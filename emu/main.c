@@ -282,6 +282,9 @@ static void usage(void)
         "                       default: the host's clock)\n"
         "  --pc-drop-at SECONDS the PC link drops at this emulated time\n"
         "  --pc-back-at SECONDS and comes back at this one (a new session)\n"
+        "  --card-kbps R:W      slow card: READ / LOAD at R KB/s, WRITE at W KB/s, + 1 ms a request\n"
+        "                       (0:0 = instant, the default; the board: about 170:100)\n"
+        "  --pc-kbps R:W        slow PC volume: the same, + 6 ms a request (the board: about 100:55)\n"
         "  --ideal-timing       every CPU cycle ideal: no cache misses, SDRAM write or sweep stalls,\n"
         "                       the blitter's older speed model (the timing before Horizon 0.19)\n"
         "  --console-us N       DBG_OUT busy for N us after each byte; bytes written while busy are dropped\n"
@@ -333,6 +336,10 @@ int main(int argc, char **argv)
         else if (!strcmp(a, "--pc-folder") && i + 1 < argc) mailbox_pc_root = argv[++i];
         else if (!strcmp(a, "--pc-drop-at") && i + 1 < argc) mailbox_pc_drop = atof(argv[++i]);
         else if (!strcmp(a, "--pc-back-at") && i + 1 < argc) mailbox_pc_back = atof(argv[++i]);
+        else if ((!strcmp(a, "--card-kbps") || !strcmp(a, "--pc-kbps")) && i + 1 < argc) {
+            double *k = a[2] == 'c' ? mailbox_card_kbps : mailbox_pc_kbps;
+            if (sscanf(argv[++i], "%lf:%lf", &k[0], &k[1]) != 2 || k[0] < 0 || k[1] < 0) usage();
+        }
         else if (!strcmp(a, "--console-us") && i + 1 < argc) console_us = atof(argv[++i]);
         else if (!strcmp(a, "--keys") && i + 1 < argc) parse_keys(argv[++i]);
         else if (!strcmp(a, "--mouse") && i + 1 < argc) parse_mouse(argv[++i]);

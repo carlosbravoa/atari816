@@ -1,0 +1,43 @@
+> cp /BIG.BIN /PC:/big.bin
+cp: /BIG.BIN: cancelled
+> ls
+  BIG.BIN                                               384K  2026-11-01 12:00
+  BIN                                                  <DIR>  2026-11-01 12:00
+  BLUE.XEX                                                20  2026-11-01 12:00
+  LONG.TXT                                              9635  2026-11-01 12:00
+  README.TXT                                             110  2026-11-01 12:00
+  SYSTEM                                               <DIR>  2026-11-01 12:00
+  carts                                                <DIR>  2026-11-01 12:00
+  disks                                                <DIR>  2026-11-01 12:00
+  docs                                                 <DIR>  2026-11-01 12:00
+  many                                                 <DIR>  2026-11-01 12:00
+  programs                                             <DIR>  2026-11-01 12:00
+  PC:                                                  <DIR>  2026-03-04 05:06
+> ls /PC:
+  Games                                                <DIR>  2026-11-01 12:00
+  Notes.txt                                               64  2026-11-01 12:00
+> cp /BIG.BIN /big2.bin
+cp: /BIG.BIN: cancelled
+> mv /BIG.BIN /PC:/moved.bin
+mv: /BIG.BIN: cancelled
+> ls
+  BIG.BIN                                               384K  2026-11-01 12:00
+  BIN                                                  <DIR>  2026-11-01 12:00
+  BLUE.XEX                                                20  2026-11-01 12:00
+  LONG.TXT                                              9635  2026-11-01 12:00
+  README.TXT                                             110  2026-11-01 12:00
+  SYSTEM                                               <DIR>  2026-11-01 12:00
+  carts                                                <DIR>  2026-11-01 12:00
+  disks                                                <DIR>  2026-11-01 12:00
+  docs                                                 <DIR>  2026-11-01 12:00
+  many                                                 <DIR>  2026-11-01 12:00
+  programs                                             <DIR>  2026-11-01 12:00
+  PC:                                                  <DIR>  2026-03-04 05:06
+> ls /PC:
+  Games                                                <DIR>  2026-11-01 12:00
+  Notes.txt                                               64  2026-11-01 12:00
+> cp /PC:/Notes.txt /n.txt
+> cat /n.txt
+Notes kept on the PC.
+They were written there, not on the card.
+> 

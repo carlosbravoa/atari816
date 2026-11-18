@@ -45,6 +45,7 @@ uint32_t host_ms(void)
 static int sessions;
 void pl_session(int up) { if (up) sessions++; printf("session %s\n", up ? "up" : "down"); fflush(stdout); }
 void pl_idle(void) { usleep(50); }
+void pl_busy(void) { }
 
 static uint8_t outb[1024];
 void pl_dev_request(const uint8_t *p, uint32_t n)

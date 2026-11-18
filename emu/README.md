@@ -20,7 +20,8 @@ make sst             # downloads the SingleStepTests sample that make test uses 
 ```
 emu816 [--sd DIR] [--load FILE@ADDR]... [--max-seconds N] [--trace]
        [--keys LIST] [--mouse LIST] [--shot FILE.ppm] [--shot-at SECONDS] [--stats] [--headless] [--fast]
-       [--ideal-timing] [--boot-cart PATH] [--pc-folder DIR] [--pc-time T] PROGRAM.BIN
+       [--ideal-timing] [--boot-cart PATH] [--pc-folder DIR] [--pc-time T]
+       [--card-kbps R:W] [--pc-kbps R:W] PROGRAM.BIN
 ```
 
 | Option | Meaning |
@@ -46,6 +47,8 @@ emu816 [--sd DIR] [--load FILE@ADDR]... [--max-seconds N] [--trace]
 | `--pc-time YYYY-MM-DDTHH:MM` | The PC's clock at power-on; it counts on with emulated time. STAT `/PC:` reports it, and the PC files the run writes get it as their date. Default: the host's clock. (The PC files the run did not write get `--card-date`, as the card's) |
 | `--pc-drop-at SECONDS` | The PC link drops at this emulated time: open PC handles answer $88, new `/PC:` calls $87, the `PC:` entry leaves the root |
 | `--pc-back-at SECONDS` | The link comes back at this time (after `--pc-drop-at`): a new session; handles from before the drop stay dead ($88) |
+| `--card-kbps R:W` | Slow card (see "Slow transfers"): READ and LOAD at R KB/s, WRITE at W KB/s, and 1 ms for every request on the card. 0 = instant. Default: off (every request instant). The board: about `170:100` |
+| `--pc-kbps R:W` | Slow PC volume: the same, with 6 ms for every request on the PC. The board: about `100:55` |
 | `--boot-cart PATH` | A cartridge (a FAT path on `--sd`) that the I/O processor loaded by itself at power-on (`boot=ash` in /atari.ini): CLASSIC\_STATE ($1E) reports it, from power-on and after a full restart |
 
 Exit codes: 0 when the program executes STP, 3 at the `--max-seconds` limit, 1 on a usage
@@ -154,9 +157,13 @@ This is a line-by-line model of the FREDDIE II part of `a816_sys.sv`:
 
 ### Mailbox (`mailbox.c`)
 
-The I/O processor polls every 512 CPU cycles (about 36 us) and serves at most one request
-per poll, as the firmware does. Software cannot depend on synchronous answers.
+The I/O processor polls every 512 CPU cycles (about 36 us) and serves one request at a time,
+as the firmware does. Software cannot depend on synchronous answers.
 
+- **One poll:** first at most one event (a key, else the mouse; see "Keyboard events"),
+  also while a request is in progress. Then, if a request is in progress and its time is up,
+  its answer. Else, if the poll sent no event, the next request is taken: without the slow
+  transfer options it is answered at once (as before); with them its answer comes later.
 - **IOP_READY:** MB_STATUS bit 0 is set on the first poll after both MB_REQ_BASE and
   MB_RSP_BASE are non-zero. MB_REQ_TAIL and MB_RSP_HEAD restart at 0.
 - **Reset:** clearing a base closes every file and resets the state.
@@ -221,17 +228,45 @@ gateway over the USB serial link):
 - The 4 handles are shared by both volumes. RENAME between them: $89. After a drop, READ,
   WRITE and SEEK on a PC handle answer $88 (also after `--pc-back-at`: a new session); CLOSE
   frees it and answers 0. SYS_SYNC closes the PC's files too. A transfer takes no extra time
-  here (on the board: about 50-150 KB/s, a few ms a call).
+  here unless `--pc-kbps` is given (see "Slow transfers"; on the board: about 55-100 KB/s, a
+  few ms a call).
+- **Unfinished files** (the gateway's rule, Docs/04-pc-link.md): a file opened with mode 2 is
+  written under a temporary name in the hidden folder `.atari816-partial` at the top of the
+  folder; CLOSE (and SYS_SYNC) moves it onto its name in one step. Until then an older file of
+  that name stays as it was (STAT shows the old one, or none). When the session ends with the
+  file still open (the link drops, the 65C816 is reset or restarted), the temporary file is
+  deleted and the older file stays as it was. Modes 1 and 3 write in place.
 
-**Keyboard events** follow the firmware's "Keyboard events" block:
+**Slow transfers** (`--card-kbps R:W`, `--pc-kbps R:W`; off by default, so every request is
+answered in the poll that takes it, as before):
+
+- READ, WRITE and LOAD on that volume take len / rate (KB = 1024 bytes; LOAD: the file's
+  size, at the read rate) plus a fixed cost per request: 1 ms on the card, 6 ms on the PC.
+  The other file requests on that volume (OPEN, CLOSE, SEEK, STAT, READDIR, MKDIR, DELETE,
+  RENAME) take the fixed cost. A request refused at once (a `/PC:` path with no link, a dead
+  PC handle) takes no time.
+- The request is done, and its answer written, when its time is up. Meanwhile no other request
+  is served, but KEY and MOUSE events keep coming.
+- A PC request during which the link drops (`--pc-drop-at`) answers $88 (link lost) at its end,
+  and is not done (a WRITE writes nothing; its mode 2 file was deleted at the drop).
+- The board's measured speeds: card read about 170 KB/s, write about 100 KB/s; PC read about
+  100 KB/s, write about 55 KB/s: `--card-kbps 170:100 --pc-kbps 100:55`.
+
+**Keyboard events** follow the firmware's "Keyboard events" block (with the changes of the
+firmware of Horizon 0.21: events during a request, every key change in order):
 
 - **Source:** keys come from SDL (scancodes are HID usages) or from `--keys`. The host
   state is 4 held usages plus a modifier bitmap; a fifth key is dropped.
-- **When:** a poll produces at most one event, before serving a request. Events are only
-  produced while IOP_READY is set, KB_ROUTE = 0 and the response ring has a free slot.
-  While KB_ROUTE = 1 the keys count as not held.
-- **Order:** releases first, then modifier changes (reported as usages $E0-$E7), then
-  presses.
+- **When** (the firmware of Horizon 0.21): every poll may produce one event, also while a
+  request is in progress (a long card or PC transfer), while IOP_READY is set, KB_ROUTE = 0
+  and the response ring has at least 2 free slots (one stays free for the answer of the
+  request in progress). A key event comes before a mouse event.
+- **Order:** every key change is reported, in the order it happened: a press and its release
+  are two events even when both come between two polls. A change that is no news (the release
+  of a key never reported, a fifth key) is skipped. Keys held before KB_ROUTE went to 0 are
+  reported from the difference between the keys held and those reported: releases first, then
+  modifier changes (usages $E0-$E7), then presses. While KB_ROUTE = 1 the keys count as not
+  held (held keys are reported released) and nothing is kept.
 - **Format:** OP=$E0, TAG=0, byte 8 = usage, byte 12 = current modifier bitmap,
   byte 13 = 1 down / 0 up, every other byte 0.
 - **F12** produces a KEY event and the SYSTEM_KEY NMI, as on the hardware.
@@ -239,14 +274,17 @@ gateway over the USB serial link):
   emulated times, with the usage in hex: `--keys 100:04:1,150:04:0` presses and releases
   A.
 
-**Mouse events** follow the firmware's "Mouse event ($E1)" block:
+**Mouse events** follow the firmware's "Mouse event ($E1)" block (0.21: events during a
+request, a button change always its own event):
 
-- **Source:** the host side adds motion and wheel into int16 accumulators and records the
-  current button byte, as `a816_mouse()` does.
-- **When:** in a poll with no key event to send, an event is produced while IOP_READY is
-  set, KB_ROUTE = 0, and there is motion, wheel or a button change. It needs a free
-  response slot, and at most one event per poll is sent. While KB_ROUTE = 1 the
-  accumulators are cleared and the buttons count as reported.
+- **Source:** the host side adds motion and wheel into int16 accumulators, one run for each
+  button state: motion with unchanged buttons is added to the last run; a button change starts
+  a new run (the motion of that same report goes with the new buttons).
+- **When:** in a poll with no key event to send, under the same conditions as key events. The
+  oldest run is sent (its motion with its buttons) before the next; a run that starts with a
+  button change is always sent, even without motion, so a quick click (a press and its release
+  between two polls) gives two events. While KB_ROUTE = 1 the motion is dropped and the
+  buttons count as reported.
 - **Format:** OP=$E1, TAG=0, byte 8 = dx, 9 = dy, 10 = wheel, each clamped to -127..127
   with the remainder kept for the next event, and byte 12 = buttons (bit 0 left, 1 right,
   2 middle). Every other byte is 0.
@@ -475,8 +513,9 @@ every 512 CPU cycles here.
 | tests/asm/copabort, eirq | The two fixed RTL issues (below) |
 | tests/asm/nmihold | A user task with S at $00:9000 takes TIMER0; the watchdog NMI fires 3 us later. The NMI must stay latched but untaken until the handler writes FR_CTRL, and the canary at the task's S must be intact |
 | A816.BIN, slow console | The self test again with `--console-us 90`: same output |
-| tests/asm/mousetest | MOUSE events from a `--mouse` script: clamping with the remainder carried, a key event taking priority, motion discarded while KB_ROUTE = 1 |
-| tests/asm/kbtest | `core/sw/a816/kbtest.s`, unchanged, run with a `--keys` script: modifiers, the 4-key limit, F12 (KEY event + NMI), a key held before KB_ROUTE = 0 |
+| tests/asm/mousetest | MOUSE events from a `--mouse` script: clamping with the remainder carried, a key event taking priority, motion discarded while KB_ROUTE = 1, a quick click (motion, press and release in one poll: three events) and a key tap in one poll (two events) |
+| tests/asm/kbtest | `core/sw/a816/kbtest.s`, unchanged, run with a `--keys` script: modifiers, the 4-key limit, F12 (KEY event + NMI), a key held before KB_ROUTE = 0, releases in the order they happened |
+| tests/asm/slowtest | `--card-kbps 64:32 --pc-kbps 100:8 --pc-drop-at 3`: each answer after its time (a 32 KB card read 0.5 s, PC requests 6 ms), KEY and MOUSE events (a quick click, a tap) printed while a request is in progress, a mode 2 PC file not there before CLOSE, a 32 KB PC write cut by the drop: $88, no file left, the older file as it was |
 | BLITTEST.BIN | `core/sw/a816/blittest.s`: every blitter op against a 65C816 reference (REV $08 and up) |
 | BLITLIST.BIN | `core/sw/a816/blitlist.s`: command lists against single blits, ABORT, WAIT_VBL, raster events, 60 frames = 999,504 us (REV $09 and up) |
 | SAMPLER.BIN | `core/sw/a816/sampler.s`: Lau's rate, end interrupt, loop, mix values, AU_LATE (REV $0A and up) |

@@ -10,7 +10,8 @@ result in A (X, Y if listed). X, Y, D, DBR, other flags preserved (**Z/N not fro
 Pointer = X offset, Y bank (`ptr label`); bank 0 = your private window ($0000-$7FFF).
 u24 in a block = 3 bytes lo, hi, bank (`.faraddr label`). Ranges may not cross a bank.
 Errors: 1 EINVAL, 2 ENOMEM, 4 EFAULT, 5 ECHILD, 6 EAGAIN, 7 ENOSYS, 8 ERUNNING, 9 ENODEV (0.17:
-no Lau; 0.18: sprites / fs_scroll before REV $0B, fs_raster / win_vbl before $09),
+no Lau; 0.18: sprites / fs_scroll before REV $0B, fs_raster / win_vbl before $09), 10
+ECANCELED (0.21, user side only: a copy cancelled, ui_cptree / ui_mvtree),
 $40+n file (44 no file, 45 no path, 46 bad name, 47 denied, 48 exists, 52 too many open).
 
 ## Program

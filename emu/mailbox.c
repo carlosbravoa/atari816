@@ -8,7 +8,10 @@
  * The PC volume (PC link step 1): paths starting "/PC:" (then the end or '/') are served
  * from the --pc-folder directory, as the firmware serves them from the PC gateway's shared
  * folder. Without --pc-folder (or after --pc-drop-at) the volume is absent: $87.
- * The I/O processor polls every MB_POLL CPU cycles and serves one request per poll.
+ * The I/O processor polls every MB_POLL CPU cycles and serves one request at a time; with
+ * --card-kbps / --pc-kbps a request's answer comes after its transfer time, and key and mouse
+ * events keep coming meanwhile (the firmware of Horizon 0.21). A PC file opened with mode 2 is
+ * written under a temporary name and moved onto its name at CLOSE (the gateway's rule).
  */
 
 #include "machine.h"
@@ -148,12 +151,23 @@ static void stamp_at(const char *host, time_t when)
 /* a card file gets the firmware's clock (FatFs), a PC file the PC's (the gateway writes it) */
 static void stamp(const char *host, int pc) { stamp_at(host, pc ? pc_now() : fw_now()); }
 
-static void close_file(Mailbox *m, int i)
+static int pc_dead(Mailbox *m, int h);
+
+/* commit = 1 (CLOSE, SYS_SYNC): a PC file opened with mode 2 is moved from its temporary
+ * name onto its own (the gateway's rule); 0 (the 65C816 reset or restarted: the session
+ * ends): the temporary file is deleted and an older file of that name stays as it was */
+static void close_file(Mailbox *m, int i, int commit)
 {
     if (!m->f[i]) return;
-    int bad = fclose(m->f[i]);
+    int bad = fclose(m->f[i]), gone = 0;
     m->f[i] = NULL;
-    if (m->fdirty[i] && m->fhost[i]) stamp(m->fhost[i], m->fpc[i]);
+    if (m->ftmp[i]) {
+        if (commit && !pc_dead(m, i) && m->fhost[i] && !rename(m->ftmp[i], m->fhost[i])) ;
+        else { unlink(m->ftmp[i]); gone = 1; }
+        free(m->ftmp[i]);
+        m->ftmp[i] = NULL;
+    }
+    if (m->fdirty[i] && m->fhost[i] && !gone) stamp(m->fhost[i], m->fpc[i]);
     free(m->fhost[i]);
     m->fhost[i] = NULL;
     m->fdirty[i] = 0;
@@ -161,9 +175,22 @@ static void close_file(Mailbox *m, int i)
     (void)bad;
 }
 
-static void close_all(Mailbox *m)
+static void close_all(Mailbox *m, int commit)
 {
-    for (int i = 0; i < MB_FILES; i++) close_file(m, i);
+    for (int i = 0; i < MB_FILES; i++) close_file(m, i, commit);
+}
+
+/* the link dropped: the temporary files of the PC files still open (mode 2) are deleted at
+ * once (the session ended); their handles stay taken until CLOSE, which frees them */
+static void pc_drop_tmp(Mailbox *m)
+{
+    for (int i = 0; i < MB_FILES; i++)
+        if (m->f[i] && m->ftmp[i] && pc_dead(m, i)) {
+            unlink(m->ftmp[i]);
+            free(m->ftmp[i]);
+            m->ftmp[i] = NULL;
+            m->fdirty[i] = 0;
+        }
 }
 
 void mailbox_reset(void)
@@ -174,13 +201,15 @@ void mailbox_reset(void)
     uint8_t now[4], nm = m->kb_now_mods;               /* keys held on the host survive */
     uint8_t btn = m->ms_btn;
     memcpy(now, m->kb_now, 4);
-    close_all(m);
+    close_all(m, 0);
     memset(m, 0, sizeof *m);
     m->root = root;
     m->restart = restart;
     memcpy(m->kb_now, now, 4);
     m->kb_now_mods = nm;
-    m->ms_btn = m->ms_btn_sent = btn;
+    m->ms_btn = btn;
+    m->ms_n = 1;                                       /* one run: no motion, these buttons */
+    m->ms_seg[0].btn = btn;
     m->next_poll = M.cpu.cycles + MB_POLL;
     /* power-on, or a full restart: the firmware loads the boot cartridge (boot=ash) */
     if (!M.cpu.cycles || restart == 2) {
@@ -381,9 +410,31 @@ static void serve(Mailbox *m, uint8_t *msg)
         if (!mb_path(buf, path, sizeof path)) { res = MB_BAD_ADDR; break; }
         if ((res = resolve(path, host, sizeof host, &pc))) break;
         if (!stat(host, &st) && S_ISDIR(st.st_mode)) { res = fl >= 2 ? FR_EXIST : FR_NO_FILE; break; }
-        FILE *nf = fopen(host, mode[fl]);
-        if (!nf) { res = errno_fr(errno, host); break; }
+        FILE *nf;
+        char *tmp = NULL;
+        if (pc && fl == 2) {
+            /* the gateway's "unfinished files": written under a temporary name in the hidden
+             * folder .atari816-partial, moved onto the name at CLOSE; until then an older file
+             * of that name stays as it was */
+            static unsigned seq;
+            char par[4096], tp[4200];
+            snprintf(par, sizeof par, "%s", host);
+            char *sl = strrchr(par, '/');
+            if (sl) *sl = 0;
+            if (stat(par, &st) || !S_ISDIR(st.st_mode)) { res = errno_fr(ENOENT, host); break; }
+            if (!stat(host, &st) && access(host, W_OK)) { res = FR_DENIED; break; }
+            snprintf(tp, sizeof tp, "%s/.atari816-partial", mailbox_pc_root);
+            mkdir(tp, 0777);
+            snprintf(tp, sizeof tp, "%s/.atari816-partial/%u-%u", mailbox_pc_root, (unsigned)getpid(), ++seq);
+            nf = fopen(tp, "w+b");
+            if (!nf) { res = errno_fr(errno, host); break; }
+            tmp = strdup(tp);
+        } else {
+            nf = fopen(host, mode[fl]);
+            if (!nf) { res = errno_fr(errno, host); break; }
+        }
         m->f[h] = nf; m->fmode[h] = rw[fl]; val = h;
+        m->ftmp[h] = tmp;
         m->fpc[h] = pc; m->fsess[h] = pc_session();
         m->fhost[h] = strdup(host);
         m->fdirty[h] = fl >= 2;                          /* created (or appended): dated at close */
@@ -392,7 +443,7 @@ static void serve(Mailbox *m, uint8_t *msg)
     case 0x02:                                           /* CLOSE */
         if (!f) { res = MB_BAD_HANDLE; break; }
         if (ferror(f) && !pc_dead(m, arg0)) res = FR_DISK_ERR;
-        close_file(m, arg0);                             /* (a dead PC handle: freed, OK) */
+        close_file(m, arg0, 1);                          /* (a dead PC handle: freed, OK) */
         break;
     case 0x03: case 0x04:                                /* READ, WRITE */
         if (!f) { res = MB_BAD_HANDLE; break; }
@@ -573,13 +624,13 @@ static void serve(Mailbox *m, uint8_t *msg)
          * /atari.ini and cold boots the classic core first: nothing to do here). Answered
          * OK; main.c then restarts the 65C816 with HORIZON.SYS read again from the card. */
         if (arg0 > 1) { res = 0x83; }
-        else { close_all(m); m->restart = 1 + (int)arg0; }
+        else { close_all(m, 0); m->restart = 1 + (int)arg0; }
         fprintf(stderr, "emu816: SYS_RESTART %u -> %02X\n", (unsigned)arg0, (unsigned)res);
         break;
     case 0x1C:                                           /* SYS_SYNC (stub) */
         /* the firmware flushes and closes everything on the card and closes the PC volume's
          * files: here, close the files */
-        close_all(m);
+        close_all(m, 1);
         fprintf(stderr, "emu816: SYS_SYNC -> 00\n");
         break;
     case 0x1D:                                           /* SYS_TIME: the clock for file dates */
@@ -606,69 +657,188 @@ static void serve(Mailbox *m, uint8_t *msg)
     msg[12] = val; msg[13] = val >> 8; msg[14] = val >> 16; msg[15] = val >> 24;
 }
 
+/* ── Keyboard and mouse events (the firmware of 0.21: they keep coming while a request is in
+ * progress) ── */
 void mailbox_key(uint8_t usage, int down)
 {
     Mailbox *m = &M.mb;
+    int changed = 0;
     if (usage >= 0xE0 && usage <= 0xE7) {
-        uint8_t b = 1 << (usage - 0xE0);
-        m->kb_now_mods = down ? (m->kb_now_mods | b) : (m->kb_now_mods & ~b);
-        return;
+        uint8_t b = 1 << (usage - 0xE0), nm = down ? (m->kb_now_mods | b) : (m->kb_now_mods & ~b);
+        changed = nm != m->kb_now_mods;
+        m->kb_now_mods = nm;
+    } else {
+        int i, held = -1, free = -1;
+        for (i = 0; i < 4; i++) { if (m->kb_now[i] == usage) held = i; if (!m->kb_now[i] && free < 0) free = i; }
+        if (!down && held >= 0) { m->kb_now[held] = 0; changed = 1; }
+        else if (down && held < 0 && free >= 0) { m->kb_now[free] = usage; changed = 1; }
+        /* a fifth key is dropped, like the 4-slot register the I/O processor reads */
     }
-    for (int i = 0; i < 4; i++) if (m->kb_now[i] == usage) { if (!down) m->kb_now[i] = 0; return; }
-    if (down) for (int i = 0; i < 4; i++) if (!m->kb_now[i]) { m->kb_now[i] = usage; return; }
-    /* a fifth key is dropped, like the 4-slot register the I/O processor reads */
+    /* every change is kept in order (while the keys are Horizon's): a press and its release
+     * between two polls are two events. When the queue is full the later changes are only
+     * in the state above (reported as a difference) */
+    if (changed && !M.sys.kb_route && m->kq_n < MB_KQ) {
+        int t = (m->kq_head + m->kq_n++) % MB_KQ;
+        m->kq_usage[t] = usage;
+        m->kq_down[t] = down != 0;
+    }
 }
 
 void mailbox_mouse(int btn, int dx, int dy, int wheel)
 {
     Mailbox *m = &M.mb;
-    m->ms_btn = btn & 7;
-    m->ms_dx += dx; m->ms_dy += dy; m->ms_wheel += wheel;     /* int16 like the firmware */
+    btn &= 7;
+    if (!m->ms_n) { m->ms_n = 1; m->ms_seg[m->ms_head].btn = m->ms_btn; }
+    int t = (m->ms_head + m->ms_n - 1) % MB_MSEG;
+    if (btn != m->ms_seg[t].btn) {                      /* a button change: a run of its own */
+        if (m->ms_n < MB_MSEG) {
+            t = (m->ms_head + m->ms_n++) % MB_MSEG;
+            m->ms_seg[t].dx = m->ms_seg[t].dy = m->ms_seg[t].wheel = 0;
+        }
+        m->ms_seg[t].btn = btn;
+        m->ms_seg[t].force = 1;
+    }
+    m->ms_btn = btn;
+    /* (int16 like the firmware's accumulators) */
+    int32_t *a[3] = { &m->ms_seg[t].dx, &m->ms_seg[t].dy, &m->ms_seg[t].wheel }, d[3] = { dx, dy, wheel };
+    for (int i = 0; i < 3; i++) {
+        int32_t v = *a[i] + d[i];
+        *a[i] = v > 32767 ? 32767 : v < -32768 ? -32768 : v;
+    }
 }
 
 static int clamp127(int v) { return v > 127 ? 127 : v < -127 ? -127 : v; }
 
-/* firmware "Mouse event ($E1)": only when no key event was sent in this poll */
-static int mouse_event(Mailbox *m)
+static void put_event(Mailbox *m, const uint8_t *e)
 {
-    if (M.sys.kb_route) { m->ms_dx = m->ms_dy = m->ms_wheel = 0; m->ms_btn_sent = m->ms_btn; return 0; }
-    if (!m->ms_dx && !m->ms_dy && !m->ms_wheel && m->ms_btn == m->ms_btn_sent) return 0;
-    int dx = clamp127(m->ms_dx), dy = clamp127(m->ms_dy), dw = clamp127(m->ms_wheel);
-    uint8_t e[16] = { 0xE1, 0, 0, 0, 0, 0, 0, 0, (uint8_t)dx, (uint8_t)dy, (uint8_t)dw, 0, m->ms_btn, 0, 0, 0 };
-    if (mb_put(m->rsp_base + m->rsp_head * 16u, e, 16)) {
-        m->rsp_head++; memtime_sweep();
-        m->ms_dx -= dx; m->ms_dy -= dy; m->ms_wheel -= dw; m->ms_btn_sent = m->ms_btn;
-        m->n_mouseev++;
-        machine_update_irq();
-    }
-    return 1;
+    if (mb_put(m->rsp_base + m->rsp_head * 16u, e, 16)) { m->rsp_head++; memtime_sweep(); }
+    machine_update_irq();
 }
 
-/* firmware "Keyboard events": one $E0 event from the difference between the keys held
- * now and those already reported. Releases first, then modifiers, then presses. */
+/* one $E1 event: the oldest run's motion (clamped to -127..127, the rest kept for the next
+ * event) with its buttons; a run that starts with a button change is sent even without
+ * motion. While KB_ROUTE = 1 the motion is dropped and the buttons count as reported. */
+static int mouse_event(Mailbox *m)
+{
+    if (M.sys.kb_route || !m->ms_n) {
+        m->ms_head = 0; m->ms_n = 1;
+        memset(&m->ms_seg[0], 0, sizeof m->ms_seg[0]);
+        m->ms_seg[0].btn = m->ms_btn;
+        return 0;
+    }
+    for (;;) {
+        __typeof__(m->ms_seg[0]) *g = &m->ms_seg[m->ms_head];
+        if (g->dx || g->dy || g->wheel || g->force) {
+            int dx = clamp127(g->dx), dy = clamp127(g->dy), dw = clamp127(g->wheel);
+            uint8_t e[16] = { 0xE1, 0, 0, 0, 0, 0, 0, 0, (uint8_t)dx, (uint8_t)dy, (uint8_t)dw, 0, g->btn, 0, 0, 0 };
+            put_event(m, e);
+            g->dx -= dx; g->dy -= dy; g->wheel -= dw; g->force = 0;
+            m->n_mouseev++;
+            if (!g->dx && !g->dy && !g->wheel && m->ms_n > 1) { m->ms_head = (m->ms_head + 1) % MB_MSEG; m->ms_n--; }
+            return 1;
+        }
+        if (m->ms_n <= 1) return 0;
+        m->ms_head = (m->ms_head + 1) % MB_MSEG;          /* an empty run: the next one */
+        m->ms_n--;
+    }
+}
+
+/* one $E0 event: the oldest key change not yet reported (a change that is no news, such as
+ * the release of a key never reported down, is skipped); with none queued, the difference
+ * between the keys held now and those reported (a key held before KB_ROUTE went to 0):
+ * releases first, then modifiers, then presses. While KB_ROUTE = 1 every key counts as
+ * released and nothing is queued. */
 static int key_event(Mailbox *m)
 {
-    uint8_t now[4], nm = m->kb_now_mods, usage = 0, down = 0;
-    memcpy(now, m->kb_now, 4);
-    if (M.sys.kb_route) { memset(now, 0, 4); nm = 0; }        /* keys belong to the classic side */
-    for (int i = 0; i < 4 && !usage; i++) {
-        int still = 0;
-        for (int j = 0; j < 4; j++) if (m->kb_held[i] && m->kb_held[i] == now[j]) still = 1;
-        if (m->kb_held[i] && !still) { usage = m->kb_held[i]; m->kb_held[i] = 0; }
+    uint8_t usage = 0, down = 0;
+    if (M.sys.kb_route) m->kq_n = 0;
+    while (m->kq_n && !usage) {
+        uint8_t u = m->kq_usage[m->kq_head], d = m->kq_down[m->kq_head];
+        m->kq_head = (m->kq_head + 1) % MB_KQ;
+        m->kq_n--;
+        if (u >= 0xE0 && u <= 0xE7) {
+            uint8_t b = 1 << (u - 0xE0);
+            if (!(m->kb_mods & b) != !d) { m->kb_mods ^= b; usage = u; down = d; }
+            continue;
+        }
+        int held = -1, free = -1;
+        for (int i = 0; i < 4; i++) { if (m->kb_held[i] == u) held = i; if (!m->kb_held[i] && free < 0) free = i; }
+        if (!d && held >= 0) { m->kb_held[held] = 0; usage = u; }
+        else if (d && held < 0 && free >= 0 && u > 3) { m->kb_held[free] = u; usage = u; down = 1; }
     }
-    for (int i = 0; i < 8 && !usage; i++)
-        if ((m->kb_mods ^ nm) & (1 << i)) { usage = 0xE0 + i; down = (nm >> i) & 1; m->kb_mods ^= 1 << i; }
-    for (int i = 0; i < 4 && !usage; i++) {
-        int known = 0, slot = -1;
-        for (int j = 0; j < 4; j++) { if (m->kb_held[j] == now[i]) known = 1; if (!m->kb_held[j]) slot = j; }
-        if (now[i] > 3 && !known && slot >= 0) { usage = now[i]; down = 1; m->kb_held[slot] = usage; }
+    if (!usage) {
+        uint8_t now[4], nm = m->kb_now_mods;
+        memcpy(now, m->kb_now, 4);
+        if (M.sys.kb_route) { memset(now, 0, 4); nm = 0; }    /* keys belong to the classic side */
+        for (int i = 0; i < 4 && !usage; i++) {
+            int still = 0;
+            for (int j = 0; j < 4; j++) if (m->kb_held[i] && m->kb_held[i] == now[j]) still = 1;
+            if (m->kb_held[i] && !still) { usage = m->kb_held[i]; m->kb_held[i] = 0; }
+        }
+        for (int i = 0; i < 8 && !usage; i++)
+            if ((m->kb_mods ^ nm) & (1 << i)) { usage = 0xE0 + i; down = (nm >> i) & 1; m->kb_mods ^= 1 << i; }
+        for (int i = 0; i < 4 && !usage; i++) {
+            int known = 0, slot = -1;
+            for (int j = 0; j < 4; j++) { if (m->kb_held[j] == now[i]) known = 1; if (!m->kb_held[j]) slot = j; }
+            if (now[i] > 3 && !known && slot >= 0) { usage = now[i]; down = 1; m->kb_held[slot] = usage; }
+        }
     }
     if (!usage) return 0;
     uint8_t e[16] = { 0xE0, 0, 0, 0, 0, 0, 0, 0, usage, 0, 0, 0, m->kb_mods, down, 0, 0 };
-    if (mb_put(m->rsp_base + m->rsp_head * 16u, e, 16)) { m->rsp_head++; memtime_sweep(); }
+    put_event(m, e);
     m->n_keyev++;
-    machine_update_irq();
     return 1;
+}
+
+/* ── Slow transfers (--card-kbps, --pc-kbps): how long the I/O processor takes for a request ──
+ * READ, WRITE and LOAD: a fixed cost per request + the bytes / the rate; the other file ops
+ * the fixed cost. Only for a volume whose option was given. */
+double mailbox_card_kbps[2], mailbox_pc_kbps[2];
+#define CARD_REQ_MS 1.0
+#define PC_REQ_MS   6.0
+
+static uint64_t req_cycles(Mailbox *m, const uint8_t *msg, int *pc)
+{
+    static char path[MAXPATH], host[4096];
+    uint32_t len = msg[2] | msg[3] << 8, buf = msg[4] | msg[5] << 8 | msg[6] << 16;
+    uint32_t arg0 = msg[8] | msg[9] << 8 | msg[10] << 16 | (uint32_t)msg[11] << 24;
+    int op = msg[0], rd = 1, xfer = 0;
+    double bytes = 0;
+    *pc = 0;
+    switch (op) {
+    case 0x02: case 0x03: case 0x04: case 0x05:          /* CLOSE, READ, WRITE, SEEK: by the handle */
+        if (arg0 >= MB_FILES || !m->f[arg0] || pc_dead(m, arg0)) return 0;     /* (refused at once) */
+        *pc = m->fpc[arg0];
+        if (op == 0x03 || op == 0x04) { xfer = 1; bytes = len; rd = op == 0x03; }
+        break;
+    case 0x01: case 0x06: case 0x07: case 0x08: case 0x09: case 0x0A: case 0x10:
+        if (!mb_path(buf, path, sizeof path)) return 0;
+        *pc = is_pc(path);
+        if (*pc && !pc_up()) return 0;                   /* no PC link: refused at once */
+        if (op == 0x10) {                                /* LOAD: the file's size */
+            struct stat st;
+            int p2;
+            xfer = 1;
+            if (!resolve(path, host, sizeof host, &p2) && !stat(host, &st) && S_ISREG(st.st_mode)) bytes = st.st_size;
+        }
+        break;
+    default:
+        return 0;
+    }
+    const double *k = *pc ? mailbox_pc_kbps : mailbox_card_kbps;
+    if (!k[0] && !k[1]) return 0;                        /* not given: instant */
+    double s = (*pc ? PC_REQ_MS : CARD_REQ_MS) / 1000.0;
+    if (xfer && k[rd ? 0 : 1] > 0) s += bytes / (k[rd ? 0 : 1] * 1024.0);
+    return (uint64_t)(s * CPU_HZ);
+}
+
+/* the answer of the request in msg goes into the response ring */
+static void answer(Mailbox *m, uint8_t *msg)
+{
+    if (!mb_put(m->rsp_base + m->rsp_head * 16u, msg, 16)) { m->error = 1; return; }
+    m->rsp_head++; memtime_sweep();
+    m->req_tail++;
+    machine_update_irq();
 }
 
 void mailbox_poll(uint64_t now)
@@ -676,26 +846,53 @@ void mailbox_poll(uint64_t now)
     Mailbox *m = &M.mb;
     if (now < m->next_poll) return;
     m->next_poll = now + MB_POLL;
+    if (mailbox_pc_root) pc_drop_tmp(m);
 
     if (!m->req_base || !m->rsp_base) {                  /* not set up (or torn down) */
-        if (m->ready || m->error || m->req_tail || m->rsp_head) {
-            close_all(m);
+        if (m->ready || m->error || m->req_tail || m->rsp_head || m->busy) {
+            close_all(m, 0);
             m->ready = m->error = 0;
             m->req_tail = m->rsp_head = 0;
+            m->busy = 0;
         }
         return;
     }
-    if (!m->ready) { m->ready = 1; m->error = 0; m->req_tail = m->rsp_head = 0; return; }
-    if ((uint8_t)(m->rsp_head + 1) == m->rsp_tail) return;      /* no room for an answer or event */
-    if (key_event(m) || mouse_event(m)) return;                 /* one event per poll */
+    if (!m->ready) { m->ready = 1; m->error = 0; m->req_tail = m->rsp_head = 0; m->busy = 0; return; }
+    /* events: one per poll, also while a request is in progress, while the response ring has
+     * at least 2 free slots (one stays free for the answer of that request) */
+    int ev = 0;
+    if ((uint8_t)(m->rsp_tail - m->rsp_head - 1) >= 2) ev = key_event(m) || mouse_event(m);
+    if ((uint8_t)(m->rsp_head + 1) == m->rsp_tail) return;      /* no room for an answer */
+    if (m->busy) {                                       /* a request in progress */
+        if (now < m->busy_until) return;
+        m->busy = 0;
+        uint8_t *msg = m->busy_msg;
+        if (m->busy_pc && (!pc_up() || pc_session() != m->busy_sess)) {
+            /* the link dropped while the PC served it: "link lost", nothing done */
+            m->n_req++;
+            msg[0] |= 0x80;
+            memset(msg + 8, 0, 8);
+            msg[8] = MB_PC_LOST;
+        } else serve(m, msg);
+        answer(m, msg);
+        return;
+    }
+    if (ev) return;                                      /* (a poll that sent an event starts none) */
     if (m->req_head == m->req_tail) return;
     uint8_t msg[16];
     if (!mb_get(m->req_base + m->req_tail * 16u, msg, 16)) { m->error = 1; return; }
+    int pc;
+    uint64_t d = req_cycles(m, msg, &pc);
+    if (d) {                                             /* served one at a time: the answer later */
+        memcpy(m->busy_msg, msg, 16);
+        m->busy = 1;
+        m->busy_until = now + d;
+        m->busy_pc = pc && pc_up();
+        m->busy_sess = pc_session();
+        return;
+    }
     serve(m, msg);
-    if (!mb_put(m->rsp_base + m->rsp_head * 16u, msg, 16)) { m->error = 1; return; }
-    m->rsp_head++; memtime_sweep();
-    m->req_tail++;
-    machine_update_irq();
+    answer(m, msg);
 }
 
 uint8_t mailbox_read(uint32_t a)

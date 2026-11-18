@@ -101,6 +101,7 @@ static int sdhc_card = 0;
 static int sd_wait_ready(void) {
     uint32_t t0 = time_millis();
     while (spi_receive() != 0xFF) {
+        in_tick();                        // (keys and mouse go on while the card is busy)
         if (time_millis() - t0 > 500) return 0;
     }
     return 1;
@@ -296,6 +297,7 @@ int sd_readsector(uint32_t start_block, uint8_t *buffer, uint32_t sector_count) 
 
         // Wait for start of block indicator
         while(spi_receive() != CMD_START_OF_BLOCK) {
+            in_tick();
             // Timeout
             if(retries > 5000) {
                 // DEBUG("sd_readsector: Timeout\n");
@@ -306,6 +308,7 @@ int sd_readsector(uint32_t start_block, uint8_t *buffer, uint32_t sector_count) 
 
         // Perform block read (512 bytes)
         spi_readblock(buffer, 512);
+        in_tick();                        // between sectors: keys and mouse go on
 
         // DEBUG("sector: %d\n", start_block-1);
         // debug_print_buf(buffer, 512);
@@ -343,6 +346,7 @@ int sd_writesector(uint32_t start_block, const uint8_t *buffer, uint32_t sector_
 
         // Send data block
         spi_writeblock(buffer, 512);
+        in_tick();
         buffer += 512;
 
         // Send CRC (ignored)

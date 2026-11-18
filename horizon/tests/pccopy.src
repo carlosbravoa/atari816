@@ -1,0 +1,55 @@
+# (0.21) A long copy in Files, with the progress window (DESK=1; tests/mousegen.py makes
+# tests/pccopy.keys from this). emu816 serves /PC: from a fresh copy of tests/pc, with the
+# board's transfer speeds (--card-kbps 170:100 --pc-kbps 100:55) and the link dropped at
+# 44.5 s; the card gets /BIG.BIN (384 KB, tests/mkbig.py): a copy to the PC takes about
+# 9 s. Files is at (24, 24); its rows from y 61, 12 apart. The progress window's Cancel button
+# is at (436, 217). Shots (s):
+#   1  12.6  ctrl-V in Files at /PC: (BIG.BIN on the clipboard): the progress window
+#            ("Copying", BIG.BIN, "... of 384 KB", the bar) over Files and Edit
+#   2  17.0  meanwhile Edit was clicked and text typed into it, the pointer moved, then
+#            Files' title clicked (its dialog raised): the text is there, the copy still
+#            runs, the pointer where the moves left it (keys and mouse during the copy)
+#   3  26.5  Edit minimized; BIG.BIN copied from /PC: back to / ("Copy of BIG.BIN"), Esc in
+#            the progress window: "Copy cancelled", no "Copy of BIG.BIN"
+#   4  36.5  ctrl-V again: copied in full ("Copy of BIG.BIN" selected)
+#   5  42.0  /BIG.BIN pasted into /PC: ("Copy of BIG.BIN"), Cancel clicked: "Copy cancelled",
+#            nothing new in /PC:
+#   6  50.5  pasted again; the link dropped during the copy: "The PC link was lost" (red), no
+#            "Copy of BIG.BIN" left on the PC; the PC icon gone
+5500 move 100 157
+5700 click
+6300 key {dE0}c{uE0}
+6800 move 100 133
+7000 dclick
+8000 move 105 6
+8100 click
+8500 move 105 23
+8700 click
+9500 move 300 30
+9700 click
+10000 key {dE0}v{uE0}
+12800 move 500 290
+13000 click
+13400 key Typed while Files copies.
+15000 move 300 100
+15600 move 200 30
+15800 click
+16200 move 610 300
+21000 move 498 47
+21200 click
+22000 move 100 85
+22200 click
+22700 key {dE0}c{uE0}
+23200 key \b
+24000 key {dE0}v{uE0}
+25500 key {esc}
+27500 key {dE0}v{uE0}
+37000 move 100 157
+37200 click
+37600 key {dE0}c{uE0}
+38000 move 100 133
+38200 dclick
+39500 key {dE0}v{uE0}
+41000 move 436 217
+41200 click
+43000 key {dE0}v{uE0}

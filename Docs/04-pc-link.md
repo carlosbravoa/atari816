@@ -212,6 +212,15 @@ The board asks, the gateway answers. Paths are relative to the shared folder, be
   whose real path (links followed) is outside the folder is refused (7); files are opened
   without following a link in the last part. `--read-only` refuses every change (7). A
   session has at most 16 open files; all are closed when the session ends.
+- **Unfinished files**: a file opened with mode 2 is written under a temporary name in the
+  hidden folder `.atari816-partial` (at the top of the shared folder). At CLOSE the gateway
+  moves it onto its real name in one step. Until then nothing changes under that name: an
+  old file stays as it was. If the session ends with the file still open (the copy was
+  cancelled, the cable came out, the board was reset, the gateway was stopped), the
+  temporary file is deleted and an old file of that name is left as it was. If the gateway
+  crashed or was killed (SIGKILL, power cut), the next gateway deletes what is left in
+  `.atari816-partial` when it starts. Modes 1 and 3 write in place: a cut-off update or
+  append stays as far as it got (and mode 3 may leave a new file it created).
 
 ### What the 65C816 sees
 
@@ -260,6 +269,7 @@ above.
 | $0F | ECHO | bytes | the same bytes |
 | $10 | SOURCE | u32 length | length bytes, byte i = i & $FF (speed test) |
 | $11 | SINK | frames of bytes (MORE) | u32 bytes received (speed test) |
+| $12 | INJECT | u16 keys, u16 key period (ms), u16 mouse reports, u8 mouse period (ms) | none (a board test, below) |
 
 - PUT creates the folders on the way, refuses a file the firmware has open (a mounted disk
   image, the cartridge image) with 7, and deletes a file whose transfer failed. The offsets
@@ -268,6 +278,15 @@ above.
   Flags: bit 0 RLE (a header byte h: 0-127 = h + 1 bytes follow as they are; 128-255 = the
   next byte repeated h - 125 times, 3 to 130), bit 1 XOR2 (from the third byte of each row a
   byte is sent XORed with the raw byte two before it; applied before RLE), bit 2 only the sum.
+- INJECT starts the firmware's input generator: `keys` key taps (a press, then its release
+  half a period later; the letters A to Z in turn) and `mouse reports` of dx = +1, one each
+  period. They enter where the keyboard's and the mouse's reports enter, and only as often
+  as the firmware looks at its keyboard input: reports that would not have fitted in the
+  keyboard UART's 64-byte receive FIFO since the last look are counted as lost, as they
+  would be on the wire. INFO shows the reports made and lost (`ksent`, `klost`: a press and a release are two; `msent`, `mlost`), the
+  longest time in microseconds between two looks (`gap`) and the events sent to Horizon
+  (`ev`); INFO starts `gap` and `ev` again. `core/tools/intest.py` with
+  `sw/a816/INTEST.BIN` uses it.
 - Results: 0, FatFs codes, $82 unknown op, $83 bad arguments, $85 busy (TYPE).
 - Requests are served by the firmware's main loop; while it serves a PC volume request
   they wait.

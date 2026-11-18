@@ -1,20 +1,23 @@
 ; uicopy.s - controls library (0.20): copying, deleting and moving files and whole folders.
 ; A move between the card and the PC volume (/PC:, the PC link) cannot be a SYS_RENAME (the
 ; I/O processor answers $89, Horizon error $C9): ui_mvtree copies, then deletes the source.
+; (0.21) Files are copied in pieces of 16 KB; ui_cpcb is called when a file starts and after
+; every piece, and may cancel the copy (C set: ECANCELED, the partial file deleted).
 ; Self-contained (no zero page; it does not need ui.s): the shell links it too. See ui.inc.
         .include "horizon.inc"
         .include "ui.inc"
 
 CP_MAXD = 48                            ; folders inside folders, at most
 CP_DBL  = 400                           ; the READDIR buffer: the path (127), then entries
-CP_BLK  = 32768                         ; bytes read and written at a time
+CP_BLK  = 16384                         ; (0.21) bytes read and written at a time: a piece
 
         .segment "CODE"
         .a16
         .i16
 
 ; X = from, Y = to (paths): moved (SYS_RENAME). Between the card and the PC: copied, then the
-; source deleted (only when the whole copy worked). C set: A = error ($48: "to" is there).
+; source deleted (only when the whole copy worked: never after an error or a cancel). C set:
+; A = error ($48: "to" is there; ECANCELED: ui_cpcb cancelled the copy).
 ui_mvtree:
         stx     cp_a
         sty     cp_b
@@ -49,8 +52,9 @@ ui_mvtree:
 
 ; X = source, Y = destination (the new name): a file copied (a file there is replaced), or a
 ; folder and everything in it (the destination folder must not exist). Not into itself
-; (EINVAL). C set: A = error; a file copied in part is deleted, the folders and files copied
-; before it stay. ui_cpcb (0: none) is called after each 32 KB.
+; (EINVAL). C set: A = error (ECANCELED: ui_cpcb cancelled); a file copied in part is
+; deleted, the folders and files copied before it stay. ui_cpcb (0: none) is called when a
+; file starts (ui_cpk = 0) and after each piece of 16 KB.
 ui_cptree:
         phy
         ldy     #.loword(cp_src)
@@ -188,7 +192,7 @@ ui_rmtree:
 
 ; ---- helpers
 ; copy cp_src to cp_dst (new; replaced if a file is there) through cp_bank. C set: A = error
-; (the half copy deleted)
+; (the half copy deleted; ECANCELED: ui_cpcb said so)
 cp_file:
         ldx     #.loword(cp_src)        ; ui_cpname: the name after the last '/'
         stx     ui_cpname
@@ -201,7 +205,13 @@ cp_file:
         stx     ui_cpname
 :       bra     :--
 :       stz     ui_cpk
-        ldx     #.loword(cp_src)
+        stz     cp_done
+        stz     cp_done+2
+        jsr     cp_call                 ; (0.21) a file starts: the name can be shown
+        bcc     :+
+        lda     #ECANCELED
+        rts
+:       ldx     #.loword(cp_src)
         ldy     #^cp_src
         lda     #O_READ
         sys     SYS_OPEN
@@ -219,7 +229,7 @@ cp_file:
         sec
 @r:     rts
 :       sta     cp_h2
-@lp:    lda     cp_h1                   ; read up to 32 KB
+@lp:    lda     cp_h1                   ; read a piece (up to 16 KB)
         jsr     cp_rw
         lda     #CP_BLK
         sta     cp_rwb+4
@@ -241,15 +251,15 @@ cp_file:
         beq     :+
         lda     #$01FF                  ; (fewer: the volume is full)
         bra     @e
-:       lda     ui_cpk
-        clc
-        adc     #CP_BLK / 1024
-        sta     ui_cpk
-        lda     ui_cpcb
-        beq     @lp
-        ldx     #0
-        jsr     (ui_cpcb,x)
-        bra     @lp
+:       clc                             ; ui_cpk = the K copied (rounded up)
+        adc     cp_done
+        sta     cp_done
+        bcc     :+
+        inc     cp_done+2
+:       jsr     cp_kset
+        jsr     cp_call
+        bcc     @lp
+        lda     #ECANCELED              ; cancelled: as an error (the half copy deleted)
 @e:     sta     cp_err
         lda     cp_h2
         sys     SYS_CLOSE
@@ -269,6 +279,39 @@ cp_file:
         sys     SYS_CLOSE
         pla
         plp
+        rts
+
+; (0.21) ui_cpk = (cp_done + 1023) / 1024
+cp_kset:
+        lda     cp_done
+        clc
+        adc     #1023
+        sta     cp_n
+        lda     cp_done+2
+        adc     #0
+        asl     a                       ; high word << 6
+        asl     a
+        asl     a
+        asl     a
+        asl     a
+        asl     a
+        sta     cp_p
+        lda     cp_n                    ; | low word >> 10
+        xba
+        and     #$00FF
+        lsr     a
+        lsr     a
+        ora     cp_p
+        sta     ui_cpk
+        rts
+
+; (0.21) call ui_cpcb (if any) -> C set: cancel
+cp_call:
+        lda     ui_cpcb
+        beq     :+
+        ldx     #0
+        jmp     (ui_cpcb,x)
+:       clc
         rts
 
 ; the read / write block: handle A, buffer cp_bank:0000 (the length set after)
@@ -446,11 +489,13 @@ cp_up:  stx     cp_p
 @out:   rts
 
         .segment "DATA"
-ui_cpcb: .word  0                       ; called after each 32 KB copied (0: none)
+ui_cpcb: .word  0                       ; called when a file starts and after each 16 KB
+                                        ; copied (0: none); C set on return: cancel
 
         .segment "BSS"
 ui_cpname: .res 2                       ; the name of the file being copied (in cp_src)
 ui_cpk:  .res   2                       ; K of it copied so far
+cp_done: .res   4                       ; (0.21) bytes of it copied so far
 ui_cpsize: .res 4                       ; its size
 cp_src: .res    130
 cp_dst: .res    130

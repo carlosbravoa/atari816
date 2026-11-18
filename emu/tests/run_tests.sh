@@ -135,9 +135,11 @@ out=$($EMU --max-seconds 5 $T/asm/eirq.bin)
 out=$($EMU --max-seconds 5 $T/asm/nmihold.bin)
 [ "$out" = "$(cat $T/expected/nmihold.txt)" ] && ok "nmihold (NMI held after a user-mode entry until FR_CTRL is written)" || bad "nmihold" "$out"
 
-# ── mouse events (firmware algorithm): clamping with remainder, key events first, KB_ROUTE ──
-out=$($EMU --max-seconds 5 --mouse "100:5:-3:0:0,150:300:-200:0:1,200:0:0:2:1,250:0:0:-1:0,600:50:50:0:3,800:1:1:0:0" --keys "150:04:1,170:04:0" $T/asm/mousetest.bin)
-[ "$out" = "$(cat $T/expected/mousetest.txt)" ] && ok "mousetest (MOUSE events, clamp, KB_ROUTE)" || bad "mousetest" "$out"
+# ── mouse events (firmware algorithm): clamping with remainder, key events first, KB_ROUTE;
+# (0.21) a click and a key tap within one poll are never merged: motion then press then release ──
+out=$($EMU --max-seconds 5 --mouse "100:5:-3:0:0,150:300:-200:0:1,200:0:0:2:1,250:0:0:-1:0,400:4:0:0:0,400:0:0:0:1,400:0:0:0:0,600:50:50:0:3,800:1:1:0:0" \
+      --keys "150:04:1,170:04:0,450:05:1,450:05:0" $T/asm/mousetest.bin)
+[ "$out" = "$(cat $T/expected/mousetest.txt)" ] && ok "mousetest (MOUSE events, clamp, KB_ROUTE, a quick click and tap kept)" || bad "mousetest" "$out"
 
 # ── keyboard events (firmware algorithm), F12 = KEY event + SYSTEM_KEY NMI ──
 out=$($EMU --max-seconds 20 --keys "0:1E:1,100:04:1,150:04:0,200:E1:1,220:05:1,260:05:0,300:E1:0,400:45:1,450:45:0,500:04:1,501:05:1,502:06:1,503:07:1,504:08:1,600:04:0,600:05:0,600:06:0,600:07:0,600:08:0,700:1E:0" $T/asm/kbtest.bin)
@@ -166,6 +168,20 @@ out=$($EMU $PCT $T/asm/pctest.bin 2>/dev/null)
 pcfix
 out=$($EMU $PCT --pc-folder "$TMP/pc" --pc-drop-at 1 --pc-back-at 1.5 $T/asm/pctest.bin 2>/dev/null)
 [ "$out" = "$(cat $T/expected/pctest-drop.txt)" ] && ok "pctest with --pc-drop-at, --pc-back-at (\$88, a new session)" || bad "pctest drop" "$out"
+
+# ── (0.21) slow transfers (--card-kbps, --pc-kbps): each answer after its time; KEY and MOUSE
+# events keep coming while a request is in progress; a PC file opened with mode 2 appears only
+# at CLOSE, and one cut off by --pc-drop-at ($88) leaves no trace (the older file as it was) ──
+rm -rf "$TMP/ssd" "$TMP/spc"; mkdir -p "$TMP/ssd" "$TMP/spc"
+head -c 32768 /dev/urandom > "$TMP/ssd/BIG.BIN"
+printf 'old\n' > "$TMP/spc/Old.txt"
+out=$($EMU --sd "$TMP/ssd" --pc-folder "$TMP/spc" --card-kbps 64:32 --pc-kbps 100:8 --pc-drop-at 3 --max-seconds 10 \
+      --keys "300:04:1,320:04:0,400:05:1,400:05:0,2000:06:1,2000:06:0" \
+      --mouse "450:10:-2:0:0,450:0:0:0:1,450:0:0:0:0,2100:3:3:0:0" $T/asm/slowtest.bin 2>/dev/null)
+if [ "$out" = "$(cat $T/expected/slowtest.txt)" ] && [ "$(cat "$TMP/spc/Old.txt")" = "old" ] \
+   && [ "$(cat "$TMP/spc/New.bin")" = "$(printf 'Sixteen bytes!\r')" ] && [ -z "$(ls -A "$TMP/spc/.atari816-partial")" ] \
+   && [ "$(ls "$TMP/spc")" = "$(printf 'New.bin\nOld.txt')" ]; then
+    ok "slowtest (slow card and PC, events during a request, mode 2 files: at CLOSE, none after a drop)"; else bad "slowtest" "$out"; fi
 
 # ── 4. CPU: SingleStepTests/65816 sample (tests/fetch_sst.py downloads it) ──
 if ls $T/sst/*.txt >/dev/null 2>&1; then

@@ -62,5 +62,6 @@ int      pl_call(uint8_t op, const uint8_t *args, uint32_t nargs,
 void     pl_dev_request(const uint8_t *p, uint32_t n);   // one frame of the developer channel
 void     pl_session(int up);                // a session started (1) or ended (0)
 void     pl_idle(void);                     // called while waiting (keyboard, SIO)
+void     pl_busy(void);                     // called after each frame while waiting (keyboard)
 
 #endif

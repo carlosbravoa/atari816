@@ -17,8 +17,10 @@ The kernel makes every path absolute; the result must fit in 127 characters (EIN
   then delete: `ui_mvtree` in the controls library does it). Without the PC every `/PC:` call
   answers $C7 at once; if the link drops, $C8. A readdir of `/` lists a folder `PC:` at the
   end while the volume is there. A stat of `/PC:` gives the PC's current time (the clock).
-  It is slower than the card (about 50-150 KB/s, a few ms a call). See Horizon's ABI.md,
-  "The PC volume".
+  It is slower than the card (about 100 KB/s to read, 55 KB/s to write, a few ms a call;
+  the card about 170 and 100). (0.21) A file opened with mode 2 on the PC gets its name only
+  when it is closed: a copy cut off leaves no half file there. See Horizon's ABI.md, "The PC
+  volume".
 - Data reaches the card when the file is closed (or at `SYS_SYNC`): close files you
   write before the user can switch off.
 

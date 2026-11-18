@@ -1,4 +1,4 @@
-# Horizon ABI (version 0.20)
+# Horizon ABI (version 0.21)
 
 This file describes the interface between Horizon and user programs. `user/horizon.inc`
 holds the same definitions for ca65.
@@ -173,7 +173,16 @@ as a normal character (`..` from `/PC:` gives `/`). On the PC volume:
   $C8; close frees such a handle (OK). sync (`SYS_SYNC`) also closes the PC's files.
 - classic_mount of a `/PC:` path: $C7 without the volume, $C2 with it (not in this step: copy
   the image to the card).
-- Speed: about 50-150 KB/s, a few ms for each call.
+- Speed: about 100 KB/s to read and 55 KB/s to write, a few ms for each call (the card: about
+  170 and 100 KB/s). (0.21) While the I/O processor serves a long call (on the PC or the card),
+  key and mouse events keep coming: other programs keep working. A program that copies large
+  files should do it in pieces and show its progress (the controls library: ui_cptree in
+  pieces of 16 KB, ui_cpcb, the progress window ui_cpwin).
+- (0.21) **Unfinished files:** a file opened with mode 2 (create) is written under a temporary
+  name; at close the gateway gives it its name in one step. Until then an older file of that
+  name stays as it was (stat and readdir show the old one, or none). If the link drops, the
+  board is reset or the gateway stops while the file is open, the temporary file is deleted
+  and the older file stays. Modes 1 and 3 write in place.
 
 **File handles.** The I/O processor has 4 handles for the whole system. The kernel records
 which task owns each one. A task can only use its own handles, and they are closed when it
@@ -639,6 +648,7 @@ order of lines from different tasks depends on timing.
 | 7 | ENOSYS | Unknown syscall |
 | 8 | ERUNNING | (0.13) spawn / task_single: a single-instance program runs already; its windows were raised |
 | 9 | ENODEV | (0.17) The hardware is not there: the sample calls on a board without Lau (REV < $0A); (0.18) sprites and fs_scroll before REV $0B, fs_raster and win_vbl before REV $09 (BASIC 2.0 says "Not available on this machine") |
+| 10 | ECANCELED | (0.21) User side only (the kernel never returns it): a copy cancelled by the user, from the controls library (ui_cptree, ui_mvtree: ui_cpcb returned C set; the progress window's Cancel; the shell's ctrl-C during `cp`, `mv`). Programs show no error for it |
 | $40 + n | I/O | I/O processor result n. n is a FatFs FRESULT: 4 no file, 5 no path, 6 invalid name, 7 denied, 8 exists, 18 too many open files. $80 is a bad handle, $81 a bad address. (0.20) The PC volume: $C7 no PC link (the volume is not there), $C8 the PC link was lost (during the call, or the handle was opened before the link dropped), $C9 not the same volume (rename between the card and the PC) |
 
 ## Program format

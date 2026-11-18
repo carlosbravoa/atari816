@@ -99,5 +99,123 @@ class Folder(unittest.TestCase):
         self.assertEqual(self.req(pclink.F_DELETE, b"/Docs\0")[0], pclink.FR_DENIED)   # not empty
 
 
+class Unfinished(unittest.TestCase):
+    """Mode 2 writes a temporary file in .atari816-partial, moved into place at CLOSE."""
+
+    def setUp(self):
+        self.root = tempfile.mkdtemp()
+        put(os.path.join(self.root, "old.txt"), "old")
+        self.sent = []
+        self.fs = pclink.FileServer(self.root, self.sent.append)
+        self.partial = os.path.join(self.root, pclink.FileServer.PARTIAL)
+
+    def req(self, op, args):
+        self.sent.clear()
+        self.fs.request(bytes([op, 5, 0, 0]) + args)
+        return self.sent[-1][3], b"".join(p[4:] for p in self.sent)
+
+    def create(self, name):
+        r, d = self.req(pclink.F_OPEN, b"\x02\0\0\0" + name + b"\0")
+        self.assertEqual(r, 0)
+        self.assertEqual(struct.unpack_from("<I", d, 4)[0], 0)
+        return d[0]
+
+    def write(self, h, data):
+        self.assertEqual(self.req(pclink.F_WRITE, bytes([h, 0, 0, 0]) + data)[0], 0)
+
+    def close(self, h):
+        return self.req(pclink.F_CLOSE, bytes([h, 0, 0, 0]))[0]
+
+    def read(self, name):
+        with open(os.path.join(self.root, name)) as f:
+            return f.read()
+
+    def temps(self):
+        return os.listdir(self.partial) if os.path.isdir(self.partial) else []
+
+    def test_new_file(self):
+        h = self.create(b"/new.txt")
+        self.write(h, b"hello")
+        self.assertFalse(os.path.exists(os.path.join(self.root, "new.txt")))
+        self.assertEqual(len(self.temps()), 1)
+        self.assertEqual(self.close(h), 0)
+        self.assertEqual(self.read("new.txt"), "hello")
+        self.assertEqual(self.temps(), [])
+
+    def test_overwrite(self):
+        h = self.create(b"/OLD.TXT")                  # (found ignoring case)
+        self.write(h, b"new content")
+        self.assertEqual(self.read("old.txt"), "old")
+        self.assertEqual(self.close(h), 0)
+        self.assertEqual(self.read("old.txt"), "new content")
+        self.assertFalse(os.path.exists(os.path.join(self.root, "OLD.TXT")))
+
+    def test_read_back(self):
+        h = self.create(b"/rb.bin")
+        self.write(h, b"abcdef")
+        self.req(pclink.F_SEEK, bytes([h, 0, 0, 0]) + struct.pack("<I", 2))
+        self.assertEqual(self.req(pclink.F_READ, bytes([h, 0, 0, 0]) + struct.pack("<I", 100)),
+                         (0, b"cdef"))
+        self.assertEqual(self.close(h), 0)
+
+    def test_session_end(self):
+        h1 = self.create(b"/old.txt")
+        h2 = self.create(b"/gone.txt")
+        self.write(h1, b"half")
+        self.write(h2, b"half")
+        self.assertEqual(len(self.temps()), 2)
+        self.fs.reset()
+        self.assertEqual(self.read("old.txt"), "old")
+        self.assertFalse(os.path.exists(os.path.join(self.root, "gone.txt")))
+        self.assertEqual(self.temps(), [])
+        self.assertEqual(self.close(h1), pclink.R_BADHANDLE)
+
+    def test_leftovers_removed_at_start(self):
+        os.mkdir(self.partial)
+        put(os.path.join(self.partial, "123-1.part"), "junk")
+        outside = os.path.join(self.root, "keep.txt")
+        put(outside, "keep")
+        os.symlink(outside, os.path.join(self.partial, "link"))
+        pclink.FileServer(self.root, self.sent.append)
+        self.assertEqual(os.listdir(self.partial), ["link"])   # links are not touched
+        self.assertEqual(self.read("keep.txt"), "keep")
+        os.unlink(os.path.join(self.partial, "link"))
+        put(os.path.join(self.partial, "123-2.part"), "junk")
+        pclink.FileServer(self.root, self.sent.append)
+        self.assertFalse(os.path.exists(self.partial))
+
+    def test_hidden_from_the_board(self):
+        h = self.create(b"/x.txt")                    # the folder exists now
+        name = b"/" + pclink.FileServer.PARTIAL.encode()
+        tmp = name + b"/" + self.temps()[0].encode()
+        r, d = self.req(pclink.F_READDIR, struct.pack("<HH", 0, 1000) + b"/\0")
+        self.assertEqual((r, struct.unpack_from("<I", d)[0]), (0, 1))     # only old.txt
+        self.assertNotIn(b"partial", d)
+        for path in (name, tmp, name.upper()):
+            self.assertEqual(self.req(pclink.F_STAT, path + b"\0")[0], pclink.FR_INVALID_NAME)
+            self.assertEqual(self.req(pclink.F_LOAD, path + b"\0")[0], pclink.FR_INVALID_NAME)
+            self.assertEqual(self.req(pclink.F_DELETE, path + b"\0")[0], pclink.FR_INVALID_NAME)
+            self.assertEqual(self.req(pclink.F_OPEN, b"\x00\0\0\0" + path + b"\0")[0],
+                             pclink.FR_INVALID_NAME)
+            self.assertEqual(self.req(pclink.F_OPEN, b"\x02\0\0\0" + path + b"\0")[0],
+                             pclink.FR_INVALID_NAME)
+            self.assertEqual(self.req(pclink.F_READDIR, struct.pack("<HH", 0, 1000) + path + b"\0")[0],
+                             pclink.FR_INVALID_NAME)
+            self.assertEqual(self.req(pclink.F_RENAME, path + b"\0/y\0")[0], pclink.FR_INVALID_NAME)
+            self.assertEqual(self.req(pclink.F_RENAME, b"/old.txt\0" + path + b"\0")[0],
+                             pclink.FR_INVALID_NAME)
+        self.assertEqual(self.close(h), 0)
+
+    def test_open_errors(self):
+        self.fs.readonly = True
+        self.assertEqual(self.req(pclink.F_OPEN, b"\x02\0\0\0/ro.txt\0")[0], pclink.FR_DENIED)
+        self.fs.readonly = False
+        self.assertFalse(os.path.exists(os.path.join(self.root, "ro.txt")))
+        os.mkdir(os.path.join(self.root, "dir"))
+        self.assertEqual(self.req(pclink.F_OPEN, b"\x02\0\0\0/dir\0")[0], pclink.FR_NO_FILE)
+        self.assertEqual(self.req(pclink.F_OPEN, b"\x02\0\0\0/nodir/x\0")[0], pclink.FR_NO_PATH)
+        self.assertEqual(self.temps(), [])
+
+
 if __name__ == "__main__":
     unittest.main()

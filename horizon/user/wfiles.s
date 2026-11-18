@@ -64,8 +64,6 @@ start:  sta     argl
         exit    1
 :       sta     z:wsown
         jsr     ui_init
-        lda     #.loword(cpprog)        ; (0.20) a large file copied: how far, on the footer
-        sta     ui_cpcb
         sys     SYS_BALLOC              ; the entry records
         bcc     :+
         jsr     stopws
@@ -1030,11 +1028,16 @@ domove: ldy     #0                      ; pth2 inside pth: pth2 starts with pth 
         ldx     #.loword(m_exists)
         jsr     say
         jmp     loop
-:       ldx     #.loword(pth)           ; (0.20 ui_mvtree: between the card and the PC
+:       lda     #1                      ; (0.21) a long move: the progress window
+        jsr     ui_cpwin
+        ldx     #.loword(pth)           ; (0.20 ui_mvtree: between the card and the PC
         ldy     #.loword(pth2)          ; volume a copy, then the source deleted)
         jsr     ui_mvtree
-        jcs     oops
-        ldx     #.loword(pth2)          ; (selected if it is in this list now)
+        jsr     ui_cpdone
+        bcc     :+
+        ldx     #.loword(m_mvcan)
+        jmp     cpfail
+:        ldx     #.loword(pth2)          ; (selected if it is in this list now)
         jsr     basename
         ldy     #.loword(came)
         jsr     ui_strcpy
@@ -1252,53 +1255,32 @@ paste:  lda     #.loword(clbuf)
 
 ; copy clbuf to pth2 (new): a file, or (0.20) a folder and everything in it (ui_cptree,
 ; also between the card and the PC volume)
-docopy: ldx     #.loword(clbuf)
+docopy: lda     #0                      ; (0.21) a long copy: the progress window
+        jsr     ui_cpwin
+        ldx     #.loword(clbuf)
         ldy     #.loword(pth2)
         jsr     ui_cptree
-        jcs     oops
-        ldx     #.loword(pth2)          ; the copy selected
+        jsr     ui_cpdone
+        bcc     :+
+        ldx     #.loword(m_cpcan)
+        jmp     cpfail
+:        ldx     #.loword(pth2)          ; the copy selected
         jsr     basename
         ldy     #.loword(came)
         jsr     ui_strcpy
         jsr     reload
         jmp     loop
 
-; (0.20) ui_cptree's call after each 32 KB: a large file says how far
-cpprog: lda     ui_cpk
-        sta     z:kdone
-        lda     ui_cpsize+1             ; its size in K
-        lsr     a
-        lsr     a
-        sta     z:ktot
-        cmp     #33
-        bcc     :+
-        lda     ui_cpname
-        sta     z:bn
-        jmp     progress
-:       rts
-
-; "Copying 64 of 300 K: NAME" on the footer
-progress:
-        lda     #.loword(fbuf)
-        sta     z:bp
-        ldx     #.loword(s_copying)
-        jsr     app
-        lda     z:kdone
-        cmp     z:ktot
-        bcc     :+
-        lda     z:ktot
-:       jsr     app_dec
-        ldx     #.loword(s_of)
-        jsr     app
-        lda     z:ktot
-        jsr     app_dec
-        ldx     #.loword(s_kcolon)
-        jsr     app
-        ldx     z:bn
-        jsr     app
-        lda     #2
-        sta     z:msg
-        jmp     footer_draw
+; (0.21) a copy or move failed (A = the error): cancelled (ECANCELED, from the progress
+; window): the folder read again (what was copied before stays), the message X on the footer
+; (no beep); another error: as always (oops)
+cpfail: cmp     #ECANCELED
+        jne     oops
+        phx
+        jsr     reload
+        plx
+        jsr     note
+        jmp     loop
 
 ; ---------------------------------------------------------------- File menu
 ; New window: another Files, in this folder
@@ -3023,9 +3005,6 @@ s_close: .byte  ")", 0
 s_k:    .byte   " K", 0
 s_empty: .byte  "(empty folder)", 0
 s_copied: .byte "Copied ", 0
-s_copying: .byte "Copying ", 0
-s_of:   .byte   " of ", 0
-s_kcolon: .byte " K: ", 0
 s_copyof: .byte "Copy of ", 0
 s_newf: .byte   "New folder", 0
 s_del:  .byte   "Delete ", 0
@@ -3055,6 +3034,8 @@ m_badname: .byte "Not a valid name", 0
 m_nomem: .byte  "Not enough memory", 0
 m_cnom: .byte   "Not enough free memory for the cartridge", 0
 m_long: .byte   "The path is too long", 0
+m_cpcan: .byte  "Copy cancelled", 0                    ; (0.21)
+m_mvcan: .byte  "Move cancelled", 0
 m_self: .byte   "A folder cannot be moved into itself", 0
 m_there: .byte  "It is already in that folder", 0
 m_noclip: .byte "The clipboard holds no file. Copy a file first.", 0
@@ -3258,5 +3239,3 @@ hasup:  .res    2                       ; 1: entry 0 is ".."
 atroot: .res    2                       ; 1: the folder is the root
 showsys: .res   2                       ; View > Show system files
 pp2:    .res    2
-kdone:  .res    2
-ktot:   .res    2

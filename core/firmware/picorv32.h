@@ -64,9 +64,16 @@ int atoi(const char *str);
 #define reg_video_diag     (*(volatile uint32_t*)0x02000064)  // [31:16]=lines/frame [15:0]=frame counter
 #define reg_sio_cap_idx    (*(volatile uint32_t*)0x02000068)  // write: select SIO capture word 0..3
 #define reg_sio_cap_data   (*(volatile uint32_t*)0x0200006c)  // read: selected SIO capture word
-#define reg_virt_kbd_0     (*(volatile uint32_t*)0x020000a0)
-#define reg_virt_kbd_1     (*(volatile uint32_t*)0x020000a4)
+#define reg_virt_kbd_0     (*(volatile uint32_t*)0x020000a0)  // write with kv_set0 (firmware.c)
+#define reg_virt_kbd_1     (*(volatile uint32_t*)0x020000a4)  // write with kv_set1
 #define reg_cart_mode      (*(volatile uint32_t*)0x020000a8)
+
+// Atari816 input layer (firmware.c, block RAM): key and mouse events for Horizon
+extern uint32_t kv0, kv1;   // what reg_virt_kbd_0 / _1 hold (the registers do not read back)
+void kv_set0(uint32_t v);   // reg_virt_kbd_0 = v, and the key events it makes
+void kv_set1(uint32_t v);
+void in_service(void);      // the keyboard UART drained, events queued and sent (cheap)
+void in_tick(void);         // in_service at most every 0.5 ms: for loops that wait long
 
 // Standard library for PicoRV32 RV32I softcore
 

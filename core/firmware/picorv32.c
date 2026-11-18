@@ -202,7 +202,7 @@ extern void uart_keyboard_poll(void);
 void delay(int ms) {
    int t0 = time_millis();
    while (time_millis() - t0 < ms) {
-      uart_keyboard_poll();
+      in_tick();
    }
 }
 
@@ -211,7 +211,7 @@ extern uint32_t virt_key_release_at;
 void joy_get(int *joy1, int *joy2) {
    uart_keyboard_poll();
    if (virt_key_release_at && (int32_t)(time_millis() - virt_key_release_at) >= 0) {
-      reg_virt_kbd_0 = 0;                   // deferred release of a bridge KEY press
+      kv_set0(0);                   // deferred release of a bridge KEY press
       virt_key_release_at = 0;
    }
    uint32_t joy = reg_joystick;

@@ -1,0 +1,90 @@
+# (0.21) A long copy in Files, with the progress window (DESK=1; tests/mousegen.py makes
+# tests/pccopy.keys from this). emu816 serves /PC: from a fresh copy of tests/pc, with the
+# board's transfer speeds (--card-kbps 170:100 --pc-kbps 100:55) and the link dropped at
+# 44.5 s; the card gets /BIG.BIN (384 KB, tests/mkbig.py): a copy to the PC takes about
+# 9 s. Files is at (24, 24); its rows from y 61, 12 apart. The progress window's Cancel button
+# is at (436, 217). Shots (s):
+#   1  12.6  ctrl-V in Files at /PC: (BIG.BIN on the clipboard): the progress window
+#            ("Copying", BIG.BIN, "... of 384 KB", the bar) over Files and Edit
+#   2  17.0  meanwhile Edit was clicked and text typed into it, the pointer moved, then
+#            Files' title clicked (its dialog raised): the text is there, the copy still
+#            runs, the pointer where the moves left it (keys and mouse during the copy)
+#   3  26.5  Edit minimized; BIG.BIN copied from /PC: back to / ("Copy of BIG.BIN"), Esc in
+#            the progress window: "Copy cancelled", no "Copy of BIG.BIN"
+#   4  36.5  ctrl-V again: copied in full ("Copy of BIG.BIN" selected)
+#   5  42.0  /BIG.BIN pasted into /PC: ("Copy of BIG.BIN"), Cancel clicked: "Copy cancelled",
+#            nothing new in /PC:
+#   6  50.5  pasted again; the link dropped during the copy: "The PC link was lost" (red), no
+#            "Copy of BIG.BIN" left on the PC; the PC icon gone
+5500 M -100:-23:0:0
+5550 M -100:0:0:0
+5600 M -20:0:0:0
+5700 M 0:0:0:1
+5780 M 0:0:0:0
+6300 {dE0}c{uE0}
+6800 M 0:-24:0:0
+7000 M 0:0:0:1
+7080 M 0:0:0:0
+7200 M 0:0:0:1
+7280 M 0:0:0:0
+8000 M 5:-100:0:0
+8050 M 0:-27:0:0
+8100 M 0:0:0:1
+8180 M 0:0:0:0
+8500 M 0:17:0:0
+8700 M 0:0:0:1
+8780 M 0:0:0:0
+9500 M 100:7:0:0
+9550 M 95:0:0:0
+9700 M 0:0:0:1
+9780 M 0:0:0:0
+10000 {dE0}v{uE0}
+12800 M 100:100:0:0
+12850 M 100:100:0:0
+12900 M 0:60:0:0
+13000 M 0:0:0:1
+13080 M 0:0:0:0
+13400 Typed while Files copies.
+15000 M -100:-100:0:0
+15050 M -100:-90:0:0
+15600 M -100:-70:0:0
+15800 M 0:0:0:1
+15880 M 0:0:0:0
+16200 M 100:100:0:0
+16250 M 100:100:0:0
+16300 M 100:70:0:0
+16350 M 100:0:0:0
+16400 M 10:0:0:0
+21000 M -100:-100:0:0
+21050 M -12:-100:0:0
+21100 M 0:-53:0:0
+21200 M 0:0:0:1
+21280 M 0:0:0:0
+22000 M -100:38:0:0
+22050 M -100:0:0:0
+22100 M -100:0:0:0
+22150 M -98:0:0:0
+22200 M 0:0:0:1
+22280 M 0:0:0:0
+22700 {dE0}c{uE0}
+23200 \b
+24000 {dE0}v{uE0}
+25500 {esc}
+27500 {dE0}v{uE0}
+37000 M 0:72:0:0
+37200 M 0:0:0:1
+37280 M 0:0:0:0
+37600 {dE0}c{uE0}
+38000 M 0:-24:0:0
+38200 M 0:0:0:1
+38280 M 0:0:0:0
+38400 M 0:0:0:1
+38480 M 0:0:0:0
+39500 {dE0}v{uE0}
+41000 M 100:84:0:0
+41050 M 100:0:0:0
+41100 M 100:0:0:0
+41150 M 36:0:0:0
+41200 M 0:0:0:1
+41280 M 0:0:0:0
+43000 {dE0}v{uE0}

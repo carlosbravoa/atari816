@@ -3,7 +3,8 @@
 ;   console with ONE puts per line (at '\n', when full, or at out_flush), so a line is never
 ;   spliced with another task's output. The exit macro flushes.
 ;   Keyboard: key_ascii (HID usage -> ASCII, US layout, shift, caps lock, ctrl), read_char,
-;   getline (echo, backspace, ctrl-C).
+;   getline (echo, backspace, ctrl-C), (0.21) key_keep (characters kept for read_char:
+;   type-ahead).
 ;   Strings: str_skip (spaces), parse_dec, through the long pointer u_p.
 ; All routines: a16 i16; A, X, Y are clobbered unless noted.
 
@@ -225,8 +226,40 @@ key_ascii:
 @none:  lda     #0
         rts
 
-; wait for a key that gives a character -> A
+; (0.21) A = a character kept for read_char: type-ahead read by a program while it was busy
+; (the shell's cp and mv look for ctrl-C between two pieces). KEEPMAX at most; more are dropped.
+key_keep:
+        ldx     u_nkeep
+        cpx     #KEEPMAX
+        bcs     :+
+        sep     #$20
+        .a8
+        sta     u_keep,x
+        rep     #$20
+        .a16
+        inc     u_nkeep
+:       rts
+
+; wait for a key that gives a character -> A ((0.21) the characters kept by key_keep first)
 read_char:
+        lda     u_nkeep
+        beq     :++
+        lda     u_keep
+        and     #$00FF
+        pha
+        ldx     #0
+:       lda     u_keep+1,x
+        sep     #$20
+        .a8
+        sta     u_keep,x
+        rep     #$20
+        .a16
+        inx
+        cpx     #KEEPMAX - 1
+        bcc     :-
+        dec     u_nkeep
+        pla
+        rts
 :       cop     SYS_IREAD
         jcs     @err
         jsr     key_ascii
@@ -722,6 +755,9 @@ NHIST   = 8
 HISTLEN = 127
 hist:   .res    NHIST * 128
 spblk:  .res    8
+KEEPMAX = 80                            ; a shell line
+u_keep: .res    KEEPMAX + 1                     ; (0.21) key_keep's characters
+u_nkeep: .res   2
 OUTMAX = 120
 out_buf: .res   OUTMAX + 2
 

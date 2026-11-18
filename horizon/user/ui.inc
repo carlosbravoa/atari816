@@ -8,7 +8,7 @@
 ; = DBR): a "pointer" below is a 16-bit address there. The library uses SYS_WEVENT, so a
 ; program using it reads its events with ui_getev (into ui_ev) instead of SYS_WEVENT.
 ; Cost: about 8.7 KB of code (0.2 KB more with ui_dlg*, 0.3 KB with ui_ask, 1.6 KB and 0.5 KB of
-; bss with ui_launch / ui_open), 1.5 KB of bss, 38 bytes of zero
+; bss with ui_launch / ui_open, (0.21) 0.8 KB with ui_cpwin), 1.5 KB of bss, 38 bytes of zero
 ; page (ui_*), and a bank only while the file dialog is open. Examples: user/edit.s (a scroll
 ; bar, the dialogs, ui_dlg* for Find / Replace / Go to line).
 ;
@@ -304,10 +304,31 @@ FT_LINK    = 9          ; (0.14) .lnk: a shortcut (ui_open opens its target)
 ; ui_rmtree         X = path: a file deleted, or a folder and everything in it. C set: A = error.
 ; ui_mvtree         X = from, Y = to: moved (SYS_RENAME); between the card and the PC volume
 ;                   (SYS_RENAME's $C9) copied with ui_cptree, then the source deleted with
-;                   ui_rmtree. C set: A = error ($48: "to" is there already).
-; ui_cpcb           (word) a routine called after every 32 KB copied, 0 = none (the default):
+;                   ui_rmtree. C set: A = error ($48: "to" is there already). (0.21) The source
+;                   is deleted only when the whole copy worked: never after an error or a
+;                   cancel.
+; ui_cpcb           (word) a routine called when a file starts (ui_cpk = 0) and after every
+;                   piece copied (0.21: 16 KB; 0.20: 32 KB), 0 = none (the default):
 ;                   ui_cpname = the file's name (in the library's copy of the path), ui_cpk =
-;                   K of it copied so far, ui_cpsize = its size (u32). It may change A, X, Y.
+;                   K of it copied so far (rounded up), ui_cpsize = its size (u32). It may
+;                   change A, X, Y. (0.21) It returns C clear to go on, C set to cancel: the
+;                   library closes both files, deletes the partial file (on the card or on
+;                   /PC:), stops (in a folder copy what was copied before stays) and returns C
+;                   set, A = ECANCELED. An error ($C8 the PC link lost, ...) also deletes the
+;                   partial file.
+; ---------------------------------------------------------------- copy progress (0.21, uicpwin.s)
+; ui_cpwin          A = 0 copy / 1 move: the progress window for the next ui_cptree / ui_mvtree
+;                   (call it just before; it sets ui_cpcb). The window ("Copying" / "Moving",
+;                   modal, centred) opens only when the copy still runs about 0.5 s after this
+;                   call, so a small copy shows nothing. It shows the file's name, "123 of
+;                   1,500 KB (8%)", a bar and a Cancel button. Between two pieces it looks at
+;                   the events that came, without waiting: Cancel, Esc or its close box cancel
+;                   the copy (ui_cptree / ui_mvtree return C set, A = ECANCELED: show no error
+;                   for it); keys of the program's other windows go to it, their other events
+;                   are dropped (a WE_RESIZE or WE_CLOSE is kept for ui_getev), as for a dialog.
+;                   Only what changed is redrawn.
+; ui_cpdone         after ui_cptree / ui_mvtree: the window closed if it opened, ui_cpcb = 0.
+;                   Keeps A and the carry: jsr ui_cptree, jsr ui_cpdone, bcs error.
 CK_YEAR  = 0
 CK_MON   = 2
 CK_DAY   = 4
@@ -345,6 +366,7 @@ CK_WDAY  = 12
 .global ui_clk, ui_clksplit, ui_clkjoin, ui_clkcheck, ui_clkmdays, ui_clkfmt, ui_clklong
 .global ui_clkparse, ui_clkload, ui_clksave, ui_clkpc
 .global ui_cptree, ui_rmtree, ui_mvtree, ui_cpcb, ui_cpname, ui_cpk, ui_cpsize
+.global ui_cpwin, ui_cpdone
 .global ui_ev                   ; 8 bytes: the event (ui_getev)
 .globalzp ui_win, ui_x, ui_y, ui_w, ui_h, ui_font, ui_c2, ui_rsel
 

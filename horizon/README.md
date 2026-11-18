@@ -76,7 +76,7 @@ The two SD cards differ only in `/SYSTEM/INIT.PRG`:
 - **`build/tsd`:** INIT (`user/tinit.s`) runs `/SYSTEM/TESTS/SELFTEST.PRG`, waits for it and exits,
   so the run ends with `[halt] no tasks`.
 
-`make test` runs twenty-five tests (`make test EMUFLAGS="--rev 7"` runs them on a board without
+`make test` runs twenty-six tests (`make test EMUFLAGS="--rev 7"` runs them on a board without
 the blitter: the software drawing paths; both must pass):
 
 1. **Regression.** SELFTEST runs on the test card with `--console-us 0`, `90` and `2000`.
@@ -290,6 +290,21 @@ the blitter: the software drawing paths; both must pass):
    the drop and back after the return, the file dialog (Edit, ctrl-O) at the root with the
    `PC:` folder and in /PC:; nine pictures (`pcdesk*.png`; `pcdesk-rev7.md5`: the free memory
    in the bar is read at other moments), the files on both sides and /SYSTEM/CLOCK checked.
+26. **Long copies** (0.21, in `make test-pc`): emu816 with the board's transfer speeds
+   (`--card-kbps 170:100 --pc-kbps 100:55`) and a 384 KB `/BIG.BIN` on the card copy
+   (`tests/mkbig.py`, the same bytes every time). `tests/pccopy.src` (Desktop, the link dropped at
+   44.5 s): BIG.BIN pasted into /PC: in Files, the progress window; meanwhile a click into Edit,
+   text typed and the pointer moved, then Files' title clicked: the text is in Edit, the copy
+   still runs, the pointer where the moves left it (keys and mouse keep coming during a long
+   request); back to the card ("Copy of BIG.BIN"), Esc in the progress window, then in full;
+   into /PC: again, Cancel clicked; once more with the link dropped during the copy ("The PC
+   link was lost"). Six pictures (`pccopy*.png`; `pccopy-rev7.md5`: without the blitter the
+   copy is a little behind at shot 2); the copies must equal BIG.BIN byte for byte,
+   and nothing may be left by the cancels or the drop (on the card, in the PC folder, in its
+   `.atari816-partial`). `tests/cpstop.keys` (text shell): `cp` to the PC, `cp` on the card and
+   `mv` to the PC, each stopped by ctrl-C ("cp: /BIG.BIN: cancelled"), "ls" typed during a copy
+   kept for the next prompt; the console must equal `tests/cpstop.txt`, BIG.BIN stays, and no
+   partial file is left.
 
 The Desktop sessions (`DESK=1` in `tests/shots.sh`) get `tests/desk.programs` as their
 Programs menu (the order of 0.12), so programs added to `sdfiles/PROGRAMS` do not change
@@ -341,7 +356,18 @@ card. How to start the gateway on the PC: see the root README, "PC link".
   stopped during the operation, or a file was opened before it stopped: $C8), "not on the
   same volume" ($C9, a rename between the card and the PC; Files, the shell and the Desktop
   copy instead).
-- The volume is slower than the card: about 50-150 KB/s, a few ms for each operation.
+- The volume is slower than the card: about 100 KB/s to read and 55 KB/s to write, a few ms
+  for each operation (the card: about 170 and 100 KB/s).
+- **Long copies** (0.21): Files and the Desktop show a progress window when a copy or a move
+  takes more than about half a second: the file's name, "123 of 1,500 KB (8%)", a bar and a
+  Cancel button (Esc and the close box work too). Cancel stops after the piece being copied:
+  the file copied in part is deleted, on the card or on the PC (in a folder copy, the files
+  copied before stay). A move that is cancelled or fails never deletes the original. In the
+  shell, ctrl-C stops `cp` and `mv` ("cp: NAME: cancelled"). The keyboard and the mouse keep
+  working in the other programs during a copy.
+- **Unfinished files:** the gateway writes a new file under a temporary name and gives it its
+  name only when it is complete. A copy to the PC that is cut off (Cancel, a lost link, a
+  reset) never leaves a half file there, and an older file of that name stays as it was.
 
 ## The shell and the file browser
 
@@ -414,6 +440,10 @@ names with spaces: "in quotes"; ctrl-C stops the foreground job
   8 lines. A line may use the whole screen width.
 - **Background jobs.** `cmd &` runs in the background; `[done] id exit code` comes
   before the next prompt. ctrl-C stops the foreground job.
+- **`cp` and `mv`** (0.21): ctrl-C stops a copy between two pieces of 16 KB: "cp: NAME:
+  cancelled", the partial file deleted (a move keeps its source). Other keys typed during the
+  copy are kept and come at the next prompt (type-ahead, ulib `key_keep`, up to 80 characters:
+  a whole command line).
 - **Atari software:**
   - `mount FILE [1-4]` mounts a disk on D1:-D4:, an executable, or a cartridge (the
     kind comes from the extension).
@@ -487,7 +517,8 @@ names with spaces: "in quotes"; ctrl-C stops the foreground job
 | `user/uipop.s` | (0.15) ui_popup, ui_popat, ui_menukey, ui_chime, ui_beep, the text field's pop-up menu |
 | `user/ktest.s` | (0.15) KTEST, the test of the kernel's 0.15 additions |
 | `user/uidate.s` | (0.14) the date: seconds to a calendar date and back, `/SYSTEM/CLOCK` (also linked by the shell); (0.20) the clock from the PC (ui_clkpc) |
-| `user/uicopy.s` | (0.20) copying and deleting files and whole folders, and moves between the card and the PC volume (ui_cptree, ui_rmtree, ui_mvtree; also linked by the shell) |
+| `user/uicopy.s` | (0.20) copying and deleting files and whole folders, and moves between the card and the PC volume (ui_cptree, ui_rmtree, ui_mvtree; also linked by the shell); (0.21) in pieces of 16 KB, a callback that may cancel |
+| `user/uicpwin.s` | (0.21) the progress window of a long copy or move: name, KB, percent, a bar, Cancel (ui_cpwin, ui_cpdone) |
 | `sdfiles/icons.txt`, `tools/mkicons.py` | (0.14) the Desktop's icons as text art -> `/SYSTEM/ICONS` and `user/icons.inc` |
 | `user/horizon.inc` | User ABI: syscall numbers, error codes, macros (`sys`, `print`, `ptr`, `exit`, long branches) |
 | `user/ulib.s` | User library: line-buffered output and number printing, HID-to-ASCII (US, shift, caps lock, ctrl), `read_char`, `getline` (echo, backspace, ctrl-C), `parse_dec`, `spawn`, `exit_a`, `args_init` |
@@ -903,6 +934,37 @@ bus time (see emu/README.md, "Memory timing"). Expect the same factor on the CPU
   source stride), SYS_WGEOM, SYS_TNAME, WE_DROP's modifiers, the date routines (ui_clk*,
   `user/uidate.s`), shortcuts (ui_lnkread, ui_mklink), program and file icons (ui_prog,
   ui_ficon). See ABI.md and ui.inc.
+
+## Version 0.21 (long copies: progress and cancel)
+
+A long copy no longer blocks without a word. The kernel did not change (bank $01 2,109 bytes
+left, k2 711, k3 2,386: as in 0.20). The I/O processor firmware of this round keeps sending
+key and mouse events while it serves a long request (a large card read or write, a request
+waiting for the PC, a developer upload); before, the keyboard and the pointer froze until it
+was done. The PC gateway writes a new file (mode 2) under a temporary name and gives it its
+name at CLOSE, so a copy that is cut off leaves nothing.
+
+- **The controls library, `uicopy.s`:** files are copied in pieces of 16 KB (0.20: 32 KB).
+  `ui_cpcb` is called when a file starts (ui_cpk = 0) and after every piece, and may return C
+  set to cancel: both files are closed, the partial file is deleted (on the card or on /PC:),
+  and ui_cptree / ui_mvtree return C set, A = ECANCELED (10, a new error code of the user side;
+  the kernel never returns it). ui_mvtree never deletes the source after an error or a cancel.
+- **The progress window, `uicpwin.s`** (new): `ui_cpwin` (A = 0 copy, 1 move) before
+  ui_cptree / ui_mvtree, `ui_cpdone` after. A modal window "Copying" / "Moving" opens when the
+  copy still runs 0.5 s later: the name, "123 of 1,500 KB (8%)", a bar, Cancel (Esc, the close
+  box). Between pieces it looks at the events without waiting and redraws only what changed.
+  See ui.inc.
+- **Files:** every copy (Paste) and move (a drag, a drop) uses it; the footer's "Copying 64
+  of 300 K" is gone. A cancel says "Copy cancelled" (or "Move cancelled") on the footer, with
+  no beep; other errors as before ("The PC link was lost", ...).
+- **Desktop:** drops that copy or move (onto the PC icon, the SD card icon, a folder) use it;
+  a cancel is silent (no beep).
+- **The shell:** ctrl-C stops `cp` and `mv` ("cp: NAME: cancelled"); other keys typed meanwhile
+  are kept for the next prompt (ulib `key_keep`, up to 80 characters, read first by `read_char`).
+- **emu816:** `--card-kbps R:W` and `--pc-kbps R:W` (slow transfers: the board's speeds are
+  about 170:100 and 100:55), key and mouse events during a request (every key change in order,
+  a quick click never lost), the gateway's temporary files for mode 2 (emu/README.md).
+- Tests: "Build, run, test", 26.
 
 ## Version 0.20 (the PC link, step 1)
 

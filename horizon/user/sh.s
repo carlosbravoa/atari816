@@ -428,6 +428,10 @@ errmsg: cmp     #$44
         bne     :+
         print   "already running (its window was raised)"
         rts
+:       cmp     #ECANCELED              ; (0.21) cp / mv stopped by ctrl-C
+        bne     :+
+        print   "cancelled"
+        rts
 :       cmp     #EIO + $87              ; (0.20) the PC link's errors
         bne     :+
         print   "no PC link"
@@ -1158,9 +1162,12 @@ b_mv:   jsr     two_names
         bcc     :+
         print   "usage: mv from to\n"
         rts
-:       ldx     #.loword(fname)
+:       lda     #.loword(cpkeys)        ; (0.21) ctrl-C stops it
+        sta     ui_cpcb
+        ldx     #.loword(fname)
         ldy     #.loword(fname2)
         jsr     ui_mvtree
+        stz     ui_cpcb
         bcc     :+
         pha
         print   "mv: "
@@ -1170,15 +1177,19 @@ b_mv:   jsr     two_names
         jmp     put_nl
 :       rts
 
-; cp from to: copy a file, 32 KB at a time through a bank of its own; (0.20) or a folder
-; and everything in it (ui_cptree; also between the card and the PC volume)
+; cp from to: copy a file, 16 KB at a time through a bank of its own; (0.20) or a folder
+; and everything in it (ui_cptree; also between the card and the PC volume). (0.21) ctrl-C
+; stops it: "cp: NAME: cancelled", the partial file deleted
 b_cp:   jsr     two_names
         bcc     :+
         print   "usage: cp from to\n"
         rts
-:       ldx     #.loword(fname)
+:       lda     #.loword(cpkeys)        ; (0.21) ctrl-C stops it
+        sta     ui_cpcb
+        ldx     #.loword(fname)
         ldy     #.loword(fname2)
         jsr     ui_cptree
+        stz     ui_cpcb
         bcc     :+
         pha
         print   "cp: "
@@ -1187,6 +1198,24 @@ b_cp:   jsr     two_names
         jsr     errmsg
         jmp     put_nl
 :       rts
+
+; (0.21) ui_cpcb of cp and mv, between two pieces: the keys typed meanwhile. ctrl-C cancels
+; (C set); the other characters are kept for the next prompt (ulib key_keep: type-ahead)
+cpkeys: sys     SYS_IPOLL
+        bcs     @none
+        cmp     #$0100                  ; (the mouse and the wheel: not ours)
+        bcs     cpkeys
+        jsr     key_ascii
+        cmp     #3
+        beq     @brk
+        cmp     #0
+        beq     cpkeys
+        jsr     key_keep
+        bra     cpkeys
+@none:  clc
+        rts
+@brk:   sec
+        rts
 
 ; ---------------------------------------------------------------- Atari software
 ; mount file [drive 1-4]: the kind comes from the extension (adds to what is mounted)

@@ -319,6 +319,8 @@ EAGAIN  = 6
 ENOSYS  = 7
 ERUNNING = 8            ; spawn / SYS_SINGLE: a single-instance program runs already (its windows were raised)
 ENODEV  = 9            ; (0.17) the hardware is not there (SYS_SPLAY ... on REV < $0A: no Lau; 0.18: sprites before $0B, ...)
+ECANCELED = 10         ; (0.21) user side only (the kernel never returns it): a copy cancelled by
+                       ; the user (the controls library's ui_cpcb said so; ui_cptree, ui_mvtree)
 EIO    = $40           ; + I/O processor result (FatFs FRESULT: $44 = no file, $45 = no path)
 
 ; ---- macros (a16 i16) ----
@@ -352,7 +354,7 @@ EIO    = $40           ; + I/O processor result (FatFs FRESULT: $44 = no file, $
 ; user library (ulib.s), see there. All clobber A, X, Y.
 .global out_char, out_str, out_flush, put_char, put_str, put_nl
 .global put_hex8, put_hex16, put_dec, put_decw, div10
-.global key_ascii, read_char, getline, str_skip, parse_dec
+.global key_ascii, read_char, getline, str_skip, parse_dec, key_keep
 .global spawn, exit_a, args_init, next_arg, atari_kind, atari_run
 .globalzp u_p                   ; long pointer used by str_skip / parse_dec
 .globalzp u_arg                 ; spawn's argument string (u24, 0 = none)

@@ -511,6 +511,8 @@ Paths are FAT32 paths, UTF-8, zero-terminated. LOAD streams a whole file straigh
 | $E2 | GAMEPAD | ARG0 = pad number, ARG1 = buttons and directions |
 | $E3 | MEDIA | ARG0 = 0 SD card removed, 1 inserted |
 
+KEY and MOUSE events keep coming while a request is being served (from firmware of Nov 18, 2026; before, they waited until the request was done, and a key pressed and released meanwhile was lost). So the answer of a request may come after events that were sent while it ran. The firmware keeps one free slot in the response ring for that answer. Every key change gives its own event, in order; mouse motion with the same buttons is added up until it is sent, and every button change gives its own event. A task that waits for an answer does not stop the pointer: Marga draws it from PTR\_X / PTR\_Y, which Horizon's interrupt service writes for each MOUSE event.
+
 ### Boot handshake
 
 1. At power-on the I/O processor holds the 65C816 in reset, loads /SYSTEM/HORIZON.SYS to $01:0000 and writes a small reset stub with the vectors at $00:FF00 to $00:FFFF.

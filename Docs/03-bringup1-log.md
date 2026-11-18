@@ -539,3 +539,110 @@ images cannot be mounted from `/PC:` (copy them to the card); one session, one f
 **Flash:** `core/impl/pclink1/` (bitstream, report, timing, `cold.bin`) is in flash (`cold.bin`
 at 0x500000, then the bitstream); the board came up from flash to the Horizon 0.20 desktop.
 `core/impl/rev0b_fw2/` stays the fallback (it needs its own `cold.bin` flashed with it).
+
+## Step 22: input during long requests, copy progress and cancel (2026-11-18, Horizon 0.21)
+
+**The problem, as measured.** While the I/O processor served a long mailbox request (a big
+card READ or WRITE, a `/PC:` request waiting for the gateway, a developer upload), keys typed
+meanwhile were lost and the pointer stopped. How input reaches the 65C816:
+
+- The keyboard and the mouse are one USB adapter (CH9350) on a 115,200 baud UART. A hardware
+  decoder (`uart_kbd_ch9350.sv`) turns the keyboard reports into the held-key state
+  (`reg_a816_keys`); the firmware reads the same UART through a 64-byte FIFO (`simpleuart.v`)
+  for the mouse reports.
+- The firmware made the KEY and MOUSE events (by comparing the held keys with what it had
+  reported) only in `a816_mailbox()`, between two requests. A key pressed and released during
+  a request was never seen. The mouse UART was drained only in the main loop and in the PC
+  link's waits: during a card request the FIFO filled after about 5 reports (40 ms) and the
+  rest were lost.
+- The pointer itself is Marga's: Horizon's interrupt service writes PTR\_X / PTR\_Y for each
+  MOUSE event (`kernel/mouse.s`). A task that waits for a mailbox answer blocks (W\_IO) with
+  interrupts on, so the 65C816 is never the reason the pointer stops; the events were.
+- Measured with a new board test (`sw/a816/INTEST.BIN`, `core/tools/intest.py`): the 65C816
+  counts every event while it copies 1.5 MB in 32 KB requests, and notes the longest time
+  between two MOUSE events. Old firmware, a MOUSE request every 10 ms from the PC: idle 14 ms;
+  writing the card 414 ms; card to PC 582 ms; PC to card 402 ms.
+
+**The fix (firmware only, no RTL change).** A small input layer in block RAM
+(`in_service()` in `firmware.c`):
+
+- Key events come from the firmware's own copy of the keyboard (`kv0`, `kv1`: the CH9350
+  reports parsed in order, and the developer KEY / TYPE keys); after every change the
+  difference is queued, one event per change, so a short tap is never lost. Mouse motion with
+  the same buttons is added up; a button change gets its own event.
+- The queue (32 events) goes into the response ring whenever two slots are free; the answer
+  of the request in progress is written after the events (`a816_mailbox` reads RSP\_HEAD
+  again at the end).
+- `in_service()` runs in the main loop, in every wait of the PC link (also between frames of
+  a long answer: `pl_busy`), in the SD card driver (between sectors and while the card is
+  busy) and in `delay()`. It does nothing costly when there is nothing to send.
+- A test generator: developer op $12 INJECT (`04-pc-link.md`) makes key taps and mouse
+  reports where the CH9350's enter, and counts as lost what would not have fitted in the
+  64-byte FIFO since the firmware last looked.
+
+**After** (INTEST with INJECT: 80 key taps every 60 ms and 600 mouse reports every 8 ms per
+phase; 1.5 MB copies in 32 KB requests; a 500 KB developer upload in phase 4):
+
+| Phase | Longest gap between MOUSE events (before / after) | Longest time between two looks at the input | Lost |
+|---|---|---|---|
+| Idle | 14 ms / 8.2 ms (the report period is 8 ms) | 4.2 ms | 0 |
+| 1.5 MB written to the card | 414 ms / 11.1 ms | 4.7 ms | 0 |
+| 1.5 MB card to PC | 582 ms / 15.3 ms | 10.1 ms | 0 |
+| 1.5 MB PC to card | 402 ms / 17.3 ms | 10.3 ms | 0 |
+| 500 KB developer upload | (not measurable before) / 19.7 ms | 12.2 ms | 0 |
+
+All 160 key reports and 600 mouse reports of every phase arrived (80 downs, 80 ups, dx 600).
+A first try lost input while a long `/PC:` READ answer streamed in (323 ms): the PC link's
+wait loop looked at the input only when no frame came; fixed with `pl_busy`. The 64-byte
+FIFO holds 5 mouse reports (40 ms), well above the longest gap now, so no RTL change.
+
+**Throughput** (before / after): FSBENCH write 5.14 / 5.06 s (the card's spread), read 3.08 /
+3.11 s, load 3.06 / 3.10 s (+1 %); PCBENCH write 9.23 / 9.23 s, read 5.12 / 5.14 s, load 5.04
+/ 5.06 s; INTEST's 1.5 MB copies card to PC 37.2 / 36.9 s, PC to card 31.2 / 30.9 s.
+
+**Screenshots** (`shot816`): 6.3 s -> 2.3 s. The PEEK816 loop (`dev_peek816` and its RLE
+helpers) now runs from block RAM (+780 bytes there).
+
+**Firmware:** hot text 22,736 + data 612 + bss 5,068 = 28,416 of 28,672 bytes (256 left; was
+25,772); cold image 23,996 bytes.
+
+**Build** (place\_option 1; the netlist did not change): logic 16,596 / 20,736 (81 %), CLS
+9,395 (91 %), registers 8,325, block RAM 44 / 46; clk\_core 31.85 MHz (rule 29.7), clk\_pix
+89.83, sys\_clk 41.34.
+
+**The gateway** (`tools/pclink.py`): a file the board creates (OPEN mode 2) is written in the
+hidden folder `.atari816-partial` and put in place at CLOSE; when the session ends with it
+open the temporary file is deleted; leftovers of a killed gateway go at the next start
+(`04-pc-link.md`, "Unfinished files"). On the board: gateway killed with SIGKILL during a
+shell `cp` of 1.5 MB to the PC: `cp` said "the PC link was lost", nothing appeared under the
+name, and the next gateway removed the 512 KB left in `.atari816-partial`.
+
+**Horizon 0.21** (`horizon/README.md`): copies go in pieces of 16 KB (was 32 KB); Files and
+the Desktop show a progress window (file name, KB and percent, a bar, Cancel; it opens after
+0.5 s); the shell's `cp` and `mv` stop on ctrl-C and keep other keys typed meanwhile (up to
+80) for the next prompt; a cancel or an error deletes the partial file. emu816 models the
+new event timing and slow transfers (`--card-kbps`, `--pc-kbps`) and the gateway's
+unfinished-file rule; new session tests (`tests/pccopy.*`, `tests/cpstop.*`).
+
+**Board tests** (build `core/impl/input1/`, first from SRAM, then flashed; Horizon 0.21 on
+the card):
+
+- Self test A816.BIN: 11 lines OK + DONE. FSBENCH, PCBENCH: above. INTEST: no input lost in
+  any phase. Classic machine: `run /blue.xex` from the shell, COLOR4 = $94, F12 back.
+- Shell `cp` of 1.5 MB card -> PC (38.9 s, 40 KB/s; 37 s with 32 KB pieces in 0.20), PC ->
+  card -> PC: the MD5 of both files on the PC equals the original's. 4,878 and 7,000 injected
+  mouse reports during these copies: none lost, longest look gap 7.6 / 10.2 ms.
+- ctrl-C during `cp` to the PC and during `cp` on the card: "cancelled", no file left on
+  either side. Gateway killed with SIGKILL during `cp`: above.
+- Desktop, Files: BIG.BIN pasted into `/PC:`: the progress window ("256 of 1,536 KB (16%)");
+  120 mouse reports injected during the copy moved the pointer by 120 pixels while it ran;
+  Esc: "Copy cancelled", nothing on the PC.
+- Screenshots 2.3 s.
+
+**To check by hand** (no real keyboard or mouse could be used here): type and move the real
+mouse during a long copy (Files to `/PC:` and the shell's `cp`), and during a `send` from
+the PC; a fast click and a fast double click during a copy.
+
+**Flash:** `core/impl/input1/` (bitstream, report, timing, `cold.bin`) is in flash; the board
+came up from flash to the Horizon 0.21 desktop. `core/impl/pclink1/` is the fallback (with
+its own `cold.bin`).

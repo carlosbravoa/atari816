@@ -236,13 +236,36 @@ s_msg:  .byte   "Saved.", 0
 | `ui_open` | X = full path | opens it with its program (a folder in Files, .BAS in BASIC, an Atari file in the classic machine, ...) |
 | `ui_cptree` | X = source path, Y = destination path (the new name) | (Horizon 0.20) copies a file (a file there is replaced), or a folder and everything in it (the destination folder must not exist); also between the card and the PC volume `/PC:`. C set: A = error |
 | `ui_rmtree` | X = path | (0.20) deletes a file, or a folder and everything in it. C set: A = error |
-| `ui_mvtree` | X = from, Y = to | (0.20) moves (`SYS_RENAME`); between the card and the PC volume (error $C9) it copies, then deletes the source. C set: A = error ($48: "to" exists) |
+| `ui_mvtree` | X = from, Y = to | (0.20) moves (`SYS_RENAME`); between the card and the PC volume (error $C9) it copies, then deletes the source (never after an error or a cancel). C set: A = error ($48: "to" exists; (0.21) `ECANCELED`: cancelled) |
+| `ui_cpwin` | A = 0 copy, 1 move | (0.21) the progress window for the next `ui_cptree` / `ui_mvtree` (call it just before; it sets `ui_cpcb`). It opens only when the copy still runs about 0.5 s later: "Copying" / "Moving", the file's name, "123 of 1,500 KB (8%)", a bar, Cancel (Esc and the close box too). Cancel makes the copy return C set, A = `ECANCELED` |
+| `ui_cpdone` | - | (0.21) after the copy: the window closed if it opened, `ui_cpcb` = 0. Keeps A and the carry |
 | `ui_clkpc` | - | (0.20) when the PC volume is there, sets the clock from the PC's clock and saves it to /SYSTEM/CLOCK. C set: no PC volume |
 
-Paths are in the program's bank. These routines do not need the rest of the library (no
-zero page): a console program can link them too. `ui_cpcb` (a word, 0 = none) may hold a
-routine that `ui_cptree` calls after every 32 KB (for a progress line: `ui_cpk` = K copied of
-the current file, `ui_cpsize` its size, `ui_cpname` its name).
+Paths are in the program's bank. These routines (not `ui_cpwin`) do not need the rest of the
+library (no zero page): a console program can link them too. `ui_cpcb` (a word, 0 = none) may
+hold a routine that `ui_cptree` calls when a file starts (`ui_cpk` = 0) and (0.21) after every
+piece of 16 KB (0.20: 32 KB): `ui_cpk` = K copied of the current file, `ui_cpsize` its size,
+`ui_cpname` its name. (0.21) It returns C clear to go on, C set to cancel: the library closes
+both files, deletes the file copied in part (on the card or on `/PC:`) and returns C set, A =
+`ECANCELED` (in a folder copy, what was copied before stays). Show no error for `ECANCELED`.
+A window program uses `ui_cpwin` / `ui_cpdone` instead; a console program can poll the
+keyboard there (the shell's `cp` stops on ctrl-C).
+
+```asm
+        lda     #0                      ; a copy (1: a move)
+        jsr     ui_cpwin                ; the progress window, if it takes long
+        ldx     #.loword(s_src)
+        ldy     #.loword(s_dst)
+        jsr     ui_cptree
+        jsr     ui_cpdone               ; (keeps A and C)
+        bcc     done
+        cmp     #ECANCELED
+        beq     done                    ; cancelled: nothing to say
+        jsr     ui_beep                 ; another error: say so (an alert, a message)
+done:   rts
+s_src:  .byte   "/BIG.BIN", 0
+s_dst:  .byte   "/PC:/BIG.BIN", 0
+```
 
 ```asm
         ldx     #.loword(s_edit)

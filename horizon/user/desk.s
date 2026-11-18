@@ -1971,7 +1971,8 @@ ondrop: lda     z:back
 ; the root; (0.20) the PC: /PC:). C set: refused (another kind, a folder into itself, the
 ; name there already) or failed. (0.20) Onto the SD card from the PC volume, or onto the PC
 ; from the card: copied (ui_cptree); else moved (ui_mvtree: between the volumes a copy, then
-; the source deleted)
+; the source deleted). (0.21) A long copy or move shows the progress window (ui_cpwin); its
+; Cancel returns C clear (nothing to report; the caller looks at the desktop again)
 moveto: stz     z:mvcp
         cmp     #$FFFF
         bne     :+
@@ -2059,12 +2060,22 @@ moveto: stz     z:mvcp
         sta     sblk+5
         jsr     stpth                   ; (there already?)
         bcc     @bad
+        lda     z:mvcp                  ; (0.21) a long copy or move: the progress window
+        eor     #1
+        jsr     ui_cpwin
         ldx     #.loword(dropbuf)
         ldy     #.loword(pth)
         lda     z:mvcp
         beq     :+
-        jmp     ui_cptree
-:       jmp     ui_mvtree
+        jsr     ui_cptree
+        bra     :++
+:       jsr     ui_mvtree
+:       jsr     ui_cpdone
+        bcc     :+
+        cmp     #ECANCELED              ; cancelled there: no error (what was copied stays)
+        bne     @bad
+        clc
+:       rts
 @bad:   sec
         rts
 

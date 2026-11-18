@@ -116,6 +116,13 @@ D18SHOTS := 10.0 14.5 17.0 19.0 26.0
 # tests/pcshell2.keys (without: clean errors)
 PCFLAGS := --pc-folder build/run-pc --pc-time 2026-03-04T05:06
 PCSHOTS := 7 16 17 21 26 33.5 41.5 48.5 51.5
+# (0.21) long copies: the board's transfer speeds (emu816 --card-kbps, --pc-kbps) and a 384 KB
+# /BIG.BIN on the card copy (tests/mkbig.py). Files' progress window (tests/pccopy.src: keys and
+# mouse during a copy, Esc and Cancel, the link dropped during a copy; shot times), the shell's
+# ctrl-C during cp and mv (tests/cpstop.keys, compared with tests/cpstop.txt)
+SLOWFLAGS := --card-kbps 170:100 --pc-kbps 100:55
+BIGPREP := python3 ../../tests/mkbig.py BIG.BIN 393216
+PCCSHOTS := 12.6 17.0 26.5 36.5 42 50.5
 # (0.17) STEST: without Lau (--rev 9 or lower) the short output and no Lau writes
 NOLAU   = $(or $(findstring --rev 9,$(EMUFLAGS)),$(findstring --rev 8,$(EMUFLAGS)),$(findstring --rev 7,$(EMUFLAGS)))
 STESTTXT = $(if $(NOLAU),stest-nolau.txt,stest.txt)
@@ -527,13 +534,34 @@ test-pc: all $(EMU)
 	  && grep -q '^2026-03-04 05:0' build/run-pic/SYSTEM/CLOCK; \
 	then echo "PASS  PC volume, Desktop: the files copied and moved, /SYSTEM/CLOCK from the PC"; \
 	else echo "FAIL  PC volume, Desktop: the files or the clock (build/run-pc, build/run-pic)"; exit 1; fi
-	@if grep -l 'emu816: blitter:' $(B)/pcshell.err $(B)/pcshell2.err $(B)/pcdesk.err; \
+	@rm -rf build/run-pc; cp -r tests/pc build/run-pc
+	@PREP='$(BIGPREP)' DESK=1 sh tests/shots.sh "$(EMU) $(EMUFLAGS) $(CARDDATE) $(PCFLAGS) $(SLOWFLAGS) --pc-drop-at 44.5" $(SD) pccopy 52 $(PCCSHOTS)
+	@if diff -u tests/pictures/$(call REV7,pccopy) $(B)/pccopy.md5; then echo "PASS  0.21 Files' progress window: a long copy to the PC and back, keys and mouse to Edit meanwhile, Esc, Cancel, the link lost"; \
+	else echo "FAIL  0.21 progress window pictures (look at $(B)/pccopy*.ppm, then make pictures-pc)"; exit 1; fi
+	@python3 tests/mkbig.py $(B)/big.ref 393216
+	@if cmp -s build/run-pc/BIG.BIN $(B)/big.ref && cmp -s "build/run-pic/Copy of BIG.BIN" $(B)/big.ref && cmp -s build/run-pic/BIG.BIN $(B)/big.ref \
+	  && [ "$$(ls -A build/run-pc | tr '\n' /)" = ".atari816-partial/BIG.BIN/Games/Notes.txt/" ] && [ -z "$$(ls -A build/run-pc/.atari816-partial)" ] \
+	  && [ "$$(ls build/run-pic | grep -c BIG)" = 2 ]; \
+	then echo "PASS  0.21 the copies byte for byte; nothing left by Esc, Cancel or the lost link (on the card, on the PC)"; \
+	else echo "FAIL  0.21 the files of the long copies (build/run-pc, build/run-pic)"; exit 1; fi
+	@rm -rf build/run-sd build/run-pc; cp -r $(SD) build/run-sd; touch build/run-sd/SYSTEM/NODESK; cp -r tests/pc build/run-pc
+	@(cd build/run-sd && $(BIGPREP))
+	@$(EMU) $(EMUFLAGS) $(CARDDATE) $(PCFLAGS) $(SLOWFLAGS) --headless --sd build/run-sd --max-seconds 32 \
+	    --keys "$$(python3 tests/keyscript.py tests/cpstop.keys)" \
+	    $(SD)/SYSTEM/HORIZON.SYS > $(B)/cpstop.out 2> $(B)/cpstop.err || true
+	@python3 -c "L = open('$(B)/cpstop.out', encoding='latin-1').read().split('\n'); i = [k for k, l in enumerate(L) if '> cp /BIG.BIN' in l][0]; open('$(B)/cpstop.txt', 'w', encoding='latin-1').write('\n'.join([L[i][L[i].index('> cp /BIG.BIN'):]] + L[i + 1:]))"
+	@if python3 tests/compare.py tests/cpstop.txt $(B)/cpstop.txt && [ "$$(ls -A build/run-pc | tr '\n' /)" = ".atari816-partial/Games/Notes.txt/" ] \
+	  && [ -z "$$(ls -A build/run-pc/.atari816-partial)" ] && cmp -s build/run-sd/BIG.BIN $(B)/big.ref && ! test -e build/run-sd/big2.bin; \
+	then echo "PASS  0.21 shell: ctrl-C stops cp and mv (cancelled, no partial file on the card or the PC, the source kept), type-ahead kept"; \
+	else echo "FAIL  0.21 shell, ctrl-C during cp / mv ($(B)/cpstop.out, build/run-sd, build/run-pc)"; exit 1; fi
+	@if grep -l 'emu816: blitter:' $(B)/pcshell.err $(B)/pcshell2.err $(B)/pcdesk.err $(B)/pccopy.err $(B)/cpstop.err; \
 	then echo "FAIL  blitter rules (the PC volume sessions)"; exit 1; \
 	else echo "PASS  blitter rules: the PC volume sessions"; fi
 
 pictures-pc:
 	cp $(B)/pcdesk.md5 tests/pictures/$(call REV7,pcdesk)
-	python3 -c "from PIL import Image; import glob; [Image.open(f).save('tests/pictures/' + f.split('/')[-1][:-4] + '.png') for f in sorted(glob.glob('$(B)/pcdesk[0-9]*.ppm'))]"
+	cp $(B)/pccopy.md5 tests/pictures/$(call REV7,pccopy)
+	python3 -c "from PIL import Image; import glob; [Image.open(f).save('tests/pictures/' + f.split('/')[-1][:-4] + '.png') for f in sorted(glob.glob('$(B)/pcdesk[0-9]*.ppm') + glob.glob('$(B)/pccopy[0-9]*.ppm'))]"
 
 pictures-games:
 	cp $(B)/calc.md5 $(B)/solitair.md5 tests/pictures/

@@ -1,0 +1,20 @@
+# (0.21) cp and mv stopped with ctrl-C in the shell (text shell; emu816 with the board's transfer
+# speeds, --card-kbps 170:100 --pc-kbps 100:55, a fresh copy of tests/pc as /PC:, and /BIG.BIN of
+# 384 KB from tests/mkbig.py on the card). Each copy takes 5-10 s; ctrl-C a second or two in:
+# "cp: NAME: cancelled", the partial file deleted (the card, the PC), a move's source kept.
+# Characters typed during a copy are kept for the next prompt (type-ahead): "ls" typed before
+# the ctrl-C, Enter after it.
+1500 {esc}
++1500 cp /BIG.BIN /PC:/big.bin\n
++2000 ls
++1000 ^C
++2500 \n
++2500 ls /PC:\n
++2000 cp /BIG.BIN /big2.bin\n
++1500 ^C
++2000 mv /BIG.BIN /PC:/moved.bin\n
++2000 ^C
++2000 ls\n
++2500 ls /PC:\n
++2500 cp /PC:/Notes.txt /n.txt\n
++2000 cat /n.txt\n

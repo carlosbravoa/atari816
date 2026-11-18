@@ -10,6 +10,7 @@
 #include "pclink.h"       // the PC link (Docs/04-pc-link.md)
 
 uint32_t CORE_ID;
+#define HOT_FN __attribute__((section(".text.hot")))   // runs from block RAM (baremetal.ld)
 
 void uart_keyboard_poll(void);
 static void bridge_poll(void);   // PC link and mailbox servicing (defined below)
@@ -49,7 +50,7 @@ uint32_t cart_sclust = 0;                    // FAT start cluster of the attache
 // bit 8 = USB-host-keyboard enable (permanently 0: keyboard is UART/CH9350 only),
 // bit 9 = arrow-keys-as-joystick mode.
 static inline void apply_input_options(void) {
-    reg_virt_kbd_1 = (option_arrow_joystick ? 0x200 : 0x000);
+    kv_set1((option_arrow_joystick ? 0x200 : 0x000));
 }
 
 // Push video options into the hardware config registers.
@@ -587,7 +588,7 @@ static inline uint32_t atari_rtclok(void) {
     volatile uint8_t *z = (volatile uint8_t *)0x00200000;
     return ((uint32_t)z[0x12] << 16) | ((uint32_t)z[0x13] << 8) | z[0x14];
 }
-static void bootwd_arm(void) { bootwd_t0 = time_millis(); bootwd_kbd = reg_virt_kbd_0; bootwd_state = 1; bootwd_warm = 0; }
+static void bootwd_arm(void) { bootwd_t0 = time_millis(); bootwd_kbd = kv0; bootwd_state = 1; bootwd_warm = 0; }
 static void bootwd_sentinel(void) {           // call while the core is held in reset
     volatile uint8_t *z = (volatile uint8_t *)0x00200000;
     z[0x12] = 0xA5; z[0x13] = 0xC3; z[0x14] = 0xA5;
@@ -738,7 +739,7 @@ void sio_delay(int ms) {
     uint32_t start = time_millis();
     while (time_millis() - start < ms) {
         sio_poll();
-        uart_keyboard_poll();
+        in_tick();
     }
 }
 
@@ -759,9 +760,9 @@ static void bootwd_poll(void) {
             uart_printf("boot: watchdog retry %d\n", boot_retries);
             if (bootwd_warm) { warm_reset(); return; }
             uint32_t kbd = bootwd_kbd;
-            reg_virt_kbd_0 = kbd;             // same OPTION state as the boot that stalled
+            kv_set0(kbd);             // same OPTION state as the boot that stalled
             load_system_roms();               // long clean reset + release; re-arms the check
-            if (kbd) { sio_delay(400); reg_virt_kbd_0 = 0; }
+            if (kbd) { sio_delay(400); kv_set0(0); }
         }
     }
 }
@@ -1227,7 +1228,7 @@ static void drop_default_cart(void) {
 }
 
 static int cold_boot_atari(void) {             // returns load_system_roms() (0 = OK)
-    reg_virt_kbd_0 = 0x00000000;
+    kv_set0(0x00000000);
     apply_machine_options();                        // RAM_SELECT stable before core leaves reset
     sio_init();
     load_default_cart();                            // boot=ash and slot empty -> /ASH.CAR
@@ -1239,7 +1240,7 @@ static int cold_boot_atari(void) {             // returns load_system_roms() (0 
 // keep servicing SIO so the boot loader's sector reads are answered during boot.
 static int cold_boot_xex(void) {               // returns load_system_roms() (0 = OK)
     drop_default_cart();                            // the xex must get the boot, not ASH
-    reg_virt_kbd_0 = 0x00410000;                    // hold OPTION (disable BASIC)
+    kv_set0(0x00410000);                    // hold OPTION (disable BASIC)
     sio_init();                                     // SIO ready before the core is released
     // Use the SAME reliable sequence as the "Boot OS" menu item, which boots an attached
     // .xex correctly. load_system_roms() holds the core in reset for the full ROM reload
@@ -1249,7 +1250,7 @@ static int cold_boot_xex(void) {               // returns load_system_roms() (0 
     int r = load_system_roms();
    
     sio_delay(600);                                 // serve boot reads while OPTION held + UNMASKED
-    reg_virt_kbd_0 = 0x00000000;                    // release OPTION
+    kv_set0(0x00000000);                    // release OPTION
     return r;
 }
 
@@ -1358,7 +1359,7 @@ static const uint8_t ascii2hid_pc[95] = {
 // to that memory from here must happen with the CPU held.
 #define A816_MEM ((volatile uint8_t *)0x00100000)
 
-void a816_mouse(int btn, int dx, int dy, int wheel);
+HOT_FN void in_mouse(int btn, int dx, int dy, int wheel);
 static void a816_poll(void) {        // 65C816 debug bytes -> serial log, one line at a time
     static char ln[64];
     static uint8_t n;
@@ -1420,13 +1421,8 @@ static void a816_start(int test) {   // test: /A816.BIN only (run816)
 //   STAT     BUF <- { u32 size, u8 attr (bit 4 = directory), u32 time (fdate << 16 | ftime) }
 //   READDIR  ARG0 = entries to skip; BUF <- packed { u32 size, u8 attr, u8 namelen, name }
 #define MB_FILES 4
-// Mouse movement waiting to be sent to Horizon as a MOUSE event ($E1)
-static int16_t ms_dx, ms_dy, ms_wheel;
-static uint8_t ms_btn, ms_btn_sent;
-static uint32_t mb_km_seen = 0xFFFFFFFF, mb_kk_seen;
 static uint32_t clk_base, clk_ms;       // SYS_TIME ($1D): seconds since 2000 at time_millis() clk_ms
 static uint8_t  clk_set;   // keys a816_mailbox found nothing new in
-volatile uint32_t a816_dbg[4];        // debug (fwpeek): last keymod, keys, poll count, mbi
 static FIL     mb_fil[MB_FILES];
 static uint8_t mb_open;                 // bit n = handle n in use
 // PC volume (paths "/PC:..."): a handle can be a file on the PC, served by the gateway
@@ -1497,7 +1493,6 @@ static uint32_t mb_xfer(FIL *f, uint32_t n, uint32_t len, int wr, uint32_t *res)
     return done;
 }
 
-void a816_mouse(int btn, int dx, int dy, int wheel) { ms_btn = btn; ms_dx += dx; ms_dy += dy; ms_wheel += wheel; }
 
 // ---- the PC volume (Docs/04-pc-link.md, "The PC volume") ----
 // "/PC:" or "/PC:/..." (any case) -> the path on the PC ("/" or "/..."), else 0
@@ -1617,6 +1612,177 @@ static void sys_do_restart(int full) {
     a816_start(0);
 }
 
+
+// ── Keyboard and mouse events for Horizon (KEY $E0, MOUSE $E1) ───────────────────────────
+// Hot (block RAM) and called often: from the main loop, from every wait of the PC link
+// (pl_idle), from the SD card driver between sectors and while the card is busy, and from
+// delay(). So events keep flowing while a long mailbox request is served (a big card READ or
+// WRITE, a /PC: request, a developer upload): the pointer moves and no key is lost.
+//  - Keys: the state is the firmware's own copy of the keyboard (kv0/kv1: the CH9350 reports,
+//    parsed in order from the UART, and the developer KEY/TYPE injections). After every change
+//    the difference to what Horizon was told is queued, one event per change (releases first,
+//    then modifiers, then presses), so a short tap is never merged away.
+//  - Mouse: motion with the same buttons is added up until it is sent; a button change first
+//    queues the motion before it (with the old buttons), so a click is never lost.
+//  - The queue goes into the response ring whenever it has 2 free slots (one stays free for
+//    the answer of the request in progress, written by a816_mailbox after the events).
+//  - Not while the keyboard belongs to the classic machine: held keys are reported released,
+//    motion is dropped. Nothing while the rings are not set up or a restart is pending.
+#define EQN 32
+typedef struct { uint8_t op, b8, b9, b10, b12, b13; } inev_t;
+static inev_t  eq[EQN];
+static uint8_t eq_h, eq_n;
+uint32_t kv0, kv1;
+static uint8_t k_held[4] __attribute__((aligned(4)));   // the keys Horizon was told are down
+static uint8_t k_mods, k_ready;
+static int16_t ms_dx, ms_dy, ms_wheel;
+static uint8_t ms_btn, ms_btn_q;                 // buttons now / of the motion being added up
+static uint32_t in_t;                             // reg_cycle at the last in_service
+volatile uint32_t in_gap, in_nev;                 // meters (INFO): longest gap in cycles, events sent
+// the input generator (developer op INJECT, a board test): key taps and mouse reports at a
+// steady rate, entering where the CH9350's reports do, with the loss a full UART FIFO causes
+#define UART_FIFO 64                              // simpleuart.v's receive FIFO, bytes
+#define KB_FRAME 15                               // bytes of a CH9350 keyboard report
+#define MS_FRAME 11                               // bytes of a mouse report
+static uint16_t gk_n, gk_per, gm_n;
+static uint8_t  gm_per, gk_down, gk_key;
+static uint32_t gk_t, gm_t;
+volatile uint32_t gk_sent, gm_sent, gk_lost, gm_lost;
+
+static HOT_FN int eq_push(uint8_t op, uint8_t b8, uint8_t b9, uint8_t b10, uint8_t b12, uint8_t b13) {
+    if (eq_n == EQN) return 0;
+    inev_t *e = &eq[(uint8_t)(eq_h + eq_n) % EQN];
+    e->op = op; e->b8 = b8; e->b9 = b9; e->b10 = b10; e->b12 = b12; e->b13 = b13;
+    eq_n++;
+    return 1;
+}
+static HOT_FN int clamp127(int v) { return v > 127 ? 127 : v < -127 ? -127 : v; }
+// the motion added up so far -> queued events (with the buttons it was made with)
+static HOT_FN int ms_queue(void) {
+    while (ms_dx || ms_dy || ms_wheel || ms_btn_q != ms_btn) {
+        int dx = clamp127(ms_dx), dy = clamp127(ms_dy), dw = clamp127(ms_wheel);
+        uint8_t b = (dx || dy || dw) ? ms_btn_q : ms_btn;
+        if (!eq_push(0xE1, dx, dy, dw, b, 0)) return 0;
+        ms_dx -= dx; ms_dy -= dy; ms_wheel -= dw; ms_btn_q = b;
+    }
+    return 1;
+}
+HOT_FN void in_mouse(int btn, int dx, int dy, int wheel) {
+    if (btn != ms_btn) { ms_queue(); ms_btn = btn; }
+    ms_dx += dx; ms_dy += dy; ms_wheel += wheel;
+}
+static HOT_FN int kb_ours(void) {
+    uint32_t a, b = reg_a816_keymod;
+    do { a = b; b = reg_a816_keymod; } while (a != b);
+    return (a >> 8) & 1;
+}
+// queue the differences between the keys held (kv0, kv1) and what Horizon was told
+static HOT_FN void in_keys(void) {
+    if (!k_ready) return;
+    uint8_t now[4] = { kv0 >> 8, kv0 >> 16, kv0 >> 24, kv1 }, nm = kv0;
+    if (!kb_ours()) { now[0] = now[1] = now[2] = now[3] = 0; nm = 0; }
+    while (eq_n < EQN) {
+        uint8_t usage = 0, down = 0;
+        for (int i = 0; i < 4 && !usage; i++) {          // releases first
+            int still = 0;
+            for (int j = 0; j < 4; j++) if (k_held[i] && k_held[i] == now[j]) still = 1;
+            if (k_held[i] && !still) { usage = k_held[i]; k_held[i] = 0; }
+        }
+        for (int i = 0; i < 8 && !usage; i++)
+            if ((k_mods ^ nm) & (1 << i)) { usage = 0xE0 + i; down = (nm >> i) & 1; k_mods ^= 1 << i; }
+        for (int i = 0; i < 4 && !usage; i++) {
+            int known = 0, slot = -1;
+            for (int j = 0; j < 4; j++) { if (k_held[j] == now[i]) known = 1; if (!k_held[j]) slot = j; }
+            if (now[i] > 3 && !known && slot >= 0) { usage = now[i]; down = 1; k_held[slot] = usage; }
+        }
+        if (!usage) return;
+        eq_push(0xE0, usage, 0, 0, k_mods, down);
+    }
+}
+HOT_FN void kv_set0(uint32_t v) { kv0 = v; reg_virt_kbd_0 = v; in_keys(); }
+HOT_FN void kv_set1(uint32_t v) { kv1 = v; reg_virt_kbd_1 = v; in_keys(); }
+
+// the queue -> the response ring
+static HOT_FN void in_flush(void) {
+    if (k_ready && !eq_n && !(ms_dx | ms_dy | ms_wheel | k_mods | *(uint32_t *)k_held)
+        && ms_btn_q == ms_btn) return;                  // nothing to say: cheap
+    uint32_t q = rd2(&reg_a816_mbq), r = rd2(&reg_a816_mbr), iop = reg_a816_mbi;
+    if (!(q & 0xFFFFFF) || !(r & 0xFFFFFF) || !(iop & 0x10000) || sys_restart) {
+        if (!sys_restart) {                              // not set up: start again when it is
+            eq_n = 0; k_ready = 0;
+            k_held[0] = k_held[1] = k_held[2] = k_held[3] = 0; k_mods = 0;
+            ms_dx = ms_dy = ms_wheel = 0; ms_btn_q = ms_btn;
+        }
+        return;
+    }
+    if (!k_ready) { k_ready = 1; in_keys(); }
+    if (!kb_ours()) { ms_dx = ms_dy = ms_wheel = 0; ms_btn_q = ms_btn; in_keys(); }
+    uint32_t rbase = r & 0xFFFFFF;
+    uint8_t rtail = r >> 24, rhead = iop >> 8, h0 = rhead;
+    if (rbase >= 0x800000 || (rbase >> 16) == 0x10) return;
+    for (;;) {
+        if ((uint8_t)(rtail - rhead - 1) < 2) break;     // keep one slot for an answer
+        if (!eq_n && !ms_queue()) break;
+        if (!eq_n) break;
+        inev_t *e = &eq[eq_h];
+        uint32_t n = rbase + rhead * 16;
+        volatile uint32_t *d = (volatile uint32_t *)(n < 0x400000 ? n ^ 0x100000 : n ^ 0x300000);
+        d[0] = e->op; d[1] = 0;
+        d[2] = e->b8 | e->b9 << 8 | e->b10 << 16;
+        d[3] = e->b12 | e->b13 << 8;
+        eq_h = (eq_h + 1) % EQN; eq_n--;
+        rhead++;
+        in_nev++;
+    }
+    if (rhead != h0) reg_a816_mbi = (iop & 0x300FF) | (uint32_t)rhead << 8;
+}
+
+// one step of the input generator: the reports due since the last call, as the UART's FIFO
+// would hold them (what does not fit is lost, as on the wire). Cold (SDRAM): a test only.
+static __attribute__((noinline)) void in_gen(void) {
+    uint32_t now = time_millis(), bytes = 0;
+    for (;;) {
+        int k = gk_n && (int32_t)(now - gk_t) >= 0, m = gm_n && (int32_t)(now - gm_t) >= 0;
+        if (k && m) { if ((int32_t)(gm_t - gk_t) < 0) k = 0; else m = 0; }
+        if (k) {                                         // a key report: press or release
+            gk_t += gk_per / 2;
+            if ((bytes += KB_FRAME) > UART_FIFO) gk_lost++;
+            else kv_set0(gk_down ? 0 : (uint32_t)(0x04 + gk_key) << 8);
+            if (gk_down) { gk_n--; gk_key = (gk_key + 1) % 26; }
+            gk_down ^= 1;
+            gk_sent++;
+        } else if (m) {
+            gm_t += gm_per;
+            gm_n--;
+            if ((bytes += MS_FRAME) > UART_FIFO) gm_lost++;
+            else in_mouse(ms_btn, 1, 0, 0);
+            gm_sent++;
+        } else break;
+    }
+}
+void in_inject(uint16_t keys, uint16_t key_ms, uint16_t mice, uint8_t mouse_ms) {
+    uint32_t now = time_millis();
+    gk_n = keys; gk_per = key_ms < 2 ? 2 : key_ms; gk_t = now; gk_down = 0; gk_key = 0;
+    gm_n = mice; gm_per = mouse_ms ? mouse_ms : 1; gm_t = now;
+    gk_sent = gm_sent = gk_lost = gm_lost = 0;
+}
+
+HOT_FN void in_service(void) {
+    static uint8_t busy;
+    if (busy) return;
+    busy = 1;
+    uint32_t c = reg_cycle;
+    if (in_t && c - in_t > in_gap) in_gap = c - in_t;
+    in_t = c;
+    uart_keyboard_poll();                                // CH9350 reports -> kv0 / in_mouse
+    if (gk_n | gm_n) in_gen();
+    in_flush();
+    busy = 0;
+}
+HOT_FN void in_tick(void) {
+    if (reg_cycle - in_t >= 13500) in_service();         // 0.5 ms
+}
+
 static void a816_mailbox(void) {
     static char path[128];
     uint32_t q = rd2(&reg_a816_mbq), r = rd2(&reg_a816_mbr), iop = reg_a816_mbi;
@@ -1647,49 +1813,6 @@ static void a816_mailbox(void) {
     if (!(iop & 0x10000)) { reg_a816_mbi = 0x10000; return; }   // IOP_READY, rings empty
     if ((uint8_t)(rhead + 1) == rtail) return;           // no room for an answer or an event
 
-    // Keyboard events ($E0 KEY): one per call, from the difference between the keys held
-    // now and the keys already reported. ARG0 = HID usage ($E0-$E7 for the modifiers),
-    // ARG1 = modifiers, bit 8 set = key down.
-    {
-        static uint8_t held[4], mods;
-        uint32_t km = rd2(&reg_a816_keymod), kk = rd2(&reg_a816_keys);
-        a816_dbg[0] = km; a816_dbg[1] = kk; a816_dbg[2]++; a816_dbg[3] = iop;
-        uint8_t  now[4] = { kk, kk >> 8, kk >> 16, kk >> 24 };
-        uint8_t  nm = km, usage = 0, down = 0;
-        if (!(km & 0x100)) { now[0] = now[1] = now[2] = now[3] = 0; nm = 0; }   // not ours
-        for (int i = 0; i < 4 && !usage; i++) {          // releases first
-            int still = 0;
-            for (int j = 0; j < 4; j++) if (held[i] && held[i] == now[j]) still = 1;
-            if (held[i] && !still) { usage = held[i]; held[i] = 0; }
-        }
-        for (int i = 0; i < 8 && !usage; i++)
-            if ((mods ^ nm) & (1 << i)) { usage = 0xE0 + i; down = (nm >> i) & 1; mods ^= 1 << i; }
-        for (int i = 0; i < 4 && !usage; i++) {
-            int known = 0, slot = -1;
-            for (int j = 0; j < 4; j++) { if (held[j] == now[i]) known = 1; if (!held[j]) slot = j; }
-            if (now[i] > 3 && !known && slot >= 0) { usage = now[i]; down = 1; held[slot] = usage; }
-        }
-        if (!usage) { mb_km_seen = km; mb_kk_seen = kk; }   // a816_mb_wanted: nothing new
-        if (usage) {
-            uint8_t e[16] = { 0xE0, 0, 0, 0, 0, 0, 0, 0, usage, 0, 0, 0, mods, down, 0, 0 };
-            if (mb_put(rbase + rhead * 16, e, 16))
-                reg_a816_mbi = (iop & 0x300FF) | (uint8_t)(rhead + 1) << 8;
-            return;
-        }
-        // Mouse event ($E1): ARG0 bytes = dx, dy, wheel (signed), ARG1 = buttons
-        if (!(km & 0x100)) { ms_dx = ms_dy = ms_wheel = 0; ms_btn_sent = ms_btn; }
-        else if (ms_dx || ms_dy || ms_wheel || ms_btn != ms_btn_sent) {
-            int dx = ms_dx > 127 ? 127 : ms_dx < -127 ? -127 : ms_dx;
-            int dy = ms_dy > 127 ? 127 : ms_dy < -127 ? -127 : ms_dy;
-            int dw = ms_wheel > 127 ? 127 : ms_wheel < -127 ? -127 : ms_wheel;
-            uint8_t e[16] = { 0xE1, 0, 0, 0, 0, 0, 0, 0, dx, dy, dw, 0, ms_btn, 0, 0, 0 };
-            if (mb_put(rbase + rhead * 16, e, 16)) {
-                reg_a816_mbi = (iop & 0x300FF) | (uint8_t)(rhead + 1) << 8;
-                ms_dx -= dx; ms_dy -= dy; ms_wheel -= dw; ms_btn_sent = ms_btn;
-            }
-            return;
-        }
-    }
     if (qhead == qtail) return;                          // nothing to do
     if (!mb_get(qbase + qtail * 16, m, 16)) { reg_a816_mbi = iop | 0x20000; return; }   // IOP_ERROR
 
@@ -2018,6 +2141,9 @@ static void a816_mailbox(void) {
     m[8]  = res; m[9]  = res >> 8; m[10] = res >> 16; m[11] = res >> 24;
     m[12] = val; m[13] = val >> 8; m[14] = val >> 16; m[15] = val >> 24;
     busy = 0;
+    in_service();                                        // (events first; one slot stays free)
+    iop = reg_a816_mbi;                                  // events may have moved RSP_HEAD
+    rhead = iop >> 8;
     if (!mb_put(rbase + rhead * 16, m, 16)) { reg_a816_mbi = iop | 0x20000; return; }
     reg_a816_mbi = (iop & 0x30000) | (uint8_t)(rhead + 1) << 8 | (uint8_t)(qtail + 1);
 }
@@ -2065,10 +2191,7 @@ DWORD get_fattime(void) {
 static int a816_mb_wanted(void) {
     uint32_t q = rd2(&reg_a816_mbq), r = rd2(&reg_a816_mbr), iop = reg_a816_mbi;
     if (sys_restart || !(q & 0xFFFFFF) || !(r & 0xFFFFFF) || !(iop & 0x10000)) return 1;
-    if ((uint8_t)(q >> 24) != (uint8_t)iop) return 1;                 // a request waits
-    if ((uint8_t)((iop >> 8) + 1) == (uint8_t)(r >> 24)) return 0;    // no room for an event
-    if (rd2(&reg_a816_keymod) != mb_km_seen || rd2(&reg_a816_keys) != mb_kk_seen) return 1;
-    return ms_dx || ms_dy || ms_wheel || ms_btn != ms_btn_sent;
+    return (uint8_t)(q >> 24) != (uint8_t)iop;                        // a request waits
 }
 
 // ── The developer channel (PC link channel 3; ops in Docs/04-pc-link.md) ─────────────────
@@ -2092,6 +2215,8 @@ static int a816_mb_wanted(void) {
 #define D_ECHO 0x0F
 #define D_SOURCE 0x10
 #define D_SINK 0x11
+#define D_INJECT 0x12
+void in_inject(uint16_t keys, uint16_t key_ms, uint16_t mice, uint8_t mouse_ms);
 
 static uint8_t dv_out[1024] __attribute__((section(".sdbuf")));   // an answer being built
 static uint32_t dv_n;
@@ -2104,7 +2229,7 @@ static void dv_flush(int more) {
     if (!dv_fail && pl_send(PL_CH_DEV, dv_hdr, dv_out, dv_n)) dv_fail = 1;
     dv_n = 0;
 }
-static void dv_put(uint8_t b) { dv_out[dv_n++] = b; if (dv_n == sizeof dv_out) dv_flush(1); }
+static HOT_FN void dv_put(uint8_t b) { dv_out[dv_n++] = b; if (dv_n == sizeof dv_out) dv_flush(1); }
 static void dv_end(uint8_t res) { dv_hdr[3] = res; dv_flush(0); }
 static void dv_reply(const uint8_t *p, uint8_t res) { dv_begin(p); dv_end(res); }
 
@@ -2121,7 +2246,7 @@ static void typer_step(void) {
     uint32_t now = time_millis();
     if ((int32_t)(now - ty_t) < 0) return;
     if (ty_phase == 1) {                                 // key held long enough: release
-        reg_virt_kbd_0 = 0;
+        kv_set0(0);
         ty_phase = 0;
         ty_t = now + (ty_prev == 0x28 ? 275 : 25);       // after RETURN the line is processed
         return;
@@ -2145,7 +2270,7 @@ static void typer_step(void) {
     }
     ty_phase = 1;
     ty_prev = e;
-    reg_virt_kbd_0 = ((uint32_t)(e & 0x7F) << 8) | ((e & KSH) ? 0x02 : 0x00);
+    kv_set0(((uint32_t)(e & 0x7F) << 8) | ((e & KSH) ? 0x02 : 0x00));
     ty_t = now + 30;
 }
 
@@ -2201,17 +2326,17 @@ static void dev_put(const uint8_t *p, uint32_t n) {
 // never disturbs the 65C816. Requests of up to 1 MB; the tools ask for about 64 KB at a time.
 static uint8_t  pk_lit[128];
 static uint32_t pk_nl;
-static void pk_flush_lit(void) {
+static HOT_FN void pk_flush_lit(void) {
     if (!pk_nl) return;
     dv_put((uint8_t)(pk_nl - 1));
     for (uint32_t i = 0; i < pk_nl; i++) dv_put(pk_lit[i]);
     pk_nl = 0;
 }
-static void pk_run(uint32_t run_n, uint8_t run_b) {
+static HOT_FN void pk_run(uint32_t run_n, uint8_t run_b) {
     if (run_n >= 3) { pk_flush_lit(); dv_put((uint8_t)(run_n + 125)); dv_put(run_b); }
     else while (run_n--) { pk_lit[pk_nl++] = run_b; if (pk_nl == 128) pk_flush_lit(); }
 }
-static void dev_peek816(const uint8_t *p, uint32_t n) {
+static HOT_FN __attribute__((noinline)) void dev_peek816(const uint8_t *p, uint32_t n) {
     if (n < 4 + 13) { dv_reply(p, 0x83); return; }
     uint32_t addr = le32(p + 4) & 0xFFFFFF;
     uint32_t width = p[8] | p[9] << 8, rows = p[10] | p[11] << 8, stride = le32(p + 12);
@@ -2226,10 +2351,10 @@ static void dev_peek816(const uint8_t *p, uint32_t n) {
         uint32_t wa = 1, wv = 0;                         // the 32-bit word last read
         for (uint32_t x = 0; x < width; x++) {
             uint32_t a = (addr + x) & 0xFFFFFF, room;
-            if ((a & ~3u) != wa) {
-                volatile uint32_t *q = (volatile uint32_t *)mb_ptr(a & ~3u, &room);
+            if ((a & ~3u) != wa) {                       // (mb_ptr's map, inline: this is hot)
                 wa = a & ~3u;
-                wv = room ? *q : 0;
+                room = !(wa >= 0x800000 || (wa >> 16) == 0x10);
+                wv = room ? *(volatile uint32_t *)(wa < 0x400000 ? wa ^ 0x100000 : wa ^ 0x300000) : 0;
             }
             uint8_t b = (uint8_t)(wv >> ((a & 3) * 8));
             sum += b;
@@ -2259,14 +2384,18 @@ void pl_dev_request(const uint8_t *p, uint32_t n) {
         dv_begin(p);
         uart_catch = (char *)dv_out; uart_catch_n = 0; uart_catch_max = sizeof dv_out;
         uart_printf("ST u:%d bs:%d rom:%d x:%d m:%d%d%d%d c:%b s:%d st:%d e:%d cn:%d br:%d"
-                    " link rx:%d bad:%d retry:%d pc:%d\n",
+                    " link rx:%d bad:%d retry:%d pc:%d"
+                    " in gap:%d ev:%d ksent:%d klost:%d msent:%d mlost:%d\n",
                     (int)time_millis(), bridge_boot_stage, bridge_rom_ok, xex_active ? 1 : 0,
                     atr_mounted[0] ? 1 : 0, atr_mounted[1] ? 1 : 0,
                     atr_mounted[2] ? 1 : 0, atr_mounted[3] ? 1 : 0,
                     dbg_last_sio_cmd, dbg_last_sio_sector, dbg_last_sio_status,
                     (int)dbg_sio_err_count,
                     (*(volatile uint32_t *)_ebss != 0x53544B21u) ? 1 : 0, boot_retries,
-                    (int)pl_rx_bytes(), (int)pl_rx_bad(), (int)pl_retries(), pl_files());
+                    (int)pl_rx_bytes(), (int)pl_rx_bad(), (int)pl_retries(), pl_files(),
+                    (int)(in_gap / 27), (int)in_nev, (int)gk_sent, (int)gk_lost,
+                    (int)gm_sent, (int)gm_lost);
+        in_gap = 0; in_nev = 0;                         // (the meters start again)
         dv_n = uart_catch_n;
         uart_catch = 0;
         dv_end(0);
@@ -2295,14 +2424,14 @@ void pl_dev_request(const uint8_t *p, uint32_t n) {
         break;
     case D_KEY:                          // mod, HID usage, hold (10 ms units): a raw key press
         if (na < 3) { dv_reply(p, 0x83); break; }
-        reg_virt_kbd_0 = ((uint32_t)a[1] << 8) | a[0];
+        kv_set0(((uint32_t)a[1] << 8) | a[0]);
         // released later by joy_get(): the main loop must see the key down (F12, F9)
         virt_key_release_at = time_millis() + (a[2] ? a[2] * 10 : 100);
         dv_reply(p, 0);
         break;
     case D_MOUSE:                        // dx, dy, wheel (signed), buttons: a MOUSE event
         if (na < 4) { dv_reply(p, 0x83); break; }
-        ms_dx += (int8_t)a[0]; ms_dy += (int8_t)a[1]; ms_wheel += (int8_t)a[2]; ms_btn = a[3];
+        in_mouse(a[3], (int8_t)a[0], (int8_t)a[1], (int8_t)a[2]);
         dv_reply(p, 0);
         break;
     case D_TYPE:                         // text typed on the classic keyboard; answer when done
@@ -2346,6 +2475,11 @@ void pl_dev_request(const uint8_t *p, uint32_t n) {
         dv_end(0);
         break;
     }
+    case D_INJECT:                       // keys u16, key period u16 (ms), mice u16, mouse period u8
+        if (na < 7) { dv_reply(p, 0x83); break; }
+        in_inject(a[0] | a[1] << 8, a[2] | a[3] << 8, a[4] | a[5] << 8, a[6]);
+        dv_reply(p, 0);
+        break;
     case D_SINK: {                       // frames of data, thrown away (speed test); answer: count
         static uint32_t got;
         got += na;
@@ -2370,14 +2504,18 @@ void pl_session(int up) {
 
 // while the firmware waits for the PC: keep the keyboard and the classic disks served
 void pl_idle(void) {
-    uart_keyboard_poll();
+    in_service();
     sio_poll();
 }
+
+// while frames keep coming during a wait (a long READ or LOAD from the PC): input only
+void pl_busy(void) { in_tick(); }
 
 static void bridge_poll(void) {
     static int busy = 0;             // re-entry guard
     if (busy) return;
     busy = 1;
+    in_service();
     a816_poll();
     if ((reg_a816_mbq | reg_a816_mbi) && a816_mb_wanted()) a816_mailbox();
     pl_poll();
@@ -2520,7 +2658,6 @@ int main_app() {
         uart_printf("Check /ATARIXL.ROM and /BASIC.ROM on the SD card, then press S1\n");
         for (;;) {
             bridge_poll();
-            uart_keyboard_poll();
             if (bridge_req) break;
         }
     }
@@ -2552,7 +2689,7 @@ int main_app() {
             // F9 = soft reset hotkey (same warm start as the menu's Soft Reset)
             int f9 = (joy1 & 0x4);
             if (f9 && !f9_prev) {
-                reg_virt_kbd_0 = 0x00000000;
+                kv_set0(0x00000000);
                 warm_reset();
                 delay(300);
             }
@@ -2576,7 +2713,6 @@ int main_app() {
             sio_poll();
             sio_poll();
             // (frame_rate_sample() retired 2026-09-20: its result was never displayed; image size)
-            uart_keyboard_poll();
             bridge_poll();
             if (bridge_req) {        // deferred bridge actions (RUN/COLD/WARM)
                 int r = bridge_req;
@@ -2602,7 +2738,7 @@ int main_app() {
                 } else if (r == 2) {
                     cold_boot_atari();
                 } else if (r == 3) {
-                    reg_virt_kbd_0 = 0x00000000;
+                    kv_set0(0x00000000);
                     warm_reset();
                 }
             }
@@ -2684,12 +2820,12 @@ void uart_keyboard_poll(void) {
                             uint8_t key3 = ch_buf[5];
                             uint8_t key4 = ch_buf[6];
                             
-                            reg_virt_kbd_0 = modifier | (key1 << 8) | (key2 << 16) | (key3 << 24);
-                            reg_virt_kbd_1 = (option_arrow_joystick ? 0x200 : 0x000) | key4;
+                            kv_set0(modifier | (key1 << 8) | (key2 << 16) | (key3 << 24));
+                            kv_set1((option_arrow_joystick ? 0x200 : 0x000) | key4);
                             last_kbd_time = time_millis();
                         } else if ((ch_cmd == 0x88 || ch_cmd == 0x83) && (ch_buf[0] & 0xF0) == 0x20 && ch_len >= 5) {
                             // relative mouse report: buttons, dx, dy, wheel (57 AB 88 07 2x btn dx dy wheel serial sum)
-                            a816_mouse(ch_buf[1], (int8_t)ch_buf[2], (int8_t)ch_buf[3], ch_len >= 7 ? (int8_t)ch_buf[4] : 0);
+                            in_mouse(ch_buf[1], (int8_t)ch_buf[2], (int8_t)ch_buf[3], ch_len >= 7 ? (int8_t)ch_buf[4] : 0);
                         }
                     }
                     ch_state = CH9350_STATE_IDLE;
@@ -2700,7 +2836,7 @@ void uart_keyboard_poll(void) {
 
     // Safety timeout: if no keyboard packet received for 1 second, clear keys
     if (last_kbd_time != 0 && (time_millis() - last_kbd_time) > 1000) {
-        reg_virt_kbd_0 = 0;
+        kv_set0(0);
         apply_input_options();
         last_kbd_time = 0;
     }

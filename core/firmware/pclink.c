@@ -296,6 +296,7 @@ int pl_send3(int ch, const uint8_t *a, uint32_t na, const volatile uint8_t *d, u
             if (epoch != ep || !up) { nested--; return -1; }
             if (acked[ch] == seq) { nested--; return 0; }
             if (!step()) pl_idle();
+            else pl_busy();                            // (a stream of frames: input too)
         }
     }
     nested--;
@@ -328,6 +329,7 @@ int pl_call(uint8_t op, const uint8_t *args, uint32_t nargs,
         while (!fw_done) {
             if (epoch != ep || !up || NOW() - fw_t > T_CALL) { r = PL_E_LOST; break; }
             if (!step()) pl_idle();
+            else pl_busy();                            // (a stream of frames: input too)
         }
         nested--;
         if (!r) r = fw_res;

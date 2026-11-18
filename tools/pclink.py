@@ -17,8 +17,10 @@ Only the Python standard library and pyserial are needed.
 import binascii
 import calendar
 import errno
+import itertools
 import os
 import queue
+import shutil
 import socket
 import stat as statmod
 import struct
@@ -531,9 +533,17 @@ class FileServer:
     """Serves the files channel from one folder. Every path the board sends is relative to
     that folder; nothing outside it is ever opened, listed, created, renamed or deleted:
     '..' and '.' components and hidden names (starting with '.') are refused, and the real
-    path (symlinks resolved) of whatever is touched must be inside the folder."""
+    path (symlinks resolved) of whatever is touched must be inside the folder.
+
+    A file opened with mode 2 (create) is written under a temporary name in the hidden
+    folder PARTIAL and moved onto its real name at CLOSE. When the session ends with it still
+    open, the temporary file is deleted and an old file of that name stays as it was. What a
+    killed gateway left in PARTIAL is deleted when the next one starts. Modes 1 and 3 write
+    in place, as before."""
 
     MAXFILES = 16
+    PARTIAL = ".atari816-partial"
+    names = itertools.count(1)        # temporary names: <pid>-<n>.part, unique in a process
 
     def __init__(self, folder, send, log=None, readonly=False, send_many=None):
         self.root = os.path.realpath(folder)
@@ -544,16 +554,95 @@ class FileServer:
         self.log = log or (lambda s: None)
         self.readonly = readonly
         self.files = {}               # handle -> fd
+        self.temps = {}               # handle -> (temporary path, final path), mode 2
         self.pending = {}             # tag -> list of request frames (multi-frame WRITE)
+        self.lock = threading.Lock()  # requests and reset() (the gateway's close) take turns
+        self.partial = os.path.join(self.root, self.PARTIAL)
+        self._clean_partial()
 
     def reset(self):
-        for fd in self.files.values():
+        """The session is over: close every file; unfinished mode 2 files are deleted."""
+        with self.lock:
+            for h, fd in self.files.items():
+                try:
+                    os.close(fd)
+                except OSError:
+                    pass
+                if h in self.temps:
+                    self._unlink(self.temps[h][0])
+            self.files.clear()
+            self.temps.clear()
+            self.pending.clear()
+
+    def _unlink(self, path):
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
+
+    def _clean_partial(self):
+        """Delete the regular files left in PARTIAL (a gateway that was killed), then the
+        folder if it is empty. Nothing else: a link there is not followed."""
+        try:
+            if not statmod.S_ISDIR(os.lstat(self.partial).st_mode):
+                return
+            names = os.listdir(self.partial)
+        except OSError:
+            return
+        for n in names:
+            p = os.path.join(self.partial, n)
             try:
-                os.close(fd)
+                if statmod.S_ISREG(os.lstat(p).st_mode):
+                    os.unlink(p)
             except OSError:
                 pass
-        self.files.clear()
-        self.pending.clear()
+        try:
+            os.rmdir(self.partial)
+        except OSError:
+            pass
+
+    def _open_temp(self, path, fl):
+        """Mode 2: a new empty file in PARTIAL for `path` (nothing is changed there yet)."""
+        if os.path.islink(path):
+            raise Refused(FR_DENIED)                     # (as O_NOFOLLOW refused it before)
+        if os.path.exists(path) and not os.access(path, os.W_OK):
+            raise Refused(FR_DENIED)
+        if not os.access(os.path.dirname(path), os.W_OK | os.X_OK):
+            raise Refused(FR_DENIED)
+        try:
+            os.mkdir(self.partial, 0o700)
+        except FileExistsError:
+            pass
+        st = os.lstat(self.partial)
+        if not statmod.S_ISDIR(st.st_mode):
+            raise Refused(FR_DENIED)                     # not our folder: leave it alone
+        tmp = os.path.join(self.partial, f"{os.getpid()}-{next(self.names)}.part")
+        fd = os.open(tmp, os.O_RDWR | os.O_CREAT | os.O_EXCL | fl, 0o644)
+        try:
+            if os.path.exists(path):                     # an old file keeps its permissions
+                os.fchmod(fd, statmod.S_IMODE(os.stat(path).st_mode))
+        except OSError:
+            pass
+        return fd, tmp
+
+    def _finish(self, tmp, final):
+        """CLOSE of a mode 2 file: move it onto its real name. The temporary file is gone
+        afterwards, whatever happens."""
+        try:
+            if (not self._inside(os.path.realpath(os.path.dirname(final)))
+                    or os.path.islink(final) or os.path.isdir(final)):
+                raise Refused(FR_DENIED)
+            try:
+                os.replace(tmp, final)
+            except OSError as e:
+                if e.errno != errno.EXDEV:
+                    raise
+                fl = getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0)
+                fd = os.open(final, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | fl, 0o644)
+                with os.fdopen(fd, "wb") as out, open(tmp, "rb") as src:
+                    shutil.copyfileobj(src, out)
+        finally:
+            self._unlink(tmp)
 
     # ---- paths ----
     def _inside(self, real):
@@ -609,11 +698,14 @@ class FileServer:
             if fl & MORE:
                 return
             parts = self.pending.pop(tag)
-            self._reply(op, tag, *self._write_req(parts))
+            with self.lock:
+                res, data = self._write_req(parts)
+            self._reply(op, tag, res, data)
             return
         args = p[4:]
         try:
-            res, data = self._do(op, args)
+            with self.lock:
+                res, data = self._do(op, args)
         except Refused as e:
             res, data = e.code, b""
         except OSError as e:
@@ -687,12 +779,14 @@ class FileServer:
             elif mode == 1:
                 fd = os.open(path, os.O_RDWR | fl)
             elif mode == 2:
-                fd = os.open(path, os.O_RDWR | os.O_CREAT | os.O_TRUNC | fl, 0o644)
-            else:
+                fd, tmp = self._open_temp(path, fl)
+            else:                                         # (1 and 3 write in place)
                 fd = os.open(path, os.O_WRONLY | os.O_CREAT | fl, 0o644)
                 os.lseek(fd, 0, os.SEEK_END)
             h = next(i for i in range(256) if i not in self.files)
             self.files[h] = fd
+            if mode == 2:
+                self.temps[h] = (tmp, path)
             size = os.fstat(fd).st_size
             self.log(f"open {path!r} mode {mode} -> {h}")
             return FR_OK, struct.pack("<BxxxI", h, size & 0xFFFFFFFF)
@@ -700,7 +794,15 @@ class FileServer:
             fd = self.files.pop(a[0], None)
             if fd is None:
                 return R_BADHANDLE, b""
-            os.close(fd)
+            temp = self.temps.pop(a[0], None)
+            try:
+                os.close(fd)
+            except OSError:
+                if temp:
+                    self._unlink(temp[0])
+                raise
+            if temp:
+                self._finish(*temp)
             return FR_OK, b""
         if op == F_READ:                                  # handle, 3 x 0, len u32
             fd = self._fd(a[0])
@@ -1123,6 +1225,7 @@ class Gateway:
             self.link.close()
         except Exception:
             pass
+        self.fs.reset()                                   # unfinished files are deleted
         if self.sock:
             try:
                 self.sock.close()
