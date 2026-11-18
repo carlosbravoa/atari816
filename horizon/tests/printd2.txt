@@ -1,0 +1,6 @@
+> printd "/Printouts/2026-11-18 15.30.12 Edit.txt" &
+[bg] 4
+> pwd
+[done] 4 exit 0002
+/
+> 

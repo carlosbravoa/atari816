@@ -924,6 +924,306 @@ exportf:
         sec
         rts
 
+; (0.23) File > Print: the document as plain text to path X ("/PRN:Write", a print job),
+; LF line ends -> C set: A = the error. Each line of the document is a paragraph (as Write
+; shows it), wrapped at PRW columns (at the last space that fits; a longer word is cut);
+; inline markers and escapes out, trailing spaces out, a tab a space. Headings: their
+; text, level 1 underlined with "=", level 2 with "-", level 3 in capitals. A bullet item
+; "- " (its indent kept), a numbered one its number as written; their other rows under
+; the text. A quote 4 spaces in (every row). A rule: PRW "-". A blank line between
+; paragraphs, around headings and rules, and between blocks of other kinds (a list, a
+; quote); blank lines of the document count once; none at the start or the end.
+PRW     = 80
+prdoc:  ldy     #^fpath
+        lda     #O_CREATE
+        sys     SYS_OPEN
+        bcc     :+
+        rts
+:       sta     fh
+        stz     z:dp
+        lda     sbank
+        sta     z:dp+2
+        stz     z:sp                    ; (a line made plain: TB)
+        lda     tbank
+        sta     z:sp+2
+        stz     cpn
+        stz     cpi
+        stz     pr_st
+        stz     pr_bl
+@l:     lda     cpi
+        cmp     nl
+        jcs     @end
+        jsr     lget
+        jsr     md_block
+        jsr     md_inline
+        lda     #NONE
+        sta     ml_line
+        lda     m_blk
+        cmp     #B_BLANK
+        bne     :+
+        sta     pr_bl
+        jmp     @nx
+:       sta     pr_k                    ; the kind (a numbered item as a bullet: one list)
+        cmp     #B_NUM
+        bne     :+
+        lda     #B_BUL
+:       sta     pr_t
+        jsr     pr_room
+        jcs     @err
+        lda     pr_st                   ; a blank line first?
+        beq     @ng
+        lda     pr_bl
+        bne     @gap
+        lda     pr_t
+        cmp     pr_prev
+        bne     @gap
+        cmp     #B_BUL
+        bcc     @gap
+        cmp     #B_RULE
+        bne     @ng
+@gap:   lda     #10
+        jsr     pr_put
+@ng:    lda     #1
+        sta     pr_st
+        stz     pr_bl
+        lda     pr_t
+        sta     pr_prev
+        ldx     #NONE                   ; a bullet's marker character: at m_ind
+        lda     pr_k
+        cmp     #B_BUL
+        bne     :+
+        ldx     m_ind
+:       stx     pr_mk
+        ldx     #$FFDF                  ; heading 3: a-z in capitals
+        cmp     #B_H3
+        beq     :+
+        ldx     #$FFFF
+:       stx     pr_up
+        ldx     #0                      ; X: TB's length
+        stz     pr_hang
+        cmp     #B_RULE
+        bne     :++
+        lda     #'-'
+:       jsr     @tb
+        cpx     #PRW
+        bcc     :-
+        brl     @wrap
+:       cmp     #B_QUO
+        bne     :++
+        lda     #' '
+:       jsr     @tb
+        cpx     #4
+        bcc     :-
+        stx     pr_hang
+:       lda     pr_t                    ; a list: its marker (a bullet "-")
+        cmp     #B_BUL
+        bne     @txt
+        ldy     #4
+:       tya
+        sec
+        sbc     #4
+        cmp     m_pfx
+        bcs     :++
+        lda     [lp],y
+        and     #$00FF
+        cpx     pr_mk
+        bne     :+
+        lda     #'-'
+:       jsr     @tb
+        iny
+        bra     :--
+:       cpx     #PRW - 20               ; (its other rows under the text)
+        bcc     :+
+        ldx     #PRW - 20
+:       stx     pr_hang
+        tyx
+        dex
+        dex
+        dex
+        dex
+@txt:   lda     llen                    ; the text: its end without trailing spaces
+        clc
+        adc     #4
+        tay
+:       cpy     #4
+        beq     :+
+        dey
+        lda     [lp],y
+        and     #$00FF
+        cmp     #' '
+        beq     :-
+        iny
+:       sty     z:t3
+        ldy     #4
+@c:     cpy     z:t3
+        bcs     @wrap
+        lda     [mb],y
+        and     #S_M | S_P
+        bne     @cn
+        lda     [lp],y
+        and     #$00FF
+        cmp     #9
+        bne     :+
+        lda     #' '
+:       cmp     #'a'
+        bcc     :+
+        cmp     #'z' + 1
+        bcs     :+
+        and     pr_up
+:       jsr     @tb
+@cn:    iny
+        bra     @c
+@wrap:  stx     pr_n                    ; the rows: [pr_i, end) of TB
+        stz     pr_i
+        stz     pr_max
+        stz     pr_row
+        lda     #PRW
+        sta     pr_w
+@row:   jsr     pr_room
+        jcs     @err
+        lda     pr_i                    ; the row's end: all that is left, or the last
+        clc                             ; space that fits (on the first row after the
+        adc     pr_w                    ; marker), or the width
+        sta     pr_e
+        cmp     pr_n
+        bcc     :+
+        lda     pr_n
+        sta     pr_e
+        bra     @emit
+:       ldx     pr_i
+        lda     pr_row
+        bne     :+
+        ldx     pr_hang
+:       stx     z:t0
+        ldy     pr_e
+:       cpy     z:t0
+        beq     @emit
+        lda     [sp],y
+        and     #$00FF
+        cmp     #' '
+        beq     :+
+        dey
+        bra     :-
+:       sty     pr_e
+@emit:  ldx     #0                      ; the hanging indent (rows after the first)
+        lda     pr_row
+        beq     :++
+:       cpx     pr_hang
+        bcs     :+
+        lda     #' '
+        jsr     pr_put
+        inx
+        bra     :-
+:       ldy     pr_i
+:       cpy     pr_e
+        bcs     :+
+        lda     [sp],y
+        jsr     pr_put
+        inx
+        iny
+        bra     :-
+:       cpx     pr_max
+        bcc     :+
+        stx     pr_max
+:       lda     #10
+        jsr     pr_put
+        inc     pr_row
+        lda     #PRW
+        sec
+        sbc     pr_hang
+        sta     pr_w
+        ldy     pr_e                    ; the next row: after the spaces
+:       cpy     pr_n
+        bcs     :+
+        lda     [sp],y
+        and     #$00FF
+        cmp     #' '
+        bne     :+
+        iny
+        bra     :-
+:       sty     pr_i
+        cpy     pr_n
+        jcc     @row
+        lda     pr_k                    ; headings 1 and 2: underlined
+        ldx     #'='
+        cmp     #B_H1
+        beq     :+
+        ldx     #'-'
+        cmp     #B_H2
+        bne     @nx
+:       txa
+        ldx     pr_max
+        beq     @nx
+:       jsr     pr_put
+        dex
+        bne     :-
+        lda     #10
+        jsr     pr_put
+@nx:    inc     cpi
+        jmp     @l
+@end:   jsr     pr_flush
+        bcs     @err
+        lda     fh
+        sys     SYS_CLOSE
+        rts
+@err:   pha
+        lda     fh
+        sys     SYS_CLOSE
+        pla
+        sec
+        rts
+@tb:    phy                             ; byte A -> TB at X (X + 1)
+        txy
+        sep     #$20
+        .a8
+        sta     [sp],y
+        rep     #$20
+        .a16
+        ply
+        inx
+        rts
+
+; byte A to the job's buffer (SB)
+pr_put: phy
+        ldy     cpn
+        sep     #$20
+        .a8
+        sta     [dp],y
+        rep     #$20
+        .a16
+        iny
+        sty     cpn
+        ply
+        rts
+; room for a row (and a heading's line): written out when $F000 bytes wait -> C set: A =
+; the error
+pr_room:
+        lda     cpn
+        cmp     #$F000
+        bcs     pr_flush
+        rts
+pr_flush:
+        lda     cpn
+        beq     @ok
+        lda     fh
+        sta     rblk
+        stz     rblk+1
+        lda     sbank
+        sta     rblk+3
+        lda     cpn
+        sta     rblk+4
+        ptr     rblk
+        sys     SYS_WRITE
+        bcs     @out
+        cmp     cpn
+        beq     @ok
+        lda     #$47
+        sec
+        rts
+@ok:    stz     cpn
+        clc
+@out:   rts
+
         .segment "RODATA"
 t_txt:  .byte   ".TXT", 0
 t_md:   .byte   ".md", 0
@@ -945,5 +1245,19 @@ sc:     .res    2
 s_last: .res    2
 rcount: .res    2
 wc_c:   .res    4
+pr_st:  .res    2                       ; prdoc: something written, a blank line seen,
+pr_bl:  .res    2                       ;   the kind of the line before
+pr_prev: .res   2
+pr_k:   .res    2                       ;   this line's block, its kind
+pr_t:   .res    2
+pr_hang: .res   2                       ;   rows after the first start this far in
+pr_n:   .res    2                       ;   TB's length, a row's start, end, width
+pr_i:   .res    2
+pr_e:   .res    2
+pr_w:   .res    2
+pr_row: .res    2
+pr_max: .res    2                       ;   the longest row
+pr_mk:  .res    2                       ;   a bullet's marker (its column), heading 3's
+pr_up:  .res    2                       ;   capitals mask
 stblk:  .res    6                       ; stat: the path, the result
 stout:  .res    10

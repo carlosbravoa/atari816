@@ -1,0 +1,5 @@
+# (0.23) BASIC printing errors (text shell, NODESK): "basic -t /BPE.BAS" runs tests/basicpe.bas
+# with a file named /Printouts on the card copy; the log after the command is compared with
+# tests/basicpe.txt.
+1500 {esc}
++1500 basic -t /BPE.BAS\n

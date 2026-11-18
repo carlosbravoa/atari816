@@ -8,9 +8,11 @@ returns to Horizon with the desktop exactly as it was. The classic machine's set
 (Settings > Classic Atari edits it; they apply after a full restart).
 
 Kinds: `CK_AUTO` 0 (by the extension), `CK_DISK` 1 (.ATR .XFD), `CK_XEX` 2 (.XEX .COM
-.EXE), `CK_CART` 3 (.CAR .ROM .BIN). Errors: $44 no file, $C2 the firmware does not know the
-operation (the emulator does not implement mount, eject and boot: it answers $C2), $C3 a bad
-kind, slot or extension, $C4 not a valid image, $C5 the firmware's menu is open.
+.EXE), `CK_CART` 3 (.CAR .ROM .BIN), (0.23) `CK_BASRUN` 4 (a BASIC program: "Run in Atari")
+and `CK_FOLDER` 5 (a folder of the card as a disk), below. Errors: $44 no file, $C2 the
+firmware does not know the operation, $C3 a bad kind, slot or extension, $C4 not a valid
+image, $C5 the firmware's menu is open. (The emulator has no classic machine: it checks and
+records the mounts, logs each operation on stderr, and boot always works.)
 
 | Constant | Value |
 | --- | --- |
@@ -18,6 +20,44 @@ kind, slot or extension, $C4 not a valid image, $C5 the firmware's menu is open.
 | `CK_DISK` | 1 |
 | `CK_XEX` | 2 |
 | `CK_CART` | 3 |
+| `CK_BASRUN` | 4 |
+| `CK_FOLDER` | 5 |
+| `FD_SAVING` | 1 |
+
+**Run in Atari** (0.23, `CK_BASRUN`): the path is a BASIC program on the card, a text
+listing (LF, CR LF or the Atari's $9B line ends; normally .BAS or .LST) or an Atari BASIC
+SAVE file. It becomes the virtual boot disk on D1: in place of D1: and the executable, like
+an executable: classic_mount answers `CK_XEX` (2) and classic_query reports it as item 4.
+classic_boot then cold boots with Atari BASIC on; a small loader types the program in and
+RUNs it. $C4: empty, or larger than 96 KB. ulib's `atari_run` does all of it for `.BAS` and
+`.LST` (with `atari_rkind` you can ask first: it returns 4 for them).
+
+**The folder disk** (0.23, `CK_FOLDER`, A = 5 | slot << 8): a folder of the card (made if
+missing) shows on that drive as an Atari DOS 2.0S single-density disk built from its files;
+what the Atari writes is copied back into the folder. classic_mount answers `CK_DISK` (1).
+The same folder on the same drive again is a refresh (the Atari's changes saved, the disk
+built again from the folder); classic_eject of the drive saves, then ejects. One drive at
+most: mounting a folder on another drive moves it (eject the old drive first, so
+classic_query forgets it too). The disk shows the files whose names fit Atari DOS 8.3 (1-8
+letters or digits, the first a letter, optionally a dot and 1-3 letters or digits; shown in
+upper case), at most 64, in name order, while they fit in 707 sectors of 125 bytes; the others
+are left out and never touched. STAT of exactly `/D1:` .. `/D4:` tells about it:
+```asm
+; A = the drive 0-3 that is the folder disk -> C clear: buf = its numbers
+fdinfo: clc
+        adc     #'1'
+        sep     #$20
+        .a8
+        sta     s_drv+2
+        rep     #$20
+        .a16
+        ptr     sblk
+        sys     SYS_STAT        ; C set ($44): not the folder disk
+        rts                     ; buf+0 files shown, buf+1 left out, buf+2 (word) free
+                                ; sectors; buf+4 bit 0 (FD_SAVING): changes wait to be saved
+sblk:   .faraddr s_drv, buf
+s_drv:  .byte   "/D1:", 0
+```
 
 The simplest way to run Atari software from a program is ulib's `atari_run` (X, Y = path):
 "start this, and only this" (it ejects what would get in the way, mounts, boots, and

@@ -1,0 +1,6 @@
+# (0.23) PRINTD and the PC link lost (emu816 --pc-folder, the board's PC speed, --pc-drop-at
+# 6): a job of 384 KB is being copied when the link drops: exit 1 at once (no hang), no
+# file on the PC (the gateway drops the unfinished file)
+1500 {esc}
++1500 printd "/Printouts/2026-11-16 08.00.00 Big.txt"\n
++8000 \n

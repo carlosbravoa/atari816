@@ -24,6 +24,8 @@ typedef struct Mailbox {
     char    *ftmp[MB_FILES];        /* a PC file opened with mode 2: the temporary host file it
                                      * is written to (moved onto fhost at CLOSE; NULL: none, or
                                      * deleted when the link dropped) */
+    uint8_t  fprn[MB_FILES];        /* (Horizon 0.23) a print job (/PRN:NAME): ftmp is its name
+                                     * with a '.' in front, moved onto fhost at CLOSE */
     const char *root;               /* --sd directory, or NULL */
     uint64_t n_req, n_keyev, n_mouseev;
     /* keyboard: what the USB side holds now (4 usages + modifier bitmap), and what the
@@ -62,6 +64,10 @@ extern double mailbox_pc_back;          /* --pc-back-at: emulated second it come
 /* --card-kbps R:W, --pc-kbps R:W: slow transfers (KB/s for READ / LOAD and WRITE; 0 = instant).
  * Given (either rate not 0): every request on that volume also costs a fixed time */
 extern double mailbox_card_kbps[2], mailbox_pc_kbps[2];
+/* (Horizon 0.23) printing: --no-pc-print (the gateway cannot make PDFs: STAT /PC: without
+ * bit 4), --classic-print FILE@SECONDS (a print job of the classic Atari's printer, P:) */
+extern int     mailbox_no_pc_print;
+int     mailbox_classic_print(const char *arg);    /* 0 OK, -1 a bad argument */
 void    mailbox_poll(uint64_t now);
 uint8_t mailbox_read(uint32_t a);
 void    mailbox_write(uint32_t a, uint8_t v);

@@ -1,0 +1,4 @@
+# (0.23) The Desktop with a PC that makes PDFs (DESK=1; --pc-folder, the classic Atari prints
+# at 6 s): shot 1 at 10.5: "Printed: Atari (to the PC)"; PRINTD made the marked .pdf on the PC.
+# (A Shift press and release: the session needs one event)
+100 {dE1}{uE1}

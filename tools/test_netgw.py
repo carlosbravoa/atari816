@@ -685,7 +685,7 @@ class GatewayWiring(unittest.TestCase):
 
     def test_services(self):
         gw = P.Gateway(self.tmp, port="/dev/null-no-port")
-        self.assertEqual(gw.link.services, P.SV_FILES | P.SV_DEV | P.SV_NET | P.SV_FETCH)
+        self.assertEqual(gw.link.services, P.SV_FILES | P.SV_DEV | P.SV_NET | P.SV_FETCH | P.SV_PRINT)
         gw = P.Gateway(self.tmp, port="/dev/null-no-port", net=False)
         self.assertEqual(gw.link.services & (P.SV_NET | P.SV_FETCH), 0)
         self.assertIsNone(gw.net)
@@ -693,7 +693,7 @@ class GatewayWiring(unittest.TestCase):
         gw.link._write = out.append
         gw.link._hello()
         hello = P.Parser().feed(out[0])[0][4]
-        self.assertEqual((hello[0], hello[10]), (P.C_HELLO, P.SV_FILES | P.SV_DEV))
+        self.assertEqual((hello[0], hello[10]), (P.C_HELLO, P.SV_FILES | P.SV_DEV | P.SV_PRINT))
         gw._on_frame(P.CH_FETCH, b"\x01\x01\x00\x00\x00\x10\x00\x00http://x/\0")   # dropped
 
     def test_frames_reach_the_net_server(self):

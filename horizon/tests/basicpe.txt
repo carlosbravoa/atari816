@@ -1,0 +1,13 @@
+REM tests/basicpe.bas: (Horizon 0.23) a print job that cannot be made (make test puts a file
+REM named Printouts on the card copy): "File error $XX", in a run and in direct mode.
+RUN
+first
+File error $47 in 20
+LPRINT "direct"
+File error $47
+LLIST
+File error $47
+PRINT "BASIC goes on"
+BASIC goes on
+exit 0001
+> 

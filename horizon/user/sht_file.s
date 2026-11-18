@@ -948,6 +948,155 @@ csv_save:
         bra     @row
 @end:   jmp     wr_end
 
+; (0.23) File > Print: the used area as text columns, a print job "/PRN:Sheet" -> C set:
+; A = the error. Each cell as shown (its column's format; formulas as their results,
+; errors by name), not cut to the column's width; each column as wide as its widest value
+; (a text with nothing right of it in its row does not count: it runs on, as on the
+; screen), two spaces between columns, numbers and errors right-aligned, text left-aligned; no
+; column letters, no row numbers; a column empty in the used area is left out; rows in
+; the used area that are empty are blank lines; no spaces at a line's end; LF line ends.
+prt_save:
+        ptr     t_prn
+        lda     #O_CREATE
+        sys     SYS_OPEN
+        bcc     :+
+        rts
+:       sta     fh
+        jsr     wr_init
+        jsr     used
+        stz     sv_c                    ; the columns' widths
+@wc:    lda     sv_c
+        cmp     us_c
+        bcs     @rows
+        asl     a
+        tax
+        stz     pr_w,x
+        stz     sv_r
+@wr:    lda     sv_r
+        cmp     us_r
+        bcs     @wn
+        jsr     pr_disp
+        lda     dkind                   ; (a text with nothing right of it in its row
+        cmp     #2                      ; runs on: it does not widen its column)
+        bne     :+
+        jsr     pr_last
+        bcs     :++
+:       lda     sv_c
+        asl     a
+        tax
+        lda     pr_n
+        cmp     pr_w,x
+        bcc     :+
+        sta     pr_w,x
+:       inc     sv_r
+        bra     @wr
+@wn:    inc     sv_c
+        bra     @wc
+@rows:  stz     sv_r
+@row:   lda     sv_r
+        cmp     us_r
+        jcs     @end
+        stz     pr_sp
+        stz     pr_any
+        stz     sv_c
+@cell:  lda     sv_c
+        cmp     us_c
+        bcs     @eol
+        asl     a
+        tax
+        lda     pr_w,x
+        beq     @cn
+        lda     pr_any                  ; two spaces after the column before
+        beq     :+
+        inc     pr_sp
+        inc     pr_sp
+:       sta     pr_any                  ; (A: not 0 from here on)
+        inc     pr_any
+        jsr     pr_disp
+        lda     sv_c
+        asl     a
+        tax
+        lda     pr_w,x                  ; the padding: before a number, after a text
+        sec
+        sbc     pr_n
+        bcs     :+
+        lda     #0
+:       ldx     dalign
+        beq     :+
+        clc
+        adc     pr_sp
+        sta     pr_sp
+        lda     #0
+:       pha
+        ldx     #0
+:       cpx     pr_n
+        bcs     :++
+        lda     fbuf,x
+        and     #$00FF
+        cmp     #' '                    ; (a line break in a text: a space)
+        bcs     :+
+        lda     #' '
+:       jsr     pr_char
+        inx
+        bra     :--
+:       pla
+        clc
+        adc     pr_sp
+        sta     pr_sp
+@cn:    inc     sv_c
+        bra     @cell
+@eol:   lda     #10
+        jsr     wr_byte
+        inc     sv_r
+        brl     @row
+@end:   jmp     wr_end
+
+; is cell sv_c, sv_r the last one in its row (the cells right of it empty)? -> C set
+pr_last:
+        lda     sv_c
+@l:     inc     a
+        cmp     us_c
+        bcs     @out
+        pha
+        xba
+        asl     a
+        asl     a
+        ora     sv_r
+        jsr     cell_get
+        pla
+        bcs     @l
+@out:   rts
+
+; cell sv_c, sv_r as shown -> fbuf, pr_n = its length, dalign
+pr_disp:
+        ldx     sv_c
+        lda     colfmt,x
+        and     #$00FF
+        tax
+        lda     sv_c
+        xba
+        asl     a
+        asl     a
+        ora     sv_r
+        jsr     cell_disp
+        sta     pr_n
+        rts
+
+; byte A after the spaces waiting (pr_sp) (X kept)
+pr_char:
+        phx
+        pha
+:       lda     pr_sp
+        beq     :+
+        dec     pr_sp
+        lda     #' '
+        jsr     wr_byte
+        bra     :-
+:       pla
+        jsr     wr_byte
+        plx
+        rts
+
 ; the text in fbuf as a CSV field: quoted if it holds a comma, a quote, a line break or
 ; spaces at its ends
 csv_quote:
@@ -1090,6 +1239,10 @@ dl_any: .res    2
 dl_t:   .res    2
 dl_clr: .res    2
 cq_q:   .res    2
+pr_w:   .res    NCOL * 2                ; (0.23) prt_save: the columns' widths, a cell's
+pr_n:   .res    2                       ;   length, spaces waiting, a column written
+pr_sp:  .res    2
+pr_any: .res    2
 
         .segment "ZEROPAGE"
 sb:     .res    4                       ; the scratch bank (file data)

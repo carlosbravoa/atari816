@@ -1,6 +1,6 @@
 # Atari816: the PC link (step 1)
 
-Nov 18, 2026
+Nov 18, 2026 (step 3: printing)
 
 The PC link connects the Atari816 to a PC (or a Raspberry Pi) through the board's USB cable.
 A small program on the PC, the **gateway** (`tools/atari816-link`), shares one folder of the PC
@@ -101,7 +101,9 @@ starts.
   frame before it was lost): drop it, no ACK; the sender goes back.
 - The board sends an ACK as soon as it accepts a frame. While the firmware is busy waiting for
   the PC (a PC volume request in progress), it keeps one developer frame and acknowledges it;
-  a second one gets no ACK until the first is done (the PC sends it again).
+  a second one gets no ACK until the first is done (the PC sends it again). The frame kept is
+  always served before any later developer frame (step 3: before, a later frame could overtake
+  it when it arrived just as the firmware became free, and a SINK test lost 1 KB).
 - Different channels never wait for each other.
 
 ## Sessions (channel 0)
@@ -122,8 +124,9 @@ Channel 0 carries only datagrams. Their first payload byte is an op.
   uses; no time zone, no daylight saving: it is the PC's wall clock).
 - **services**: bit 0 FILES (the PC serves the PC volume, channel 2), bit 1 DEV (the PC may
   send developer requests, channel 3), bit 2 NET (the PC makes TCP connections, channel 4),
-  bit 3 FETCH (the PC fetches URLs, channel 5). A gateway started with `--no-net` leaves bits 2
-  and 3 clear.
+  bit 3 FETCH (the PC fetches URLs, channel 5), bit 4 PRINT (step 3: the PC turns print jobs
+  into PDF files, "Printing" below). A gateway started with `--no-net` leaves bits 2 and 3
+  clear.
 
 **Starting.** The PC sends HELLO (a new random nonce each time) once a second until a
 HELLO_ACK with its nonce comes back. The session is up. A HELLO always starts a new session
@@ -155,13 +158,13 @@ PC at start, and PC volume requests answer "no PC link" at once.
 | 3 | Developer | the PC | The developer tools (below) |
 | 4 | Net | the board | Step 2: outgoing TCP connections (below) |
 | 5 | Fetch | the board | Step 2: fetch a URL: HTTP, HTTPS, FTP (below) |
-| 6 | Print | the board | Reserved for step 3 |
-| 7 | Classic | either | Reserved for step 3: the bridge for the classic Atari |
+| 6 | | | Reserved (step 3 needed no channel: printing goes through channel 2) |
+| 7 | | | Reserved (step 3: the classic Atari talks only to the board, never to the PC) |
 | 8-15 | | | Reserved |
 
 A receiver acknowledges DATA frames on a channel it does not know, and drops them.
 
-### Requests and responses (channels 2, 3, 6 and 7)
+### Requests and responses (channels 2 and 3)
 
 Every DATA payload on these channels starts with a 4-byte header:
 
@@ -235,8 +238,9 @@ The firmware turns the mailbox ops into these requests (`02-register-spec.md`, "
   the 4 mailbox handles are shared by both volumes.
 - READDIR of `/` (the card's root) lists one more folder at the end, `PC:`, while a gateway
   with the files service is connected.
-- STAT of `/PC:` itself answers at once (no request): a folder, size 0, and as its time the
-  PC's clock now (the time from HELLO, counted on). Horizon sets its clock from it.
+- STAT of `/PC:` itself answers at once (no request): a folder, as its time the PC's clock now
+  (the time from HELLO, counted on; Horizon sets its clock from it), and (step 3) as its size
+  the services of HELLO (before step 3: 0).
 - New mailbox results: **$87** no PC link (no gateway, or one without the files service:
   answered at once), **$88** PC link lost (the session ended during the request, or a handle
   of an ended session; CLOSE of such a handle frees it and answers 0), **$89** RENAME between
@@ -257,7 +261,7 @@ above.
 | $01 | INFO | none | One text line: the firmware's state and the link counters |
 | $02 | PUT | frame 1: u32 size, path on the card; then frames of u32 offset + data (MORE on all but the last) | none; RESULT after the last frame |
 | $03 | RESTART816 | [u8 1 = start /A816.BIN, not /SYSTEM/HORIZON.SYS] | none |
-| $04 | RUN | path of a .xex on the card | none (mounted and cold booted after the answer) |
+| $04 | RUN | path of a .xex on the card (step 3: or of a BASIC program, .BAS or .LST: as "Run in Atari") | none (mounted and cold booted after the answer) |
 | $05 | COLD | none | none (the classic machine is cold booted) |
 | $06 | WARM | none | none (warm start) |
 | $07 | EJECT | none | none (the virtual .xex disk is ejected) |
@@ -407,6 +411,34 @@ path must fit in 127 bytes (Horizon's path limit).
   streams (all four handles in use). In an answer with $8F, ARG1 is the HTTP status.
 - CLOSE sends CLOSE to the PC and frees the handle. SYS_SYNC and a 65C816 restart close every
   stream.
+
+## Printing (step 3)
+
+Printing needs no channel of its own: a print job reaches the PC as a file of the PC volume
+(channel 2), and the gateway turns it into a PDF. The PC keeps only the PDF.
+
+- The board writes the job (OPEN mode 2, WRITE, CLOSE) as `/Printouts/NAME.pdf`: in the folder
+  `Printouts` at the top of the shared folder (any case), the name ending in `.pdf`. Horizon's
+  program PRINTD does this (`horizon/ABI.md`, "Printing"), only when HELLO had bit 4 (PRINT).
+- The file starts with a marker, then a small header, then the text:
+
+  ```
+  1B "A816PRINT 1" 0A        (13 bytes)
+  title=TEXT 0A              the job's name (the program, "Atari", ...)
+  date=YYYY-MM-DD HH:MM 0A   when it was printed
+  0A                         the end of the header
+  the text                   Latin-1; LF or CR LF line ends; FF ($0C) starts a new page
+  ```
+
+- At CLOSE (before the unfinished file gets its name, "Unfinished files" above) a gateway with
+  the PRINT service replaces such a file's content by a PDF: A4, the built-in Courier font at
+  10 points (80 columns, 58 lines a page), margins of 2 cm, a header line on every page (the
+  title, the date, "Page n of m"); long lines are wrapped, a tab goes to the next multiple of 8,
+  a form feed starts a new page, characters Courier cannot show become `?`
+  (`tools/pdfprint.py`, only the Python standard library). Files without the marker, and marked
+  files elsewhere, are kept as written.
+- A gateway without the service (before step 3) would keep the marked text under the `.pdf`
+  name; Horizon therefore sends jobs only when HELLO had bit 4 (STAT of `/PC:` tells it).
 
 ## The gateway
 

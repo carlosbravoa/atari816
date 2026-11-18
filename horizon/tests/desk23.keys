@@ -1,0 +1,86 @@
+# (0.23) The Desktop: print notices, the folder disk, Run in Atari (DESK=1; tests/mousegen.py
+# makes tests/desk23.keys from this; the card gets tests/mk23.py's additions: a clock, /Atari,
+# /Desktop/PROG.BAS, /HELLO.LST; emu816 --classic-print tests/p23.atascii@6: the classic
+# Atari prints at 6 s, the job is finished 3 s later). Files is at (24, 24); its rows:
+# HELLO.LST y 169, README.TXT 193. Shots (s):
+#   1  10.5  the notice "Printed: Atari" (the job finished at 9 s) instead of the clock
+#   2  13.0  the notice clicked: Printer with the job
+#   3  16.0  the Atari icon clicked: the panel, "Folder disk..." and "No folder disk" at its bottom
+#   4  18.0  Folder disk...: the dialog (/Atari, D2:)
+#   5  20.5  Enter (Mount): D2: "/Atari (folder)" with Refresh, "5 files, 4 left out, 543 free
+#            sectors" (tests/mk23.py); Refresh clicked (mounted again: tests/desk23.err)
+#   6  23.0  the Atari icon's menu: "Eject D2: Atari", "Folder disk..." in the last group
+#   7  26.5  the panel closed; PROG.BAS's menu: Open, Run in Atari, -, Rename..., Delete
+#   8  32.3  Run in Atari (kind 4), F12; the panel: Program PROG.BAS
+#   9  35.0  README.TXT's menu in Files: ... Print
+#  10  37.5  Print: Files' footer "Printed ...", the notice "Printed: Files"
+#  11  39.5  HELLO.LST's menu: ... Print, Run in Atari (then chosen: kind 4, F12)
+# the notice clicked: Printer (the classic Atari's job selected); Esc closes it
+11000 M 100:-100:0:0
+11050 M 100:-74:0:0
+11100 M 80:0:0:0
+11400 M 0:0:0:1
+11480 M 0:0:0:0
+13500 {esc}
+15000 M -4:94:0:0
+15400 M 0:0:0:1
+15480 M 0:0:0:0
+16500 M -100:100:0:0
+16550 M -100:100:0:0
+16600 M -100:13:0:0
+16650 M -67:0:0:0
+16900 M 0:0:0:1
+16980 M 0:0:0:0
+19000 \n
+21000 M 100:-100:0:0
+21050 M 100:-86:0:0
+21100 M 13:0:0:0
+21400 M 0:0:0:1
+21480 M 0:0:0:0
+22500 M 100:-27:0:0
+22550 M 54:0:0:0
+22600 M 0:0:0:2
+22680 M 0:0:0:0
+24000 {esc}
+24500 M -100:-23:0:0
+24550 M -100:0:0:0
+24600 M -100:0:0:0
+24650 M -100:0:0:0
+24700 M -18:0:0:0
+24900 M 0:0:0:1
+24980 M 0:0:0:0
+25500 M 100:83:0:0
+25550 M 100:0:0:0
+25600 M 100:0:0:0
+25650 M 100:0:0:0
+25700 M 18:0:0:0
+25750 M 0:0:0:2
+25830 M 0:0:0:0
+26500 M -52:23:0:0
+26900 M 0:0:0:1
+26980 M 0:0:0:0
+29500 {F12}
+30500 M 52:-83:0:0
+30900 M 0:0:0:1
+30980 M 0:0:0:0
+32500 M -100:-23:0:0
+32550 M -100:0:0:0
+32600 M -100:0:0:0
+32650 M -100:0:0:0
+32700 M -18:0:0:0
+32900 M 0:0:0:1
+32980 M 0:0:0:0
+33500 M -78:100:0:0
+33550 M 0:16:0:0
+33600 M 0:0:0:2
+33680 M 0:0:0:0
+35500 M 28:51:0:0
+35900 M 0:0:0:1
+35980 M 0:0:0:0
+38500 M -28:-75:0:0
+38600 M 0:0:0:2
+38680 M 0:0:0:0
+40000 M 28:65:0:0
+40400 M 0:0:0:1
+40480 M 0:0:0:0
+43000 {F12}

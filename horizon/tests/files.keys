@@ -1,6 +1,7 @@
 # Files (DESK=1: the Desktop): DESK=1 sh tests/shots.sh EMU SD files 46 T1 ... (16 shots)
 # The SD card is modified (a move, a copy, a rename, a new folder, a delete): use a scratch copy.
-# It needs: /docs holding only "Read me first.txt"; no other entry of / starting "sy" or
+# It needs: "Read me first.txt" first in /docs (0.23: then "Using the printer and the Atari.md",
+# "Welcome.md"); no other entry of / starting "sy" or
 # "docs"; /SYSTEM/INIT.PRG; no /BIN/WRITE.PRG gives the "not found" alert at shot 8.
 # Good shot times (s), total 46 s:
 #   5.4   the Desktop, Files 1 in / (the Up button dimmed, no "..", /SYSTEM hidden)

@@ -30,11 +30,14 @@ PROGS  := wfiles term paint settings cat files dir mem edit basic sheet
 PROGS  += calc solitair quabrick
 # (0.22) the internet through the PC link: the Downloader, the BBS terminal
 PROGS  += download bbs
+# (0.23) printing: Printer (the print jobs in /Printouts), PRINTD (a job sent to the PC as a PDF)
+PROGS  += printer
 SYSPROGS := desk sh about
+SYSPROGS += printd
 TESTPROGS := selftest bench mouse mtest wdemo hello count spin tick regs crash ping pong keys ftest leak hog ktest stest gtest
 # programs linked with the controls library (build/ui.lib from user/ui*.s, API in user/ui.inc)
 UIPROGS := edit wfiles desk paint settings basic sheet about
-UIPROGS += calc solitair quabrick download bbs
+UIPROGS += calc solitair quabrick download bbs printer
 # (0.14) the shell links the library for the date (uidate.s)
 UIPROGS += sh
 UISRC  := $(wildcard user/ui*.s)
@@ -76,6 +79,9 @@ ESHOTS := 8.9 9.9 12.0 14.2 16.4 19.6
 # session (tests/sheet.keys) shot times. Its pictures are the same with and without the blitter.
 SHTSECS := 24
 SHTSHOTS := 7.0 11.0 13.8 15.6 17.0 18.6
+# (0.23) Sheet, File > Print and ctrl-P (tests/sheetp.keys: /programs/BUDGET.SHT): shot times;
+# both jobs compared with tests/sheet-print.txt
+SPSHOTS := 7 9.5
 # Write: the -t script run (tests/write-t.keys, tests/write.wt), emulated seconds; the picture
 # session (tests/write.keys) and the editing session (tests/writee.keys, it saves W1.MD and
 # NOTES.md) shot
@@ -83,11 +89,19 @@ SHTSHOTS := 7.0 11.0 13.8 15.6 17.0 18.6
 WRSECS := 30
 WRSHOTS := 6.0 8.0 10.5 13.0 21.0 24.0 31.0 33.2 35.5
 WESHOTS := 18.0 34.0 39.5 41.0 43.0
+# (0.23) File > Print (tests/writep.keys; the card gets tests/write-print.md as /WP.MD): shot
+# times; the job compared with tests/write-print.txt
+WPSHOTS := 7 10
 # (without the blitter Edit is slower: the same session, later states, its own md5)
 EMD5   := $(if $(findstring --rev 7,$(EMUFLAGS)),edit-rev7.md5,edit.md5)
 # Edit, second session (tests/editw.keys: undo, word wrap, Find / Replace, ...): shot times
 # (the same pictures with and without the blitter); the file it saves must be tests/editw.txt
 EWSHOTS := 15.9 17.6 19.6 21.0 23.2 24.1 27.3 29.7 32.2
+# (0.23) Edit, printing and Atari line ends (tests/editp.keys; the card gets tests/editp.lst as
+# /PROG.LST): shot times; the file saved and the two print jobs compared byte for byte (no
+# clock on the test card: every job is "2026-01-01 00.00.00 NAME.txt")
+EPSHOTS := 5 8.5 13.5 16
+JOB    := build/run-pic/Printouts/2026-01-01 00.00.00
 # The Desktop's system functions (tests/system.keys, made from tests/system.src; the card gets
 # tests/system.programs as /SYSTEM/PROGRAMS): out-of-memory alerts, Force quit, one About,
 # Shut down (cancelled by a program, then done), the "safe" screen, Restart, /Desktop icons
@@ -237,9 +251,11 @@ user/wfont.inc: kernel/font8x12.txt tools/mkwfont.py
 # the sample document of Write
 all: $(SD)/docs/Welcome.md
 $(TSD)/SYSTEM/INIT.PRG: $(SD)/docs/Welcome.md
-$(SD)/docs/Welcome.md: sdfiles/docs/Welcome.md $(B)/tree.stamp
+$(SD)/docs/Welcome.md: sdfiles/docs/Welcome.md sdfiles/docs/Using\ the\ printer\ and\ the\ Atari.md $(B)/tree.stamp
 	mkdir -p $(SD)/docs
 	cp $< $@
+	@# (0.23) the user's page on printing, the folder disk and Run in Atari
+	cp "sdfiles/docs/Using the printer and the Atari.md" $(SD)/docs/
 # (0.22) the BBS terminal: its 8x8 ATASCII font (tools/mkatascii.py: the graphics characters
 # drawn in user/atascii.txt, the others from the console font) and its address book
 $(SD)/BIN/BBS.PRG: user/atascii.inc kernel/font.inc
@@ -373,6 +389,12 @@ test: all $(EMU)
 	else echo "FAIL  Edit pictures, second session (look at $(B)/editw*.ppm, then make pictures)"; exit 1; fi
 	@if cmp $(B)/run-pic/E2.TXT tests/editw.txt; then echo "PASS  Edit: the file the second session saved"; \
 	else echo "FAIL  Edit: build/run-pic/E2.TXT is not tests/editw.txt"; exit 1; fi
+	@PREP='cp ../../tests/editp.lst PROG.LST' sh tests/shots.sh "$(EMU) $(EMUFLAGS) $(CARDDATE)" $(SD) editp 17 $(EPSHOTS)
+	@if diff -u tests/pictures/editp.md5 $(B)/editp.md5; then echo "PASS  0.23 Edit pictures: Atari line ends, File > Print, Printed"; \
+	else echo "FAIL  0.23 Edit pictures, printing (look at $(B)/editp*.ppm, then make pictures)"; exit 1; fi
+	@if cmp $(B)/run-pic/PROG.LST tests/editp-lst.txt && cmp "$(JOB) Edit.txt" tests/editp-job1.txt && cmp "$(JOB) Edit 2.txt" tests/editp-job2.txt; \
+	then echo "PASS  0.23 Edit: an Atari file saved with \$$9B line ends, the print jobs (LF line ends)"; \
+	else echo "FAIL  0.23 Edit: build/run-pic/PROG.LST or the jobs in build/run-pic/Printouts"; exit 1; fi
 	@sh tests/shots.sh "$(EMU) $(EMUFLAGS) $(CARDDATE)" $(SD) paint 27 $(PSHOTS)
 	@if diff -u tests/pictures/$(subst edit,paint,$(EMD5)) $(B)/paint.md5; then echo "PASS  Paint pictures"; \
 	else echo "FAIL  Paint pictures (look at $(B)/paint*.ppm, then make pictures)"; exit 1; fi
@@ -389,6 +411,8 @@ test: all $(EMU)
 	else echo "FAIL  Files pictures (look at $(B)/files*.ppm, then make pictures)"; exit 1; fi
 	@$(MAKE) --no-print-directory test-pc
 	@$(MAKE) --no-print-directory test-net
+	@$(MAKE) --no-print-directory test-print
+	@$(MAKE) --no-print-directory test-23
 	@rm -rf build/run-sd; cp -r $(SD) build/run-sd; touch build/run-sd/SYSTEM/NODESK; cp tests/basic.bas build/run-sd/BT.BAS
 	@$(EMU) $(EMUFLAGS) $(CARDDATE) --headless --sd build/run-sd --max-seconds $(BASSECS) \
 	    --keys "$$(python3 tests/keyscript.py tests/basic-t.keys)" \
@@ -409,6 +433,12 @@ test: all $(EMU)
 	@sh tests/shots.sh "$(EMU) $(EMUFLAGS) $(CARDDATE)" $(SD) sheet 20 $(SHTSHOTS)
 	@if diff -u tests/pictures/sheet.md5 $(B)/sheet.md5; then echo "PASS  Sheet pictures"; \
 	else echo "FAIL  Sheet pictures (look at $(B)/sheet*.ppm, then make pictures)"; exit 1; fi
+	@sh tests/shots.sh "$(EMU) $(EMUFLAGS) $(CARDDATE)" $(SD) sheetp 12 $(SPSHOTS)
+	@if diff -u tests/pictures/sheetp.md5 $(B)/sheetp.md5; then echo "PASS  0.23 Sheet pictures: File > Print"; \
+	else echo "FAIL  0.23 Sheet pictures, printing (look at $(B)/sheetp*.ppm, then make pictures)"; exit 1; fi
+	@if cmp "$(JOB) Sheet.txt" tests/sheet-print.txt && cmp "$(JOB) Sheet 2.txt" tests/sheet-print.txt; \
+	then echo "PASS  0.23 Sheet: the print jobs (the used area as text columns)"; \
+	else echo "FAIL  0.23 Sheet: the jobs in build/run-pic/Printouts are not tests/sheet-print.txt"; exit 1; fi
 	@rm -rf build/run-sd; cp -r $(SD) build/run-sd; touch build/run-sd/SYSTEM/NODESK
 	@$(EMU) $(EMUFLAGS) $(CARDDATE) --headless --sd build/run-sd --max-seconds 60 \
 	    --keys "$$(python3 tests/keyscript.py tests/leak.keys)" \
@@ -451,7 +481,7 @@ test: all $(EMU)
 	  else echo "FAIL  full screen and kill (look at $(B)/gtestk*.ppm)"; exit 1; fi; \
 	else echo "SKIP  0.18 sprite and full-screen pictures (REV \$$0B only)"; fi
 	@$(MAKE) --no-print-directory test-games
-	@if grep -l 'emu816: blitter:' $(B)/selftest-*.err $(B)/shell-*.err $(B)/screen.err $(B)/browse.err $(B)/wdemo.err $(B)/wcopy.err $(B)/wdraw.err $(B)/desk.err $(B)/edit.err $(B)/editw.err $(B)/paint.err $(B)/settings.err $(B)/files.err $(B)/basic-t.err $(B)/basic.err $(B)/sheet-t.err $(B)/sheet.err $(B)/classic.err $(B)/system.err $(B)/wins.err $(B)/desk14.err $(B)/kmenu.err $(B)/leak.err $(B)/ktest.err $(B)/desk15.err $(B)/desk18.err $(B)/stest.err $(B)/gtest.err $(B)/gtests.err $(B)/gtestf.err $(B)/gtestk.err; \
+	@if grep -l 'emu816: blitter:' $(B)/selftest-*.err $(B)/shell-*.err $(B)/screen.err $(B)/browse.err $(B)/wdemo.err $(B)/wcopy.err $(B)/wdraw.err $(B)/desk.err $(B)/edit.err $(B)/editw.err $(B)/editp.err $(B)/paint.err $(B)/settings.err $(B)/files.err $(B)/basic-t.err $(B)/basic.err $(B)/sheet-t.err $(B)/sheet.err $(B)/sheetp.err $(B)/classic.err $(B)/system.err $(B)/wins.err $(B)/desk14.err $(B)/kmenu.err $(B)/leak.err $(B)/ktest.err $(B)/desk15.err $(B)/desk18.err $(B)/stest.err $(B)/gtest.err $(B)/gtests.err $(B)/gtestf.err $(B)/gtestk.err; \
 	then echo "FAIL  blitter rules (START or a register write while BUSY, or a read without CACHE_FLUSH)"; exit 1; \
 	else echo "PASS  blitter rules: no violations"; fi
 	@echo "TEST PASSED"
@@ -462,6 +492,7 @@ pictures:
 	cp $(B)/screen.md5 $(B)/browse.md5 $(B)/wdemo.md5 $(B)/wcopy.md5 $(B)/wdraw.md5 tests/pictures/
 	cp $(B)/edit.md5 tests/pictures/$(EMD5)
 	cp $(B)/editw.md5 tests/pictures/editw.md5
+	cp $(B)/editp.md5 tests/pictures/editp.md5
 	cp $(B)/paint.md5 tests/pictures/$(subst edit,paint,$(EMD5))
 	cp $(B)/settings.md5 tests/pictures/$(subst edit,settings,$(EMD5))
 	cp $(B)/classic.md5 tests/pictures/classic.md5
@@ -475,8 +506,9 @@ pictures:
 	cp $(B)/desk18.md5 tests/pictures/$(call REV7,desk18)
 	cp $(B)/basic.md5 tests/pictures/basic.md5
 	cp $(B)/sheet.md5 tests/pictures/sheet.md5
+	cp $(B)/sheetp.md5 tests/pictures/sheetp.md5
 	cp $(B)/browse.err tests/browse.err
-	python3 -c "from PIL import Image; import glob; [Image.open(f).save('tests/pictures/' + f.split('/')[-1][:-4] + '.png') for f in sorted(glob.glob('$(B)/screen[0-9]*.ppm') + glob.glob('$(B)/browse[0-9]*.ppm') + glob.glob('$(B)/wdemo[0-9]*.ppm') + glob.glob('$(B)/wcopy[0-9]*.ppm') + glob.glob('$(B)/wdraw[0-9]*.ppm') + glob.glob('$(B)/desk[0-9]*.ppm') + glob.glob('$(B)/edit[0-9]*.ppm') + glob.glob('$(B)/editw[0-9]*.ppm') + glob.glob('$(B)/paint[0-9]*.ppm') + glob.glob('$(B)/settings[0-9]*.ppm') + glob.glob('$(B)/classic[0-9]*.ppm') + glob.glob('$(B)/system[0-9]*.ppm') + glob.glob('$(B)/kmenu[0-9]*.ppm') + glob.glob('$(B)/wins[0-9]*.ppm') + glob.glob('$(B)/desk14[0-9]*.ppm') + glob.glob('$(B)/desk15[0-9]*.ppm') + glob.glob('$(B)/files[0-9]*.ppm') + glob.glob('$(B)/basic[0-9]*.ppm') + glob.glob('$(B)/sheet[0-9]*.ppm'))]"
+	python3 -c "from PIL import Image; import glob; [Image.open(f).save('tests/pictures/' + f.split('/')[-1][:-4] + '.png') for f in sorted(glob.glob('$(B)/screen[0-9]*.ppm') + glob.glob('$(B)/browse[0-9]*.ppm') + glob.glob('$(B)/wdemo[0-9]*.ppm') + glob.glob('$(B)/wcopy[0-9]*.ppm') + glob.glob('$(B)/wdraw[0-9]*.ppm') + glob.glob('$(B)/desk[0-9]*.ppm') + glob.glob('$(B)/edit[0-9]*.ppm') + glob.glob('$(B)/editw[0-9]*.ppm') + glob.glob('$(B)/editp[0-9]*.ppm') + glob.glob('$(B)/paint[0-9]*.ppm') + glob.glob('$(B)/settings[0-9]*.ppm') + glob.glob('$(B)/classic[0-9]*.ppm') + glob.glob('$(B)/system[0-9]*.ppm') + glob.glob('$(B)/kmenu[0-9]*.ppm') + glob.glob('$(B)/wins[0-9]*.ppm') + glob.glob('$(B)/desk14[0-9]*.ppm') + glob.glob('$(B)/desk15[0-9]*.ppm') + glob.glob('$(B)/files[0-9]*.ppm') + glob.glob('$(B)/basic[0-9]*.ppm') + glob.glob('$(B)/sheet[0-9]*.ppm') + glob.glob('$(B)/sheetp[0-9]*.ppm'))]"
 
 # Calculator and Solitaire: their self tests (tests/calc-t.keys, tests/solitair-t.keys; the
 # output compared with tests/calc-t.txt, tests/solitair-t.txt) and picture sessions
@@ -635,6 +667,49 @@ test-net: all $(EMU)
 	then echo "FAIL  blitter rules (the internet sessions)"; exit 1; \
 	else echo "PASS  blitter rules: the internet sessions"; fi
 
+# (0.23) printing, the folder disk, Run in Atari (the Desktop, Files and the shell's parts;
+# Printer, PRINTD, Edit, Write, Sheet and BASIC have their own tests). The card gets
+# tests/mk23.py's additions (a clock, /Atari, /Desktop/PROG.BAS, /HELLO.LST). The shell
+# (tests/sh23.keys): print (the jobs equal the files), run of a listing (classic_mount kind 4:
+# tests/sh23.err). The Desktop (tests/desk23.src, emu816 --classic-print tests/p23.atascii@6:
+# the classic Atari prints at 6 s): the notice, the Atari panel's folder disk (the dialog,
+# the numbers, Refresh), the Atari icon's menu, Run in Atari from an icon and from Files,
+# Files' Print; its classic ops and jobs: tests/desk23.err, tests/p23-atari.txt. Then
+# tests/desk23b.keys: the same classic job with --pc-folder (the gateway makes PDFs): the notice
+# "(to the PC)", the Desktop's PRINTD made the marked .pdf (tests/desk23b.pdf). make
+# pictures-23 freezes their pictures.
+D23SHOTS := 10.5 13 16 18 20.5 23 26.5 32.3 35 37.5 39.5
+D23PREP := python3 ../../tests/mk23.py
+test-23: all $(EMU)
+	@rm -rf build/run-sd; cp -r $(SD) build/run-sd; touch build/run-sd/SYSTEM/NODESK; (cd build/run-sd && $(D23PREP))
+	@$(EMU) $(EMUFLAGS) $(CARDDATE) --headless --sd build/run-sd --max-seconds 18 \
+	    --keys "$$(python3 tests/keyscript.py tests/sh23.keys)" \
+	    $(SD)/SYSTEM/HORIZON.SYS > $(B)/sh23.out 2> $(B)/sh23.err || true
+	@python3 -c "L = open('$(B)/sh23.out', encoding='latin-1').read().split('\n'); i = [k for k, l in enumerate(L) if '> print README' in l][0]; open('$(B)/sh23.txt', 'w', encoding='latin-1').write('\n'.join([L[i][L[i].index('> print'):]] + L[i + 1:]))"
+	@if python3 tests/compare.py tests/sh23.txt $(B)/sh23.txt && cmp -s "build/run-sd/Printouts/2026-11-18 15.30.03 Shell.txt" $(SD)/README.TXT \
+	  && cmp -s "build/run-sd/Printouts/2026-11-18 15.30.03 Shell 2.txt" $(SD)/LONG.TXT && grep 'emu816: CLASSIC' $(B)/sh23.err | diff -u tests/sh23.err -; \
+	then echo "PASS  0.23 shell: print (the jobs in /Printouts equal the files), run of a BASIC listing (classic_mount kind 4)"; \
+	else echo "FAIL  0.23 shell: print, run ($(B)/sh23.out, $(B)/sh23.err, build/run-sd/Printouts)"; exit 1; fi
+	@PREP='$(D23PREP)' DESK=1 sh tests/shots.sh "$(EMU) $(EMUFLAGS) $(CARDDATE) --classic-print tests/p23.atascii@6" $(SD) desk23 45 $(D23SHOTS)
+	@if diff -u tests/pictures/$(call REV7IF,desk23) $(B)/desk23.md5; then echo "PASS  0.23 Desktop: the print notice, the folder disk (dialog, numbers, Refresh), Run in Atari (an icon, Files), Files' Print"; \
+	else echo "FAIL  0.23 Desktop pictures (look at $(B)/desk23*.ppm, then make pictures-23)"; exit 1; fi
+	@if grep 'emu816: CLASSIC\|emu816: P: job' $(B)/desk23.err | diff -u tests/desk23.err - && cmp -s "build/run-pic/Printouts/2026-11-18 15.30.05 Atari.txt" tests/p23-atari.txt \
+	  && cmp -s "build/run-pic/Printouts/2026-11-18 15.30.35 Files.txt" $(SD)/README.TXT; \
+	then echo "PASS  0.23 Desktop: the folder disk mounted twice (Refresh), kind 4 from the icon and from Files, the classic Atari's job and Files' job"; \
+	else echo "FAIL  0.23 Desktop: classic ops or jobs ($(B)/desk23.err, build/run-pic/Printouts)"; exit 1; fi
+	@rm -rf build/run-pc; cp -r tests/pc build/run-pc
+	@DESK=1 sh tests/shots.sh "$(EMU) $(EMUFLAGS) $(CARDDATE) --pc-folder build/run-pc --pc-time 2026-11-18T15:30 --classic-print tests/p23.atascii@6" $(SD) desk23b 13 10.5
+	@if diff -u tests/pictures/$(call REV7IF,desk23b) $(B)/desk23b.md5 && cmp -s "build/run-pc/Printouts/2026-11-18 15.30.05 Atari.pdf" tests/desk23b.pdf; \
+	then echo "PASS  0.23 Desktop with a PC that makes PDFs: the notice \"(to the PC)\", PRINTD's marked .pdf on the PC"; \
+	else echo "FAIL  0.23 Desktop with the PC ($(B)/desk23b*.ppm, build/run-pc/Printouts, tests/desk23b.pdf)"; exit 1; fi
+	@if grep -l 'emu816: blitter:' $(B)/sh23.err $(B)/desk23.err $(B)/desk23b.err; then echo "FAIL  blitter rules (0.23 sessions)"; exit 1; \
+	else echo "PASS  blitter rules: the 0.23 sessions"; fi
+
+pictures-23:
+	cp $(B)/desk23.md5 tests/pictures/$(call REV7IF,desk23)
+	cp $(B)/desk23b.md5 tests/pictures/$(call REV7IF,desk23b)
+	python3 -c "from PIL import Image; import glob; [Image.open(f).save('tests/pictures/' + f.split('/')[-1][:-4] + '.png') for f in sorted(glob.glob('$(B)/desk23[0-9]*.ppm') + glob.glob('$(B)/desk23b[0-9]*.ppm'))]"
+
 pictures-net:
 	cp $(B)/download.md5 tests/pictures/$(call REV7,download)
 	cp $(B)/bbs.md5 tests/pictures/$(call REV7IF,bbs)
@@ -650,7 +725,81 @@ pictures-games:
 	cp $(B)/quabrick.md5 tests/pictures/$(call REV7,quabrick)
 	python3 -c "from PIL import Image; import glob; [Image.open(f).save('tests/pictures/' + f.split('/')[-1][:-4] + '.png') for f in sorted(glob.glob('$(B)/calc[0-9]*.ppm') + glob.glob('$(B)/solitair[0-9]*.ppm') + glob.glob('$(B)/quabrick[0-9]*.ppm'))]"
 
-.PHONY: test-games pictures-games test-pc pictures-pc test-net pictures-net
+# (0.23) printing: PRINTD in the text shell (tests/printd.keys, emu816 --pc-folder on a fresh
+# copy of tests/pc; the card gets tests/print as /Printouts and a job of 40,000 bytes made by
+# tests/mkbig.py): the marked .pdf files on the PC compared with tests/printd-edit.pdf,
+# tests/printd-notes.pdf and the big job; tests/printd2.keys with --no-pc-print and without
+# the PC volume: exit 2, nothing written; tests/printd3.keys: the PC link lost during a job
+# of 384 KB (the board's PC speed): exit 1 at once, no file left. Printer's pictures
+# (tests/printer.src: the list, the preview, a classic Atari job arriving, Delete, Send to
+# PC; tests/printer2.src: no jobs, jobs arriving, a resize, "printer PATH", Open in Edit).
+# make pictures-print freezes the pictures.
+PRTPREP = rm -rf build/run-sd build/run-pc; cp -r $(SD) build/run-sd; touch build/run-sd/SYSTEM/NODESK; cp -r tests/print build/run-sd/Printouts; \
+          cp -r tests/pc build/run-pc; python3 tests/mkbig.py "build/run-sd/Printouts/2026-11-16 08.00.00 Big.txt"
+PRTCUT  = python3 -c "import sys; L = open(sys.argv[1], encoding='latin-1').read().split('\n'); i = [k for k, l in enumerate(L) if '> printd' in l][0]; \
+          open(sys.argv[2], 'w', encoding='latin-1').write('\n'.join([L[i][L[i].index('> printd'):]] + L[i + 1:]))"
+PRTSHOTS := 6 7.5 10.5 16 17.5 19 22
+PRT2SHOTS := 5 11 16.5 20 26 29
+test-print: all $(EMU)
+	@$(PRTPREP) 40000
+	@$(EMU) $(EMUFLAGS) $(CARDDATE) $(PCFLAGS) --headless --sd build/run-sd --max-seconds 25 \
+	    --keys "$$(python3 tests/keyscript.py tests/printd.keys)" \
+	    $(SD)/SYSTEM/HORIZON.SYS > $(B)/printd.out 2> $(B)/printd.err || true
+	@$(PRTCUT) $(B)/printd.out $(B)/printd.txt
+	@if python3 tests/compare.py tests/printd.txt $(B)/printd.txt && cmp -s "build/run-pc/Printouts/2026-11-18 15.30.12 Edit.pdf" tests/printd-edit.pdf \
+	  && cmp -s build/run-pc/Printouts/notes.pdf tests/printd-notes.pdf \
+	  && python3 -c "import sys; b = open('build/run-sd/Printouts/2026-11-16 08.00.00 Big.txt', 'rb').read(); \
+	       sys.exit(open('build/run-pc/Printouts/2026-11-16 08.00.00 Big.pdf', 'rb').read() != b'\x1bA816PRINT 1\ntitle=Big\ndate=2026-11-16 08:00\n\n' + b)" \
+	  && [ "$$(ls build/run-pc/Printouts | tr '\n' /)" = "2026-11-16 08.00.00 Big.pdf/2026-11-18 15.30.12 Edit.pdf/notes.pdf/" ]; \
+	then echo "PASS  0.23 PRINTD: the marked .pdf files on the PC byte for byte (title and date from the job's name, or the file's), exit 1 for no job, the usage line"; \
+	else echo "FAIL  0.23 PRINTD ($(B)/printd.out, build/run-pc/Printouts)"; exit 1; fi
+	@$(PRTPREP) 100
+	@$(EMU) $(EMUFLAGS) $(CARDDATE) $(PCFLAGS) --no-pc-print --headless --sd build/run-sd --max-seconds 8 \
+	    --keys "$$(python3 tests/keyscript.py tests/printd2.keys)" \
+	    $(SD)/SYSTEM/HORIZON.SYS > $(B)/printd2.out 2> $(B)/printd2.err || true
+	@$(PRTCUT) $(B)/printd2.out $(B)/printd2.txt
+	@if python3 tests/compare.py tests/printd2.txt $(B)/printd2.txt && ! test -e build/run-pc/Printouts; \
+	then echo "PASS  0.23 PRINTD: a gateway without the print service: exit 2, nothing written"; \
+	else echo "FAIL  0.23 PRINTD with --no-pc-print ($(B)/printd2.out, build/run-pc)"; exit 1; fi
+	@$(PRTPREP) 100
+	@$(EMU) $(EMUFLAGS) $(CARDDATE) --headless --sd build/run-sd --max-seconds 8 \
+	    --keys "$$(python3 tests/keyscript.py tests/printd2.keys)" \
+	    $(SD)/SYSTEM/HORIZON.SYS > $(B)/printd2b.out 2> $(B)/printd2b.err || true
+	@$(PRTCUT) $(B)/printd2b.out $(B)/printd2b.txt
+	@if python3 tests/compare.py tests/printd2.txt $(B)/printd2b.txt; \
+	then echo "PASS  0.23 PRINTD: no PC volume: exit 2"; \
+	else echo "FAIL  0.23 PRINTD without the PC ($(B)/printd2b.out)"; exit 1; fi
+	@$(PRTPREP) 393216
+	@$(EMU) $(EMUFLAGS) $(CARDDATE) $(PCFLAGS) --pc-kbps 100:55 --pc-drop-at 6 --headless --sd build/run-sd --max-seconds 14 \
+	    --keys "$$(python3 tests/keyscript.py tests/printd3.keys)" \
+	    $(SD)/SYSTEM/HORIZON.SYS > $(B)/printd3.out 2> $(B)/printd3.err || true
+	@$(PRTCUT) $(B)/printd3.out $(B)/printd3.txt
+	@if python3 tests/compare.py tests/printd3.txt $(B)/printd3.txt && [ -z "$$(ls -A build/run-pc/Printouts)" ] && [ -z "$$(ls -A build/run-pc/.atari816-partial)" ]; \
+	then echo "PASS  0.23 PRINTD: the PC link lost during a job: exit 1 at once, no file left on the PC"; \
+	else echo "FAIL  0.23 PRINTD, the link lost ($(B)/printd3.out, build/run-pc)"; exit 1; fi
+	@rm -rf build/run-pc; cp -r tests/pc build/run-pc
+	@PREP='cp -r ../../tests/print Printouts && rm Printouts/notes.txt' sh tests/shots.sh "$(EMU) $(EMUFLAGS) $(CARDDATE) --pc-folder build/run-pc --pc-time 2026-11-18T16:00 \
+	    --classic-print tests/lprint.bin@11" $(SD) printer 24 $(PRTSHOTS)
+	@if diff -u tests/pictures/$(call REV7IF,printer) $(B)/printer.md5; then echo "PASS  0.23 Printer: the jobs newest first, the preview (tabs, wrap, a new page, scrolling), a classic job arriving, Delete, Send to PC"; \
+	else echo "FAIL  0.23 Printer pictures (look at $(B)/printer*.ppm, then make pictures-print)"; exit 1; fi
+	@if [ "$$(ls build/run-pic/Printouts | tr '\n' /)" = "2026-11-17 09.05.00 Atari.txt/2026-11-18 15.31.40 BASIC.txt/2026-11-18 16.00.10 Atari.txt/" ] \
+	  && python3 -c "import sys; b = open('build/run-pic/Printouts/2026-11-18 16.00.10 Atari.txt', 'rb').read(); \
+	       sys.exit(open('build/run-pc/Printouts/2026-11-18 16.00.10 Atari.pdf', 'rb').read() != b'\x1bA816PRINT 1\ntitle=Atari\ndate=2026-11-18 16:00\n\n' + b)"; \
+	then echo "PASS  0.23 Printer: the job deleted, the classic job sent to the PC (marked .pdf)"; \
+	else echo "FAIL  0.23 Printer: the files (build/run-pic/Printouts, build/run-pc/Printouts)"; exit 1; fi
+	@sh tests/shots.sh "$(EMU) $(EMUFLAGS) $(CARDDATE) --classic-print tests/lprint.bin@6 --classic-print tests/lprint.bin@12" $(SD) printer2 31 $(PRT2SHOTS)
+	@if diff -u tests/pictures/$(call REV7IF,printer2) $(B)/printer2.md5; then echo "PASS  0.23 Printer: no jobs, jobs arriving, a resize, \"printer PATH\", Open in Edit"; \
+	else echo "FAIL  0.23 Printer pictures, second session (look at $(B)/printer2*.ppm, then make pictures-print)"; exit 1; fi
+	@if grep -l 'emu816: blitter:' $(B)/printd.err $(B)/printd2.err $(B)/printd2b.err $(B)/printd3.err $(B)/printer.err $(B)/printer2.err; \
+	then echo "FAIL  blitter rules (the printing sessions)"; exit 1; \
+	else echo "PASS  blitter rules: the printing sessions"; fi
+
+pictures-print:
+	cp $(B)/printer.md5 tests/pictures/$(call REV7IF,printer)
+	cp $(B)/printer2.md5 tests/pictures/$(call REV7IF,printer2)
+	python3 -c "from PIL import Image; import glob; [Image.open(f).save('tests/pictures/' + f.split('/')[-1][:-4] + '.png') for f in sorted(glob.glob('$(B)/printer[0-9]*.p[np][gm]'))]"
+
+.PHONY: test-games pictures-games test-pc pictures-pc test-net pictures-net test-23 pictures-23 test-print pictures-print
 
 clean:
 	rm -rf build
@@ -676,15 +825,20 @@ write-test: all $(EMU)
 	else echo "FAIL  Write: build/run-pic/W1.MD is not tests/write-w1.md"; exit 1; fi
 	@if cmp $(B)/run-pic/NOTES.md tests/write-notes.md; then echo "PASS  Write: a new document saved as NOTES.md (Markdown)"; \
 	else echo "FAIL  Write: build/run-pic/NOTES.md is not tests/write-notes.md"; exit 1; fi
-	@if grep -l 'emu816: blitter:' $(B)/write-t.err $(B)/write.err $(B)/writee.err; \
+	@PREP='cp ../../tests/write-print.md WP.MD' sh tests/shots.sh "$(EMU) $(EMUFLAGS) $(CARDDATE)" $(SD) writep 11 $(WPSHOTS)
+	@if diff -u tests/pictures/writep.md5 $(B)/writep.md5; then echo "PASS  0.23 Write pictures: File > Print, Printed"; \
+	else echo "FAIL  0.23 Write pictures, printing (look at $(B)/writep*.ppm, then make pictures)"; exit 1; fi
+	@if cmp "$(JOB) Write.txt" tests/write-print.txt; then echo "PASS  0.23 Write: the print job (plain text: wrapped at 80 columns, headings, lists, a quote, a rule)"; \
+	else echo "FAIL  0.23 Write: the job in build/run-pic/Printouts is not tests/write-print.txt"; exit 1; fi
+	@if grep -l 'emu816: blitter:' $(B)/write-t.err $(B)/write.err $(B)/writee.err $(B)/writep.err; \
 	then echo "FAIL  blitter rules (Write)"; exit 1; else echo "PASS  blitter rules (Write): no violations"; fi
 	@echo "WRITE TESTS PASSED"
 
 # Write's pictures (after checking build/write*.ppm by eye)
 pictures: write-pictures
 write-pictures:
-	cp $(B)/write.md5 $(B)/writee.md5 tests/pictures/
-	python3 -c "from PIL import Image; import glob; [Image.open(f).save('tests/pictures/' + f.split('/')[-1][:-4] + '.png') for f in sorted(glob.glob('$(B)/write[0-9]*.ppm') + glob.glob('$(B)/writee[0-9]*.ppm'))]"
+	cp $(B)/write.md5 $(B)/writee.md5 $(B)/writep.md5 tests/pictures/
+	python3 -c "from PIL import Image; import glob; [Image.open(f).save('tests/pictures/' + f.split('/')[-1][:-4] + '.png') for f in sorted(glob.glob('$(B)/write[0-9]*.ppm') + glob.glob('$(B)/writee[0-9]*.ppm') + glob.glob('$(B)/writep[0-9]*.ppm'))]"
 
 .PHONY: all run test clean pictures write-pictures write-test
 
@@ -728,3 +882,38 @@ basic2-pictures:
 	python3 -c "from PIL import Image; import glob; [Image.open(f).save('tests/pictures/' + f.split('/')[-1][:-4] + '.png') for f in sorted(glob.glob('$(B)/basic2s[0-9]*.ppm'))]"
 
 .PHONY: basic2-test basic2-pictures
+
+# (Horizon 0.23) BASIC printing (also run by make test; make basicp-test runs it alone):
+# tests/basicp.bas as a -t script: LPRINT (numbers, strings, ; , TAB, SPC, several lines),
+# LLIST in direct mode and inside a run, an error in a run, STOP and CONT, a break (Esc at
+# 10 s, tests/basicp-t.keys), LPRINT in direct mode, the new reserved words. The output must
+# match tests/basicp.txt; the 7 jobs in /Printouts of the card copy (no clock on the card: all
+# "2026-01-01 00.00.00 BASIC.txt", "... BASIC 2.txt" ...) tests/basicp-1.txt .. -7.txt byte
+# for byte, and nothing else may be there (a job left open is a ".2026-..." file). Then
+# tests/basicpe.bas with a file named /Printouts on the card: no job can be made, "File error
+# $47" in a run and in direct mode (tests/basicpe.txt).
+BASPSECS := 14
+BASPJOBS := 1 2 3 4 5 6 7
+test: basicp-test
+basicp-test: all $(EMU)
+	@rm -rf build/run-sd; cp -r $(SD) build/run-sd; touch build/run-sd/SYSTEM/NODESK; cp tests/basicp.bas build/run-sd/BP.BAS
+	@$(EMU) $(EMUFLAGS) $(CARDDATE) --headless --sd build/run-sd --max-seconds $(BASPSECS) \
+	    --keys "$$(python3 tests/keyscript.py tests/basicp-t.keys)" \
+	    $(SD)/SYSTEM/HORIZON.SYS > $(B)/basicp-t.out 2> $(B)/basicp-t.err || true
+	@python3 -c "L = open('$(B)/basicp-t.out', encoding='latin-1').read().split('\n'); i = [k for k, l in enumerate(L) if '> basic -t /BP.BAS' in l][0]; open('$(B)/basicp-t.txt', 'w', encoding='latin-1').write('\n'.join(L[i + 1:]))"
+	@if python3 tests/compare.py tests/basicp.txt $(B)/basicp-t.txt; then echo "PASS  BASIC printing: LPRINT, LLIST, the job of a run (END, an error, STOP, CONT, a break), direct mode"; \
+	else echo "FAIL  BASIC printing ($(B)/basicp-t.out)"; exit 1; fi
+	@ok=1; for n in $(BASPJOBS); do s=" $$n"; [ $$n = 1 ] && s=; \
+	  cmp "build/run-sd/Printouts/2026-01-01 00.00.00 BASIC$$s.txt" tests/basicp-$$n.txt || ok=0; done; \
+	  [ "$$(ls -A build/run-sd/Printouts | wc -l)" = "$(words $(BASPJOBS))" ] || { ls -A build/run-sd/Printouts; ok=0; }; \
+	  if [ $$ok = 1 ]; then echo "PASS  BASIC printing: the $(words $(BASPJOBS)) jobs in /Printouts, all closed"; \
+	  else echo "FAIL  BASIC printing: the jobs in build/run-sd/Printouts are not tests/basicp-N.txt"; exit 1; fi
+	@rm -rf build/run-sd; cp -r $(SD) build/run-sd; touch build/run-sd/SYSTEM/NODESK build/run-sd/Printouts; cp tests/basicpe.bas build/run-sd/BPE.BAS
+	@$(EMU) $(EMUFLAGS) $(CARDDATE) --headless --sd build/run-sd --max-seconds 8 \
+	    --keys "$$(python3 tests/keyscript.py tests/basicpe-t.keys)" \
+	    $(SD)/SYSTEM/HORIZON.SYS > $(B)/basicpe-t.out 2> $(B)/basicpe-t.err || true
+	@python3 -c "L = open('$(B)/basicpe-t.out', encoding='latin-1').read().split('\n'); i = [k for k, l in enumerate(L) if '> basic -t /BPE.BAS' in l][0]; open('$(B)/basicpe-t.txt', 'w', encoding='latin-1').write('\n'.join(L[i + 1:]))"
+	@if python3 tests/compare.py tests/basicpe.txt $(B)/basicpe-t.txt; then echo "PASS  BASIC printing: no job possible, File error \$$47 in a run and in direct mode"; \
+	else echo "FAIL  BASIC printing errors ($(B)/basicpe-t.out)"; exit 1; fi
+
+.PHONY: basicp-test

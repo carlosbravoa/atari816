@@ -12,11 +12,12 @@ It boots into the Desktop (or, with `/SYSTEM/NODESK` on the card, into the text 
 
 | Folder | Contents |
 | --- | --- |
-| `/SYSTEM` | `HORIZON.SYS` (the kernel), `INIT.PRG`, the system programs `DESK.PRG` (the Desktop), `SH.PRG` (the shell), `ABOUT.PRG`, the settings files `CONFIG` (Settings), `PROGRAMS` (the Desktop's Programs menu) and `NODESK` (optional: boot into the text shell), and (0.14) `ICONS` (the Desktop's icons, made from `sdfiles/icons.txt`), `CLOCK` (the last time set, written by the Desktop and the shell) and `LAYOUT` (where the desktop icons are), (0.22) `URLS` (the Downloader's last addresses) and `BBS.TXT` (the BBS terminal's address book). Files hides it and refuses to start its programs |
+| `/SYSTEM` | `HORIZON.SYS` (the kernel), `INIT.PRG`, the system programs `DESK.PRG` (the Desktop), `SH.PRG` (the shell), `ABOUT.PRG`, (0.23) `PRINTD.PRG` (sends a print job to the PC), the settings files `CONFIG` (Settings), `PROGRAMS` (the Desktop's Programs menu) and `NODESK` (optional: boot into the text shell), and (0.14) `ICONS` (the Desktop's icons, made from `sdfiles/icons.txt`), `CLOCK` (the last time set, written by the Desktop and the shell) and `LAYOUT` (where the desktop icons are), (0.22) `URLS` (the Downloader's last addresses) and `BBS.TXT` (the BBS terminal's address book). Files hides it and refuses to start its programs |
 | `/SYSTEM/TESTS` | Test and demo programs: SELFTEST, HELLO, COUNT, SPIN, TICK, REGS, CRASH, FTEST, PING, PONG, KEYS, MOUSE, MTEST, BENCH, WDEMO, LEAK, HOG, (0.15) KTEST, (0.17) STEST, (0.18) GTEST |
-| `/BIN` | The applications: WFILES (Files), TERM (Terminal), EDIT, WRITE, SHEET, PAINT, BASIC, CALC, SOLITAIR, (0.17) QUABRICK (Quabricks; its samples QUABRICK.SFX, its high scores QUABRICK.DAT), SETTINGS, (0.22) DOWNLOAD (the Downloader), BBS (the BBS terminal), and the shell's tools FILES (the text browser), CAT, DIR, MEM |
+| `/BIN` | The applications: WFILES (Files), TERM (Terminal), EDIT, WRITE, SHEET, PAINT, BASIC, CALC, SOLITAIR, (0.17) QUABRICK (Quabricks; its samples QUABRICK.SFX, its high scores QUABRICK.DAT), SETTINGS, (0.22) DOWNLOAD (the Downloader), BBS (the BBS terminal), (0.23) PRINTER (Printer), and the shell's tools FILES (the text browser), CAT, DIR, MEM |
 | `/Desktop` | Created by the Desktop if missing: what is in it shows as icons on the desktop (0.14: shortcuts are `.LNK` files, below) |
-| `/atari.ini` | The classic machine's settings, read by the I/O processor at boot (Settings > Classic Atari edits it) |
+| `/atari.ini` | The classic machine's settings, read by the I/O processor at boot (Settings > Classic Atari edits it; 0.23: also the folder disk, `folder=` and `folderdrive=`) |
+| `/Printouts` | (0.23) The print jobs, made by the I/O processor at the first one (see "Version 0.23") |
 
 The shell finds a command word in `/BIN`, then `/SYSTEM`, then `/SYSTEM/TESTS`.
 
@@ -325,6 +326,10 @@ the blitter: the software drawing paths; both must pass):
    `tests/bbs.log`. No internet is needed. Not covered: a URL whose size the server does not
    give (emu816 always gives the file's size; uicpwin and `get` show "KB" only then).
 
+28. **Printing, the folder disk, Run in Atari** (0.23; `make test-23`, `make test-print`, `make
+   basicp-test`, and the Edit, Write and Sheet sessions `editp`, `writep`, `sheetp`): see
+   "Version 0.23", Tests.
+
 The Desktop sessions (`DESK=1` in `tests/shots.sh`) get `tests/desk.programs` as their
 Programs menu (the order of 0.12), so programs added to `sdfiles/PROGRAMS` do not change
 their pictures. `PREP=command` runs a command on the session's copy of the card first.
@@ -469,7 +474,8 @@ suits a games machine: pick a game, Enter, play, F12 returns to the list.
 built-ins: help, ls [path] (or dir), cat file, cd [path], pwd, ps,
   mem, kill id, cls, atari, exit, files (the file browser), restart [full], shutdown
 files: rm path..., mkdir path, mv from to, cp from to (to: a folder too)
-Atari: mount file [1-4], eject d1-d4|cart|xex, boot, run file
+Atari: mount file [1-4], eject d1-d4|cart|xex, boot, run file (.bas .lst too)
+print file...: each file to the printer (/Printouts; Programs > Printer)
 other words run <WORD>.PRG from /BIN, /SYSTEM or /SYSTEM/TESTS (or a .PRG path);
   the rest of the line is its argument; a trailing & runs it in the background
 names with spaces: "in quotes"; ctrl-C stops the foreground job
@@ -507,6 +513,10 @@ names with spaces: "in quotes"; ctrl-C stops the foreground job
     kind comes from the extension).
   - `eject d1`-`d4` | `cart` | `xex` removes one.
   - `boot` cold boots with what is mounted; `run FILE` = start this, and only this.
+    (0.23) `run` also takes a BASIC program (`.bas`, `.lst`): "Run in Atari".
+- **`print FILE...`** (0.23): each file becomes a print job of its own (`/PRN:Shell`), its
+  bytes as they are: `printed NAME`, or why not. The text shell shows no notices and sends
+  nothing to the PC by itself (the Desktop does that).
   - F12 always returns to Horizon.
 - **Tools in `/BIN`:** CAT, DIR, MEM. **In `/SYSTEM/TESTS`:** SELFTEST, HELLO, COUNT
   (argument: a letter), SPIN, TICK, REGS, CRASH (argument: mode 1-13), FTEST (file syscall
@@ -995,6 +1005,120 @@ bus time (see emu/README.md, "Memory timing"). Expect the same factor on the CPU
   source stride), SYS_WGEOM, SYS_TNAME, WE_DROP's modifiers, the date routines (ui_clk*,
   `user/uidate.s`), shortcuts (ui_lnkread, ui_mklink), program and file icons (ui_prog,
   ui_ficon). See ABI.md and ui.inc.
+
+## Version 0.23 (the PC link, step 3: printing, the folder disk, Run in Atari)
+
+The I/O processor's step 3 (ABI.md, "Printing, Run in Atari and the folder disk (0.23)"; the
+user's side: `/docs/Using the printer and the Atari.md` on the card). Nothing new in the kernel.
+
+**Printing.** A program prints by writing a *print job*: it opens `/PRN:NAME`, writes plain text
+(LF line ends, FF a new page) and closes it; the I/O processor keeps it as
+`/Printouts/YYYY-MM-DD HH.MM.SS NAME.txt` (a `.` in front of the name while it is written).
+The classic Atari's printer (P:, `LPRINT` in Atari BASIC) makes jobs named `Atari`. STAT of
+`/PRN:` counts the finished jobs.
+
+- **Who prints:** Edit, Write and Sheet: File > Print (Ctrl+P), jobs `Edit`, `Write`,
+  `Sheet`. Edit prints its text as it is (LF line ends); Write prints the document as plain
+  text (each paragraph wrapped at 80 columns, the markup removed, heading 1 underlined with
+  `=`, heading 2 with `-`, heading 3 in capitals, list items with `- ` or their number, quotes
+  indented by 4, a rule as 80 `-`, a blank line between blocks); Sheet prints the used range as
+  aligned columns of the values as shown (each column as wide as its widest value, two spaces
+  between columns, numbers right-aligned, text left-aligned; no column letters or row
+  numbers; SHEET.md, "Printing"). Edit and Write say "Printed" on their status line; Sheet has
+  none (the Desktop's notice says it); errors are alerts. Horizon BASIC: `LPRINT` (like PRINT)
+  and `LLIST` (like LIST): a run is one job `BASIC`, finished when BASIC is back at the prompt
+  (END, STOP, an error, a break, RUN, closing BASIC); a direct LPRINT or LLIST line is a job of
+  its own (BASIC.md, "Printing"; LPRINT and LLIST are reserved words now).
+- **The Desktop** asks the count every second (one STAT; /Printouts is read only when it
+  changed). For a new job the status at the right of the menu bar says "Printed: NAME" for
+  about 6 s instead of the clock, with the information chime; a click on it opens Printer.
+  When the PC's gateway makes PDFs (STAT `/PC:` has PCS_PRINT), the Desktop also starts
+  `/SYSTEM/PRINTD.PRG` for each new job: the notice says "(to the PC)". The Desktop's timer is
+  now 1 s; its old 5-s work (the clock, /Desktop, the Atari's mounts) still comes at the
+  timer's 5th, 10th, ... second (by the uptime, so a tick lost in a dialog or while the Atari
+  was shown moves nothing). Without the Desktop (the text shell) there are no notices and
+  nothing is sent at once.
+- **Printer** (`/BIN/PRINTER.PRG`, Programs > Printer, `printer [PATH]` in the shell; one
+  window only): the jobs of /Printouts newest first (the size, the name without `.txt`; names
+  starting with `.` left out), a preview of the selected one in the fixed font (wrapped, tabs,
+  a new page as a grey line, the first 63 KB), Delete (asks first), Send to PC (dimmed unless
+  the PC makes PDFs; it runs PRINTD and says whether it worked), Open in Edit (also Enter or a
+  double click), Close (Esc); a File menu with the same. It reads /Printouts again when the
+  count of finished jobs changes (one STAT a second) and when it gets the focus.
+- **PRINTD** (`/SYSTEM/PRINTD.PRG PATH`, no window): sends one job to the PC: mkdir
+  `/PC:/Printouts`, `BASE.pdf` written with the marker, `title=` the name after the job's date
+  and time, `date=` from the job's name (else from its file's date), an empty line, the text in
+  pieces of 16 KB. Exit 0 sent, 1 an error (a lost link too: the partial file deleted), 2 no PC
+  or no PCS_PRINT.
+- **The shell:** `print FILE...` (each file a job `Shell`, its bytes as they are).
+- **Files:** a text file's pop-up menu (the files that have "Open with Edit") has **Print**
+  (a job `Files`, the file as it is; the footer says "Printed").
+
+**Run in Atari.** A BASIC program (`.BAS`, `.LST`: a listing, or a program saved by Atari
+BASIC) runs on the classic Atari: classic_mount CK_BASRUN makes it the boot disk on D1:, the
+Atari cold boots with BASIC on and a small loader types it in and RUNs it (F12 returns). In
+Files' and the Desktop's pop-up menus of such files ("Run in Atari"; a shortcut: by its
+target), and the shell's `run FILE` (ulib `atari_run` uses CK_BASRUN for `.bas` and `.lst`; a
+cartridge is ejected first). The Atari panel shows it as the program. A double click on a
+`.BAS` still opens Horizon BASIC. `.LST` files are text (FT_TEXT: Edit opens them).
+
+**The folder disk.** A folder of the card as a disk of the classic Atari (classic_mount
+CK_FOLDER: an Atari DOS 2.0S disk built from its files; what the Atari writes goes back into
+the folder). The Atari panel has a new row at its bottom: **Folder disk...** and, next to it,
+"12 files, 3 left out, 120 free sectors" (STAT `/D1:`..`/D4:`; ", saving..." while the Atari's
+changes wait; looked at every second while the panel is open) or "No folder disk". The
+dialog: the folder (default `/Atari`, made if missing; a text field: the file dialog cannot
+choose folders), the drive (a list D1:-D4:, default D2:; "D1: (the Atari cannot boot from
+it)"), Cancel / Mount. The folder disk's row shows "PATH (folder)" and a **Refresh** button
+next to Eject (the same folder mounted again: the Atari's changes saved, the disk built again).
+Mounting on another drive ejects the old one first. The Atari icon's menu has "Folder disk..."
+too (in its last group, so the items above it stay where they were).
+
+**Edit and Atari listings.** A file whose first 4 KB hold a $9B and no LF is an Atari file
+(`LIST "D:..."` on the Atari): $9B ends its lines, the status line says "Atari line ends",
+and it is saved with $9B line ends again, so the Atari can ENTER it (new, LF and CR LF files
+stay as they were). Inverse video (bytes $A0-$FF) is shown and saved as the normal character:
+it is lost.
+
+**The card's docs:** `/docs/Using the printer and the Atari.md` (for the user: printing, Printer, the
+PDFs, the folder disk from Atari DOS and Atari BASIC, Run in Atari and its limits).
+
+**Sizes.** EDIT.PRG 34,880 -> 35,377, WRITE.PRG 62,704 -> 63,891 (1.6 KB left under the
+loader's 64 KB; every program also grew by the 38 bytes of ulib's atari_rkind), SHEET.PRG 47,673 -> 48,232, BASIC.PRG 52,084 -> 52,527, DESK.PRG 39,535 ->
+42,866, WFILES.PRG 31,278 -> 31,553, SH.PRG 14,923 -> 15,550; new: PRINTER.PRG 22,119, PRINTD.PRG
+3,479. The kernel is unchanged (only its version string).
+
+Tests (`make test-23`, run by `make test`): `tests/sh23.keys` (the shell: print, run of a
+listing: emu816's log shows classic_mount kind 4) and `tests/desk23.src` (the Desktop, with
+emu816's `--classic-print`: the notice, Printer from the status, the folder disk's dialog,
+numbers and Refresh, the Atari icon's menu, Run in Atari from an icon and from Files, Files'
+Print; the jobs and the classic ops are compared). Printer and PRINTD (`make test-print`): PRINTD with `--pc-folder` (the marked .pdf files byte
+for byte), `--no-pc-print` and no PC (exit 2), the link lost (exit 1, nothing left); Printer's
+pictures in two sessions (`tests/printer.src`: the list, the preview, scrolling, a classic job
+arriving, Delete, Send to PC; `tests/printer2.src`: no jobs, jobs arriving, a resize,
+`printer PATH`, Open in Edit). Edit (`tests/editp.keys`: an Atari listing opened, edited and
+saved with $9B line ends, two jobs), Write (`tests/writep.keys`, the job equals
+`tests/write-print.txt`) and Sheet (`tests/sheetp.keys`, `tests/sheet-print.txt`). BASIC
+(`make basicp-test`: LPRINT and LLIST in runs that end, fail, stop and continue, direct mode;
+the seven jobs compared; a card where no job can be made: "File error $47"). The tests set a
+clock (/SYSTEM/CLOCK) where the jobs' names must have running times; without one every job is
+`2026-01-01 00.00.00`.
+
+Changed pictures: the About pictures (the version), the Atari panel (desk14 2-5, desk18: its
+new bottom row; the bar's free memory there is one bank lower: the taller panel's bitmap), the
+Atari icon's menu (desk15 1, 3; desk18 4), Files' text-file menu (desk15 4: Print), basic2s
+(the two new keywords make tokenising a little slower: the programs are at other points when
+the shots come), files8 with --rev 7 (WRITE.PRG is larger and loads a little later).
+
+emu816 models all of it (emu/README.md, "Printing, Run in Atari, the folder disk"; new options
+`--classic-print FILE@SECONDS`, `--no-pc-print`).
+
+The BBS test's server (`tests/bbsserver.py`) now goes on as soon as the terminal's telnet
+answers are in, instead of always waiting 1 s twice: emu816 runs in step with the host's clock
+while a connection is open, so those 2 s of host time put the second call's screen about 0.2 s
+before the link drop at 26 s, and under a loaded host the `bbs5` picture could catch it either
+way (it was seen to differ at `--rev 10`). Now the screen comes within a few milliseconds of the
+connection.
 
 ## Version 0.22 (the PC link, step 2: the internet)
 

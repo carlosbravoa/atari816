@@ -141,8 +141,9 @@ class AtariLink:
             progress(len(data), len(data))
 
     def run(self, data, name, progress=None):
-        """Send then boot. `data` must be a .xex ($FFFF header)."""
-        if data[:2] != b"\xff\xff":
+        """Send then boot. `data` must be a .xex ($FFFF header), or (step 3) a BASIC program
+        named .BAS or .LST (a listing or a SAVE file: "Run in Atari")."""
+        if data[:2] != b"\xff\xff" and not name.lower().endswith((".bas", ".lst")):
             raise LinkError("not a .xex (missing $FFFF header)")
         self.send(data, name, progress)
         self._req(pclink.D_RUN, name.lstrip("/").encode() + b"\0", what="run")

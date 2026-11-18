@@ -1,0 +1,18 @@
+# (0.23) PRINTD in the text shell (emu816 --pc-folder on a fresh copy of tests/pc; the card
+# gets tests/print as /Printouts, and a job of 40,000 bytes made by tests/mkbig.py: three
+# pieces of 16 KB). Each run in the background: the shell reports "[done] id exit CODE".
+# A job named "YYYY-MM-DD HH.MM.SS NAME" (in quotes), one with another name (no quotes,
+# blanks around it: its title is the name, its date the file's), the big one, no such job
+# (exit 1), no path (the usage line, exit 1); then the PC's folder
+1500 {esc}
++1500 printd "/Printouts/2026-11-18 15.30.12 Edit.txt" &\n
++2500 \n
++500 printd   /Printouts/notes.txt   &\n
++2500 \n
++500 printd "/Printouts/2026-11-16 08.00.00 Big.txt" &\n
++3500 \n
++500 printd "/Printouts/nothere.txt" &\n
++2500 \n
++500 printd &\n
++2500 \n
++500 ls /PC:/Printouts\n

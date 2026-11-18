@@ -1,0 +1,4 @@
+> printd "/Printouts/2026-11-16 08.00.00 Big.txt"
+exit 0001
+> 
+> 

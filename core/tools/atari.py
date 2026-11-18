@@ -12,7 +12,8 @@ Usage:
   atari.py ping [-p PORT]            # send ENQ, expect "A8OK" back
   atari.py send FILE [NAME] [-p P]   # copy FILE to the SD, default /PC/<name>;
                                      #   NAME may include folders: GAMES/X.ATR
-  atari.py run  FILE.XEX [-p P]      # send + boot it (the make-run dev loop)
+  atari.py run  FILE.XEX [-p P]      # send + boot it (the make-run dev loop); also a
+                                     #   BASIC program FILE.BAS / FILE.LST (Run in Atari)
   atari.py eject [-p P]              # just eject the virtual .xex from D1:
   atari.py key NAME|0xNN [--shift] [--ctrl] [--hold MS]  # press one raw key:
                                      #   start/select/option (=F6/F7/F8), f1..f12,

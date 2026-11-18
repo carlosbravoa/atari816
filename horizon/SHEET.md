@@ -44,6 +44,7 @@ and ten years of savings with compound interest).
 | ctrl-D / R | fill down / right |
 | ctrl-A | select everything |
 | ctrl-N / O / S | new, open, save |
+| ctrl-P | print (0.23) |
 
 While editing, the field takes the keys (Left / Right, Home / End, Shift selections,
 ctrl-C / X / V on its text); Enter, Tab, Up, Down, PgUp and PgDn take the entry and then
@@ -62,10 +63,10 @@ move. A formula that does not compile is not taken: a beep, and the field stays.
 
 ## Menus
 
-- **File**: New, Open..., Save, Save as..., Export CSV..., Close. New, Open and Close ask
-  before unsaved changes are lost. Open reads a `.CSV` file as CSV and anything else as a
-  sheet; Save writes a sheet (a sheet that came from a CSV file asks for a name). A name
-  without an extension gets `.SHT` (Export: `.CSV`).
+- **File**: New, Open..., Save, Save as..., Export CSV..., Print, Close. New, Open and
+  Close ask before unsaved changes are lost. Open reads a `.CSV` file as CSV and anything
+  else as a sheet; Save writes a sheet (a sheet that came from a CSV file asks for a name).
+  A name without an extension gets `.SHT` (Export: `.CSV`). Print: see "Printing" below.
 - **Edit**: Cut, Copy, Paste, Clear, Fill down, Fill right, Insert row, Insert column,
   Delete row, Delete column. Insert and delete work on as many rows or columns as are
   selected.
@@ -175,6 +176,30 @@ comma, a quote, a line break or spaces at its ends is quoted (`""` inside). Impo
 of a `.CSV` file) reads fields separated by commas, quoted fields with commas and line
 breaks inside, and treats each field as if typed: numbers become numbers.
 
+### Printing
+
+(0.23) File > Print (ctrl-P) prints the used area (from A1 to the last used row and
+column) as plain text: a print job named `Sheet` (it appears in `/Printouts`; the Desktop
+says when it is done). Each cell is printed as it is shown: in its column's format,
+formulas as their results, errors by name, but never cut to the column's width. Each
+column is as wide as its widest value, with two spaces between columns; numbers and errors
+are right-aligned, text is left-aligned. A text with nothing to its right in its row (a
+title) does not widen its column: it runs on, as it does on the screen. There are no
+column letters and no row numbers; a column with nothing in the used area is left out, and
+an empty row is an empty line. If the job cannot be written, an alert says why.
+
+The budget example (`/programs/BUDGET.SHT`) prints as:
+
+```
+Household budget, per month and per year
+
+Item          Month     Year       Share
+Rent            950.00  11,400.00   46.24%
+Electricity      64.50     774.00    3.14%
+...
+Total         2,054.55  24,654.60  100.00%
+```
+
 ## Limits
 
 - 26 columns, 999 rows; 250 characters in a cell; formulas compile to at most 1,400 bytes
@@ -203,4 +228,6 @@ END: g groups, f failed`. The script holds `.SHT` lines (cells, widths, formats)
 `tests/sheet.sht` is the script `make test` runs (21 groups: input and rounding,
 arithmetic, operators, overflow, every function, errors, cycles, a chain 998 deep, copy and
 paste, fill, insert and delete with references, files, CSV, formats, bad input, out of
-memory, and the benchmark); `tests/sheet.keys` is the picture session.
+memory, and the benchmark); `tests/sheet.keys` is the picture session; (0.23)
+`tests/sheetp.keys` prints the budget example (its job is compared with
+`tests/sheet-print.txt`).

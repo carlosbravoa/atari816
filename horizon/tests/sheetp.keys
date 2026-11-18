@@ -1,0 +1,12 @@
+# (0.23) Sheet: File > Print (text shell). /programs/BUDGET.SHT opened; F10: the File menu
+# with Print (shot 1); Print chosen from the keyboard (the window as before: shot 2); the job
+# "/Printouts/2026-01-01 00.00.00 Sheet.txt" compared with tests/sheet-print.txt. Then
+# ctrl-P prints again: "... Sheet 2.txt", the same text.
+1500 {esc}
++1500 sheet /programs/BUDGET.SHT\n
+6000 {d43}{u43}
+# shot 1 at 7.0 s; Down x5: New, Open, Save, Save as, Export CSV, Print
+7500 {down}{down}{down}{down}{down}
++500 \n
+# shot 2 at 9.5 s
+10000 {dE0}p{uE0}

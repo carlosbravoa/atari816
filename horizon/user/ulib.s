@@ -552,6 +552,13 @@ args_init:
 ; A = kind of file X, Y by its extension: 1 disk (.atr .xfd), 2 executable (.xex .com
 ; .exe), 3 cartridge (.car .rom .bin), 0 unknown. (The I/O processor's own rule.)
 atari_kind:
+        lda     #8 * 4                  ; (the table's first 8 entries)
+        bra     ak_go
+; (0.23) as atari_kind, and 4 (CK_BASRUN) for a BASIC program (.bas .lst): what "Run in
+; Atari" (atari_run) can start
+atari_rkind:
+        lda     #10 * 4
+ak_go:  sta     u_kend
         stx     z:u_s
         tya
         sta     z:u_s+2
@@ -596,7 +603,7 @@ atari_kind:
         inx
         inx
         inx
-        cpx     #8 * 4
+        cpx     u_kend
         bcc     @ext
 @none:  lda     #0
         rts
@@ -604,17 +611,21 @@ atari_kind:
 ; run Atari file X, Y: "start this, and only this". Ejects what would get in the way (a
 ; disk or executable ejects the cartridge; a cartridge ejects the executable and D1:;
 ; D2:-D4: stay), mounts it (D1: / executable / cartridge by its extension) and boots.
+; (0.23) A BASIC program (.bas .lst, a listing or a tokenised Atari BASIC file): "Run in
+; Atari": the cartridge ejected, mounted as CK_BASRUN (the I/O processor makes it the boot
+; disk on D1:, in place of D1: and the executable), the Atari cold booted with BASIC on.
 ; Returns only on an error (C set, A = code) or after F12 (C clear). u_p is kept.
 atari_run:
         stx     z:u_r
         tya
         sta     z:u_r+2
-        jsr     atari_kind
+        jsr     atari_rkind
+        sta     u_kind
         cmp     #3
         beq     @cart
         cmp     #0
         beq     @mount
-        lda     #CK_CART                ; disk / executable: no cartridge
+        lda     #CK_CART                ; disk / executable / BASIC: no cartridge
         sys     SYS_CEJECT
         bra     @mount
 @cart:  lda     #CK_XEX                 ; cartridge: no executable, nothing in D1:
@@ -623,8 +634,11 @@ atari_run:
         sys     SYS_CEJECT
 @mount: ldx     z:u_r
         ldy     z:u_r+2
-        lda     #0                      ; by extension, D1:
-        sys     SYS_CMOUNT
+        lda     u_kind                  ; BASIC: CK_BASRUN; else by extension, D1:
+        cmp     #CK_BASRUN
+        beq     :+
+        lda     #0
+:       sys     SYS_CMOUNT
         bcs     @out
         sys     SYS_CBOOT
 @out:   rts
@@ -749,6 +763,7 @@ ktab_shift:
 
         .segment "RODATA"
 ext_tab: .byte  "ATR", 1, "XFD", 1, "XEX", 2, "COM", 2, "EXE", 2, "CAR", 3, "ROM", 3, "BIN", 3
+        .byte   "BAS", 4, "LST", 4      ; (0.23) atari_rkind only: CK_BASRUN
 
         .segment "BSS"
 NHIST   = 8
@@ -760,6 +775,8 @@ u_keep: .res    KEEPMAX + 1                     ; (0.21) key_keep's characters
 u_nkeep: .res   2
 OUTMAX = 120
 out_buf: .res   OUTMAX + 2
+u_kend: .res    2                       ; (0.23) atari_kind's table end; atari_run's kind
+u_kind: .res    2
 
         .segment "ZEROPAGE"
 u_t:    .res    2

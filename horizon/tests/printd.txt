@@ -1,0 +1,25 @@
+> printd "/Printouts/2026-11-18 15.30.12 Edit.txt" &
+[bg] 4
+> printd   /Printouts/notes.txt   &
+[done] 4 exit 0000
+[bg] 5
+> 
+[done] 5 exit 0000
+> printd "/Printouts/2026-11-16 08.00.00 Big.txt" &
+[bg] 6
+> 
+[done] 6 exit 0000
+> printd "/Printouts/nothere.txt" &
+[bg] 7
+> 
+[done] 7 exit 0001
+> printd &
+[bg] 8
+> usage: printd PATH (a print job: sent to the PC as a PDF)
+
+[done] 8 exit 0001
+> ls /PC:/Printouts
+  2026-11-16 08.00.00 Big.pdf                          40046  2026-03-04 05:06
+  2026-11-18 15.30.12 Edit.pdf                          1855  2026-03-04 05:06
+  notes.pdf                                               64  2026-03-04 05:06
+> 

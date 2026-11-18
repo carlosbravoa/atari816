@@ -1,0 +1,9 @@
+emu816: P: job /Printouts/2026-11-18 15.30.05 Atari.txt
+emu816: CLASSIC_MOUNT kind 5 slot 1 /Atari -> 00
+emu816: CLASSIC_MOUNT kind 5 slot 1 /Atari -> 00
+emu816: CLASSIC_EJECT kind 3 slot 0 - -> 00
+emu816: CLASSIC_MOUNT kind 4 slot 0 /Desktop/PROG.BAS -> 00
+emu816: CLASSIC_BOOT kind 0 slot 0 - -> 00
+emu816: CLASSIC_EJECT kind 3 slot 0 - -> 00
+emu816: CLASSIC_MOUNT kind 4 slot 0 /HELLO.LST -> 00
+emu816: CLASSIC_BOOT kind 0 slot 0 - -> 00

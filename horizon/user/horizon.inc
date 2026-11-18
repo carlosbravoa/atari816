@@ -104,6 +104,23 @@ CK_AUTO = 0
 CK_DISK = 1
 CK_XEX  = 2
 CK_CART = 3
+CK_BASRUN = 4         ; (0.23) "Run in Atari": a BASIC program (a listing or a tokenised SAVE file) as the boot
+                      ;   disk on D1:, typed in and RUN by a small loader; answered and recorded as CK_XEX
+CK_FOLDER = 5         ; (0.23) a folder on the card as an Atari DOS 2.0S disk on D1:-D4: (A = 5 | slot << 8;
+                      ;   answered as CK_DISK); the same folder and drive again = Refresh. STAT "/D1:" .. "/D4:"
+                      ;   (exactly) of its drive: size = files shown | left out << 8 | free sectors << 16,
+                      ;   attr $10 | FD_SAVING; another drive: $44
+FD_SAVING = 1         ;   STAT attr bit 0: Atari changes are waiting to be saved into the folder
+; (0.23) printing: OPEN "/PRN:NAME" (any mode) gives a normal file handle: a print job, plain text
+; (LF line ends, FF a new page, Latin-1), finished at CLOSE as /Printouts/YYYY-MM-DD HH.MM.SS NAME.txt.
+; STAT of exactly "/PRN:": size = the jobs finished since the I/O processor started (both kinds)
+; STAT of exactly "/PC:": size = the gateway's services (PCS_*)
+PCS_FILES = $01       ; the PC volume (/PC:)
+PCS_DEV   = $02       ; the developer service
+PCS_NET   = $04       ; tcp:// and tls:// connections
+PCS_FETCH = $08       ; http://, https://, ftp:// URLs
+PCS_PRINT = $10       ; (0.23) PDFs: a file /PC:/Printouts/NAME.pdf starting with the print marker
+                      ;   (ESC "A816PRINT 1" LF, "title=..." LF, "date=YYYY-MM-DD HH:MM" LF, LF, the text)
 SYS_ILEND     = $53   ; A = task id, X = 1: ctrl-C kills it; lend the keyboard (back at its exit)
 SYS_IPOLL     = $54   ; as SYS_IREAD, but C set and A = EAGAIN at once when nothing is queued
 
@@ -370,7 +387,7 @@ E_NSTREAM = EIO + 18    ; too many open files / streams
 .global out_char, out_str, out_flush, put_char, put_str, put_nl
 .global put_hex8, put_hex16, put_dec, put_decw, div10
 .global key_ascii, read_char, getline, str_skip, parse_dec, key_keep
-.global spawn, exit_a, args_init, next_arg, atari_kind, atari_run
+.global spawn, exit_a, args_init, next_arg, atari_kind, atari_run, atari_rkind
 .globalzp u_p                   ; long pointer used by str_skip / parse_dec
 .globalzp u_arg                 ; spawn's argument string (u24, 0 = none)
 

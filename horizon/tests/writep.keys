@@ -1,0 +1,11 @@
+# (0.23) Write: File > Print (text shell). The card copy gets tests/write-print.md as /WP.MD
+# (headings, inline markup, lists, a quote, a rule, long lines). The File menu open from the
+# keyboard (F10), Print shown (shot 1); Print chosen: "Printed" on the status line (shot 2);
+# the job "/Printouts/2026-01-01 00.00.00 Write.txt" compared with tests/write-print.txt.
+1500 {esc}
++1500 write /WP.MD\n
+6000 {d43}{u43}
+# shot 1 at 7.0 s; Down x5: New, Open, Save, Save as, Export, Print
+7500 {down}{down}{down}{down}{down}
++500 \n
+# shot 2 at 10.0 s

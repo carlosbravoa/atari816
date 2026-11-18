@@ -4,7 +4,9 @@
 ; The sheet: 26 columns (A-Z) x 999 rows. A cell holds a number, a text or a formula
 ; ("=" first). Numbers are decimal fixed point (64 bits, four decimals: sht_num.s);
 ; formulas (sht_fx.s) are recalculated after every change in dependency order
-; (sht_calc.s). Files: the program's own text format .SHT and CSV (sht_file.s). See
+; (sht_calc.s). Files: the program's own text format .SHT and CSV (sht_file.s). (0.23)
+; File > Print (ctrl-P): the used area as text columns, a print job "/PRN:Sheet" (sht_file.s,
+; prt_save); an alert if it fails (no message when it works: the Desktop tells). See
 ; SHEET.md for the user's side.
 ;
 ; One assembly unit:
@@ -1420,7 +1422,7 @@ onmenu: lda     editing                 ; (a menu while editing: the entry first
         tay
         jmp     (mtab,x)
 m_file: tyx
-        cpx     #14
+        cpx     #18
         jcs     loop
         jmp     (ftab,x)
 m_edit: tyx
@@ -2184,6 +2186,20 @@ m_export:
         ldy     #.loword(fpath)
         jsr     ui_strcpy
         jmp     loop
+; (0.23) File > Print (ctrl-P): the used area as text columns (prt_save), a print job
+; "/PRN:Sheet"; an alert if it failed (the Desktop tells when it is done)
+m_print:
+        jsr     busy
+        jsr     prt_save
+        php
+        pha
+        jsr     unbusy
+        pla
+        plp
+        bcc     :+
+        ldx     #.loword(m_cantprint)
+        jsr     errbox
+:       jmp     loop
 m_close:
         jsr     confirm
         jcs     loop
@@ -2923,7 +2939,7 @@ askwidth:
 
         .segment "RODATA"
 menus:  .byte   "File", 0, "New", 0, "Open...", 0, "Save", 0, "Save as...", 0
-        .byte   "Export CSV...", 0, "-", 0, "Close", 0, 0
+        .byte   "Export CSV...", 0, "-", 0, "Print", 0, "-", 0, "Close", 0, 0
         .byte   "Edit", 0, "Cut", 0, "Copy", 0, "Paste", 0, "Clear", 0, "-", 0
         .byte   "Fill down", 0, "Fill right", 0, "-", 0, "Insert row", 0, "Insert column", 0
         .byte   "Delete row", 0, "Delete column", 0, 0
@@ -2931,17 +2947,19 @@ menus:  .byte   "File", 0, "New", 0, "Open...", 0, "Save", 0, "Save as...", 0
         .byte   "-", 0, "Thousands", 0, "Percent", 0, "-", 0, "Column width...", 0, 0, 0
         .res    256 - (* - menus)
 mtab:   .addr   m_file, m_edit, m_fmt
-ftab:   .addr   m_new, m_open, m_save, m_saveas, m_export, loop, m_close
+ftab:   .addr   m_new, m_open, m_save, m_saveas, m_export, loop, m_print, loop, m_close
 etab:   .addr   m_cut, m_copy, m_paste, m_clear, loop, m_filld, m_fillr, loop, m_insr, m_insc
         .addr   m_delr, m_delc
 otab:   .addr   o_gen, o_d0, o_d2, o_d4, loop, o_thou, o_pct, loop, o_width
 ; ctrl + key: {ASCII, routine}
 ctltab: .word   14, m_new, 15, m_open, 19, m_save, 24, m_cut, 3, m_copy, 22, m_paste
-        .word   4, m_filld, 18, m_fillr, 1, m_all, 0
+        .word   4, m_filld, 18, m_fillr, 1, m_all, 16, m_print, 0
 ctls:   .addr   vsb, hsb, fld, 0
 ptchars: .byte  "=+-*/^(,:<>"
 PTN     = * - ptchars
 t_sheet: .byte  "Sheet: ", 0
+t_prn:  .byte   "/PRN:Sheet", 0
+m_cantprint: .byte "Cannot print ", 0
 t_star: .byte   " *", 0
 t_newname: .byte "(new)", 0
 t_open: .byte   "Open", 0

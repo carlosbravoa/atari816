@@ -737,8 +737,9 @@ quote:  phx
 ; A right press on a row (it is selected) or on the empty part of the list, or the menu
 ; key (Shift+F10) with a row selected: a pop-up menu (ui_popup). Each item has an action
 ; (a routine of the File / Edit / View menus, or one of its own):
-;   a file: Open, (text: Open with Edit, Open with Write; an Atari file: Load into Atari), -,
-;     Copy, Add to desktop, -, Rename..., Delete
+;   a file: Open, (text: Open with Edit, Open with Write, (0.23) Print; a BASIC program, .bas
+;     .lst: Run in Atari; an Atari file: Load into Atari), -, Copy, Add to desktop, -,
+;     Rename..., Delete
 ;   a folder: Open, Open in new window, -, Add to desktop, -, Rename..., Delete
 ;   "..": Open
 ;   the background: New folder..., Paste (dimmed: an empty clipboard), -, Parent folder
@@ -765,11 +766,15 @@ ctxmenu:
         bcc     :+
         lda     #A_OPEN                 ; "..": Open
         jsr     additem
-        bra     @show
+        jmp     @show
 :       ldx     z:sel
         jsr     rec
         jsr     kind
         sta     z:pk
+        ldx     #.loword(fname)         ; (0.23) a BASIC program (.bas .lst): Run in Atari
+        ldy     #^fname
+        jsr     atari_rkind
+        sta     prk
         lda     #A_OPEN
         jsr     additem
         lda     z:pk
@@ -787,6 +792,13 @@ ctxmenu:
 :       lda     #A_EDIT
         jsr     additem
         lda     #A_WRITE
+        jsr     additem
+        lda     #A_PRINT                ; (0.23) a text: Print
+        jsr     additem
+:       lda     prk
+        cmp     #CK_BASRUN
+        bne     :+
+        lda     #A_RUNAT
         jsr     additem
 :       lda     z:pk
         cmp     #FT_ATARI
@@ -970,6 +982,29 @@ a_load: jsr     fullsel
         jsr     say
         jmp     loop
 :
+        jsr     footer                  ; the footer says what is mounted
+        jmp     loop
+; (0.23) Print: the file copied as it is into a print job ("/PRN:Files", ui_cptree); the
+; footer says so
+a_print:
+        jsr     fullsel
+        jcs     long
+        ldx     #.loword(pth)
+        ldy     #.loword(p_prn)
+        jsr     ui_cptree
+        jcs     oops
+        ldx     #.loword(m_print)
+        jsr     note
+        jmp     loop
+; (0.23) Run in Atari: a BASIC program (.bas .lst) as the Atari's boot disk, the Atari cold
+; booted and shown (ulib atari_run; F12 comes back)
+a_runat:
+        jsr     fullsel
+        jcs     long
+        ldx     #.loword(pth)
+        ldy     #^pth
+        jsr     atari_run
+        jcs     oops
         jsr     footer                  ; the footer says what is mounted
         jmp     loop
 ; pth = the selected entry's full path; C set: too long
@@ -2967,10 +3002,12 @@ A_DEL   = 9
 A_NEWF  = 10
 A_PASTE = 11
 A_UP    = 12
+A_PRINT = 13                            ; (0.23)
+A_RUNAT = 14
 acttab: .addr   open, a_neww, a_edit, a_write, a_load, loop, copy, addesk, rename, delete
-        .addr   newdir, paste, parent
+        .addr   newdir, paste, parent, a_print, a_runat
 acttxt: .addr   s_aopen, s_aneww, s_aedit, s_awrite, s_aload, s_asep, s_acopy, s_adesk
-        .addr   s_aren, s_adel, s_anewf, s_apaste, s_aup
+        .addr   s_aren, s_adel, s_anewf, s_apaste, s_aup, s_aprint, s_arunat
 s_aopen: .byte  "Open", 9, "Enter", 0
 s_aneww: .byte  "Open in new window", 0
 s_aedit: .byte  "Open with Edit", 0
@@ -2984,6 +3021,10 @@ s_adel: .byte   "Delete", 9, "Del", 0
 s_anewf: .byte  "New folder...", 0
 s_apaste: .byte "Paste", 9, "Ctrl+V", 0
 s_aup:  .byte   "Parent folder", 9, "Backspace", 0
+s_aprint: .byte "Print", 0
+s_arunat: .byte "Run in Atari", 0
+p_prn:  .byte   "/PRN:Files", 0         ; (0.23) a print job
+m_print: .byte  "Printed (Programs > Printer shows it)", 0
 p_edit: .byte   "/BIN/EDIT.PRG", 0
 p_write: .byte  "/BIN/WRITE.PRG", 0
 t_edit: .byte   "Edit", 0
@@ -3124,6 +3165,7 @@ rblk:   .res    10
 dblk:   .res    16
 ev:     .res    8
 fname:  .res    260
+prk:    .res    2                       ; (0.23) the pop-up's entry: atari_rkind
 came:   .res    260
 pbuf:   .res    300                     ; (0.15) a pop-up menu's items, their actions
 pact:   .res    12

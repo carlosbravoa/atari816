@@ -42,14 +42,17 @@
 15300 {d2B}{u2B}edited.txt
 # shot at 16.4; Enter saves
 16700 \n
-# a change, then File > Close: the alert
+# a change, then File > Close: the alert ((0.23) Close is 28 lines lower, below Print and
+# a separator; the pointer goes back up after the click, where the picture had it)
 17800 x
 18300 M -100:-100:0:0
 +50 M -65:-21:0:0
 +300 M 0:0:0:1
 +100 M 0:0:0:0
 +300 M 0:88:0:0
-+200 M 0:0:0:1
++50 M 0:28:0:0
++150 M 0:0:0:1
 +100 M 0:0:0:0
++50 M 0:-28:0:0
 # shot at 19.6; Esc = Cancel
 20500 {esc}

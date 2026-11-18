@@ -1,0 +1,26 @@
+# (0.23) Printer in the text shell (tests/mousegen.py makes tests/printer.keys from this).
+# emu816 --pc-folder on a fresh copy of tests/pc, --pc-time 2026-11-18T16:00 (the clock
+# comes from the PC: new jobs are dated from it), --classic-print tests/lprint.bin@11 (the
+# classic Atari prints at 11 s: the job is finished at 14 s). The card gets tests/print as
+# /Printouts (without notes.txt; its hidden ".2026-11-18 15.40.00 Write.txt" is not
+# listed). The window's content is at (41, 38). Shots (s):
+#   1   6.0  the jobs newest first, the newest selected, its preview
+#   2   7.5  Down: the Edit job (tabs, a long line wrapped at a blank, the scroll bar)
+#   3  10.5  two clicks on the scroll bar's track: two pages down (the FF row of dashes)
+#   4  16.0  the classic Atari's job arrived (the timer saw STAT /PRN: change): it is on
+#            top, the selection and the preview stay on the Edit job
+#   5  17.5  the Delete key: the question
+#   6  19.0  Enter: deleted; the row where it was (the older Atari job) is selected
+#   7  22.0  Home, a click on Send to PC: PRINTD ran: "Sent to the PC as Printouts/..."
+1500 key {esc}
+3000 key printer\n
+6500 key {down}
+8500 move 585 270
+9000 click
+9500 click
+16500 key {d4C}{u4C}
+18000 key \n
+19500 key {home}
+20000 move 176 315
+20300 click
+22500 key \n

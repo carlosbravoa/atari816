@@ -283,6 +283,10 @@ static void usage(void)
         "                       default: the host's clock)\n"
         "  --pc-drop-at SECONDS the PC link drops at this emulated time\n"
         "  --pc-back-at SECONDS and comes back at this one (a new session)\n"
+        "  --no-pc-print        the gateway cannot make PDFs (STAT /PC: without the PRINT bit 4)\n"
+        "  --classic-print FILE@SECONDS  the classic Atari prints FILE (ATASCII, as P: sends it) at that\n"
+        "                       emulated time: a print job /Printouts/... Atari.txt, finished 3 s later\n"
+        "                       (through core/firmware/prnconv.c, as the firmware); repeatable\n"
         "  --net                the internet (PC link step 2): tcp://host:port are real host connections\n"
         "  --net-root DIR       ... and http://, https://, ftp:// URLs are served from DIR/host/path\n"
         "  --net-delay MS       the PC's time to answer a URL OPEN or STAT (default 0)\n"
@@ -338,6 +342,8 @@ int main(int argc, char **argv)
             if (a[2] == 'c') mailbox_card_date = mktime(&tm); else mailbox_pc_time = mktime(&tm);
         }
         else if (!strcmp(a, "--pc-folder") && i + 1 < argc) mailbox_pc_root = argv[++i];
+        else if (!strcmp(a, "--no-pc-print")) mailbox_no_pc_print = 1;
+        else if (!strcmp(a, "--classic-print") && i + 1 < argc) { if (mailbox_classic_print(argv[++i])) usage(); }
         else if (!strcmp(a, "--net")) mailbox_net = 1;
         else if (!strcmp(a, "--net-root") && i + 1 < argc) mailbox_net_root = argv[++i];
         else if (!strcmp(a, "--net-delay") && i + 1 < argc) {

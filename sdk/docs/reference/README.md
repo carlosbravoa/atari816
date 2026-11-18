@@ -1,6 +1,6 @@
 # Programmer's reference
 
-The interface between Horizon 0.18 (and 0.22's internet) and its programs, reorganised by topic with an example
+The interface between Horizon 0.18 (and 0.22's internet, 0.23's printing) and its programs, reorganised by topic with an example
 for each call. The source of truth is `horizon/ABI.md` (and the sources it names);
 `make -C sdk check` compares this reference with `horizon/user/horizon.inc`, `ui.inc` and
 the kernel's syscall table, and assembles every example.
@@ -16,7 +16,8 @@ the kernel's syscall table, and assembles every example.
 | [controls.md](controls.md) | The controls library (ui.lib): buttons, fields, lists, scroll bars, alerts, the file dialog |
 | [ulib.md](ulib.md) | The user library and the macros of horizon.inc |
 | [sound.md](sound.md) | beep, sound_write, POKEY 2 and the DACs; samples on Lau; the sound volume |
-| [classic.md](classic.md) | The classic Atari: mount, eject, boot, show |
+| [classic.md](classic.md) | The classic Atari: mount, eject, boot, show; (0.23) Run in Atari, the folder disk |
+| [printing.md](printing.md) | (0.23) Printing: `/PRN:NAME` jobs, watching for new ones, PDFs on the PC |
 | [games.md](games.md) | Horizon 0.18, the games round: frame sync (vsync, frame, WE_VBL), palette entries, Marga's sprites, full-screen mode (own framebuffer, scrolling with wrap and split, raster table), draw lists |
 | [hardware.md](hardware.md) | The hardware (video, blitter, sound, input, timers) and what programs can reach of it |
 | [performance.md](performance.md) | Measured costs: CPU, syscalls, drawing, board against emulator |

@@ -735,3 +735,118 @@ on the PC's loopback); with an older gateway it stops at once with $8A (no such 
 **Flash:** `core/impl/net1/` (bitstream, report, timing, `cold.bin`) is in flash (`cold.bin` at
 0x500000, then the bitstream); the board came up from flash to the Horizon 0.22 desktop and the
 self test passed (11 OK + DONE). `core/impl/input1/` is the fallback (with its own `cold.bin`).
+
+## Step 24: printing, the classic Atari's printer and files, "Run in Atari" (2026-11-18, Horizon 0.23)
+
+No RTL change: the bitstream was rebuilt for the new firmware only (the netlist is the same).
+
+**Part 0: the PC link test that failed 2 of 8 runs** (`core/test/pclink_host/run_tests.py
+--pcdrop 20000`). Two bugs, both found by looping the test:
+
+- **Firmware engine** (`pclink.c`): a developer frame that came while the firmware was busy
+  (a PC volume request, a stream send) is kept ("parked") and served later. `pl_poll` read the
+  next frame *before* serving the kept one, so when the PC's next frame came just as the
+  firmware became free it was served first: the last SINK frame overtook the one before it,
+  the answer was 1,028 bytes short and the overtaken frame was counted into the next request.
+  Now the kept frame is served first, and while one is kept (also while it is being served) a
+  new developer frame gets no ACK (the PC sends it again). A new session forgets the kept frame.
+- **Gateway** (`tools/pclink.py`): the developer channel was given free *after* the last frame
+  of an answer was passed to the tool. A tool that sent its next request at once found the
+  channel still "owned", skipped taking it, and the gateway then freed it: the answer of that
+  request found no owner and was dropped ("no answer to request"). Now it is freed first.
+- The test harness now polls the link between two PC volume requests, as the firmware's main
+  loop does (before, a developer request waited until all the file requests were done, which
+  failed on a busy PC), builds its program in its own temporary folder (runs side by side) and
+  removes it afterwards, and never falls back to a real board's serial port.
+- Proof (the final code): `run_tests.py --pcdrop 20000` 50 runs out of 50 passed, `--drop
+  20000` 10 of 10, no loss 10 of 10. Before the fixes the loop failed about 1 run in 15 (a
+  SINK 1,028 bytes short; or "no answer to request 0x7e" after it).
+
+**The keyboard (user report).** Since step 22 the firmware made Horizon's key events from its
+own parse of the CH9350's reports, which took a keyboard report only with type $10 and one
+checksum rule; the hardware decoder (`uart_kbd_ch9350.sv`, which fed Horizon before step 22)
+takes type $10 or $11 and the sum with or without the type byte. Some keyboards send the other
+forms: Horizon got no keys from them (the mouse worked). The firmware now accepts the same as
+the decoder. The input generator (developer op INJECT, `intest.py`) now feeds its key taps as
+whole CH9350 reports through the same parser (type $10 / $11 and both checksum forms in turn),
+with a parser state of its own (the real CH9350 sends a status packet `57 AB 82 A3` about 30
+times a second: mixed into the same state, one generated report a phase was lost).
+
+**Printing.** OPEN of `/PRN:NAME` makes a print job on the card (`/Printouts/YYYY-MM-DD
+HH.MM.SS NAME.txt`, written under a dotted name and renamed at CLOSE); STAT `/PRN:` counts the
+jobs. The classic Atari's printer (SIO $40-$43, P:) is answered in block RAM (STATUS, WRITE of
+40 / 29 / 20 bytes): each record goes into a ring in SDRAM; the main loop turns the records into
+text (`prnconv.c`: ATASCII EOL to LF, inverse video cleared, the graphics characters as
+look-alikes, padding after an EOL and trailing blanks dropped, CR LF / LF / FF / TAB / ESC of
+ASCII printer drivers handled) and the job `... Atari.txt` is written when 3 s pass without data,
+the classic machine is frozen (F12) or cold booted, or SYS_SYNC comes. Nothing goes to Horizon
+by message: Horizon notices new jobs by the counter. On the PC side a job becomes a PDF
+(`04-pc-link.md`, "Printing").
+
+**The folder disk** (`fdisk.c`, plain C; host test `core/test/fdisk_host/`). A folder of the
+card is an Atari DOS 2.0S single-density disk built in SDRAM (92,160 bytes at physical
+0x180000, in the classic machine's part of the SDRAM that its RAM and ROMs do not use): files
+with 8.3 names in name order, at most 64, as many as fit in 707 sectors. The SIO code reads and
+writes sectors there (block RAM code, a 128-byte copy: no card access in the SIO path). What the
+Atari writes is saved into the folder 1.5 s after the drive was last used (10 s after a failed
+try), by cold code that runs only then: a file is saved only when its directory entry is closed
+and its sector chain is complete and consistent, through a temporary file and a rename; a folder
+file is deleted only when no entry carries its name any more; files Horizon (or the firmware) has
+open are left alone until closed; a save stops when the Atari uses the drive meanwhile; names the
+disk does not show are never overwritten; FORMAT is refused. The disk is built again at every
+cold start of the classic machine and on a new mount of the same folder (Refresh), after saving.
+Remembered in /atari.ini (`folder=`, `folderdrive=`).
+
+**"Run in Atari"** (`bas_loader.s`, 397 bytes, served as sectors 1-4 of a virtual D1:; py65 test
+`bas_loader_test.py`): the boot program puts a read-only `D:` handler into HATABS (one file: the
+program, from sector 5 on) and hooks the screen editor's GET, so that BASIC's first input lines
+are `ENTER "D:"` and `RUN` (a listing) or `RUN "D:"` (a SAVE file); with the last of them the
+editor is unhooked. BASIC shows the errors of bad lines as always. The firmware converts a text
+listing (LF / CR LF / CR to $9B, TAB to a blank, a final RUN line dropped) and boots with BASIC
+enabled (the default cartridge out for that boot). The developer op RUN takes a .BAS / .LST path
+too (`atari.py run PROG.LST`).
+
+**Firmware size:** hot text 21,212 + data 616 + bss 4,412 = **26,240 of 28,672 bytes** (2,432
+left; was 25,108: +1,132 for the printer, the memory disks and the checks in the main loop).
+Cold image 43,708 bytes (was 31,440); with the SDRAM buffers after it the cold region ends at
+0x1F688 of 0x20000. Most stack used (INFO `stk`): 1,920 bytes after the self test, FSBENCH, PCBENCH, INTEST and
+the folder disk's builds and saves.
+
+**Build** (place_option 1; the netlist did not change): logic 16,596 / 20,736 (81 %), CLS 9,395
+(91 %), registers 8,325, block RAM 44 / 46; clk_core 31.85 MHz (rule 29.7), clk_pix 89.83,
+sys_clk 41.34.
+
+**Board** (build `core/impl/step3/`, from SRAM, then flashed; Horizon 0.23 installed on the card):
+
+| Test | Result |
+| --- | --- |
+| Self test A816.BIN | 11 OK + DONE |
+| FSBENCH write / read / load | 5.33 / 3.10 / 3.10 s (step 23: 4.93-5.31 / 3.10 / 3.10) |
+| PCBENCH write / read / load (512 KB) | 9.55-9.63 / 4.13-4.28 / 4.15 s (step 23: 9.22 / 4.00 / 3.90; another PC load) |
+| INTEST | keys 80 / 80 down and up in every phase (one a phase was lost before the generator got its own parser state); mouse: no loss where nobody touched the real mouse (someone used the board's real mouse during two runs: more motion than injected) |
+| Print from the shell (`print`), Edit (Ctrl+P on an Atari listing), Horizon BASIC (`LPRINT`) | jobs `... Shell.txt`, `... Edit.txt`, `... BASIC.txt` in /Printouts; the notice "Printed: Shell" in the menu bar; the Printer window lists and shows them |
+| Classic `LPRINT` (in a "Run in Atari" program) | `... Atari.txt`: `HELLO FROM ATARI BASIC`, `LINE 1`-`LINE 3` (44 bytes), exactly |
+| Gateway: Printer's Send to PC; a classic job while connected | `Printouts/... BASIC.pdf` and (sent at once by the Desktop) `... Atari.pdf` on the PC: A4, one page, pdftotext shows the text; nothing else in the folder |
+| "Run in Atari", listing with a bad line | `40 ERROR- PRUNT "BAD LINE"` shown at ENTER, then the RUN stops with `ERROR- 17 AT LINE 40` (as Atari BASIC does); the lines before it printed |
+| "Run in Atari", good listing | `DONE`, COLOR2 (710) = 52 as the program poked |
+| "Run in Atari" of a SAVE file (`run /Atari/T.BAS`, saved by the Atari onto the folder disk) | `HI FROM DOS` |
+| Folder disk on D2: (`/Atari`), DOS 2.5 (the card's `DOS25.atr`) on D1:, Atari BASIC | `SAVE "D2:T.BAS"`, `LIST "D2:T.LST"`: both in /Atari a moment later (67 and 42 bytes); a file copied there in Horizon, after a cold start, `LOAD "D2:U.BAS"` + `LIST` right; `XIO 33` (delete) and `XIO 32` (rename) done in the folder; an overwrite to 662 bytes saved, built again at the next cold start and loaded back right |
+| Reset (warm start) during `LIST "D2:T.LST"` and during `SAVE "D2:T.BAS"` over a file | no T.LST in the folder; T.BAS kept whole (its old 67 bytes) |
+| Edit on `P.LST` (written by `LIST "D2:P.LST"`) | the lines shown, "Atari line ends" in the status line |
+| /atari.ini after the mount | `folder=/Atari`, `folderdrive=2` appended, the other lines kept |
+| ATR mount (DOS25.atr on D1:) | boots as before; BLUE.XEX runs (COLOR4 = $94), F12 back |
+
+Not tested on the board: MyDOS and SpartaDOS X on the folder disk (only DOS 2.5; MyDOS 4.5 is on
+the card), Write's and Sheet's Print and Files' right-click menus (emu816 tests only), a power cut
+during a save. Once, Horizon stopped answering (the pointer frozen, the firmware fine) after a
+sequence of keyboard menu commands typed through the developer KEY op while the Atari panel was
+open; a Horizon restart cured it and it did not happen again; cause unknown.
+
+**Note for board testing:** a gateway that runs while openFPGALoader loads a bitstream keeps a
+dead port (it writes HELLO, reads nothing, and never reopens it); `usbreset 0403:6010` (or
+restarting the gateway) brings it back.
+
+**Flash:** `core/impl/step3/` (bitstream, report, timing, `cold.bin`) is in flash (`cold.bin` at
+0x500000, then the bitstream); the board came up from flash to the Horizon 0.23 desktop, the folder
+disk mounted again from /atari.ini, self test 11 OK + DONE. `core/impl/net1/` stays the fallback
+(with its own `cold.bin`; it has neither the keyboard fix nor step 3).

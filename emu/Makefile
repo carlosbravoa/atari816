@@ -2,8 +2,11 @@
 CC      ?= gcc
 CFLAGS  ?= -O2 -Wall -std=c11 -D_DEFAULT_SOURCE
 LDLIBS  = -lm
-SRCS    = main.c cpu65816.c freddie.c sysblock.c mailbox.c net.c nvc.c blitter.c audio.c
-HDRS    = nvc_palette.h machine.h cpu65816.h freddie.h sysblock.h mailbox.h net.h nvc.h blitter.h audio.h
+# (Horizon 0.23) the firmware's converter of the classic Atari's printer output (plain C; no -I
+# there: core/firmware has its own bare-metal stdlib.h, string.h)
+FW      = ../core/firmware
+SRCS    = main.c cpu65816.c freddie.c sysblock.c mailbox.c net.c nvc.c blitter.c audio.c $(FW)/prnconv.c
+HDRS    = nvc_palette.h machine.h cpu65816.h freddie.h sysblock.h mailbox.h net.h nvc.h blitter.h audio.h $(FW)/prnconv.h
 
 ifeq ($(SDL),1)
 CFLAGS  += -DHAVE_SDL $(shell sdl2-config --cflags)

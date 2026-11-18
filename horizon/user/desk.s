@@ -53,6 +53,25 @@
 ; (0.18) As on a real machine, attaching or ejecting a cartridge is a power cycle: the
 ; executable is ejected (attaching), then the classic machine is cold booted and stays
 ; hidden (classic_boot CB_STAY). Restart Atari with a cartridge ejects the executable first.
+; (0.23) Printing: every second (the timer) the Desktop asks how many print jobs are finished
+; (one STAT of "/PRN:"); when that count changed, /Printouts is read and the jobs newer than
+; the newest seen (names start with the date and time) are new: "Printed: NAME" in the
+; status for about 6 s instead of the clock (a click on it opens Printer, /BIN/PRINTER.PRG),
+; the information chime, and, when the PC's gateway makes PDFs (STAT "/PC:": PCS_PRINT),
+; /SYSTEM/PRINTD.PRG is started for each new job (detached): the notice then says "(to the
+; PC)". The jobs there at start count as seen. Without the Desktop (the text shell): no
+; notices, nothing sent at once.
+; (0.23) "Run in Atari": a /Desktop entry (or a shortcut's target) that is a BASIC program
+; (.bas .lst) has it in its pop-up menu (ulib atari_run: classic_mount CK_BASRUN, the Atari
+; cold booted and shown; F12 returns). Double click still opens Horizon BASIC.
+; (0.23) The folder disk: the Atari panel's "Folder disk..." (and the Atari icon's menu): a
+; dialog with the folder (default /Atari, made if missing) and the drive (D1:-D4:, default
+; D2:; D1: cannot boot), Mount: classic_mount CK_FOLDER (an old folder disk on another drive
+; is ejected first: its changes are saved). The drive that is the folder disk (STAT "/D1:" ..
+; "/D4:" answers) shows "PATH (folder)" and a Refresh button (the same folder mounted again:
+; the Atari's changes saved, the disk built again from the folder); the line under the rows
+; says "12 files, 3 left out, 120 free sectors" (", saving..." while the Atari's changes wait
+; to be saved), looked at every second while the panel is open.
 ; Force quit: a dialog listing the running programs; the one chosen is killed.
 ; Restart / Shut down (and WE_SYSREQ, asked by a program with SYS_SYSREQ: no confirmation):
 ; every other window gets WE_CLOSE (SYS_WSCLOSEALL); the programs may ask to save; one that
@@ -95,13 +114,18 @@ FQH     = 196
 MENUL   = 2048                          ; the menus given to win_menu (the kernel keeps 2045)
 MENUMAX = 2000
 ATW     = 376                           ; the Atari panel's content (0.18: wider, taller:
-ATH     = 218                           ; two rows of three buttons)
+ATB     = 218                           ; two rows of three buttons above ATB; 0.23: the folder
+ATH     = ATB + 28                      ; disk's row below them)
 ATBW1   = 100                           ; its buttons' columns: Attach disk... / Eject all,
 ATBW2   = 128                           ; Attach cartridge... / Restart Atari, Run
 ATBW3   = ATW - 8 - (8 + ATBW1 + 8 + ATBW2 + 8)     ; program... / Switch to Atari
 ATROW   = 24                            ; its rows
 DTW     = 260                           ; the "Date and time" dialog's content
 DTH     = 112
+FDW     = 300                           ; (0.23) the "Folder disk" dialog's content
+FDH     = 176
+NOTICE  = 7                             ; (0.23) a print notice's seconds (+ 1)
+PNAMEL  = 64                            ; (0.23) a job's name kept (with its 0)
 
         .segment "CODE"
         .a16
@@ -180,9 +204,17 @@ start:  sys     SYS_SINGLE              ; never two Desktops
         jsr     drawall
         jsr     mkmenu                  ; the menus (the Programs list from the card)
         jsr     setmenu
-        lda     z:back                  ; the status: every 5 s
-        ldx     #500
+        stz     prtick
+        lda     #$FFFF
+        sta     fdslot
+        lda     z:back                  ; the timer: every second (0.23; the status, /Desktop
+        ldx     #100                    ; and the Atari's mounts every 5 s, as before)
         sys     SYS_WTIMER
+        sys     SYS_UPTIME              ; (its start: the 5-s work at its 5th, 10th, ... second)
+        sta     tm0
+        stx     tm0+2
+        stz     tlast
+        jsr     prinit                  ; (0.23) the print jobs there now count as seen
         jsr     clock
         ldx     #.loword(p_files)       ; Files at start
         ldy     #0
@@ -203,11 +235,7 @@ loop:   lda     #0
         and     #$00FF
         cmp     #WE_TICK
         bne     :+
-        jsr     clock
-        jsr     rescan
-        jsr     atcheck
-        bcc     loop
-        jsr     atchanged
+        jsr     tick
         jmp     loop
 :       cmp     #WE_BUTTON
         jeq     onbutton
@@ -216,10 +244,18 @@ loop:   lda     #0
         cmp     #WE_DROP
         jeq     ondrop
         cmp     #WE_STATUS
-        bne     :+
-        jsr     datedlg
+        bne     @nost
+        lda     prtick                  ; (0.23) a print notice shows: Printer
+        beq     :+
+        ldx     #.loword(p_printer)
+        ldy     #0
+        lda     #.loword(t_printer)
+        jsr     ui_launch
         jmp     loop
-:       cmp     #WE_MENUOPEN
+:       jsr     datedlg
+        jmp     loop
+@nost:
+        cmp     #WE_MENUOPEN
         bne     :+
         lda     ui_ev+2                 ; Programs opens: the list read again
         cmp     #1
@@ -321,6 +357,7 @@ loop:   lda     #0
         jne     loop
 @atari: sys     SYS_CLASSIC             ; until F12 there
         stz     z:btn
+        jsr     tcatch                  ; (0.23)
         jmp     loop
 
 fail:   print   "desk: no window system\n"
@@ -2103,10 +2140,11 @@ ispc:   ldy     #0
 ; A right press (or the menu key / Shift+F10 with an icon selected): a pop-up menu
 ; (ui_popup, the kernel's SYS_WPOPUP) for the icon there, or for the desktop:
 ;   the Atari icon: Attach disk..., Attach cartridge..., Run program..., -, one "Eject ..."
-;     line per thing loaded, Eject all, -, Restart Atari, Switch to Atari, -,
-;     Atari settings..., Open panel
+;     line per thing loaded, Eject all, -, Restart Atari, Switch to Atari, -, (0.23) Folder
+;     disk..., Atari settings..., Open panel
 ;   the SD card: Open
-;   a /Desktop entry: Open, (a shortcut: Show original), -, Rename..., Delete
+;   a /Desktop entry: Open, ((0.23) a BASIC program: Run in Atari), (a shortcut: Show
+;     original), -, Rename..., Delete
 ;   the desktop: New folder..., Tidy up, -, Settings...
 ; A = 0: at the pointer (the event's a, b; the icon there is selected), 1: from the
 ; keyboard (the selected icon; the menu below it)
@@ -2139,19 +2177,29 @@ ctxmenu:
         lda     z:pui
         jmp     openicon
 @out:   rts
-@ent:   lda     z:pui                   ; a /Desktop entry: Open, (Show original), -,
-        asl     a                       ; Rename..., Delete
+@ent:   lda     z:pui                   ; a /Desktop entry: Open, ((0.23) a BASIC program:
+        asl     a                       ; Run in Atari), (Show original), -, Rename..., Delete
         tax
         lda     ic_lnk,x
         sta     z:plnk
-        ldx     #.loword(pu_lnk)
-        lda     z:plnk
-        bne     :+
-        ldx     #.loword(pu_ent)
-:       jsr     popup
+        jsr     prunq                   ; (0.23) prun: a BASIC program (its path in pth)
+        lda     prun
+        asl     a
+        ora     z:plnk
+        asl     a
+        tax
+        lda     pu_tab,x
+        tax
+        jsr     popup
         cmp     #$FFFF
         beq     @out
-        ldx     z:plnk                  ; (not a shortcut: no Show original)
+        ldx     prun                    ; (0.23) Run in Atari: item 1; the others after it
+        beq     :+                      ; as without it
+        cmp     #1
+        jeq     runat
+        bcc     :+
+        dec     a
+:       ldx     z:plnk                  ; (not a shortcut: no Show original)
         bne     :+
         cmp     #1
         bcc     :+
@@ -2182,7 +2230,7 @@ ctxmenu:
         jsr     place
         jmp     redraw
 :       cmp     #3
-        bne     @out
+        jne     @out
         ldx     #.loword(p_set)
         ldy     #0
         lda     #.loword(t_settings)
@@ -2326,7 +2374,8 @@ atmenu: ldx     #.loword(pu_at1)        ; the fixed start
         tay
         jmp     ejrow
 :       sec                             ; after them: Eject all, -, Restart Atari, Switch to
-        sbc     z:pn                    ; Atari, -, Atari settings..., Open panel
+        sbc     z:pn                    ; Atari, -, (0.23) Folder disk..., Atari settings...,
+                                        ; Open panel
         lsr     a
         bne     :+
         jmp     ejectall
@@ -2337,14 +2386,17 @@ atmenu: ldx     #.loword(pu_at1)        ; the fixed start
         bne     :+
         sys     SYS_CLASSIC
         stz     z:btn
-        rts
+        jmp     tcatch                  ; (0.23)
 :       cmp     #5
+        bne     :+
+        jmp     fdlg                    ; (0.23)
+:       cmp     #6
         bne     :+
         ldx     #.loword(p_set)         ; Settings on its Classic Atari page
         ldy     #.loword(a_atari)
         lda     #.loword(t_settings)
         jmp     ui_launch
-:       cmp     #6
+:       cmp     #7
         bne     @out
         jmp     atpanel
 @out:   rts
@@ -2496,6 +2548,11 @@ atboot: jsr     cartin
         jsr     atupdate
 :       lda     #0                      ; (not CB_STAY: shown)
         sys     SYS_CBOOT
+        php
+        pha
+        jsr     tcatch                  ; (0.23)
+        pla
+        plp
         stz     z:btn
         bcc     :+
         sta     z:err
@@ -2816,6 +2873,13 @@ atpanel:
         sta     z:atwin
         jmp     ui_beep
 :       sta     z:atwin
+        sep     #$20                    ; (0.23) the Refresh button (not always in the list)
+        .a8
+        sta     bt_fref+CT_WIN
+        rep     #$20
+        .a16
+        ldx     #$FFFF                  ; (no Refresh drawn yet)
+        stx     fdold
         ldx     #0                      ; the controls' window
 :       lda     at_ctl,x
         beq     :+
@@ -2910,7 +2974,7 @@ atfill: stz     z:c
         lda     z:c
         cmp     #6
         jcc     @r
-        rts
+        jmp     atfold                  ; (0.23) the folder disk
 
 ; an event of the panel: its close box, its buttons; (0.18) a right press or the menu key:
 ; the Atari icon's menu (without Open panel)
@@ -2961,14 +3025,20 @@ atevent:
         iny
         cpy     #6
         bne     @a
-        cpx     #.loword(bt_eja)
+        cpx     #.loword(bt_fdk)        ; (0.23) Folder disk..., Refresh
+        bne     :+
+        jmp     fdlg
+:       cpx     #.loword(bt_fref)
+        bne     :+
+        jmp     fdref
+:       cpx     #.loword(bt_eja)
         bne     @sw
         jmp     ejectall
 @sw:    cpx     #.loword(bt_switch)
         bne     @bt
         sys     SYS_CLASSIC
         stz     z:btn
-        rts
+        jmp     tcatch                  ; (0.23)
 @bt:    cpx     #.loword(bt_boot)
         bne     @out
         jmp     atboot                  ; with what is loaded; F12 comes back
@@ -3021,6 +3091,714 @@ mount:  stx     z:p
 @ok:    jmp     atupdate
 @not:   ldx     #.loword(al_notat)
         jmp     ui_alert
+
+; (0.23) Run in Atari (a /Desktop entry's menu): the BASIC program in pth (prunq) as the
+; Atari's boot disk, the Atari cold booted and shown (ulib atari_run); an alert if it fails
+runat:  ldx     #.loword(pth)
+        ldy     #^pth
+        jsr     atari_run
+        php
+        pha
+        jsr     tcatch
+        pla
+        plp
+        stz     z:btn
+        bcc     :+
+        sta     z:err
+        ldx     #.loword(al_norun)
+        jsr     ui_alert
+:       jmp     atupdate
+
+; (0.23) prun = 1 if icon pui (a /Desktop file, or a shortcut's target) is a BASIC program
+; (.bas .lst: atari_rkind); its path in pth
+prunq:  stz     prun
+        lda     z:pui
+        jsr     kindof
+        cmp     #K_FILE
+        bne     @out
+        lda     z:pui
+        jsr     iconpath                ; pth
+        lda     z:plnk
+        beq     :+
+        ldx     #.loword(pth)           ; a shortcut: its target
+        jsr     ui_lnkread
+        bcs     @out
+        ldx     #.loword(ui_lktgt)
+        ldy     #.loword(pth)
+        jsr     ui_strcpy
+:       ldx     #.loword(pth)
+        ldy     #^pth
+        jsr     atari_rkind
+        cmp     #CK_BASRUN
+        bne     @out
+        inc     prun
+@out:   rts
+
+; ---------------------------------------------------------------- the folder disk (0.23)
+; fdslot = the drive (0-3) that is the folder disk ($FFFF: none): STAT "/D1:" .. "/D4:"
+; answers only for it (st: its numbers)
+atfind: lda     #$FFFF
+        sta     fdslot
+        stz     z:c
+:       jsr     fdstat
+        bcc     :+
+        inc     z:c
+        lda     z:c
+        cmp     #4
+        bcc     :-
+        rts
+:       lda     z:c
+        sta     fdslot
+        rts
+
+; STAT of drive z:c ("/D1:" ..) -> C clear: the folder disk (st: size, attributes)
+fdstat: lda     z:c
+        clc
+        adc     #'1'
+        sep     #$20
+        .a8
+        sta     fdq+2
+        rep     #$20
+        .a16
+        ldx     #.loword(fdq)
+        jmp     statx
+
+; after atfill (the rows): the folder disk's row says "PATH (folder)" and has a Refresh
+; button next to its Eject (the other rows as wide as before); the line under the rows
+; gives its numbers, or "No folder disk"
+atfold: jsr     atfind
+        ldx     #$FFFF                  ; rows 0-3: their width (* 2: the folder's row)
+        lda     fdslot
+        cmp     #$FFFF
+        beq     :+
+        asl     a
+        tax
+:       stx     z:t
+        ldx     #0
+:       lda     at_nl,x
+        tay
+        lda     #ATW - 84 - 76
+        cpx     z:t
+        bne     :+
+        lda     #ATW - 84 - 76 - 68
+:       sta     a:CT_W,y
+        inx
+        inx
+        cpx     #8
+        bcc     :--
+        lda     fdslot
+        cmp     #$FFFF
+        bne     @f
+        stz     at_fslot                ; none: no Refresh
+        ldx     #.loword(t_nofd)
+        ldy     #.loword(fdnum)
+        jsr     ui_strcpy
+        lda     #UF_DIM
+        sta     lb_fdn+CT_FLAGS
+        jmp     @clr
+@f:     ldy     #.loword(fdnum)         ; its numbers (st, from atfind)
+        jsr     fdtext
+        stz     lb_fdn+CT_FLAGS
+        lda     fdslot                  ; Refresh on its row
+        asl     a
+        tax
+        lda     fd_rowy,x
+        sta     bt_fref+CT_Y
+        lda     #.loword(bt_fref)
+        sta     at_fslot
+        lda     fdslot                  ; its row's text: at_nm + row * 48
+        asl     a
+        asl     a
+        asl     a
+        asl     a
+        sta     z:t
+        asl     a
+        adc     z:t
+        adc     #.loword(at_nm)
+        sta     z:r
+        lda     fdslot                  ; the folder (as recorded by classic_mount)
+        ptr     qbuf
+        sys     SYS_CQUERY
+        bcs     :+
+        cmp     #0
+        bne     :++
+:       stz     qbuf                    ; (not known: after a restart of Horizon)
+:       ldy     #0                      ; (32 characters at most)
+:       lda     qbuf,y
+        and     #$00FF
+        beq     :+
+        cpy     #32
+        bcs     :+
+        sep     #$20
+        .a8
+        sta     (r),y
+        rep     #$20
+        .a16
+        iny
+        bra     :-
+:       tya                             ; " (folder)", or "(folder)" alone
+        clc
+        adc     z:r
+        tay
+        ldx     #.loword(t_fdin)
+        lda     qbuf
+        and     #$00FF
+        bne     :+
+        inx
+:       jsr     ui_strcpy
+        lda     #UF_DIM                 ; Refresh needs the path
+        ldx     qbuf
+        cpx     #0
+        beq     :+
+        lda     #0
+:       sta     bt_fref+CT_FLAGS
+        lda     fdslot                  ; its label and Eject not dimmed
+        asl     a
+        tax
+        lda     at_nl,x
+        tay
+        lda     #0
+        sta     a:CT_FLAGS,y
+        lda     at_eb,x
+        tay
+        lda     #0
+        sta     a:CT_FLAGS,y
+@clr:   lda     fdslot                  ; the Refresh column cleared when it moved or went
+        cmp     fdold
+        beq     @out
+        sta     fdold
+        lda     z:atwin
+        sta     z:ui_win
+        lda     #ATW - 136
+        sta     z:ui_x
+        lda     #8
+        sta     z:ui_y
+        lda     #64
+        sta     z:ui_w
+        lda     #ATROW * 4
+        sta     z:ui_h
+        lda     #WD_FILL | (C_BODY << 8)
+        jmp     ui_rect
+@out:   rts
+
+; Y = buffer: "12 files, 3 left out, 120 free sectors" (", saving..." while the Atari's
+; changes wait to be saved into the folder) from st (STAT of the folder disk's drive)
+fdtext: lda     st
+        and     #$00FF
+        pha
+        jsr     putdec
+        ldx     #.loword(t_fdf)
+        pla
+        cmp     #1
+        bne     :+
+        ldx     #.loword(t_fdf1)
+:       jsr     memcpy0
+        lda     st+1
+        and     #$00FF
+        jsr     putdec
+        ldx     #.loword(t_fdlo)
+        jsr     memcpy0
+        lda     st+2
+        jsr     putdec
+        ldx     #.loword(t_fds)
+        jsr     memcpy0
+        lda     st+4
+        and     #FD_SAVING
+        beq     :+
+        ldx     #.loword(t_fdsv)
+        jsr     memcpy0
+:       lda     #0
+        sep     #$20
+        .a8
+        sta     a:0,y
+        rep     #$20
+        .a16
+        rts
+
+; every second while the panel is open: the folder disk's numbers again (they change when
+; the Atari writes; "saving..."); the line drawn when it changed
+atfnum: lda     z:atwin
+        cmp     #$FFFF
+        beq     @out
+        lda     fdslot
+        cmp     #$FFFF
+        beq     @out
+        sta     z:c
+        jsr     fdstat
+        bcs     @out                    ; (gone: the look at the mounts every 5 s redraws)
+        ldy     #.loword(fdtmp)
+        jsr     fdtext
+        lda     #.loword(fdtmp)
+        sta     z:q
+        lda     #.loword(fdnum)
+        sta     z:r
+        jsr     streq
+        bcc     @out
+        ldx     #.loword(fdtmp)
+        ldy     #.loword(fdnum)
+        jsr     ui_strcpy
+        ldx     #.loword(lb_fdn)
+        jmp     ui_draw
+@out:   rts
+
+; "Folder disk": a folder of the card as an Atari DOS disk on a drive (classic_mount
+; CK_FOLDER). The folder (default /Atari, else the folder disk's) and the drive (D1:-D4:;
+; default D2:, else the folder disk's; D1: cannot boot), Mount (the same folder and drive:
+; a refresh; another drive: the old one ejected first, its changes saved)
+fdlg:   jsr     atfind
+        ldx     #.loword(t_fddef)
+        lda     fdslot
+        cmp     #$FFFF
+        beq     :+
+        ptr     qbuf
+        sys     SYS_CQUERY
+        ldx     #.loword(t_fddef)
+        bcs     :+
+        cmp     #0
+        beq     :+
+        ldx     #.loword(qbuf)
+:       ldy     #.loword(fdpath)
+        jsr     ui_strcpy
+        sta     fd_fld+FD_LEN           ; all of it selected, the cursor at its end
+        sta     fd_fld+FD_CUR
+        stz     fd_fld+FD_ANC
+        stz     fd_fld+FD_SCR
+        lda     #UF_FOCUS
+        sta     fd_fld+CT_FLAGS
+        lda     fdslot
+        cmp     #$FFFF
+        bne     :+
+        lda     #1                      ; D2:
+:       sta     fd_list+LS_SEL
+        stz     fd_list+LS_TOP
+        stz     fd_list+CT_FLAGS
+        ldx     #.loword(dg_fd)
+        jsr     ui_dlgopen
+        bcc     @run
+        jmp     ui_beep
+@run:   ldx     #.loword(dg_fd)
+        jsr     ui_dlgrun
+        cpx     #.loword(bt_fdok)
+        bne     @close
+        lda     fdpath
+        and     #$00FF
+        beq     @bad
+        lda     fd_list+LS_SEL
+        cmp     #4
+        bcc     :+
+@bad:   jsr     ui_beep
+        bra     @run
+:       sta     fdnew
+        ldx     #.loword(dg_fd)
+        jsr     ui_dlgclose
+        stz     z:btn
+        bra     fdmount
+@close: ldx     #.loword(dg_fd)
+        stz     z:btn
+        jmp     ui_dlgclose
+
+; Refresh: the folder disk's folder mounted again on its drive
+fdref:  lda     fdslot
+        cmp     #$FFFF
+        beq     @out
+        sta     fdnew
+        ptr     qbuf
+        sys     SYS_CQUERY
+        bcs     @out
+        cmp     #0
+        beq     @out
+        ldx     #.loword(qbuf)
+        ldy     #.loword(fdpath)
+        jsr     ui_strcpy
+        bra     fdmount
+@out:   rts
+
+; fdpath on drive fdnew as the folder disk (a folder disk on another drive is ejected first,
+; so the kernel's record of that drive goes too); an alert if it fails
+fdmount:
+        lda     fdslot
+        cmp     #$FFFF
+        beq     :+
+        cmp     fdnew
+        beq     :+
+        xba
+        ora     #CK_DISK
+        sys     SYS_CEJECT
+:       lda     fdnew
+        xba
+        ora     #CK_FOLDER
+        ldx     #.loword(fdpath)
+        ldy     #^fdpath
+        sys     SYS_CMOUNT
+        bcc     :+
+        sta     z:err
+        ldx     #.loword(al_nofd)
+        jsr     ui_alert
+:       jmp     atupdate
+
+; the drive list's rows (ui list callback: A = row -> X = its text)
+fd_row: asl     a
+        tax
+        lda     fd_rows,x
+        tax
+        rts
+
+; ---------------------------------------------------------------- printing (0.23)
+; The timer, every second: prcheck (new print jobs), the notice's end, the folder disk's
+; numbers; every 5 s (as before 0.23: at the timer's 5th, 10th, ... second, by the uptime,
+; so a tick lost while a dialog was open does not move them) the status, /Desktop and what
+; the Atari has loaded
+tick:   sys     SYS_UPTIME              ; the timer's second this tick belongs to (first:
+        sec                             ; the uptime before anything waits for the I/O
+        sbc     tm0                     ; processor)
+        sta     z:lo
+        txa
+        sbc     tm0+2
+        sta     z:hi
+        lda     #1000
+        jsr     div32
+        lda     z:lo
+        sta     tsec
+        jsr     prcheck
+        lda     prtick
+        beq     :+
+        dec     prtick
+        bne     :+
+        jsr     clock                   ; the notice is over: the clock again
+:       jsr     atfnum
+        lda     tsec
+        sta     z:lo
+        cmp     tlast
+        beq     @out
+        ldx     #5
+        jsr     divmod
+        cpx     #0
+        bne     @out
+        lda     z:lo
+        sta     tlast
+        bra     five
+@out:   rts
+five:   jsr     clock                   ; the 5-s work
+        jsr     rescan
+        jsr     atcheck
+        bcc     :+
+        jmp     atchanged
+:       rts
+
+; after the classic Atari was shown (SYS_CLASSIC, SYS_CBOOT: the Desktop waited there, its
+; timer's events queued): when one of the timer's 5-s seconds passed meanwhile, its work now
+; (as the 5-s timer's queued event did before 0.23; the 1-s events that follow come late and
+; would miss it)
+tcatch: sys     SYS_UPTIME
+        sec
+        sbc     tm0
+        sta     z:lo
+        txa
+        sbc     tm0+2
+        sta     z:hi
+        lda     #1000
+        jsr     div32
+        lda     z:lo
+        ldx     #5
+        jsr     divmod                  ; A = the 5-s periods passed
+        sta     z:t
+        asl     a
+        asl     a
+        clc
+        adc     z:t
+        beq     @out
+        cmp     tlast
+        beq     @out
+        bcc     @out
+        sta     tlast
+        jmp     five
+@out:   rts
+
+; at start: the count of finished jobs and the newest name there now (no notice). prok = 0
+; when the I/O processor does not know "/PRN:" (an older firmware): never asked again
+prinit: stz     prok
+        stz     prmax
+        stz     prnew
+        ldx     #.loword(p_prn)
+        jsr     statx
+        bcs     :+
+        sta     prcnt
+        inc     prok
+        stz     prnoti
+        jsr     prscan
+:       rts
+
+; one STAT of "/PRN:": when the count changed, /Printouts is read (prscan, with notices)
+prcheck:
+        lda     prok
+        beq     @out
+        ldx     #.loword(p_prn)
+        jsr     statx
+        bcs     @out
+        cmp     prcnt
+        beq     @out
+        sta     prcnt
+        lda     #1
+        sta     prnoti
+        jsr     prscan
+@out:   rts
+
+; read /Printouts (jobs: files whose names do not start with '.'): prmax = the greatest name
+; (without ".txt"; names start with the date and time). With prnoti: each name greater than
+; the greatest before is a new job (prnewjob); then the notice for the greatest new one: the
+; status, the information chime
+prscan: ldx     #.loword(prmax)
+        ldy     #.loword(prold)
+        jsr     ui_strcpy
+        stz     prnw                    ; the greatest new one
+        stz     prpc                    ; the PC not asked yet
+        stz     prsnt
+        stz     z:skip
+@call:  lda     #.loword(p_prd)         ; block: path, buffer, length, skip
+        sta     rblk
+        lda     #^p_prd
+        sta     rblk+2
+        lda     #.loword(dbuf)
+        sta     rblk+3
+        lda     #^dbuf
+        sta     rblk+5
+        lda     #DBUFLEN
+        sta     rblk+6
+        lda     z:skip
+        sta     rblk+8
+        ptr     rblk
+        sys     SYS_READDIR
+        jcs     @end
+        cmp     #0
+        jeq     @end
+        sta     z:cnt
+        clc
+        adc     z:skip
+        sta     z:skip
+        ldx     #0
+@ent:   stx     z:dpos
+        lda     dbuf+4,x                ; a folder, or ".name": not a job
+        and     #$0010
+        bne     @nx
+        lda     dbuf+6,x
+        and     #$00FF
+        cmp     #'.'
+        beq     @nx
+        jsr     prname                  ; prcand
+        ldx     #.loword(prmax)
+        jsr     prcmp
+        bcc     :+
+        ldx     #.loword(prcand)
+        ldy     #.loword(prmax)
+        jsr     ui_strcpy
+:       lda     prnoti
+        beq     @nx
+        ldx     #.loword(prold)
+        jsr     prcmp
+        bcc     @nx
+        jsr     prnewjob
+@nx:    ldx     z:dpos
+        lda     dbuf+5,x
+        and     #$00FF
+        clc
+        adc     #6
+        adc     z:dpos
+        tax
+        dec     z:cnt
+        bne     @ent
+        jmp     @call
+@end:   lda     prnw
+        and     #$00FF
+        beq     @out
+        ldx     #.loword(prnw)          ; the notice
+        ldy     #.loword(prnew)
+        jsr     ui_strcpy
+        lda     prsnt
+        sta     prsent
+        lda     #NOTICE
+        sta     prtick
+        lda     #CH_INFO
+        jsr     ui_chime
+        jmp     clock                   ; (it shows the notice)
+@out:   rts
+
+; prcand = the name of entry dpos of dbuf without ".txt" (PNAMEL - 1 characters at most)
+prname: ldx     z:dpos
+        lda     dbuf+5,x
+        and     #$00FF
+        sta     z:t
+        ldy     #0
+:       cpy     z:t
+        bcs     :+
+        cpy     #PNAMEL - 1
+        bcs     :+
+        lda     dbuf+6,x
+        sep     #$20
+        .a8
+        sta     prcand,y
+        rep     #$20
+        .a16
+        inx
+        iny
+        bra     :-
+:       lda     #0
+        sep     #$20
+        .a8
+        sta     prcand,y
+        rep     #$20
+        .a16
+        cpy     #5
+        bcc     @out
+        lda     prcand-4,y              ; ".txt" (any case) at the end: left out
+        and     #$DFFF
+        cmp     #'.' | ('T' << 8)
+        bne     @out
+        lda     prcand-2,y
+        and     #$DFDF
+        cmp     #'X' | ('T' << 8)
+        bne     @out
+        lda     #0
+        sep     #$20
+        .a8
+        sta     prcand-4,y
+        rep     #$20
+        .a16
+@out:   rts
+
+; C set if prcand is greater than the string X (byte by byte; a longer one with the same
+; start is greater)
+prcmp:  stx     z:t
+        ldy     #0
+:       lda     prcand,y
+        and     #$00FF
+        sta     z:t0
+        lda     (t),y
+        and     #$00FF
+        cmp     z:t0
+        bne     :+
+        cmp     #0
+        beq     @no
+        iny
+        bra     :-
+:       bcc     @yes                    ; (X's byte below prcand's)
+@no:    clc
+        rts
+@yes:   sec
+        rts
+
+; a new job (entry dpos of dbuf, its name in prcand): the greatest new one is the notice's;
+; when the PC's gateway makes PDFs (asked once a scan), PRINTD started for it (detached)
+prnewjob:
+        ldx     #.loword(prnw)
+        jsr     prcmp
+        bcc     :+
+        ldx     #.loword(prcand)
+        ldy     #.loword(prnw)
+        jsr     ui_strcpy
+:       lda     prpc
+        bne     :+
+        lda     #1                      ; asked: 1 no, 2 it makes PDFs
+        sta     prpc
+        ldx     #.loword(p_pc)
+        jsr     statx
+        bcs     :+
+        and     #PCS_PRINT
+        beq     :+
+        lda     #2
+        sta     prpc
+:       lda     prpc
+        cmp     #2
+        bne     @out
+        ldx     #.loword(p_prdd)        ; its path: "/Printouts/" + the name
+        ldy     #.loword(prarg)
+        jsr     memcpy0
+        ldx     z:dpos
+        lda     dbuf+5,x
+        and     #$00FF
+        sta     z:t
+:       lda     z:t
+        beq     :+
+        cpy     #.loword(prarg + 127)
+        bcs     :+
+        lda     dbuf+6,x
+        sep     #$20
+        .a8
+        sta     a:0,y
+        rep     #$20
+        .a16
+        inx
+        iny
+        dec     z:t
+        bra     :-
+:       lda     #0
+        sep     #$20
+        .a8
+        sta     a:0,y
+        rep     #$20
+        .a16
+        lda     #.loword(prarg)
+        sta     z:u_arg
+        lda     #^prarg
+        sta     z:u_arg+2
+        ldx     #.loword(p_printd)
+        ldy     #^p_printd
+        lda     #1 | SP_DETACH
+        jsr     spawn
+        bcs     @out
+        lda     #1                      ; (the notice: "(to the PC)")
+        sta     prsnt
+@out:   rts
+
+; the status during a notice: "Printed: NAME" (NAME: the job's name after its date and
+; time), " (to the PC)" when PRINTD was started
+notice: ldx     #.loword(t_prd)
+        ldy     #.loword(stat)
+        jsr     memcpy0
+        ldx     #.loword(prnew)         ; "YYYY-MM-DD HH.MM.SS NAME": NAME
+        lda     prnew+4
+        and     #$00FF
+        cmp     #'-'
+        bne     :+
+        lda     prnew+19
+        and     #$00FF
+        cmp     #' '
+        bne     :+
+        lda     prnew+20
+        and     #$00FF
+        beq     :+
+        ldx     #.loword(prnew + 20)
+:       lda     #31 - 9                 ; room: 31 characters in all
+        sta     z:t
+        lda     prsent
+        beq     :+
+        lda     #31 - 9 - 12
+        sta     z:t
+:       lda     a:0,x
+        and     #$00FF
+        beq     :+
+        dec     z:t
+        bmi     :+
+        sep     #$20
+        .a8
+        sta     a:0,y
+        rep     #$20
+        .a16
+        inx
+        iny
+        bra     :-
+:       lda     prsent
+        beq     :+
+        ldx     #.loword(t_topc)
+        jsr     memcpy0
+:       lda     #0
+        sep     #$20
+        .a8
+        sta     a:0,y
+        rep     #$20
+        .a16
+        ptr     stat
+        sys     SYS_WSTATUS
+        rts
 
 ; ---------------------------------------------------------------- the date and time
 ; "Date and time": the date (year, month, day) and the time (hour, minute) in five fields,
@@ -3828,7 +4606,10 @@ safe:   lda     z:back                  ; the bar: no menus, no status
 ; ---------------------------------------------------------------- the status
 ; "NNNNK free  up H:MM" (the time since start) until the clock is set, then "NNNNK free
 ; HH:MM"
-clock:  ldy     #0
+clock:  lda     prtick                  ; (0.23) a print notice instead
+        beq     :+
+        jmp     notice
+:       ldy     #0
         sys     SYS_MINFO               ; free banks * 64 KB
         xba
         lsr     a
@@ -3976,7 +4757,7 @@ m_sys_end:
 d_progs: .byte  "Edit=/BIN/EDIT.PRG", 10, "Write=/BIN/WRITE.PRG", 10, "Sheet=/BIN/SHEET.PRG", 10
         .byte   "Paint=/BIN/PAINT.PRG", 10, "BASIC=/BIN/BASIC.PRG", 10, "Calculator=/BIN/CALC.PRG", 10
         .byte   "Solitaire=/BIN/SOLITAIR.PRG", 10, "Terminal=/BIN/TERM.PRG", 10
-        .byte   "Files=/BIN/WFILES.PRG", 10, 0
+        .byte   "Files=/BIN/WFILES.PRG", 10, "Printer=/BIN/PRINTER.PRG", 10, 0
 p_progs: .byte  "/SYSTEM/PROGRAMS", 0
 p_icons: .byte  "/SYSTEM/ICONS", 0
 p_layout: .byte "/SYSTEM/LAYOUT", 0
@@ -4014,6 +4795,10 @@ t_rst:  .byte   "Restart", 0
 pu_sd:  .byte   "Open", 0, 0
 pu_ent: .byte   "Open", 0, "-", 0, "Rename...", 0, "Delete", 9, "Del", 0, 0
 pu_lnk: .byte   "Open", 0, "Show original", 0, "-", 0, "Rename...", 0, "Delete", 9, "Del", 0, 0
+pu_entr: .byte  "Open", 0, "Run in Atari", 0, "-", 0, "Rename...", 0, "Delete", 9, "Del", 0, 0
+pu_lnkr: .byte  "Open", 0, "Run in Atari", 0, "Show original", 0, "-", 0, "Rename...", 0
+        .byte   "Delete", 9, "Del", 0, 0
+pu_tab: .addr   pu_ent, pu_lnk, pu_entr, pu_lnkr    ; (0.23) by shortcut + 2 * BASIC program
 pu_desk: .byte  "New folder...", 0, "Tidy up", 0, "-", 0, "Settings...", 0, 0
 pu_at1:                                 ; (0.18: also the panel's buttons)
 t_atd:  .byte   "Attach disk...", 0
@@ -4021,7 +4806,9 @@ t_atc:  .byte   "Attach cartridge...", 0
 t_atr:  .byte   "Run program...", 0
         .byte   "-", 0, 0
 pu_at2: .byte   MS_STATE, "Eject all", 0, "-", 0, "Restart Atari", 0, "Switch to Atari", 9, "F12", 0
-        .byte   "-", 0, "Atari settings...", 0, "Open panel", 0, 0
+        .byte   "-", 0
+t_fdk:  .byte   "Folder disk...", 0     ; (0.23; also the panel's button)
+        .byte   "Atari settings...", 0, "Open panel", 0, 0
 at_ek:  .addr   t_ek1, t_ek2, t_ek3, t_ek4, t_ekx, t_ekc
 t_ek1:  .byte   "Eject D1: ", 0
 t_ek2:  .byte   "Eject D2: ", 0
@@ -4071,6 +4858,35 @@ t_eject: .byte  "Eject", 0
 t_eja:  .byte   "Eject all", 0
 t_boot: .byte   "Restart Atari", 0
 t_switch: .byte "Switch to Atari", 0
+; (0.23) printing, Run in Atari, the folder disk
+p_prn:  .byte   "/PRN:", 0
+p_prd:  .byte   "/Printouts", 0
+p_prdd: .byte   "/Printouts/", 0
+p_printd: .byte "/SYSTEM/PRINTD.PRG", 0
+p_printer: .byte "/BIN/PRINTER.PRG", 0
+t_printer: .byte "Printer", 0
+t_prd:  .byte   "Printed: ", 0
+t_topc: .byte   " (to the PC)", 0
+t_norun: .byte  "The program could not be run on the Atari.", 10
+        .byte   "It must be an Atari BASIC program.", 0
+t_fref: .byte   "Refresh", 0
+t_fdt:  .byte   "Folder disk", 0
+t_fdl1: .byte   "Folder on the card (made if missing):", 0
+t_fdl2: .byte   "Drive:", 0
+t_fdm:  .byte   "Mount", 0
+t_fddef: .byte  "/Atari", 0
+t_nofd: .byte   "No folder disk", 0
+t_fdin: .byte   " (folder)", 0
+t_fdf:  .byte   " files, ", 0
+t_fdf1: .byte   " file, ", 0
+t_fdlo: .byte   " left out, ", 0
+t_fds:  .byte   " free sectors", 0
+t_fdsv: .byte   ", saving...", 0
+t_nofdx: .byte  "The folder could not be used as a disk.", 10
+        .byte   "Check its name.", 0
+t_fr1:  .byte   "D1: (the Atari cannot boot from it)", 0
+fd_rows: .addr  t_fr1, t_d2, t_d3, t_d4
+fd_rowy: .word  8 + ATROW * 0, 8 + ATROW * 1, 8 + ATROW * 2, 8 + ATROW * 3
 t_mount: .byte  "The file could not be loaded.", 10, "Check that it is a valid Atari image.", 0
 t_notat: .byte  "Only Atari disks (.ATR .XFD), programs", 10, "(.XEX .COM .EXE) and cartridges", 10
         .byte   "(.CAR .ROM .BIN) can be loaded.", 0
@@ -4118,6 +4934,36 @@ al_nonew: .word 3
         .addr   t_newt, t_nonew, b_ok, 0, 0
 al_noren: .word 3
         .addr   t_rent, t_noren, b_ok, 0, 0
+al_norun: .word 3                       ; (0.23)
+        .addr   t_atari, t_norun, b_ok, 0, 0
+al_nofd: .word  3
+        .addr   t_fdt, t_nofdx, b_ok, 0, 0
+; (0.23) the "Folder disk" dialog: the folder, the drive, Cancel / Mount
+dg_fd:  .addr   t_fdt
+        .word   FDW, FDH
+        .addr   fd_ctl
+        .word   0
+fd_ctl: .addr   fd_l1, fd_fld, fd_l2, fd_list, bt_fdc, bt_fdok, 0
+fd_l1:  .byte   UT_LABEL, 0
+        .word   8, 8, FDW - 16, UI_LINE, 0
+        .addr   t_fdl1
+fd_fld: .byte   UT_FIELD, 0
+        .word   8, 24, FDW - 16, UI_FLDH, UF_FOCUS
+        .word   fdpath, 128, 0, 0, 0, 0
+fd_l2:  .byte   UT_LABEL, 0
+        .word   8, 52, FDW - 16, UI_LINE, 0
+        .addr   t_fdl2
+fd_list: .byte  UT_LIST, 0
+        .word   8, 68, FDW - 16, 4 * UI_ROWH + 4, 0
+        .word   4, 1, 0, fd_row, 0, 0
+        .res    SB_SIZE
+bt_fdok: .byte  UT_BUTTON, 0
+        .word   FDW - 80, FDH - 28, 72, UI_BTNH, UF_DEFAULT
+        .addr   t_fdm
+bt_fdc: .byte   UT_BUTTON, 0
+        .word   FDW - 160, FDH - 28, 72, UI_BTNH, UF_CANCEL
+        .addr   b_cancel
+fdq:    .byte   "/D1:", 0               ; a drive's STAT (the digit set by fdstat)
 ; Force quit: a list and two buttons
 dg_fq:  .addr   t_fq
         .word   FQW, FQH
@@ -4199,26 +5045,38 @@ at_b5:  .byte   UT_BUTTON, 0
         .word   ATW - 68, 8 + ATROW * 5, 60, UI_BTNH, 0
         .addr   t_eject
 bt_atd: .byte   UT_BUTTON, 0
-        .word   8, ATH - 56, ATBW1, UI_BTNH, 0
+        .word   8, ATB - 56, ATBW1, UI_BTNH, 0
         .addr   t_atd
 bt_atc: .byte   UT_BUTTON, 0
-        .word   16 + ATBW1, ATH - 56, ATBW2, UI_BTNH, 0
+        .word   16 + ATBW1, ATB - 56, ATBW2, UI_BTNH, 0
         .addr   t_atc
 bt_atr: .byte   UT_BUTTON, 0
-        .word   24 + ATBW1 + ATBW2, ATH - 56, ATBW3, UI_BTNH, 0
+        .word   24 + ATBW1 + ATBW2, ATB - 56, ATBW3, UI_BTNH, 0
         .addr   t_atr
 bt_eja: .byte   UT_BUTTON, 0
-        .word   8, ATH - 28, ATBW1, UI_BTNH, 0
+        .word   8, ATB - 28, ATBW1, UI_BTNH, 0
         .addr   t_eja
 bt_boot: .byte  UT_BUTTON, 0
-        .word   16 + ATBW1, ATH - 28, ATBW2, UI_BTNH, 0
+        .word   16 + ATBW1, ATB - 28, ATBW2, UI_BTNH, 0
         .addr   t_boot
 bt_switch: .byte UT_BUTTON, 0
-        .word   24 + ATBW1 + ATBW2, ATH - 28, ATBW3, UI_BTNH, UF_DEFAULT
+        .word   24 + ATBW1 + ATBW2, ATB - 28, ATBW3, UI_BTNH, UF_DEFAULT
         .addr   t_switch
+; (0.23) the folder disk: a row of its own (Folder disk..., its numbers), a Refresh button on
+; its drive's row (in the list only while there is one: at_fslot)
+bt_fdk: .byte   UT_BUTTON, 0
+        .word   8, ATB, ATBW1, UI_BTNH, 0
+        .addr   t_fdk
+lb_fdn: .byte   UT_LABEL, 0
+        .word   16 + ATBW1, ATB + 4, ATW - 24 - ATBW1, UI_LINE, UF_DIM
+        .addr   fdnum
+bt_fref: .byte  UT_BUTTON, 0
+        .word   ATW - 136, 8, 64, UI_BTNH, 0
+        .addr   t_fref
 at_ctl: .addr   at_k0, at_n0, at_b0, at_k1, at_n1, at_b1, at_k2, at_n2, at_b2
         .addr   at_k3, at_n3, at_b3, at_k4, at_n4, at_b4, at_k5, at_n5, at_b5
-        .addr   bt_atd, bt_atc, bt_atr, bt_eja, bt_boot, bt_switch, 0
+        .addr   bt_atd, bt_atc, bt_atr, bt_eja, bt_boot, bt_switch, bt_fdk, lb_fdn
+at_fslot: .addr 0, 0
 at_ab:  .addr   bt_atd, bt_atc, bt_atr  ; (0.18) Attach disk..., cartridge..., Run program...
 at_nl:  .addr   at_n0, at_n1, at_n2, at_n3, at_n4, at_n5
 at_eb:  .addr   at_b0, at_b1, at_b2, at_b3, at_b4, at_b5
@@ -4277,6 +5135,30 @@ dt_v:   .res    10                      ; the date dialog: year, month, day, hou
 pbuf:   .res    640                     ; (0.15) a pop-up menu's items (the Atari's)
 pslot:  .res    12                      ; the slots of its Eject lines
 rnblk:  .res    6                       ; rename: {u24 old, u24 new}
+; (0.23) printing
+prok:   .res    2                       ; the I/O processor knows "/PRN:"
+prcnt:  .res    2                       ; the count of finished jobs last seen
+prtick: .res    2                       ; a notice's seconds left (0: the clock)
+tm0:    .res    4                       ; the uptime when the timer started (ms)
+tlast:  .res    2                       ; the timer's second of the last 5-s work
+tsec:   .res    2                       ; (tick: this one's)
+prnoti: .res    2                       ; prscan: new jobs give a notice
+prpc:   .res    2                       ; prscan: the PC asked (1 no PDFs, 2 PDFs)
+prsnt:  .res    2                       ; prscan: PRINTD started
+prsent: .res    2                       ; the notice: "(to the PC)"
+prmax:  .res    PNAMEL                  ; the greatest job name seen (without ".txt")
+prold:  .res    PNAMEL                  ; (prscan: before it)
+prnw:   .res    PNAMEL                  ; (prscan: the greatest new one)
+prnew:  .res    PNAMEL                  ; the notice's job
+prcand: .res    PNAMEL                  ; a name read
+prarg:  .res    130                     ; PRINTD's argument: the job's path
+prun:   .res    2                       ; (0.23) the entry's menu: a BASIC program
+fdslot: .res    2                       ; (0.23) the folder disk's drive ($FFFF: none)
+fdold:  .res    2                       ;   (its Refresh button drawn there)
+fdnew:  .res    2                       ;   the drive to mount on
+fdpath: .res    130                     ;   the folder
+fdnum:  .res    64                      ;   its numbers' line
+fdtmp:  .res    64
 
         .segment "ZEROPAGE"
 back:   .res    2

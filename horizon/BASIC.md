@@ -160,6 +160,8 @@ Several statements on one line are separated by `:`.
 | `END`, `STOP`, `CONT` | stop; STOP says `Stopped in N`, CONT goes on after it (or after a break) |
 | `RUN [n]`, `RUN "file"` | clears the variables and runs (from line n, or loads the file first: see below) |
 | `LIST [n]`, `LIST [n]-[m]` | the program, or a part of it |
+| `LPRINT [items]` | (Horizon 0.23) as PRINT (the same items, `;`, `,`, TAB, SPC), to the printer: see "Printing" |
+| `LLIST [n]`, `LLIST [n]-[m]` | (Horizon 0.23) as LIST, to the printer |
 | `NEW`, `CLR` | NEW: no program; CLR: no variables |
 | `LOAD "file"`, `SAVE ["file"]` | the program as plain text (`.BAS` is added when the name has no extension; SAVE alone uses the program's name) |
 | `DIR ["folder"]` | the names in a folder (folders end in `/`) |
@@ -256,6 +258,36 @@ POKEY 2 (four voices) through the kernel; REV $07 boards and later.
 | `BEEP [f, ms]` | a short tone on voice 0 (1000 Hz, 100 ms) |
 
 END, STOP, a break, an error and RUN silence all voices.
+
+## Printing (Horizon 0.23)
+
+LPRINT and LLIST print: their text goes into a **print job**, a text file that appears in
+`/Printouts` on the card as `2026-11-18 15.30.12 BASIC.txt` (the date and time it was
+started; `BASIC 2.txt`, `BASIC 3.txt` ... when there are several in one second). Programs >
+Printer shows the jobs (and sends one to the PC as a PDF); the Desktop shows a notice when one
+is done ("Printed: ..."; not in the text shell).
+
+```
+10 LPRINT "Name","Price"
+20 FOR I=1 TO 3:READ N$,P:LPRINT N$,P:NEXT
+30 LPRINT:LLIST 10-20
+40 DATA Apple,0.5,Bread,2.25,Milk,1.1
+```
+
+- **One job a run.** The first LPRINT or LLIST that prints something starts the job; all that
+  the program prints goes into it, and it is finished (it appears in `/Printouts`) when BASIC
+  is back at the prompt: END, the last line, STOP, an error, a break (Esc, ctrl-C, Program >
+  Stop). RUN, LOAD and NEW finish it too (a RUN inside a program starts a new job), and so does
+  closing BASIC. CONT after STOP or a break goes on in a new job.
+- **Direct mode.** LPRINT or LLIST typed without a line number is a job of its own: the job is
+  finished when the line has run (several on one line: one job).
+- **The text.** As PRINT shows it on the console, with LF line ends. The job has its own
+  column: `,` goes to the next column of 10 and TAB to its column on a line of 80; longer lines
+  are not cut (the PC side wraps them). A line left open (`LPRINT "A";` at the end) is ended
+  when the job is finished. `LPRINT CHR$(12)` starts a new page.
+- **Nothing printed, no job:** an LLIST of no lines makes none.
+- **Errors.** A job that cannot be made or written stops the program with `File error $XX in
+  N` (the I/O error, as LOAD and SAVE report it); the job is finished with what was printed.
 
 ## Games (2.0)
 
@@ -409,7 +441,8 @@ Syntax error · Type mismatch · Out of memory · Undefined line N · Division b
 Overflow · Subscript out of range · Array already dimensioned · NEXT without FOR · RETURN
 without GOSUB · WEND without WHILE · WHILE without WEND · Out of DATA · Bad argument ·
 String too long · Too many variables · Nesting too deep (FOR, GOSUB, WHILE: 256) ·
-Expression too complex · Cannot continue · File error · File not found · Line too long ·
+Expression too complex · Cannot continue · File error (LPRINT, LLIST: `File error $XX`, the
+I/O error) · File not found · Line too long ·
 Too many lines · Number too large (a line number) · Name too long · Line number missing
 (LOAD of a line without a number: `... in file line N`) · Illegal function call (SQR of a
 negative number, LOG of 0, `(-8)^(1/3)`, SIN of 1E9 or more) · (2.0) Not available on this
@@ -467,6 +500,14 @@ writes to Lau `tests/basic2.err`. On REV $0B a picture session (`tests/basic2s.k
 SPRITES.BAS, DRIFT.BAS and SCROLLER.BAS with Break, Alt+Tab and CONT
 (`tests/pictures/basic2s*.png`). TESTS.BAS has a 2.0 group too (pictures in a window, NOTE,
 FRAME: the parts every board has).
+
+(Horizon 0.23) `make test` (and `make basicp-test` alone) runs `tests/basicp.bas` the same
+way: LPRINT and LLIST in a run and in direct mode, a run that ends with an error, STOP and
+CONT, a break (Esc), the new reserved words. Its output must match `tests/basicp.txt`, and the
+seven jobs in `/Printouts` on the card copy (the test card has no clock: every job is
+`2026-01-01 00.00.00 BASIC ...`) must be `tests/basicp-1.txt` .. `basicp-7.txt` byte for
+byte, with no job left open. `tests/basicpe.bas` runs with a file named `/Printouts` in the
+way: `File error $47` (`tests/basicpe.txt`).
 
 ## Examples
 
@@ -548,11 +589,22 @@ cache the target line's index in the line itself.
   the kernel.
 - No TRAP, no files from programs (OPEN, PRINT #, INPUT #) yet, no PRINT USING, no USR
   or machine code.
+- (Horizon 0.23) LPRINT and LLIST print into a text file in `/Printouts` (a print job), not
+  to a printer on the serial bus; the classic Atari's own LPRINT (P:) makes such jobs too.
 - (2.0) No player-missile graphics: 16 sprites of up to 32 x 32 in 16 or 256 colours
   instead (SPRITE), with collisions by boxes (HIT) rather than by pixels; no GRAPHICS modes
   and display lists: a window of any size, or the full screen (`SCREEN 1`, `SCREEN 2`) with
   fine scrolling, a split panel and raster colours (SCROLL, PANEL, RASTER); samples (WAVE,
   PLAY) as well as POKEY's tones.
+
+## Changes with Horizon 0.23
+
+- LPRINT and LLIST: printing into print jobs (see "Printing").
+- **Reserved words**: LPRINT and LLIST are keywords now and cannot be variable names (names
+  that contain them, `LLISTS`, are fine). None of the shipped programs uses them; programs are
+  kept as text, so every program saved before loads.
+- Inside: both are extended statements (`$FC`, then 10 and 11); BASIC.PRG grew by 425 bytes
+  (52,497 bytes; the code bank has about 2 KB left).
 
 ## Changes in 2.0
 

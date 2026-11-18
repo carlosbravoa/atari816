@@ -83,6 +83,31 @@ the gateway stops.
 
 The protocol, for anyone who wants to write another gateway: [`Docs/04-pc-link.md`](Docs/04-pc-link.md).
 
+## Printing, and the classic Atari's files
+
+- **Printing.** Edit, Write, Sheet, BASIC (`LPRINT`, `LLIST`), the shell (`print FILE`) and
+  Files (right-click a text file, Print) print. A printout is a text file in **`/Printouts`** on
+  the card, named after the date, the time and the program (`2026-11-18 15.30.12 Edit.txt`).
+  The **Printer** program (Programs menu) lists them, shows them, deletes them and sends them to
+  the PC. With the gateway running, each printout also goes to the PC at once, as a **PDF** in
+  `Printouts/` of the shared folder.
+- **The classic Atari prints too.** Whatever the 8-bit side prints (`LPRINT`, `LIST "P:"`, a
+  word processor) becomes a printout `... Atari.txt`, the same way. A printout ends after 3
+  seconds without new text, or when you go back to the desktop.
+- **A folder as a disk.** In the Atari panel, "Folder disk..." shows a folder of the card
+  (default `/Atari`) to the 8-bit Atari as an Atari DOS 2 disk (D2: by default). Boot a DOS
+  (DOS 2.0, DOS 2.5, MyDOS, SpartaDOS X with its ATARIDOS driver) from D1: as usual: the files
+  of the folder are there, and what the Atari saves, renames or deletes there goes back into the
+  folder as plain files, a moment after the Atari has closed them. Only files with Atari DOS
+  names (`NAME.EXT`, 8 + 3 letters or digits, starting with a letter) show, at most 64, and as
+  many as fit on a 90 KB disk; the panel says how many were left out. A file being written on
+  the Atari never replaces the folder's file until it is complete.
+- **Run in Atari.** Right-click a BASIC listing (`.BAS` or `.LST` text, written in Edit with
+  Atari BASIC's keywords in capitals) in Files or on the desktop and choose "Run in Atari": the
+  8-bit Atari starts with Atari BASIC, types the program in and runs it. BASIC shows the errors
+  of bad lines as usual. No DOS disk is needed (and none is reachable from such a run).
+  `LIST "D2:PROG.LST"` on the Atari writes a listing into the folder disk that Edit opens.
+
 ## What you must supply yourself
 
 The Atari OS and BASIC ROM images are **not included** in this repository and must not be

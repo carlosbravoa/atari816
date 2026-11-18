@@ -1,0 +1,12 @@
+10 REM a run: one job
+20 LPRINT "Hello";" ";"printer"
+30 LPRINT 1;-2;3.5;1E+10;" ";0.25
+40 LPRINT "A","B","C"
+50 LPRINT "TAB";TAB(12);"X";SPC(3);"Y"
+60 LPRINT "no end";
+70 LPRINT " - joined"
+80 FOR I=1 TO 3:LPRINT "line ";I:NEXT
+90 LPRINT
+100 LLIST 20-40
+110 PRINT "to the screen"
+120 LPRINT "the end"

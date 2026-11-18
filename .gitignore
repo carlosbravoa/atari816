@@ -10,3 +10,5 @@ __pycache__/
 /emu/tests/cputest/cputest
 /horizon/build/
 /Docs/00-START-HERE.md
+/core/test/fdisk_host/fdisk_host
+/core/test/pclink_host/harness

@@ -222,6 +222,7 @@ static void ctl(const uint8_t *p, uint32_t n)
         if (n < 11) return;
         if (up) session_end();
         for (int i = 0; i < PL_NCH; i++) tx_seq[i] = rx_last[i] = acked[i] = 0;
+        parked = 0;                                    // (a frame of the old session)
         svc = p[10];
         pc_t0 = p[6] | p[7] << 8 | p[8] << 16 | (uint32_t)p[9] << 24;
         pc_ms = NOW();
@@ -267,7 +268,11 @@ static void rx_frame(void)
     if (seq == rx_last[ch]) { tx_ack(ch, seq); return; }     // a repeat: our ACK was lost
     if (seq != rx_last[ch] % 255 + 1) return;                 // not the next one: dropped
                                                               // (the PC sends it again)
-    if (ch == PL_CH_DEV && nested) {                         // busy: keep it for later
+    // A developer frame while busy, or while an older one is still kept: keep it (one), or drop
+    // it without an ACK (the PC sends it again). Never served before the one kept: the frames
+    // of a request must be taken in order (a SINK frame came after the last one, 2026-11).
+    int dev_later = ch == PL_CH_DEV && (nested || parked);
+    if (dev_later) {
         if (parked || n > sizeof park) return;               // no room: the PC sends it again
         for (uint32_t i = 0; i < n; i++) park[i] = p[i];
         parkn = n;
@@ -280,7 +285,7 @@ static void rx_frame(void)
         fw_t = NOW();
         if (fw_sink && n > 4) fw_sink(p + 4, n - 4, fw_ctx);
         if (!(p[2] & PL_RQ_MORE)) { fw_res = p[3]; fw_done = 1; }
-    } else if (ch == PL_CH_DEV && !nested) {
+    } else if (ch == PL_CH_DEV && !dev_later) {
         pl_dev_request(p, n);
     } else if (ch == PL_CH_NET || ch == PL_CH_FETCH) {
         ns_frame(ch, p, n);                                  // (any time: it only stores)
@@ -297,12 +302,12 @@ static int step(void)
 
 HOT void pl_poll(void)
 {
+    if (parked && !nested) {                               // the frame kept comes first
+        pl_dev_request(park, parkn);                       // (parked stays set meanwhile: a new
+        parked = 0;                                        //  developer frame waits, unacked)
+    }
     if (rx_drain()) rx_frame();
     else if (up && NOW() - last_rx > T_SILENT) session_end();
-    if (parked && !nested) {
-        parked = 0;
-        pl_dev_request(park, parkn);
-    }
 }
 
 int pl_send(int ch, const uint8_t *hdr4, const volatile uint8_t *d, uint32_t n)

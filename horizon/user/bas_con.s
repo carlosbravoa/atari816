@@ -149,6 +149,8 @@ con_nl: lda     #10
 ; character A: LF new line, CR column 0, BS back, FF clear, 32-126 printed (others '?')
 con_putc:
         and     #$00FF
+        ldx     lpon                    ; (0.23) LPRINT, LLIST: into the print job
+        jne     lp_putc
         ldx     mirror
         beq     :+
         pha

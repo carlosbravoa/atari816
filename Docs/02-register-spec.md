@@ -489,7 +489,7 @@ A ring is empty when HEAD equals TAIL and full when HEAD + 1 equals TAIL.
 | $09 | DELETE | BUF = path | 0 |
 | $0A | RENAME | BUF = "old\\0new" | 0 |
 | $10 | LOAD | BUF = path, ARG0 = 24-bit destination address | Bytes loaded |
-| $18 to $1A | CLASSIC\_MOUNT, CLASSIC\_EJECT, CLASSIC\_BOOT | Implemented in the firmware; layout in the comment block in `core/firmware/firmware.c` | |
+| $18 to $1A | CLASSIC\_MOUNT, CLASSIC\_EJECT, CLASSIC\_BOOT | Implemented in the firmware; layout in the comment block in `core/firmware/firmware.c` (step 3: kinds 4 and 5, below) | |
 | $1B | SYS\_RESTART | ARG0 = 0: reload Horizon from the card and restart the 65C816; 1: full restart (/atari.ini read again, classic images ejected, classic machine cold booted, then Horizon). The OK reply comes first; the 65C816 is reset once it has moved MB\_RSP\_TAIL past it (at most 500 ms later). Errors: $83 bad ARG0, 4 no Horizon on the card (no restart then) | 0 |
 | $1C | SYS\_SYNC | none. Closes every mailbox file and classic disk image, unmounts the card; then the card may be removed or the power cut. Until the next restart every op below $1B answers $86 | Handles that were open |
 | $1D | SYS\_TIME | ARG0 = the time Horizon knows, in seconds since 2000-01-01 00:00 (local: the clock the user set, or the last one saved, counting from start). The firmware counts on from it with its own millisecond timer, and FatFs stamps files with it (`get_fattime`, FF\_FS\_NORTC = 0); before it is given, files get the firmware's build date. Horizon sends it whenever `time_set` is called (at start, after the saved clock is loaded, and when the user sets the clock) | 0 |
@@ -512,6 +512,34 @@ other requests are served. Results added: $8A no such service, $8B bad address, 
 found, $8D refused, $8E timeout, $8F HTTP status 400 or more (ARG1 = the status), $90 the
 connection was closed, $91 TLS failed, $92 too many streams on the PC, $93 another network
 error.
+
+**Printing, the folder disk, "Run in Atari"** (step 3; Horizon's side: `horizon/ABI.md`):
+
+- **OPEN `/PRN:NAME`** (any case, any mode: a new file) starts a print job: the card file
+  `/Printouts/YYYY-MM-DD HH.MM.SS NAME.txt` (the folder made if missing; NAME cut to 24
+  characters, characters a FAT name cannot have become `_`, empty: `Job`; ` 2`, ` 3`, ... when
+  the name is taken). It is written under the same name with a `.` in front and renamed at
+  CLOSE (also the CLOSE of SYS_SYNC or of a 65C816 restart), so a job is whole when it
+  appears. A normal card handle (0-3). **STAT `/PRN:`**: size = print jobs finished since the
+  I/O processor started (attribute $10, time now). Other ops on `/PRN:` paths: $82.
+- **The classic printer**: SIO devices $40-$43 (P1:-P4:) answer STATUS and WRITE (40, 29 or 20
+  bytes for AUX1 `N`, `S`, `D`); the records become the job `... Atari.txt` (ATASCII to text,
+  `core/firmware/prnconv.c`), finished after 3 s without data, when the classic machine is
+  frozen or cold booted, and by SYS_SYNC. It counts in STAT `/PRN:`.
+- **CLASSIC_MOUNT kind 4**: a BASIC program (a listing, or an Atari BASIC SAVE file; at most
+  96 KB) as the boot disk on D1: (the answer's kind is 2, as an executable); CLASSIC_BOOT then
+  cold boots with Atari BASIC enabled, and the boot program (`core/firmware/bas_loader.s`)
+  ENTERs and RUNs it. **Kind 5**: a folder (made if missing) as an Atari DOS 2.0S disk on drive
+  ARG0 (answer: kind 1); the same folder on the same drive again builds it again (Refresh);
+  CLASSIC_EJECT kind 1 of that drive saves what the Atari changed, then ejects; remembered in
+  /atari.ini (`folder=`, `folderdrive=`). Only one drive is a folder disk.
+- **STAT `/D1:`-`/D4:`**: on the folder disk's drive: size = files shown | files left out << 8
+  | free sectors << 16, attribute $10 | 1 while changes wait to be saved, time = the last build
+  or save. Any other drive: 4.
+- **STAT `/PC:`**: the size is now the gateway's services (bit 4: it makes PDF files).
+- Memory: the folder disk's image and state, the printer's buffers and the "Run in Atari" disk
+  are in the classic machine's part of the SDRAM that its RAM (320 KB at most) and ROMs do not
+  use (physical 0x180000-0x1EFFFF; `firmware.c`, "Step 3: memory").
 
 ### Events (I/O processor to Horizon, TAG = 0)
 

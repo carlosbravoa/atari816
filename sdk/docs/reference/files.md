@@ -99,7 +99,9 @@ the new position low, X = high. A file opened read-only is clipped to its size.
 In: X, Y = `{u24 path, u24 out}`. Out: A = size low, X = size high; `out` gets 9 bytes:
 u32 size, u8 attributes (bit 4 directory, bit 0 read-only, $20 archive), u32 FAT time
 (date << 16 | time). The root `/` cannot be stat'ed (error $46); `/PC:` can (0.20: its time
-is the PC's clock now).
+is the PC's clock now; 0.23: its size is the gateway's services, PCS_*). (0.23) `/PRN:` gives
+the number of print jobs finished ([printing.md](printing.md)), `/D1:` .. `/D4:` the folder
+disk's numbers ([classic.md](classic.md)).
 ```asm
         ptr     sblk
         sys     SYS_STAT        ; -> A, X = size

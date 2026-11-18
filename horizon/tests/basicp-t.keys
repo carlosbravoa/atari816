@@ -1,0 +1,8 @@
+# (0.23) BASIC printing test run (text shell, NODESK): "basic -t /BP.BAS" runs tests/basicp.bas
+# as a script; the console is mirrored into the log (build/basicp-t.out), the part after the
+# command compared with tests/basicp.txt; the jobs in build/run-sd/Printouts with
+# tests/basicp-N.txt.
+1500 {esc}
++1500 basic -t /BP.BAS\n
+# Esc breaks the program waiting in a loop (the break test)
++7000 {esc}

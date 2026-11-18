@@ -1,0 +1,19 @@
+Household budget, per month and per year
+
+Item          Month     Year       Share
+Rent            950.00  11,400.00   46.24%
+Electricity      64.50     774.00    3.14%
+Water            28.75     345.00    1.40%
+Internet         39.90     478.80    1.94%
+Groceries       420.00   5,040.00   20.44%
+Transport       115.00   1,380.00    5.60%
+Insurance        86.40   1,036.80    4.21%
+Leisure         150.00   1,800.00    7.30%
+Savings         200.00   2,400.00    9.73%
+
+Total         2,054.55  24,654.60  100.00%
+
+Income        2,400.00  28,800.00
+Left over       345.45   4,145.40   14.39%
+Largest item    950.00
+Average item    228.28

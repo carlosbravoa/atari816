@@ -21,7 +21,8 @@ make sst             # downloads the SingleStepTests sample that make test uses 
 emu816 [--sd DIR] [--load FILE@ADDR]... [--max-seconds N] [--trace]
        [--keys LIST] [--mouse LIST] [--shot FILE.ppm] [--shot-at SECONDS] [--stats] [--headless] [--fast]
        [--ideal-timing] [--boot-cart PATH] [--pc-folder DIR] [--pc-time T]
-       [--card-kbps R:W] [--pc-kbps R:W] [--net] [--net-root DIR] [--net-delay MS] PROGRAM.BIN
+       [--card-kbps R:W] [--pc-kbps R:W] [--net] [--net-root DIR] [--net-delay MS]
+       [--no-pc-print] [--classic-print FILE@SECONDS]... PROGRAM.BIN
 ```
 
 | Option | Meaning |
@@ -52,6 +53,8 @@ emu816 [--sd DIR] [--load FILE@ADDR]... [--max-seconds N] [--trace]
 | `--net` | The Net service of the PC link (step 2): `tcp://host:port` paths are real TCP connections from the host (see "The internet (PC link step 2)"). Without it they answer $8A |
 | `--net-root DIR` | The Fetch service: `http://`, `https://` and `ftp://` URLs are served from files in DIR (`scheme://host[:port]/path` = the file `DIR/host/path`). Without it they answer $8A |
 | `--net-delay MS` | The time the PC takes to answer an OPEN or STAT of a URL (the server's answer), in emulated milliseconds. Default 0 (+ 6 ms when `--pc-kbps` is given) |
+| `--no-pc-print` | (Horizon 0.23) The gateway cannot make PDFs: STAT `/PC:` answers its services without bit 4 (PRINT): $0D instead of $1D (see "Printing, Run in Atari, the folder disk") |
+| `--classic-print FILE@SECONDS` | (Horizon 0.23) At that emulated time the classic Atari prints FILE (ATASCII bytes as P: sends them, e.g. `HELLO` $9B): a print job `/Printouts/YYYY-MM-DD HH.MM.SS Atari.txt`, converted by the firmware's own `core/firmware/prnconv.c` (in records of 40 bytes, a record ending at its EOL), written at once under its `.` name and finished 3 s later (the firmware ends a job after 3 s without data); stderr: `emu816: P: job /Printouts/...`. Repeatable (8 at most) |
 | `--boot-cart PATH` | A cartridge (a FAT path on `--sd`) that the I/O processor loaded by itself at power-on (`boot=ash` in /atari.ini): CLASSIC\_STATE ($1E) reports it, from power-on and after a full restart |
 
 Exit codes: 0 when the program executes STP, 3 at the `--max-seconds` limit, 1 on a usage
@@ -202,6 +205,7 @@ The open formats match the firmware:
 | RENAME | BUF = `"old\0new"`. Answers FR_EXIST if the target exists |
 | LOAD | Whole file to ARG0. ARG1 = bytes loaded |
 | SYS_TIME ($1D) | ARG0 = seconds since 2000-01-01 00:00 (local), as Horizon gives it at start and when the clock is set. The firmware counts on from it and FatFs stamps files with it; here the count is emulated time, and a file the 65C816 created or wrote gets that time as its host modification time when it is closed (MKDIR at once), so STAT shows it and runs stay deterministic. Before it is given: 2026-01-01 00:00 (the firmware: its build date) |
+| CLASSIC_MOUNT / EJECT / BOOT ($18-$1A) | A stub (there is no classic machine): the firmware's argument checks and result codes; any existing file mounts (kind 0: by its extension); BOOT always works. One line per op on stderr (`emu816: CLASSIC_MOUNT kind 1 slot 1 /GAME.ATR -> 00`). (Horizon 0.23) Kind 4 (CK_BASRUN, "Run in Atari"): a file on the card, $84 when empty or over 96 KB, recorded and answered as kind 2. Kind 5 (CK_FOLDER, ARG0 = the drive 0-3): a folder (made if missing; $48 if it is a file), answered as kind 1; one drive at most (a folder on another drive moves it); a disk image, executable or BASIC program mounted over that drive, and EJECT of it, end it |
 | CLASSIC_STATE ($1E) | ARG0 = 5 (the cartridge): ARG1 = its image size in bytes (a .CAR without its 16-byte header; 0 = none), BUF (LEN bytes) its path. The cartridges CLASSIC_MOUNT attached, or the `--boot-cart` one from power-on and after a full restart. $83 for another ARG0 |
 
 Mapping FAT paths to the `--sd` directory:
@@ -226,7 +230,7 @@ gateway over the USB serial link):
 - READDIR of `/` (exactly) gives one more entry at the end while the volume is there: `PC:`,
   size 0, attr $10; the skip count counts it. READDIR on the volume: names starting with `.`
   are left out, sorted by name, symlinks pointing out of DIR left out.
-- STAT of `/PC:`: size 0, attr $10, time = the PC's current time (`--pc-time`, counting on with
+- STAT of `/PC:`: size = the services (Horizon 0.23: $1D, see below; 0 before), attr $10, time = the PC's current time (`--pc-time`, counting on with
   emulated time; else the host's clock). STAT of anything else: as on the card (`--card-date`
   for the files the run did not write; the files it wrote: the PC's time at their close).
 - The 4 handles are shared by both volumes. RENAME between them: $89. After a drop, READ,
@@ -240,6 +244,36 @@ gateway over the USB serial link):
   that name stays as it was (STAT shows the old one, or none). When the session ends with the
   file still open (the link drops, the 65C816 is reset or restarted), the temporary file is
   deleted and the older file stays as it was. Modes 1 and 3 write in place.
+
+**Printing, Run in Atari, the folder disk** (PC link step 3, Horizon 0.23; the firmware's
+rules, ABI.md "Printing, Run in Atari and the folder disk"):
+
+- **`/PRN:NAME`** (any case for `PRN`): OPEN in any mode creates a print job, a normal handle
+  0-3, written as `/Printouts/.YYYY-MM-DD HH.MM.SS NAME.txt` (the firmware's clock, SYS_TIME;
+  `/Printouts` made if missing) and moved onto the name without the `.` at CLOSE, and also when
+  the 65C816 is reset (a job is never thrown away). NAME: cut to 24 characters, `\ / : * ? " <
+  > |` and bytes below 32 made `_`, blanks and dots at its ends removed, empty: `Job`; a name
+  taken (finished or open): ` 2` .. ` 99` after NAME. Without a clock given every job has the
+  fixed date 2026-01-01 00.00.00 (Horizon's tests put a /SYSTEM/CLOCK on the card when they
+  need running times).
+- **STAT of exactly `/PRN:`**: size = the jobs finished since power-on (also `--classic-print`
+  ones; it survives restarts of the 65C816), attr $10, time = now. STAT of `/PRN:NAME`, and
+  READDIR, MKDIR, DELETE, RENAME, LOAD, CLASSIC_MOUNT of a `/PRN:` path: $82.
+- **STAT of exactly `/PC:`** (the root): size = the gateway's services: bit 0 files, 2 net,
+  3 fetch, 4 print: $1D with `--pc-folder`, $0D with `--no-pc-print` (bit 1, the developer
+  service, is never reported). A file written as `/PC:/Printouts/NAME.pdf` with the print
+  marker stays as it was written (the gateway would make a PDF of it): tests compare its bytes.
+- **The folder disk** (CLASSIC_MOUNT kind 5): there is no classic Atari, so no disk is built.
+  STAT of exactly `/D1:` .. `/D4:` (any case) for the folder's drive gives the numbers of the
+  firmware's rule, as they were at the mount (a refresh, the same folder and drive again,
+  counts again): size = files shown | files left out << 8 | free sectors << 16, attr $10 (never
+  FD_SAVING: nothing waits to be saved here), the FAT time of the mount. The rule: in name
+  order (the Atari's 8.3 name, upper case) at most 64 files whose names fit Atari DOS (1-8
+  letters or digits, the first a letter, optionally a dot and 1-3 letters or digits), each
+  needing max(1, ceil(size / 125)) of 707 sectors (one that does not fit is left out and the
+  next ones tried); folders inside ignored; every other file "left out". Another drive: $04.
+  Not modelled: /atari.ini's `folder=` lines (the folder disk is kept across restarts of the
+  65C816 here, but not written to the card), the copy of the Atari's changes into the folder.
 
 **Slow transfers** (`--card-kbps R:W`, `--pc-kbps R:W`; off by default, so every request is
 answered in the poll that takes it, as before):
@@ -592,7 +626,7 @@ every 512 CPU cycles here.
 | A816.BIN | The self test (FREDDIE II, timers, preemption, watchdog, mailbox), run with `--sd` pointing at a copy of itself. Uses `core/sw/a816/A816.BIN` when it exists |
 | BRINGUP1.BIN | RAM test, LOOP ($5948, the board $5947), READ and MVN (within 3 % of the board's values) |
 | tests/asm/mbdemo | Mailbox: open/read/close, LOAD, READDIR (and with skip), create/write/STAT/DELETE, error codes $80/$81/$82/6/5. Waits with WAI on the IOP interrupt |
-| tests/asm/pctest | The PC volume, three runs: with `--pc-folder` (the `PC:` entry at the end of the root and the skip count, STAT `/PC:` = `--pc-time`, case-insensitive names, a file written, read back and seeked, MKDIR, RENAME inside the volume, $89 across, `..` and a symlink out denied, $87 / $82 for CLASSIC_MOUNT), without it ($87 everywhere, the root unchanged), and with `--pc-drop-at` / `--pc-back-at` ($88 on old handles, CLOSE frees them, the entry gone and back). Outputs `tests/expected/pctest*.txt`; nothing may be written outside the folder |
+| tests/asm/pctest | The PC volume, three runs: with `--pc-folder` (the `PC:` entry at the end of the root and the skip count, STAT `/PC:` = `--pc-time` and (Horizon 0.23) the services $1D, case-insensitive names, a file written, read back and seeked, MKDIR, RENAME inside the volume, $89 across, `..` and a symlink out denied, $87 / $82 for CLASSIC_MOUNT), without it ($87 everywhere, the root unchanged), and with `--pc-drop-at` / `--pc-back-at` ($88 on old handles, CLOSE frees them, the entry gone and back). Outputs `tests/expected/pctest*.txt`; nothing may be written outside the folder |
 | tests/asm/cpuirq | COP and BRK frames, an MVN interrupted 88 times by a 50 us timer, WAI with I clear, the NMI edge rule |
 | tests/asm/nvcdemo | Palette writes, every blitter operation, the pointer, 3 VBLANKs = 49,975 us (60.03 Hz). Picture checked by md5 |
 | tests/asm/nvcmode1/2 | 4 bpp and 320x180 modes, the LINE interrupt, BASE_PENDING. Picture checked by md5 |

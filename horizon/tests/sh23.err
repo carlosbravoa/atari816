@@ -1,0 +1,6 @@
+emu816: CLASSIC_EJECT kind 3 slot 0 - -> 00
+emu816: CLASSIC_MOUNT kind 4 slot 0 /HELLO.LST -> 00
+emu816: CLASSIC_BOOT kind 0 slot 0 - -> 00
+emu816: CLASSIC_EJECT kind 3 slot 0 - -> 00
+emu816: CLASSIC_MOUNT kind 4 slot 0 /nosuch.bas -> 04
+emu816: CLASSIC_MOUNT kind 0 slot 0 /README.TXT -> 83

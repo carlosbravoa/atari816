@@ -109,6 +109,7 @@ static int fails;
 
 static int call(uint8_t op, const void *a, uint32_t na, const void *w, uint32_t nw)
 {
+    pl_poll();                       // as the firmware's main loop between two mailbox requests
     gotn = 0;
     return pl_call(op, a, na, w, nw, sink, 0);
 }

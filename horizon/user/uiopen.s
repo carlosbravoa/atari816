@@ -857,7 +857,9 @@ ft_tab: .byte   "LNK", 0, FT_LINK, "PRG", 0, FT_PRG, "BAS", 0, FT_BASIC, "PIC", 
         .byte   "SHT", 0, FT_SHEET, "CSV", 0, FT_SHEET, "MD", 0, FT_WRITE
         .byte   "TXT", 0, FT_TEXT, "DOC", 0, FT_TEXT, "NFO", 0, FT_TEXT, "CFG", 0, FT_TEXT
         .byte   "INI", 0, FT_TEXT, "ASC", 0, FT_TEXT, "LOG", 0, FT_TEXT, "S", 0, FT_TEXT
-        .byte   "INC", 0, FT_TEXT, "ASM", 0, FT_TEXT, 0
+        .byte   "INC", 0, FT_TEXT, "ASM", 0, FT_TEXT
+        .byte   "LST", 0, FT_TEXT       ; (0.23) a BASIC listing (LIST "D:..." on the Atari: $9B line ends)
+        .byte   0
 ; the program of each type (FT_* order) and its name for messages
 ft_prog: .addr  0, p_files, 0, 0, p_edit, p_basic, p_paint, p_sheet, p_write, 0
 ft_name: .addr  0, n_files, 0, 0, n_edit, n_basic, n_paint, n_sheet, n_write, 0

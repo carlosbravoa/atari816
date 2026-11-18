@@ -48,10 +48,10 @@ def main():
                     out.append(b)
             return feed(self, bytes(out))
         pclink.Parser.feed = lossy
-    exe = os.path.join(HERE, "harness")
+    tmp = tempfile.mkdtemp(prefix="pclink-test-")
+    exe = os.path.join(tmp, "harness")                  # (in the temp folder: runs side by side)
     subprocess.run(["gcc", "-O2", "-Wall", "-DPL_HOST", "-o", exe, os.path.join(HERE, "harness.c")],
                    check=True)
-    tmp = tempfile.mkdtemp(prefix="pclink-test-")
     share = os.path.join(tmp, "share")
     os.mkdir(share)
     os.symlink("/etc", os.path.join(share, "OUT"))
@@ -99,8 +99,11 @@ def main():
             print("board: " + ln.rstrip())
     threading.Thread(target=reader, daemon=True).start()
     t0 = time.time()
-    while not os.path.exists(pclink.sock_path()) and time.time() - t0 < 5:
+    while not os.path.exists(pclink.sock_path()) and time.time() - t0 < 30:   # (a busy PC: slow)
         time.sleep(0.05)
+    if not os.path.exists(pclink.sock_path()):          # (never fall back to a real board's port)
+        print("FAIL the gateway's socket did not appear")
+        os._exit(1)
     # developer channel through the gateway, while the board runs its file requests
     with pclink.DevClient(timeout=20) as d:
         check(d.via == "gateway", "tools use the gateway")
@@ -138,6 +141,8 @@ def main():
     h.kill()
     print("parser: skipped", gw2.link.parser.skipped, "bad", gw2.link.parser.bad,
           "retries", gw.link.retries)
+    import shutil
+    shutil.rmtree(tmp, ignore_errors=True)               # (the shared folder, the socket)
     print("RESULT", "PASS" if not fails else f"FAIL ({fails})")
     sys.stdout.flush()
     sys.stderr.flush()

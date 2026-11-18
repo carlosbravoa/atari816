@@ -3,7 +3,11 @@
 ;     exit, restart [full], shutdown (both ask the Desktop when one runs), mount file [1-4], eject d1-d4|cart|xex, boot, run file (Atari software),
 ;     rm path..., mkdir path, mv from to, cp from to (into a folder: keeps the name),
 ;     (0.22) get URL [to] (a download: cp with progress; "to" a folder or a name, by default
-;     the URL's last part in the current folder)
+;     the URL's last part in the current folder),
+;     (0.23) print file... (each file a print job of its own, "/PRN:Shell": its bytes as they
+;     are; it appears in /Printouts; the Desktop, when it runs, shows a notice and Printer
+;     lists it). run file also takes a BASIC program (.bas .lst): "Run in Atari" (ulib
+;     atari_run: classic_mount CK_BASRUN, then the Atari cold boots and types it in)
 ;   Arguments may be quoted: "River Raid (Title Version).xex". Paths are relative to the
 ;     current directory (cd, kept by the kernel per task and inherited by programs).
 ;   (0.22) A URL (http://, https://, ftp://, tcp://, tls://: the PC link's internet) is a path
@@ -497,7 +501,8 @@ b_help: print   "built-ins: help, ls [path] (or dir), cat file, cd [path], pwd, 
         print   "files: rm path..., mkdir path, mv from to, cp from to (to: a folder too)\n"
         print   "internet (the PC link): get URL [to] downloads (http:// https:// ftp://);\n"
         print   "  a URL is a path: cp, cat take one too\n"
-        print   "Atari: mount file [1-4], eject d1-d4|cart|xex, boot, run file\n"
+        print   "Atari: mount file [1-4], eject d1-d4|cart|xex, boot, run file (.bas .lst too)\n"
+        print   "print file...: each file to the printer (/Printouts; Programs > Printer)\n"
         print   "other words run <WORD>.PRG from /BIN, /SYSTEM or /SYSTEM/TESTS (or a .PRG path);\n"
         print   "  the rest of the line is its argument; a trailing & runs it in the background\n"
         print   "names with spaces: \"in quotes\"; ctrl-C stops the foreground job\n"
@@ -1068,6 +1073,92 @@ b_cat:  jsr     getword
         sys     SYS_CLOSE
         rts
 
+; ---------------------------------------------------------------- printing (0.23)
+; print file... : each file a print job of its own ("/PRN:Shell"), its bytes copied as they
+; are; "printed NAME" or "print: NAME: why" for each
+b_print:
+        stz     z:t0
+@next:  jsr     getword
+        bne     @one
+        lda     z:t0
+        bne     :+
+        print   "usage: print file...\n"
+:       rts
+@one:   inc     z:t0
+        ldx     #.loword(fname)
+        ldy     #^fname
+        lda     #O_READ
+        sys     SYS_OPEN
+        jcs     @err
+        sta     z:t1                    ; the file
+        ptr     p_prn
+        lda     #O_CREATE
+        sys     SYS_OPEN
+        bcc     :+
+        pha
+        lda     z:t1
+        sys     SYS_CLOSE
+        pla
+        bra     @err
+:       sta     z:t2                    ; the job
+        lda     #.loword(dbuf)          ; block: handle, buffer, length
+        sta     blk+1
+        sep     #$20
+        .a8
+        lda     #^dbuf
+        sta     blk+3
+        rep     #$20
+        .a16
+@copy:  lda     z:t1
+        jsr     blkh
+        lda     #DBUFLEN
+        sta     blk+4
+        ldx     #.loword(blk)
+        ldy     #^blk
+        sys     SYS_READ
+        bcs     @werr
+        cmp     #0
+        beq     @end
+        sta     blk+4
+        lda     z:t2
+        jsr     blkh
+        ldx     #.loword(blk)
+        ldy     #^blk
+        sys     SYS_WRITE
+        bcs     @werr
+        bra     @copy
+@end:   lda     z:t1
+        sys     SYS_CLOSE
+        lda     z:t2                    ; (the job is finished at its close)
+        sys     SYS_CLOSE
+        bcs     @err
+        print   "printed "
+        ldx     #.loword(fname)
+        ldy     #^fname
+        jsr     out_str
+        jsr     put_nl
+        jmp     @next
+@werr:  pha
+        lda     z:t1
+        sys     SYS_CLOSE
+        lda     z:t2
+        sys     SYS_CLOSE
+        pla
+@err:   pha
+        print   "print: "
+        jsr     pr_fname
+        pla
+        jsr     errmsg
+        jsr     put_nl
+        jmp     @next
+; the block's handle (a byte) = A
+blkh:   sep     #$20
+        .a8
+        sta     blk
+        rep     #$20
+        .a16
+        rts
+
 ; ---------------------------------------------------------------- files
 ; rm path... : delete each (files, and empty folders)
 b_rm:   stz     z:t0
@@ -1527,7 +1618,8 @@ b_boot: print   "booting the Atari: F12 returns to Horizon\n"
         jmp     cerr
 :       rts
 
-; run file: start this, and only this (see ulib atari_run)
+; run file: start this, and only this (see ulib atari_run); (0.23) a BASIC program (.bas
+; .lst) too: "Run in Atari"
 b_run:  jsr     getword
         bne     :+
         print   "usage: run file\n"
@@ -1541,7 +1633,9 @@ b_run:  jsr     getword
         pha
         print   "run: "
         pla
-        jmp     cerr
+        cmp     #$C3
+        jne     cerr
+        print   "unknown file type (.atr .xfd .xex .com .exe .car .rom .bin .bas .lst)\n"
 :       rts
 
 ; print the meaning of a classic op error A, and a newline
@@ -1626,10 +1720,12 @@ bnames: .byte   "help", 0, 0, 0, 0
         .byte   "shutdown"              ; (8 characters: the table's end is its terminator)
         .byte   "date", 0, 0, 0, 0
         .byte   "get", 0, 0, 0, 0, 0
+        .byte   "print", 0, 0, 0
         .byte   0
 bfuncs: .addr   b_help, b_dir, b_cat, b_ps, b_mem, b_kill, b_exit, b_cls, b_atari
         .addr   b_mount, b_eject, b_boot, b_run, b_cd, b_pwd, b_dir
-        .addr   b_rm, b_mkdir, b_mv, b_cp, b_restart, b_shutdown, b_date, b_get
+        .addr   b_rm, b_mkdir, b_mv, b_cp, b_restart, b_shutdown, b_date, b_get, b_print
+p_prn:  .byte   "/PRN:Shell", 0         ; (0.23) a print job
 ; (0.22) the internet's errors, E_NOSVC to E_NET
 netmsg: .addr   m_nosvc, m_badaddr, m_noname, m_refused, m_timeout, 0, m_closed, m_tls
         .addr   m_pcbusy, m_net

@@ -147,7 +147,9 @@ X_PLAY  = 6
 X_SCROLL = 7
 X_PANEL = 8
 X_RASTER = 9
-X_N     = 10
+X_LPRINT = 10                           ; (Horizon 0.23)
+X_LLIST = 11
+X_N     = 12
 
 TMAX    = 500                           ; tokens of one line
 LBMAX   = 1000                          ; LIST's text of one line
@@ -1122,7 +1124,7 @@ kwtab:  .addr   k_let, k_print, k_input, k_if, k_goto, k_gosub, k_return, k_on
         .addr   k_none                                                          ; $F0
         .endrepeat
 kwtab2: .addr   k_sprite, k_shape, k_get, k_put, k_copy, k_wave, k_play, k_scroll ; $100
-        .addr   k_panel, k_raster
+        .addr   k_panel, k_raster, k_lprint, k_llist
 k_off:  .byte   "OFF", 0
 k_hit:  .byte   "HIT", 0
 k_frame: .byte  "FRAME", 0
@@ -1137,6 +1139,8 @@ k_play: .byte   "PLAY", 0
 k_scroll: .byte "SCROLL", 0
 k_panel: .byte  "PANEL", 0
 k_raster: .byte "RASTER", 0
+k_lprint: .byte "LPRINT", 0
+k_llist: .byte  "LLIST", 0
 k_let:  .byte   "LET", 0
 k_print: .byte  "PRINT", 0
 k_input: .byte  "INPUT", 0

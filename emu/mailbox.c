@@ -15,6 +15,27 @@
  *
  * The internet (PC link step 2, net.c): URL paths and the stream handles 4-7 are served there.
  * The link counts as up while any PC service is given (--pc-folder, --net, --net-root).
+ *
+ * Step 3 (Horizon 0.23): printing, "Run in Atari", the folder disk.
+ * - "/PRN:NAME" (OPEN, any mode = create): a print job, a normal card file (handle 0-3) written as
+ *   /Printouts/.YYYY-MM-DD HH.MM.SS NAME.txt (the firmware's clock; /Printouts made if missing; NAME
+ *   cut to 24 characters, \ / : * ? " < > | and bytes below 32 made '_', blanks and dots at the ends
+ *   removed, "" = "Job"; " 2" .. " 99" when the name is taken) and moved onto its name without the
+ *   '.' at CLOSE (also when the 65C816 is reset). STAT of exactly "/PRN:": size = the jobs finished
+ *   since power-on (these and the classic Atari's), attr $10, time = now. Any other op on a /PRN:
+ *   path: $82. The classic Atari's printer (P:): --classic-print FILE@SECONDS makes such a job
+ *   ("NAME" = Atari) from FILE's ATASCII bytes through the firmware's converter
+ *   (core/firmware/prnconv.c), finished 3 s later (the firmware ends a job after 3 s without data).
+ * - STAT of "/PC:" (the root): size = the gateway's services, bit 0 files, 2 net, 3 fetch, 4 print
+ *   (--pc-folder: 1 | 4 | 8 | 16; --no-pc-print: without 16). A file the gateway turns into a PDF
+ *   (/PC:/Printouts/NAME.pdf starting with the marker) stays as it was written here.
+ * - CLASSIC_MOUNT kind 4 (CK_BASRUN, a BASIC program as the boot disk): checked and recorded as
+ *   kind 2 (answer 2; $84 for an empty file or one over 96 KB). Kind 5 (CK_FOLDER): the folder
+ *   (made if missing) on D1:-D4: (answer 1); one drive at most (mounting it on another moves it).
+ *   There is no classic Atari here: the disk is never built; STAT of exactly "/D1:" .. "/D4:" for
+ *   the folder's drive gives the numbers of the firmware's rule (fd_scan below) as they were at
+ *   the mount: size = shown | left out << 8 | free sectors << 16, attr $10 (never "waiting to be
+ *   saved"), the FAT time of the mount; another drive: $04.
  */
 
 #include "machine.h"
@@ -28,6 +49,7 @@
 #include <time.h>
 #include <unistd.h>
 #include <fcntl.h>
+#include "../core/firmware/prnconv.h"   /* (0.23) the firmware: the classic Atari's printer output */
 
 enum { FR_OK, FR_DISK_ERR, FR_INT_ERR, FR_NOT_READY, FR_NO_FILE, FR_NO_PATH, FR_INVALID_NAME,
        FR_DENIED, FR_EXIST, FR_INVALID_OBJECT, FR_WRITE_PROTECTED, FR_INVALID_DRIVE,
@@ -55,6 +77,13 @@ static uint64_t clk_cyc;
 static char     cart_path[MAXPATH];
 static uint32_t cart_size;
 const char     *mailbox_boot_cart;          /* --boot-cart: loaded "by the firmware" at power-on */
+/* (0.23) the print jobs finished since power-on (STAT /PRN:), and the folder disk (CLASSIC_MOUNT
+ * kind 5): its drive (-1: none), folder and numbers. Both survive restarts of the 65C816 */
+static uint32_t prn_done;
+static int      fd_slot = -1;
+static char     fd_dir[MAXPATH];
+static uint32_t fd_shown, fd_skipped, fd_free, fd_time;
+int             mailbox_no_pc_print;
 
 static time_t fw_now(void)
 {
@@ -170,8 +199,10 @@ static void close_file(Mailbox *m, int i, int commit)
     int bad = fclose(m->f[i]), gone = 0;
     m->f[i] = NULL;
     if (m->ftmp[i]) {
-        if (commit && !pc_dead(m, i) && m->fhost[i] && !rename(m->ftmp[i], m->fhost[i])) ;
-        else { unlink(m->ftmp[i]); gone = 1; }
+        /* (a print job is finished, never thrown away: the firmware closes it at a reset too) */
+        if ((commit || m->fprn[i]) && !pc_dead(m, i) && m->fhost[i] && !rename(m->ftmp[i], m->fhost[i])) {
+            if (m->fprn[i]) prn_done++;
+        } else { unlink(m->ftmp[i]); gone = 1; }
         free(m->ftmp[i]);
         m->ftmp[i] = NULL;
     }
@@ -180,6 +211,7 @@ static void close_file(Mailbox *m, int i, int commit)
     m->fhost[i] = NULL;
     m->fdirty[i] = 0;
     m->fpc[i] = 0;
+    m->fprn[i] = 0;
     (void)bad;
 }
 
@@ -396,6 +428,183 @@ static uint32_t xfer(FILE *f, uint32_t n, uint32_t len, int wr, uint32_t *res)
 
 static int cmpstr(const void *a, const void *b) { return strcmp(*(char *const *)a, *(char *const *)b); }
 
+/* ── (0.23) printing ── */
+/* "/PRN:" (any case) at the start: a print job's path */
+static int is_prn(const char *p) { return !strncasecmp(p, "/PRN:", 5); }
+
+/* a card path (FAT) that exists, in any case */
+static int card_has(const char *fat)
+{
+    char h[4096];
+    struct stat st;
+    return !host_path(fat, h, sizeof h) && !lstat(h, &st);
+}
+
+/* a new job named NAME: host = /Printouts/YYYY-MM-DD HH.MM.SS NAME.txt (the firmware's clock;
+ * " 2" .. " 99" after NAME when the name is taken), tmp = the same with a '.' in front of the
+ * name (written while the job is open). /Printouts is made if missing. 0 or an FRESULT */
+static int prn_job(const char *name, char *host, size_t hn, char *tmp, size_t tn)
+{
+    char nm[32], dir[4096], fat[MAXPATH + 32];
+    int k = 0, a = 0;
+    for (int i = 0; name[i] && i < 24; i++) {
+        unsigned char c = (unsigned char)name[i];
+        nm[k++] = c < 32 || strchr("\\/:*?\"<>|", c) ? '_' : (char)c;
+    }
+    nm[k] = 0;
+    while (nm[a] == ' ' || nm[a] == '.') a++;
+    while (k > a && (nm[k - 1] == ' ' || nm[k - 1] == '.')) nm[--k] = 0;
+    memmove(nm, nm + a, (size_t)(k - a + 1));
+    if (!nm[0]) strcpy(nm, "Job");
+    int r = host_path("/Printouts", dir, sizeof dir);
+    if (r) return r;
+    struct stat st;
+    if (stat(dir, &st)) {
+        if (mkdir(dir, 0777)) return errno_fr(errno, dir);
+        stamp(dir, 0);
+    } else if (!S_ISDIR(st.st_mode)) return FR_DENIED;
+    time_t now = fw_now();
+    struct tm tm;
+    localtime_r(&now, &tm);
+    for (int n = 1; n < 100; n++) {
+        char base[64], num[8] = "";
+        if (n > 1) snprintf(num, sizeof num, " %d", n);
+        snprintf(base, sizeof base, "%04d-%02d-%02d %02d.%02d.%02d %s%s", tm.tm_year + 1900, tm.tm_mon + 1,
+                 tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec, nm, num);
+        snprintf(fat, sizeof fat, "/Printouts/%s.txt", base);
+        if (card_has(fat)) continue;
+        snprintf(fat, sizeof fat, "/Printouts/.%s.txt", base);
+        if (card_has(fat)) continue;
+        if ((size_t)snprintf(host, hn, "%s/%s.txt", dir, base) >= hn
+            || (size_t)snprintf(tmp, tn, "%s/.%s.txt", dir, base) >= tn) return FR_INVALID_NAME;
+        return FR_OK;
+    }
+    return FR_EXIST;
+}
+
+/* --classic-print FILE@SECONDS: at that emulated time the classic Atari "prints" FILE's bytes
+ * (ATASCII, as P: sends them: records of 40 bytes, a record ending at its EOL); the job is
+ * written at once under its '.' name and finished 3 s later */
+#define NCPRINT 8
+static struct { const char *file; double at; int state; char host[4096], tmp[4200]; } cprint[NCPRINT];
+static int ncprint;
+
+int mailbox_classic_print(const char *arg)
+{
+    const char *at = strrchr(arg, '@');
+    if (!at || at == arg || ncprint == NCPRINT) return -1;
+    char *f = strndup(arg, (size_t)(at - arg)), *e;
+    double t = strtod(at + 1, &e);
+    if (!f || *e || t < 0) { free(f); return -1; }
+    cprint[ncprint].file = f;
+    cprint[ncprint++].at = t;
+    return 0;
+}
+
+static void cprint_tick(void)
+{
+    double t = emu_sec();
+    for (int i = 0; i < ncprint; i++) {
+        if (cprint[i].state == 0 && t >= cprint[i].at) {
+            cprint[i].state = 2;
+            FILE *in = fopen(cprint[i].file, "rb"), *out = NULL;
+            if (!in) { fprintf(stderr, "emu816: --classic-print %s: cannot read it\n", cprint[i].file); continue; }
+            int r = M.mb.root ? prn_job("Atari", cprint[i].host, sizeof cprint[i].host, cprint[i].tmp, sizeof cprint[i].tmp) : FR_NOT_READY;
+            if (!r && !(out = fopen(cprint[i].tmp, "wb"))) r = FR_DENIED;
+            if (r) { fprintf(stderr, "emu816: P: job not made (%02X)\n", r); fclose(in); continue; }
+            prn_conv_t c = { 0 };
+            uint8_t rec[40], txt[40 + 256];
+            int n = 0, ch;
+            while ((ch = fgetc(in)) != EOF) {                /* a record: up to 40 bytes or its EOL */
+                rec[n++] = (uint8_t)ch;
+                if (ch == 0x9B || n == 40) { fwrite(txt, 1, (size_t)prn_record(&c, rec, n, txt), out); n = 0; }
+            }
+            if (n) fwrite(txt, 1, (size_t)prn_record(&c, rec, n, txt), out);
+            fwrite(txt, 1, (size_t)prn_finish(&c, txt), out);
+            fclose(in);
+            fclose(out);
+            cprint[i].state = 1;
+        }
+        if (cprint[i].state == 1 && t >= cprint[i].at + 3) {     /* 3 s without data: the end */
+            cprint[i].state = 2;
+            if (rename(cprint[i].tmp, cprint[i].host)) { unlink(cprint[i].tmp); continue; }
+            stamp(cprint[i].host, 0);
+            prn_done++;
+            const char *b = strrchr(cprint[i].host, '/');
+            fprintf(stderr, "emu816: P: job /Printouts/%s\n", b ? b + 1 : cprint[i].host);
+        }
+    }
+}
+
+/* ── (0.23) the folder disk ── */
+/* "/D1:" .. "/D4:" exactly (any case): 0-3, else -1 */
+static int drive_of(const char *p)
+{
+    return p[0] == '/' && (p[1] | 0x20) == 'd' && p[2] >= '1' && p[2] <= '4' && p[3] == ':' && !p[4] ? p[2] - '1' : -1;
+}
+
+/* the Atari DOS 8.3 rule: 1-8 letters / digits, the first a letter, optionally '.' and 1-3
+ * letters / digits (any case; out: upper case). 0 if the name has no such form */
+static int fd_aname(const char *n, char *out)
+{
+    int i = 0, k = 0, e = 0;
+#define AN(c) (((c) >= 'A' && (c) <= 'Z') || ((c) >= 'a' && (c) <= 'z') || ((c) >= '0' && (c) <= '9'))
+    if (!((n[0] >= 'A' && n[0] <= 'Z') || (n[0] >= 'a' && n[0] <= 'z'))) return 0;
+    for (; n[i] && n[i] != '.'; i++) {
+        if (i >= 8 || !AN(n[i])) return 0;
+        out[k++] = (char)(n[i] & ~(n[i] >= 'a' ? 0x20 : 0));
+    }
+    if (n[i] == '.') {
+        out[k++] = n[i++];
+        for (; n[i]; i++, e++) {
+            if (e >= 3 || !AN(n[i])) return 0;
+            out[k++] = (char)(n[i] & ~(n[i] >= 'a' ? 0x20 : 0));
+        }
+        if (!e) return 0;
+    }
+#undef AN
+    out[k] = 0;
+    return 1;
+}
+
+typedef struct { char name[13]; uint32_t size; } fd_cand;
+static int cmpcand(const void *a, const void *b) { return strcmp(((const fd_cand *)a)->name, ((const fd_cand *)b)->name); }
+
+/* the folder's numbers by the firmware's rule: in name order, at most 64 files of 8.3 names,
+ * each max(1, ceil(size / 125)) sectors of 707 (one that does not fit is left out, the next
+ * ones tried); folders inside ignored; every other file "left out" */
+static void fd_scan(const char *host)
+{
+    fd_shown = fd_skipped = 0;
+    fd_free = 707;
+    DIR *d = opendir(host);
+    if (!d) return;
+    fd_cand *c = NULL;
+    size_t nc = 0, cap = 0;
+    struct dirent *de;
+    while ((de = readdir(d))) {
+        char hp[4400], an[13];
+        struct stat st;
+        if (!strcmp(de->d_name, ".") || !strcmp(de->d_name, "..")) continue;
+        snprintf(hp, sizeof hp, "%s/%s", host, de->d_name);
+        if (stat(hp, &st) || S_ISDIR(st.st_mode)) continue;
+        if (!fd_aname(de->d_name, an)) { fd_skipped++; continue; }
+        if (nc == cap) c = realloc(c, (cap = cap ? 2 * cap : 64) * sizeof *c);
+        snprintf(c[nc].name, sizeof c[nc].name, "%s", an);
+        c[nc++].size = (uint32_t)st.st_size;
+    }
+    closedir(d);
+    if (nc) qsort(c, nc, sizeof *c, cmpcand);
+    for (size_t i = 0; i < nc; i++) {
+        uint32_t need = (c[i].size + 124) / 125;
+        if (!need) need = 1;
+        if ((i && !strcmp(c[i].name, c[i - 1].name)) || fd_shown == 64 || need > fd_free) { fd_skipped++; continue; }
+        fd_shown++;
+        fd_free -= need;
+    }
+    free(c);
+}
+
 static void serve(Mailbox *m, uint8_t *msg)
 {
     static char path[MAXPATH], host[4096];
@@ -417,6 +626,19 @@ static void serve(Mailbox *m, uint8_t *msg)
         while (h < MB_FILES && m->f[h]) h++;
         if (h == MB_FILES) { res = FR_TOO_MANY_OPEN_FILES; break; }
         if (!mb_path(buf, path, sizeof path)) { res = MB_BAD_ADDR; break; }
+        if (is_prn(path)) {                              /* (0.23) a print job: any mode creates */
+            static char tp[4200];
+            if ((res = prn_job(path + 5, host, sizeof host, tp, sizeof tp))) break;
+            FILE *nf = fopen(tp, "w+b");
+            if (!nf) { res = errno_fr(errno, tp); break; }
+            m->f[h] = nf; m->fmode[h] = 3; val = h;
+            m->ftmp[h] = strdup(tp);
+            m->fpc[h] = 0; m->fsess[h] = 0;
+            m->fhost[h] = strdup(host);
+            m->fdirty[h] = 1;
+            m->fprn[h] = 1;
+            break;
+        }
         if ((res = resolve(path, host, sizeof host, &pc))) break;
         if (!stat(host, &st) && S_ISDIR(st.st_mode)) { res = fl >= 2 ? FR_EXIST : FR_NO_FILE; break; }
         FILE *nf;
@@ -475,20 +697,33 @@ static void serve(Mailbox *m, uint8_t *msg)
         break;
     case 0x06: {                                         /* STAT */
         uint8_t o[9];
+        uint32_t sz, t;
+        uint8_t attr;
+        int dv;
         if (!mb_path(buf, path, sizeof path)) { res = MB_BAD_ADDR; break; }
+        if (is_prn(path)) {                              /* (0.23) "/PRN:": the jobs finished */
+            if (path[5]) { res = MB_UNSUPPORTED; break; }
+            sz = prn_done; attr = 0x10; t = fat_time(fw_now());
+            goto st_out;
+        }
+        if ((dv = drive_of(path)) >= 0) {                /* (0.23) "/D1:" ..: the folder disk */
+            if (dv != fd_slot) { res = FR_NO_FILE; break; }
+            sz = fd_shown | fd_skipped << 8 | fd_free << 16; attr = 0x10; t = fd_time;
+            goto st_out;
+        }
         if ((res = resolve(path, host, sizeof host, &pc))) break;
         const char *q = path; while (*q == '/') q++;
         if (!*q) { res = FR_INVALID_NAME; break; }       /* FatFs cannot stat the root */
-        uint32_t sz, t;
-        uint8_t attr;
-        if (pc && pc_is_root(path)) {                    /* the PC volume's root: the PC's clock */
-            sz = 0; attr = 0x10; t = fat_time(pc_now());
+        if (pc && pc_is_root(path)) {                    /* the PC volume's root: the PC's clock; */
+            sz = 0x01 | 0x04 | 0x08 | (mailbox_no_pc_print ? 0 : 0x10);    /* (0.23) the services */
+            attr = 0x10; t = fat_time(pc_now());
         } else {
             if (stat(host, &st)) { res = errno_fr(errno, host); break; }
             sz = S_ISDIR(st.st_mode) ? 0 : (uint32_t)st.st_size;
             t = fat_time(stat_date(host, st.st_mtime));
             attr = fat_attr(host, &st);
         }
+    st_out:
         o[0] = sz; o[1] = sz >> 8; o[2] = sz >> 16; o[3] = sz >> 24;
         o[4] = attr;
         o[5] = t; o[6] = t >> 8; o[7] = t >> 16; o[8] = t >> 24;
@@ -498,6 +733,7 @@ static void serve(Mailbox *m, uint8_t *msg)
     }
     case 0x07: {                                         /* READDIR */
         if (!mb_path(buf, path, sizeof path)) { res = MB_BAD_ADDR; break; }
+        if (is_prn(path)) { res = MB_UNSUPPORTED; break; }
         if ((res = resolve(path, host, sizeof host, &pc))) break;
         int card_root = !strcmp(path, "/") && pc_up();   /* the card's root: "PC:" at the end */
         DIR *d = opendir(host);
@@ -544,6 +780,7 @@ static void serve(Mailbox *m, uint8_t *msg)
     }
     case 0x08: case 0x09:                                /* MKDIR, DELETE */
         if (!mb_path(buf, path, sizeof path)) { res = MB_BAD_ADDR; break; }
+        if (is_prn(path)) { res = MB_UNSUPPORTED; break; }
         if ((res = resolve(path, host, sizeof host, &pc))) break;
         if (pc && pc_is_root(path)) { res = msg[0] == 0x08 ? FR_EXIST : FR_DENIED; break; }
         if (msg[0] == 0x08) { if (mkdir(host, 0777)) res = errno_fr(errno, host); else stamp(host, pc); }
@@ -554,6 +791,7 @@ static void serve(Mailbox *m, uint8_t *msg)
         static char to[MAXPATH], hto[4096];
         if (!mb_path(buf, path, sizeof path) || !mb_path(buf + strlen(path) + 1, to, sizeof to)) { res = MB_BAD_ADDR; break; }
         int pc2 = 0;
+        if (is_prn(path) || is_prn(to)) { res = MB_UNSUPPORTED; break; }
         int r1 = resolve(path, host, sizeof host, &pc), r2 = resolve(to, hto, sizeof hto, &pc2);
         if (r1 == MB_NO_PC || r2 == MB_NO_PC) { res = MB_NO_PC; break; }
         if (pc != pc2) { res = MB_NOT_SAME; break; }     /* the card and the PC volume */
@@ -568,6 +806,7 @@ static void serve(Mailbox *m, uint8_t *msg)
     }
     case 0x10: {                                         /* LOAD whole file to ARG0 */
         if (!mb_path(buf, path, sizeof path)) { res = MB_BAD_ADDR; break; }
+        if (is_prn(path)) { res = MB_UNSUPPORTED; break; }
         if ((res = resolve(path, host, sizeof host, &pc))) break;
         if (!stat(host, &st) && S_ISDIR(st.st_mode)) { res = FR_NO_FILE; break; }
         FILE *lf = fopen(host, "rb");
@@ -582,15 +821,18 @@ static void serve(Mailbox *m, uint8_t *msg)
     case 0x18: case 0x19: case 0x1A: {                   /* CLASSIC_MOUNT / EJECT / BOOT */
         /* Stub of the firmware ops (there is no classic machine here): the same argument
          * checks and result codes, any existing file with a known extension mounts, BOOT
-         * always succeeds. One line per op on stderr. */
+         * always succeeds. One line per op on stderr. (0.23) Kind 4 (CK_BASRUN, a BASIC
+         * program: answered and recorded as an executable) and 5 (CK_FOLDER, a folder disk on
+         * a drive: answered as a disk) */
         static const char *opn[3] = { "CLASSIC_MOUNT", "CLASSIC_EJECT", "CLASSIC_BOOT" };
-        int kind = msg[7], s = kind == 1 ? (int)arg0 : 0;
+        int kind = msg[7], s = kind == 1 || kind == 5 ? (int)arg0 : 0;
         path[0] = 0;
         if (msg[0] == 0x1A) {
             val = m->cl_xex ? 2 : 0;
         } else {
             if (msg[0] == 0x18) {
                 if (!mb_path(buf, path, sizeof path)) { res = MB_BAD_ADDR; goto cl_log; }
+                if (is_prn(path)) { res = MB_UNSUPPORTED; goto cl_log; }
                 if (is_pc(path)) { res = pc_up() ? MB_UNSUPPORTED : MB_NO_PC; goto cl_log; }   /* (not in step 1) */
                 const char *e = strrchr(path, '.');
                 if (!kind && e && strlen(e) == 4)
@@ -600,20 +842,38 @@ static void serve(Mailbox *m, uint8_t *msg)
                         if (j == 3) { kind = i < 2 ? 1 : i < 5 ? 2 : 3; break; }
                     }
             }
-            if (kind < 1 || kind > 3 || s >= 4) { res = 0x83; goto cl_log; }
+            if (kind < 1 || kind > (msg[0] == 0x18 ? 5 : 3) || s >= 4) { res = 0x83; goto cl_log; }
             if (msg[0] == 0x19) {                        /* EJECT */
                 if (kind == 3) { m->cl_cart = 0; cart_size = 0; cart_path[0] = 0; }
                 else {
                     if (!s) m->cl_xex = 0;
                     if (kind == 1) m->cl_disk[s] = 0;
+                    if (kind == 1 && s == fd_slot) fd_slot = -1;    /* the folder disk: saved, gone */
                 }
                 goto cl_log;
             }
             if ((res = host_path(path, host, sizeof host))) goto cl_log;
+            if (kind == 5) {                             /* a folder (made if missing) as a disk */
+                if (stat(host, &st)) {
+                    if (mkdir(host, 0777)) { res = errno_fr(errno, host); goto cl_log; }
+                    stamp(host, 0);
+                } else if (!S_ISDIR(st.st_mode)) { res = FR_EXIST; goto cl_log; }
+                if (fd_slot >= 0 && fd_slot != s) m->cl_disk[fd_slot] = 0;   /* moved */
+                fd_slot = s;
+                snprintf(fd_dir, sizeof fd_dir, "%s", path);
+                fd_scan(host);
+                fd_time = fat_time(fw_now());
+                m->cl_disk[s] = 1;
+                if (!s) m->cl_xex = 0;
+                val = 1;
+                goto cl_log;
+            }
             if (stat(host, &st)) { res = errno_fr(errno, host); goto cl_log; }
             if (S_ISDIR(st.st_mode)) { res = FR_NO_FILE; goto cl_log; }
+            if (kind == 4 && (!st.st_size || st.st_size > 96 * 1024)) { res = 0x84; goto cl_log; }
+            if ((kind == 1 && s == fd_slot) || ((kind == 2 || kind == 4) && fd_slot == 0)) fd_slot = -1;
             if (kind == 1) { m->cl_disk[s] = 1; if (!s) m->cl_xex = 0; }
-            else if (kind == 2) { m->cl_xex = 1; m->cl_disk[0] = 0; }
+            else if (kind == 2 || kind == 4) { m->cl_xex = 1; m->cl_disk[0] = 0; }
             else {
                 m->cl_cart = 1;
                 snprintf(cart_path, sizeof cart_path, "%s", path);
@@ -621,7 +881,7 @@ static void serve(Mailbox *m, uint8_t *msg)
                 const char *e = strrchr(path, '.');
                 if (e && !strcasecmp(e, ".CAR") && cart_size >= 16) cart_size -= 16;
             }
-            val = kind;
+            val = kind == 4 ? 2 : kind;
         }
     cl_log:
         fprintf(stderr, "emu816: %s kind %d slot %d %s -> %02X\n", opn[msg[0] - 0x18],
@@ -865,6 +1125,7 @@ void mailbox_poll(uint64_t now)
     Mailbox *m = &M.mb;
     if (now < m->next_poll) return;
     m->next_poll = now + MB_POLL;
+    if (ncprint) cprint_tick();                          /* (0.23) the classic Atari's printer */
     if (mailbox_pc_root) pc_drop_tmp(m);
     net_tick(now);
 

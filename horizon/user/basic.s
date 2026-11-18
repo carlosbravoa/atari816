@@ -15,6 +15,7 @@
 ;   bas_fn.s     the functions of floating point (SQR, SIN, EXP, LOG ...)
 ;   bas_mem.s    variables, arrays, the string heap and its garbage collector
 ;   bas_gfx.s    the graphics window, sound
+;   bas_prn.s    (Horizon 0.23) LPRINT and LLIST: the print job
 ;
 ; Memory: the code bank holds the interpreter and small buffers; everything else lives in
 ; banks of its own (SYS_BALLOC), so a program and its data can use many 64 KB banks:
@@ -251,6 +252,7 @@ stopws: lda     wsown
 quit:   lda     #0
 quit_code:
         pha
+        jsr     lp_end                  ; (0.23) the print job finished
         jsr     snd_off
         jsr     pal_restore
         jsr     stopws
@@ -375,6 +377,7 @@ main_ready:
         txs
         stz     running
         stz     vsp                     ; (values left by an error or a break)
+        jsr     lp_end                  ; (0.23) the run's print job finished
         jsr     fs_suspend              ; (2.0: the console is seen while BASIC waits)
         lda     script                  ; (a script: no Ready)
         bne     main_cmd
@@ -816,6 +819,7 @@ error:  rep     #$38                    ; (also decimal mode off)
         ldx     err_sp
         txs
         sta     errcode
+        stz     lpon                    ; (0.23) the message to the console
         jsr     snd_off
         jsr     game_stop
         stz     contok
@@ -965,11 +969,23 @@ con_errmsg:
         cprint  "Undefined line "
         lda     errarg
         jmp     con_putu16
-:       asl     a
+:       pha
+        asl     a
         tax
         lda     errtab-2,x
         tax
-        jmp     con_puts
+        jsr     con_puts
+        pla                             ; (0.23) "File error $XX": the I/O error of the
+        cmp     #E_FILE                 ; print job
+        bne     :+
+        lda     ioerr
+        beq     :+
+        stz     ioerr
+        pha
+        cprint  " $"
+        pla
+        jmp     con_puthex8
+:       rts
 
 ; an I/O error A (prog_load, prog_save): the message on the console
 con_puterr:
@@ -993,6 +1009,7 @@ do_break:
         ldx     err_sp
         txs
         stz     brkf
+        stz     lpon                    ; (0.23) the message to the console
         jsr     snd_off
         jsr     game_stop
         lda     curidx
@@ -1028,6 +1045,7 @@ do_break:
         .include "bas_gfx.s"
         .include "bas_game.s"
         .include "bas_snd.s"
+        .include "bas_prn.s"
 
         .segment "RODATA"
 menus:  .byte   "File", 0, "New", 0, "Load...", 0, "Save", 0, "Save as...", 0, "-", 0, "Close", 0, 0

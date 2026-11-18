@@ -1,0 +1,18 @@
+> print README.TXT nosuch.txt LONG.TXT
+printed README.TXT
+print: nosuch.txt: not found
+printed LONG.TXT
+> print
+usage: print file...
+> ls /Printouts
+  2026-11-18 15.30.03 Shell 2.txt                       9635  2026-11-18 15:30
+  2026-11-18 15.30.03 Shell.txt                          110  2026-11-18 15:30
+> run HELLO.LST
+booting the Atari: F12 returns to Horizon
+> run nosuch.bas
+booting the Atari: F12 returns to Horizon
+run: file not found
+> run README.TXT
+booting the Atari: F12 returns to Horizon
+run: unknown file type (.atr .xfd .xex .com .exe .car .rom .bin .bas .lst)
+> 

@@ -1,0 +1,19 @@
+# (0.23) Printer in the text shell, second session (tests/mousegen.py makes
+# tests/printer2.keys from this): no PC volume, no /Printouts at start, no clock (every job
+# is dated 2026-01-01 00.00.00); emu816 --classic-print tests/lprint.bin@6 and @12 (jobs
+# finished at 9 and 15 s: "... Atari.txt", then "... Atari 2.txt"). Shots (s):
+#   1   5.0  no jobs: how to print; Delete, Send to PC, Open in Edit dimmed
+#   2  11.0  the first job arrived (the timer): selected, its preview (a long line wrapped)
+#   3  16.5  the second one ("Atari 2", the same second) on top; the selection stays
+#   4  20.0  the window made smaller with its grip: the text wrapped again
+#   5  26.0  Esc closed it; "printer PATH" selects that job (not the newest)
+#   6  29.0  Enter: the job opened in Edit
+1500 key {esc}
+3000 key printer\n
+17000 move 595 341
+17300 press
+17400 drag 470 300
+18500 release
+21000 key {esc}
+22000 key printer "/Printouts/2026-01-01 00.00.00 Atari.txt"\n
+26500 key \n

@@ -58,10 +58,10 @@ def main():
         c, _ = srv.accept()
         c.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
         c.sendall(bytes([IAC, DO, TTYPE, IAC, WILL, ECHO, IAC, WILL, SGA, IAC, DO, NAWS]))
-        got = read_for(c, 1.0)
+        got = read_for(c, 5.0, lambda g: len(g) >= 12)        # (the four answers)
         log.write(f'caller {n}: negotiation answers: {got.hex(" ")}\n')
         c.sendall(bytes([IAC, SB, TTYPE, 1, IAC, SE]))
-        got = read_for(c, 1.0)
+        got = read_for(c, 5.0, lambda g: g.endswith(bytes([IAC, SE])))
         log.write(f'caller {n}: terminal type: {got.hex(" ")}\n')
         log.flush()
         c.sendall(atascii_screen())
@@ -95,10 +95,16 @@ def main():
     log.write('server: done\n')
     log.close()
 
-def read_for(c, secs):
-    """the bytes that come within secs"""
+def read_for(c, secs, done):
+    """the bytes that come within secs, or until done(bytes so far) says they are complete.
+    (0.23) Not waiting the full time once the answer is there: emu816 runs in step with the
+    host's clock while a connection is open, so a fixed 2 s of waiting here moved the screen's
+    arrival near the test's link drop (26 s): bbs5 showed it or not, by the host's speed. The
+    limit is 5 s (it costs nothing when the answer comes): on a loaded host the emulator can
+    take more than 1 s of host time to answer, and the log then put the answer under
+    "typed"."""
     got, t = b'', time.time() + secs
-    while True:
+    while not done(got):
         r, _, _ = select.select([c], [], [], max(0, t - time.time()))
         if not r:
             return got
@@ -106,5 +112,6 @@ def read_for(c, secs):
         if not b:
             return got
         got += b
+    return got
 
 main()

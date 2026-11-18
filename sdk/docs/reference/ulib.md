@@ -86,4 +86,5 @@ the buffer is full, or at `out_flush`), so a line is never mixed with another pr
 | `spawn` | X, Y = path, A = priority, `u_arg` = u24 argument string (0 = none) -> A = id, C on error |
 | `exit_a` | A = exit code: flush, then SYS_EXIT |
 | `atari_kind` | X, Y = file name -> A = 1 disk, 2 executable, 3 cartridge, 0 none (by the extension) |
-| `atari_run` | X, Y = path: "start this, and only this" on the classic machine; returns after F12 (C set: error A) |
+| `atari_run` | X, Y = path: "start this, and only this" on the classic machine; returns after F12 (C set: error A). (0.23) A BASIC program (.bas .lst): "Run in Atari" (classic_mount `CK_BASRUN`) |
+| `atari_rkind` | (0.23) As `atari_kind`, and 4 (`CK_BASRUN`) for .bas and .lst: what `atari_run` can start |

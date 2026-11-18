@@ -9,7 +9,7 @@
 ;   write_fmt.s    the Format menu: inline spans, headings, lists, quotes; Enter / Tab /
 ;                  Backspace in lists
 ;   write_file.s   find, replace, go to, word count, files (load, save, save as .md, export
-;                  plain text)
+;                  plain text), (0.23) print (prdoc)
 ;   write_tb.s     the toolbar, its state (the style at the cursor), the menus' check marks
 ;   write_test.s   "write -t FILE" (the self test) and "write -b FILE" (timings)
 ;   wfont.inc      the type faces (compressed: unpacked at the start) and the toolbar's
@@ -59,6 +59,12 @@
 ; quote, ctrl-minus rule (write_fmt.s); Enter, Tab, Shift-Tab and Backspace know lists. The
 ; mouse: a click places the cursor, Shift-click extends, a drag selects, a double click a
 ; word, a triple click a line; the wheel scrolls (the scroll bar); the toolbar.
+;
+; (0.23) File > Print (ctrl-P): the document as plain text (write_file.s, prdoc: each line
+; a paragraph wrapped at 80 columns, the markup out, headings underlined or in capitals,
+; list markers "- " / "1. " with the other rows under the text, a quote 4 spaces in, a
+; blank line between paragraphs and blocks), LF line ends, a print job "/PRN:Write"; then
+; "Printed" on the status line (until the next key press, click or menu), or an alert.
 ;
 ; Menus: each command with its shortcut (after a TAB) and the Format items' check marks:
 ; more than 254 bytes, which win_menu keeps on a kernel that takes long menus. On one that
@@ -398,7 +404,10 @@ loop:   lda     tst_sp                  ; (write -t, -b: back to the script)
         jsr     ui_getev
         bcs     loop
 @got:   inc     pendn
-        ldx     #.loword(ctls)
+        lda     stnote                  ; (0.23) a note on the status line: gone at the
+        beq     :+                      ; next key press, click or menu
+        jsr     noteoff
+:       ldx     #.loword(ctls)
         jsr     ui_event
         cmp     #UA_CHANGE
         bne     :+
@@ -432,6 +441,25 @@ loop:   lda     tst_sp                  ; (write -t, -b: back to the script)
         cmp     #WE_LEAVE
         jeq     onleave
         jmp     loop
+
+; (0.23) the status line's note (stnote, "Printed") gone at a key press, a button, a menu
+noteoff:
+        lda     ui_ev
+        and     #$00FF
+        cmp     #WE_KEY
+        bne     :+
+        lda     ui_ev+5
+        and     #$00FF
+        bne     @off
+        rts
+:       cmp     #WE_BUTTON
+        beq     @off
+        cmp     #WE_MENU
+        bne     :+
+@off:   stz     stnote
+        lda     #1
+        sta     pend
+:       rts
 
 ; the view drawn now (if anything is due)
 flush:  stz     pendn
@@ -531,6 +559,21 @@ m_export:
         jsr     flush
         jsr     do_export
         jsr     refresh
+        jmp     loop
+; (0.23) File > Print (ctrl-P): the document as plain text (prdoc), a print job
+; "/PRN:Write"; "Printed" on the status line, or an alert
+m_print:
+        jsr     flush
+        jsr     arm_drop
+        ldx     #.loword(t_prn)
+        jsr     prdoc
+        bcc     :+
+        ldx     #.loword(m_cantprint)
+        jsr     errbox
+        bra     :++
+:       lda     #.loword(t_printed)
+        sta     stnote
+:       jsr     refresh
         jmp     loop
 m_close:
         jsr     confirm
@@ -1534,14 +1577,16 @@ markclr:
 ; at the right. Drawn when its text changes, with its paper (no blank moment).
 stupdate:
         ldy     #.loword(stbuf)
+        ldx     stnote                  ; (0.23) a note ("Printed")
+        bne     :+
         lda     tb_hov                  ; a toolbar button under the pointer: its name
         cmp     #NONE
-        beq     :+
+        beq     :++
         asl     a
         tax
         lda     tbhint,x
         tax
-        jsr     scat
+:       jsr     scat
         bra     @blk
 :       ldx     #.loword(t_line)
         jsr     scat
@@ -2010,7 +2055,7 @@ confirm:
 ; the menus (items with a state byte: their check marks; after a TAB: the shortcut)
 menus:  .byte   "File", 0, "New", 9, "Ctrl+N", 0, "Open...", 9, "Ctrl+O", 0
         .byte   "Save", 9, "Ctrl+S", 0, "Save as...", 0, "Export text...", 0, "-", 0
-        .byte   "Close", 9, "Ctrl+W", 0, 0
+        .byte   "Print", 9, "Ctrl+P", 0, "-", 0, "Close", 9, "Ctrl+W", 0, 0
         .byte   "Edit", 0, MS_STATE, "Undo", 9, "Ctrl+Z", 0, MS_STATE, "Redo", 9, "Ctrl+Y", 0
         .byte   "-", 0, "Cut", 9, "Ctrl+X", 0, "Copy", 9, "Ctrl+C", 0, "Paste", 9, "Ctrl+V", 0
         .byte   "Select all", 9, "Ctrl+A", 0, "-", 0, "Find...", 9, "Ctrl+F", 0
@@ -2028,7 +2073,8 @@ menus:  .byte   "File", 0, "New", 9, "Ctrl+N", 0, "Open...", 9, "Ctrl+O", 0
         .byte   MS_STATE, "Outdent list", 9, "Shift+Tab", 0, 0, 0
 MN_LAST = 15                            ; (Format's last item)
         .res    32
-; the short menus, for a kernel that keeps 254 bytes of them (win_menu reads 256)
+; the short menus, for a kernel that keeps 254 bytes of them (win_menu reads 256; full:
+; (0.23) Print is not in them, ctrl-P prints)
 menus_s: .byte  "File", 0, "New", 0, "Open...", 0, "Save", 0, "Save as...", 0, "Export...", 0
         .byte   "-", 0, "Close", 0, 0
         .byte   "Edit", 0, "Undo", 0, "Redo", 0, "-", 0, "Cut", 0, "Copy", 0, "Paste", 0
@@ -2040,9 +2086,10 @@ menus_s: .byte  "File", 0, "New", 0, "Open...", 0, "Save", 0, "Save as...", 0, "
         .byte   "Quote", 0, 0, 0
         .res    256 - (* - menus_s)
 ; each menu's items: their number, their handlers (the long menus, then the short ones)
-mnn:    .word   7, 12, 4, 16, 7, 10, 3, 11
-mnt:    .addr   ftab, etab, vtab, fmtab, ftab, etab_s, vtab_s, fmtab_s
-ftab:   .addr   m_new, m_open, m_save, m_saveas, m_export, loop, m_close
+mnn:    .word   9, 12, 4, 16, 7, 10, 3, 11
+mnt:    .addr   ftab, etab, vtab, fmtab, ftab_s, etab_s, vtab_s, fmtab_s
+ftab:   .addr   m_new, m_open, m_save, m_saveas, m_export, loop, m_print, loop, m_close
+ftab_s: .addr   m_new, m_open, m_save, m_saveas, m_export, loop, m_close
 popitems: .byte "Undo", 9, "Ctrl+Z", 0, "Redo", 9, "Ctrl+Y", 0, "-", 0, "Cut", 9, "Ctrl+X", 0
         .byte   "Copy", 9, "Ctrl+C", 0, "Paste", 9, "Ctrl+V", 0, "Select all", 9, "Ctrl+A", 0, 0
 etab:   .addr   m_undo, m_redo, loop, m_cut, m_copy, m_paste, m_all, loop, m_find, m_fnext
@@ -2058,7 +2105,7 @@ khtab:  .addr   f_norm, f_h1, f_h2, f_h3
 ; ctrl + letter (key_ascii: 1-26) -> handler
 kctab:  .word   1, m_all, 3, m_copy, 24, m_cut, 22, m_paste, 19, m_save, 15, m_open
         .word   14, m_new, 26, m_undo, 25, m_redo, 6, m_find, 7, m_fnext, 8, m_repl
-        .word   12, m_goto, 2, f_bold, 9, f_ital, 5, f_code
+        .word   12, m_goto, 2, f_bold, 9, f_ital, 5, f_code, 16, m_print
         .word   '8', f_bul, '7', f_num, '9', f_quote, '-', f_rule, 0
 ctls:   .addr   es_sb, 0
 blknames: .addr 0, t_h1, t_h2, t_h3, t_bul, t_num, t_quo, t_rule, 0
@@ -2070,6 +2117,9 @@ t_num:  .byte   "Numbered list", 0
 t_quo:  .byte   "Quote", 0
 t_rule: .byte   "Rule", 0
 t_gap:  .byte   "     ", 0
+t_prn:  .byte   "/PRN:Write", 0
+t_printed: .byte "Printed", 0
+m_cantprint: .byte "Cannot print ", 0
 t_wtitle: .byte "Write: ", 0
 t_star: .byte   " *", 0
 t_newname: .byte "Untitled.md", 0
@@ -2267,6 +2317,7 @@ stbuf:  .res    48
 stbuf2: .res    64
 stlast: .res    48
 stlast2: .res   64
+stnote: .res    2                       ; (0.23) the status line's note (0: none)
 fpath:  .res    130
 abuf:   .res    130
 dlgbuf: .res    130

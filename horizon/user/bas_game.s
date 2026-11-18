@@ -2272,7 +2272,7 @@ game_reset:
 
         .segment "RODATA"
 stab2:  .addr   st_sprite, st_shape, st_get, st_put, st_copy, st_wave, st_play, st_scroll
-        .addr   st_panel, st_raster
+        .addr   st_panel, st_raster, st_lprint, st_llist
 
         .segment "DATA"
 sp_first: .word $FFFF                   ; the first of our 16 sprites ($FFFF: none)

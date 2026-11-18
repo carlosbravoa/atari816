@@ -1,0 +1,11 @@
+# (0.23) The shell: print (each file a job "/PRN:Shell"; a missing file; no argument) and
+# run of a BASIC listing ("Run in Atari": classic_mount kind 4, emu816's log); the card gets
+# tests/mk23.py's additions (a clock: the jobs' names have running times)
+500 {esc}
++1500 print README.TXT nosuch.txt LONG.TXT\n
++3000 print\n
++1500 ls /Printouts\n
++2000 run HELLO.LST\n
++3000 {F12}
++1500 run nosuch.bas\n
++2000 run README.TXT\n

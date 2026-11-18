@@ -1,0 +1,51 @@
+# (0.23) The Desktop: print notices, the folder disk, Run in Atari (DESK=1; tests/mousegen.py
+# makes tests/desk23.keys from this; the card gets tests/mk23.py's additions: a clock, /Atari,
+# /Desktop/PROG.BAS, /HELLO.LST; emu816 --classic-print tests/p23.atascii@6: the classic
+# Atari prints at 6 s, the job is finished 3 s later). Files is at (24, 24); its rows:
+# HELLO.LST y 169, README.TXT 193. Shots (s):
+#   1  10.5  the notice "Printed: Atari" (the job finished at 9 s) instead of the clock
+#   2  13.0  the notice clicked: Printer with the job
+#   3  16.0  the Atari icon clicked: the panel, "Folder disk..." and "No folder disk" at its bottom
+#   4  18.0  Folder disk...: the dialog (/Atari, D2:)
+#   5  20.5  Enter (Mount): D2: "/Atari (folder)" with Refresh, "5 files, 4 left out, 543 free
+#            sectors" (tests/mk23.py); Refresh clicked (mounted again: tests/desk23.err)
+#   6  23.0  the Atari icon's menu: "Eject D2: Atari", "Folder disk..." in the last group
+#   7  26.5  the panel closed; PROG.BAS's menu: Open, Run in Atari, -, Rename..., Delete
+#   8  32.3  Run in Atari (kind 4), F12; the panel: Program PROG.BAS
+#   9  35.0  README.TXT's menu in Files: ... Print
+#  10  37.5  Print: Files' footer "Printed ...", the notice "Printed: Files"
+#  11  39.5  HELLO.LST's menu: ... Print, Run in Atari (then chosen: kind 4, F12)
+# the notice clicked: Printer (the classic Atari's job selected); Esc closes it
+11000 move 600 6
+11400 click
+13500 key {esc}
+15000 move 596 100
+15400 click
+16500 move 229 313
+16900 click
+19000 key \n
+21000 move 442 127
+21400 click
+22500 move 596 100
+22600 rclick
+24000 key {esc}
+24500 move 178 77
+24900 click
+25500 move 596 160
+25600 rclick
+26500 move 544 183
+26900 click
+29500 key {F12}
+30500 move 596 100
+30900 click
+32500 move 178 77
+32900 click
+33500 move 100 193
+33600 rclick
+35500 move 128 244
+35900 click
+38500 move 100 169
+38600 rclick
+40000 move 128 234
+40400 click
+43000 key {F12}

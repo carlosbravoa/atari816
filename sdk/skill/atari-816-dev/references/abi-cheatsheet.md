@@ -213,6 +213,18 @@ No new syscalls: **a URL is a path** (127 characters with the scheme), on handle
   (http://host/path = the file DIR/host/path; missing: 404). Examples: `SDK/examples/fetch`,
   `SDK/examples/echo`.
 
+## Printing, Run in Atari, the folder disk (0.23): `SDK/docs/reference/printing.md`, `classic.md`
+
+No new syscalls. **Print:** open `/PRN:NAME` (any mode), write plain text (LF lines, FF a new
+page), close: the job appears as `/Printouts/YYYY-MM-DD HH.MM.SS NAME.txt` (a `.` in front while
+open: skip such names when listing). STAT of exactly `/PRN:`: size = jobs finished (poll it,
+read /Printouts only when it changed). STAT `/PC:`: size = PCS_* services (PCS_PRINT $10: the PC
+makes PDFs of `/PC:/Printouts/*.pdf` with the marker; `/SYSTEM/PRINTD.PRG PATH` sends a job).
+classic_mount `CK_BASRUN` 4 (a BASIC program as the boot disk; answered as 2; ulib atari_run
+does it for .bas .lst), `CK_FOLDER` 5 | slot << 8 (a folder as an Atari DOS disk; answered as 1;
+STAT `/D1:`..`/D4:` = shown | left out << 8 | free sectors << 16, attr bit 0 FD_SAVING).
+emu816: `--classic-print FILE@SECONDS`, `--no-pc-print`.
+
 ## Colours
 
 0 C_BLACK, 1 C_WHITE, 2 C_DESK (teal 36 92 112), 3 C_DESK2, 4 C_TITLE (dark blue 28 60 132),

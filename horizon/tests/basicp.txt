@@ -1,0 +1,42 @@
+REM tests/basicp.bas: (Horizon 0.23) LPRINT and LLIST, run by make test as "basic -t" (as
+REM tests/basic.bas). Each print job appears in /Printouts on the card copy; make test
+REM compares them with tests/basicp-1.txt .. basicp-7.txt, the output with tests/basicp.txt.
+PRINT "-- LLIST in direct mode: a job of its own"
+-- LLIST in direct mode: a job of its own
+LLIST
+RUN
+to the screen
+PRINT "-- an error in a run: the job closed"
+-- an error in a run: the job closed
+NEW
+RUN
+Division by zero in 20
+PRINT "-- STOP closes the job, CONT starts a new one"
+-- STOP closes the job, CONT starts a new one
+NEW
+RUN
+Stopped in 20
+CONT
+PRINT "-- direct LPRINT: a job of its own"
+-- direct LPRINT: a job of its own
+LPRINT "direct";1;2:LPRINT "two lines"
+PRINT "-- a break (Esc) closes the job"
+-- a break (Esc) closes the job
+NEW
+RUN
+Break in 20
+PRINT "-- reserved: LPRINT, LLIST"
+-- reserved: LPRINT, LLIST
+LPRINT=1
+Syntax error
+LLISTS=2:PRINT LLISTS
+2
+DIR "/Printouts"
+2026-01-01 00.00.00 BASIC 2.txt 
+2026-01-01 00.00.00 BASIC 3.txt 
+2026-01-01 00.00.00 BASIC 4.txt 
+2026-01-01 00.00.00 BASIC 5.txt 
+2026-01-01 00.00.00 BASIC 6.txt 
+2026-01-01 00.00.00 BASIC 7.txt 2026-01-01 00.00.00 BASIC.txt
+exit 0001
+> 

@@ -9,6 +9,9 @@
 #include "xex_loader.h"   // 6502 binary-load boot loader image (virtual D1: disk)
 #include "pclink.h"       // the PC link (Docs/04-pc-link.md)
 #include "pcnet.h"        // the internet through it: URLs and connections (step 2)
+#include "prnconv.h"      // (step 3) the classic Atari's printer output as text
+#include "fdisk.h"        // (step 3) a folder as a DOS 2 disk
+#include "bas_loader.h"   // (step 3) the boot program of "Run in Atari"
 
 uint32_t CORE_ID;
 #define HOT_FN __attribute__((section(".text.hot")))   // runs from block RAM (baremetal.ld)
@@ -26,6 +29,8 @@ int option_scanline_level = 0;              // 0=off,1=25%,2=50%,3=75% scanline 
 int option_h_offset = 0;                    // horizontal pan: capture-skip pixels (0..48)
 int option_stereo = 0;                      // 1 = dual-POKEY stereo (POKEY2 @ $D210 -> right); default mono
 int option_kbd_layout = 0;                  // 0 = Atari-positional keys (default), 1 = US-PC symbolic
+int option_folderdrive = 0;                  // (step 3) "folderdrive=N": the folder disk on DN: (0 none)
+static char option_folder[128] __attribute__((section(".sdbuf")));   // "folder=PATH"
 
 // Classic machine RAM sizes (/atari.ini "ram"). code = core RAM_SELECT; kb = the ini value.
 // The core has only these two (Atari816: capped at 320 KB, the larger RAMBO/Compy schemes
@@ -92,7 +97,61 @@ bool     xex_active = false;
 FIL      xex_file;
 uint32_t xex_len = 0;
 
-static uint8_t sio_sector_buf[256];
+static uint8_t sio_sector_buf[256] __attribute__((aligned(4)));
+
+// ── Step 3: memory the I/O processor takes in the classic machine's part of the SDRAM ──────
+// Physical 0x110000-0x1EFFFF is free: the classic machine's RAM ends at 0x050000 (320 KB at most)
+// and its ROMs start at 0x1F0000; the 65C816 never maps it (Horizon's pool is banks $02-$0F,
+// $12-$1F, $40-$7F). The firmware sees physical 0x1xxxxx at 0x3xxxxx.
+#define FD_IMG    ((uint8_t *)0x00380000)   // the folder disk: 720 x 128 = 92,160 bytes (phys 0x180000)
+#define FD_ST     ((fd_t *)0x00396800)      // its state (about 7 KB)
+#define INI_BUF   ((char *)0x0039C000)      // /atari.ini being rewritten (2 x 4 KB)
+#define PRN_RAW   ((uint8_t *)0x0039E000)   // what the printer got, as it came: a ring of records
+#define PRN_RING  8192
+#define PRN_TXT   ((uint8_t *)0x003A0000)   // a classic print job's text (192 KB; more goes to the card)
+#define PRN_TMAX  0x30000
+#define RUN_IMG   ((uint8_t *)0x003D0000)   // the "Run in Atari" disk (128 KB, up to the BASIC ROM)
+#define RUN_MAX   0x20000
+
+// Disks served from that memory (hot: the SIO service): 1 the folder disk (read and write; what
+// the Atari writes is saved into the folder later, fdisk.c), 2 the "Run in Atari" disk (read only)
+static uint8_t  rd_kind[ATR_DRIVES];
+static uint8_t *rd_base[ATR_DRIVES];
+static uint16_t rd_nsec[ATR_DRIVES];
+volatile uint32_t fd_act;                   // the Atari's accesses to the folder disk
+static uint8_t  fd_wr, fd_fail;             // it wrote (a save is due); the last save failed
+static uint32_t fd_tl;                      // its last access
+static __attribute__((section(".text.hot"))) int rd_read(int slot, uint32_t sector, uint8_t *buf) {
+    if (!sector || sector > rd_nsec[slot]) return -5;
+    const uint32_t *q = (const uint32_t *)(rd_base[slot] + (sector - 1) * 128);
+    uint32_t *d = (uint32_t *)buf;
+    for (int i = 0; i < 32; i++) d[i] = q[i];
+    if (rd_kind[slot] == 1) { fd_act++; fd_tl = time_millis(); }
+    return 0;
+}
+static __attribute__((section(".text.hot"))) int rd_write(int slot, uint32_t sector, const uint8_t *buf) {
+    if (rd_kind[slot] != 1 || !sector || sector > FD_NSEC) return -5;
+    uint32_t *d = (uint32_t *)(FD_IMG + (sector - 1) * 128);
+    const uint32_t *q = (const uint32_t *)buf;
+    for (int i = 0; i < 32; i++) d[i] = q[i];
+    FD_ST->dirty[sector >> 3] |= 1 << (sector & 7);
+    FD_ST->pending = 1;
+    fd_act++; fd_tl = time_millis(); fd_wr = 1;
+    return 0;
+}
+// The printer (P1:-P4:): each record as it comes into a ring (a length byte, then the bytes); the
+// main loop turns them into the job's text (prn_service, cold)
+static uint32_t prn_head, prn_tail, prn_t;  // the ring (free-running byte counts); the last record
+static uint8_t  prn_job;                    // a classic print job is open
+static __attribute__((section(".text.hot"))) int prn_put(const uint8_t *b, int n) {
+    uint32_t h = prn_head;
+    if (h - prn_tail + n + 1 > PRN_RING) return -1;   // full: 'E', the OS tries again
+    PRN_RAW[h++ & (PRN_RING - 1)] = n;
+    for (int i = 0; i < n; i++) PRN_RAW[h++ & (PRN_RING - 1)] = b[i];
+    prn_head = h;
+    prn_t = time_millis();
+    return 0;
+}
 static uint8_t sio_cmd_buf[5];
 static int     sio_cmd_idx = 0;
 static uint32_t sio_cmd_timeout = 0;   // millis timestamp of first byte in current frame
@@ -120,6 +179,7 @@ int load_option()  {
     int r = 0;
     char buf[1024];
     char *line, *key, *value;
+    option_folder[0] = 0;                        // (in SDRAM: not cleared at start)
     FRESULT fr = f_open(&f, OPTION_FILE, FA_READ);
     if (fr != FR_OK)
         return (fr == FR_NO_FILE || fr == FR_NO_PATH) ? 1 : -1;
@@ -155,6 +215,13 @@ int load_option()  {
         }
         if (strcmp(key, "kbdlayout") == 0) {
             option_kbd_layout = (atoi(value) != 0);
+        }
+        if (strcmp(key, "folder") == 0) {             // (step 3) the folder disk
+            strncpy(option_folder, value, sizeof option_folder - 1);
+            option_folder[sizeof option_folder - 1] = 0;
+        }
+        if (strcmp(key, "folderdrive") == 0) {
+            option_folderdrive = atoi(value);
         }
         if (strcmp(key, "boot") == 0) {
             option_boot_ash = (strcmp(value, "ash") == 0);   // anything else = basic
@@ -877,19 +944,21 @@ void sio_process_command(void) {
         return;
     }
     
-    // (H: 0x72 and P1: 0x40 were removed, Atari816: like every other unknown device
-    // they now stay silent.)
+    // (H: 0x72 was removed, Atari816.) (Step 3) P1:-P4: ($40-$43) are the printer: STATUS and
+    // WRITE only; the records become print jobs (prn_put, prn_service).
     // Respond to D1:-D4: (Device IDs 0x31-0x34; D3/D4 = config/bridge drives)
-    if (device < 0x31 || device > 0x30 + ATR_DRIVES) {
+    int prn = (device & 0xFC) == 0x40;
+    if (!prn && (device < 0x31 || device > 0x30 + ATR_DRIVES)) {
         return;
     }
-    int slot = device - 0x31;
+    int slot = prn ? 0 : device - 0x31;
+    if (prn && cmd != 0x53 && cmd != 0x57) cmd = 0;     // (anything else: NAK)
 
     // An EMPTY drive slot stays SILENT — no drive on the bus. Answering 'E' to
     // the OS's boot probe makes it loop "BOOT ERROR" instead of falling through
     // to BASIC (HW-hit 2026-07-18 when the sio_poll mounted-gate moved to make
     // the printer reachable; the gate belongs per-device, not globally).
-    if (!atr_mounted[slot] && !(slot == 0 && xex_active))
+    if (!prn && !atr_mounted[slot] && !(slot == 0 && xex_active) && !rd_kind[slot])
         return;
 
     uint16_t sector = aux1 | (aux2 << 8);
@@ -912,11 +981,11 @@ void sio_process_command(void) {
             
             // 2. Prepare status block (4 bytes)
             uint8_t status_block[4];
-            status_block[0] = 0x10; // Drive active (bit 4)
-            if (atr_sector_size[slot] == 256) {
+            status_block[0] = prn ? 0 : 0x10; // Drive active (bit 4)
+            if (!prn && atr_sector_size[slot] == 256) {
                 status_block[0] |= 0x20; // Double density (bit 5)
             }
-            if (atr_readonly[slot]) {
+            if (!prn && atr_readonly[slot]) {
                 status_block[0] |= 0x08; // Write protected (bit 3)
             }
             
@@ -965,6 +1034,7 @@ void sio_process_command(void) {
             // 2. Perform the slow read from the SD card (takes several milliseconds)
             int r = (slot == 0 && xex_active)
                         ? xex_read_sector(sector, sector_buf, &sector_len)
+                        : rd_kind[slot] ? rd_read(slot, sector, sector_buf)
                         : atr_read_sector(slot, sector, sector_buf, &sector_len);
             if (r == 0) {
                 // Calculate checksum of sector data (Atari end-around carry)
@@ -1002,7 +1072,8 @@ void sio_process_command(void) {
         case 0x50: { // Write sector command (without verify)
             // no per-sector log — see READ (BL616 flood)
             uint8_t *sector_buf = sio_sector_buf;
-            int sector_len = (atr_sector_size[slot] == 128 || sector <= 3) ? 128 : 256;
+            int sector_len = prn ? (aux1 == 'S' ? 29 : aux1 == 'D' ? 20 : 40)   // (prn_reclen)
+                           : (atr_sector_size[slot] == 128 || sector <= 3) ? 128 : 256;
 
             // Send ACK (with command-to-ACK SIO delay)
             delay_us(250);
@@ -1023,7 +1094,9 @@ void sio_process_command(void) {
                 sio_tx_byte(0x41); // 'A'
                 sio_wait_tx_empty();
 
-                int wr = atr_readonly[slot] ? -9
+                int wr = prn ? prn_put(sector_buf, sector_len)
+                          : atr_readonly[slot] ? -9
+                          : rd_kind[slot] ? rd_write(slot, sector, sector_buf)
                           : atr_write_sector(slot, sector, sector_buf, sector_len);
                 delay_us(250);
                 if (wr == 0) {
@@ -1227,7 +1300,9 @@ static void drop_default_cart(void) {
     strcpy(mounted_cart_name, "None");
 }
 
+static void classic_cold_hooks(void);          // (step 3) print job ended, folder disk saved and built again
 static int cold_boot_atari(void) {             // returns load_system_roms() (0 = OK)
+    classic_cold_hooks();
     kv_set0(0x00000000);
     apply_machine_options();                        // RAM_SELECT stable before core leaves reset
     sio_init();
@@ -1239,6 +1314,7 @@ static int cold_boot_atari(void) {             // returns load_system_roms() (0 
 // Cold-boot the virtual XEX disk on D1: with OPTION held (BASIC disabled), then
 // keep servicing SIO so the boot loader's sector reads are answered during boot.
 static int cold_boot_xex(void) {               // returns load_system_roms() (0 = OK)
+    classic_cold_hooks();
     drop_default_cart();                            // the xex must get the boot, not ASH
     kv_set0(0x00410000);                    // hold OPTION (disable BASIC)
     sio_init();                                     // SIO ready before the core is released
@@ -1252,6 +1328,18 @@ static int cold_boot_xex(void) {               // returns load_system_roms() (0 
     sio_delay(600);                                 // serve boot reads while OPTION held + UNMASKED
     kv_set0(0x00000000);                    // release OPTION
     return r;
+}
+
+// (step 3) "Run in Atari": the boot disk on D1: with Atari BASIC enabled (no OPTION held, the
+// default cartridge out for this boot, as for an executable)
+static int cold_boot_basic(void) {
+    classic_cold_hooks();
+    drop_default_cart();
+    kv_set0(0x00000000);
+    apply_machine_options();
+    sio_init();
+    *(volatile uint8_t *)(0x00200000 + 0x0244) = 1; // COLDST = 1
+    return load_system_roms();
 }
 
 // ── PC link (Docs/04-pc-link.md; engine in pclink.c) ─────────────────────────────────
@@ -1373,6 +1461,18 @@ static FIL     mb_fil[MB_FILES];
 static uint8_t mb_open;                 // bit n = handle n in use
 // PC volume (paths "/PC:..."): a handle can be a file on the PC, served by the gateway
 static uint8_t  mb_pc;                  // bit n = handle n is a PC file
+static uint8_t  mb_prn;                 // (step 3) bit n = handle n is a print job (/PRN:)
+// ---- step 3 (defined after the mailbox) ----
+static int      spec_path(const char *p);       // 1 "/PRN:", 2 "/PRN:...", 3-6 "/D1:"-"/D4:", 0 other
+static int      prn_hopen(int h, const char *name);   // a print job on handle h
+static uint32_t prn_hclose(int h);
+static uint32_t prn_count;                      // print jobs finished
+static int      mount_folder(const char *path, int slot, int remember);
+static int      mount_run(const char *path);
+static void     rd_drop(int slot, int forget);
+static void     fd_flush(void);
+static void     prn_end(void);
+static int      cold_boot_basic(void);
 static uint8_t  mb_pch[MB_FILES];       // the gateway's handle
 static uint32_t mb_pcep[MB_FILES];      // the link session (pl_epoch) it was opened in
 
@@ -1506,7 +1606,7 @@ static uint32_t mb_close_all(void) {    // close every mailbox handle; first err
     uint32_t res = 0;
     for (int i = 0; i < MB_FILES; i++) {
         if (!(mb_open & (1 << i))) continue;
-        FRESULT r = (mb_pc & (1 << i)) ? pc_close(i) : f_close(&mb_fil[i]);
+        FRESULT r = (mb_pc & (1 << i)) ? pc_close(i) : (mb_prn & (1 << i)) ? prn_hclose(i) : f_close(&mb_fil[i]);
         if (r && !res) res = r;
     }
     mb_open = 0;
@@ -1562,6 +1662,7 @@ static void sys_do_restart(int full) {
             if (atr_mounted[i]) { f_close(&atr_file[i]); atr_mounted[i] = false; }
         }
         if (xex_active) { f_close(&xex_file); xex_active = false; }
+        for (int i = 0; i < ATR_DRIVES; i++) if (rd_kind[i]) rd_drop(i, 0);   // (step 3)
         reg_cart_mode = 0;
         strcpy(mounted_cart_name, "None");
         int rom = cold_boot_atari();                     // boot=ash: /ASH.CAR; ROMs; long reset
@@ -1574,6 +1675,8 @@ static void sys_do_restart(int full) {
             mount_silent = 1;
             mount_atr("/HDD.ATR", 3);
             mount_silent = 0;
+            if (option_folderdrive >= 1 && option_folderdrive <= ATR_DRIVES && option_folder[0])   // (step 3)
+                mount_folder(option_folder, option_folderdrive - 1, 0);
         }
         uart_printf("boot: roms %d\n", rom);
     }
@@ -1708,6 +1811,19 @@ static HOT_FN void in_flush(void) {
 
 // one step of the input generator: the reports due since the last call, as the UART's FIFO
 // would hold them (what does not fit is lost, as on the wire). Cold (SDRAM): a test only.
+void ch_frame(const uint8_t *f, int n);
+// a key report as the CH9350 sends it (57 AB 88 0B, type, modifiers, 0, 6 keys, serial, sum), fed
+// through the same parser: the type alternates $10 / $11 and the checksum both forms (with or
+// without the type byte), as keyboards send them
+static void in_genkey(uint8_t key) {
+    static uint8_t serial;
+    uint8_t f[15] = { 0x57, 0xAB, 0x88, 11, 0x10 | (gk_sent & 1), 0, 0, key, 0, 0, 0, 0, 0, serial++, 0 };
+    uint8_t sum = 0;
+    for (int i = 5; i < 14; i++) sum += f[i];
+    if (gk_sent & 2) sum += f[4];
+    f[14] = sum;
+    ch_frame(f, 15);
+}
 static __attribute__((noinline)) void in_gen(void) {
     uint32_t now = time_millis(), bytes = 0;
     for (;;) {
@@ -1716,7 +1832,7 @@ static __attribute__((noinline)) void in_gen(void) {
         if (k) {                                         // a key report: press or release
             gk_t += gk_per / 2;
             if ((bytes += KB_FRAME) > UART_FIFO) gk_lost++;
-            else kv_set0(gk_down ? 0 : (uint32_t)(0x04 + gk_key) << 8);
+            else in_genkey(gk_down ? 0 : 0x04 + gk_key);
             if (gk_down) { gk_n--; gk_key = (gk_key + 1) % 26; }
             gk_down ^= 1;
             gk_sent++;
@@ -1811,6 +1927,9 @@ static void a816_mailbox(void) {
         if (!mb_path(buf, path, sizeof path)) res = 0x81;
         else if (ns_kind(path)) later = ns_open(path, m, &res, &val);   // a URL, a connection
         else if (h == MB_FILES) res = FR_TOO_MANY_OPEN_FILES;
+        else if (spec_path(path) == 1 || spec_path(path) == 2) {   // (step 3) a print job
+            if (!(res = prn_hopen(h, path + 5))) { mb_open |= 1 << h; mb_prn |= 1 << h; val = h; }
+        }
         else if ((pcp = pc_path(path))) {                // a file on the PC
             pc_args[0] = m[7] & 3; pc_args[1] = pc_args[2] = pc_args[3] = 0;
             int na = pc_args_path(4, pcp);
@@ -1827,6 +1946,7 @@ static void a816_mailbox(void) {
         if (nsh) res = ns_close(arg0);
         else if (!f) res = 0x80;
         else if (pch) res = pc_close(arg0);
+        else if (mb_prn & (1 << arg0)) res = prn_hclose(arg0);   // (step 3) the job is done
         else { res = f_close(f); mb_open &= ~(1 << arg0); }
         break;
     case 0x03: case 0x04:                                // READ, WRITE
@@ -1868,11 +1988,27 @@ static void a816_mailbox(void) {
         uint8_t o[9];
         if (!mb_path(buf, path, sizeof path)) { res = 0x81; break; }
         if (ns_kind(path)) { later = ns_stat(path, buf, m, &res, &val); break; }
+        int sp = spec_path(path);
+        if (sp == 1 || sp >= 3) {                        // (step 3) "/PRN:": the jobs finished;
+            uint32_t sz = prn_count, t = get_fattime(), at = 0x10;   // "/Dn:": the folder disk
+            if (sp >= 3) {
+                if (rd_kind[sp - 3] != 1) { res = FR_NO_FILE; break; }
+                sz = FD_ST->shown | FD_ST->skipped << 8 | (uint32_t)FD_ST->nfree << 16;
+                at |= FD_ST->pending ? 1 : 0;
+                t = FD_ST->t_saved;
+            }
+            o[0] = sz; o[1] = sz >> 8; o[2] = sz >> 16; o[3] = sz >> 24; o[4] = at;
+            o[5] = t; o[6] = t >> 8; o[7] = t >> 16; o[8] = t >> 24;
+            if (!mb_put(buf, o, 9)) res = 0x81;
+            val = sz;
+            break;
+        }
+        if (sp == 2) { res = 0x82; break; }
         if ((pcp = pc_path(path))) {
             if (!pl_files()) { res = PL_E_NOLINK; break; }
             if (pcp[1] == 0) {                           // its root: a folder, the PC's clock now
                 uint32_t t = fat_from2000(pl_pc_time());
-                o[0] = o[1] = o[2] = o[3] = 0; o[4] = 0x10;
+                o[0] = pl_svc(); o[1] = o[2] = o[3] = 0; o[4] = 0x10;   // (step 3) size: the services
                 o[5] = t; o[6] = t >> 8; o[7] = t >> 16; o[8] = t >> 24;
             } else {
                 if (pc_args_path(0, pcp) < 0) { res = FR_INVALID_NAME; break; }
@@ -1899,7 +2035,7 @@ static void a816_mailbox(void) {
         uint32_t off = 0;
         int full = 0;
         if (!mb_path(buf, path, sizeof path)) { res = 0x81; break; }
-        if (ns_kind(path)) { res = 0x82; break; }
+        if (ns_kind(path) || spec_path(path)) { res = 0x82; break; }
         if ((pcp = pc_path(path))) {                     // skip u16, room u16, path
             pc_args[0] = arg0; pc_args[1] = arg0 >> 8; pc_args[2] = len; pc_args[3] = len >> 8;
             int na = pc_args_path(4, pcp);
@@ -1933,6 +2069,7 @@ static void a816_mailbox(void) {
     case 0x08: case 0x09:                                // MKDIR, DELETE
         if (!mb_path(buf, path, sizeof path)) res = 0x81;
         else if (ns_kind(path)) res = FR_DENIED;
+        else if (spec_path(path)) res = 0x82;
         else if ((pcp = pc_path(path))) {
             if (pc_args_path(0, pcp) < 0) res = FR_INVALID_NAME;
             else res = pl_call(m[0], pc_args, strlen(pcp) + 1, 0, 0, pc_tohdr, &k);
@@ -1944,6 +2081,7 @@ static void a816_mailbox(void) {
         const char *pct;
         if (!mb_path(buf, path, sizeof path) || !mb_path(buf + strlen(path) + 1, to, sizeof to)) res = 0x81;
         else if (ns_kind(path) || ns_kind(to)) res = FR_DENIED;
+        else if (spec_path(path) || spec_path(to)) res = 0x82;
         else if ((pcp = pc_path(path)) && (pct = pc_path(to))) {
             int na = pc_args_path(0, pcp);
             if (na < 0 || (na = pc_args_path(na, pct)) < 0) res = FR_INVALID_NAME;
@@ -1956,7 +2094,7 @@ static void a816_mailbox(void) {
     case 0x10: {                                         // LOAD whole file to ARG0
         FIL lf;
         if (!mb_path(buf, path, sizeof path)) { res = 0x81; break; }
-        if (ns_kind(path)) { res = 0x82; break; }
+        if (ns_kind(path) || spec_path(path)) { res = 0x82; break; }
         if ((pcp = pc_path(path))) {
             if (pc_args_path(0, pcp) < 0) { res = FR_INVALID_NAME; break; }
             k.dst = arg0 & 0xFFFFFF;
@@ -1975,7 +2113,9 @@ static void a816_mailbox(void) {
     //   $18 CLASSIC_MOUNT  BUF   = path (zero-terminated, as OPEN/LOAD)
     //                      FLAGS = kind: 0 by extension (.ATR/.XFD disk, .XEX/.COM/.EXE
     //                              executable, .CAR/.ROM/.BIN cartridge), 1 disk image,
-    //                              2 executable, 3 cartridge
+    //                              2 executable, 3 cartridge, (step 3) 4 a BASIC program to
+    //                              run ("Run in Atari": the boot disk on D1:, answered as 2),
+    //                              5 a folder as a DOS 2 disk on drive ARG0 (answered as 1)
     //                      ARG0  = drive slot 0..3 (D1:..D4:), disk images only; an
     //                              executable always becomes the virtual boot disk on D1:
     //                      Mount only, no reset. The new image replaces the slot's old
@@ -2003,17 +2143,17 @@ static void a816_mailbox(void) {
     //   multi-MB carts take seconds); EJECT immediate; BOOT ~0.2 s (ROM reload), ~0.8 s for
     //   an executable (OPTION held 600 ms while its boot sectors are served).
     case 0x18: case 0x19: case 0x1A: {
-        int kind = m[7], r = 0, s = kind == 1 ? arg0 : 0;   // ($85 "OSD open" is no longer returned)
+        int kind = m[7], r = 0, s = kind == 1 || kind == 5 ? arg0 : 0;   // ($85 "OSD open" is no longer returned)
         if (m[0] == 0x1A) {
-            val = xex_active ? 2 : 0;
-            r = xex_active ? cold_boot_xex() : cold_boot_atari();
+            val = xex_active || rd_kind[0] == 2 ? 2 : 0;
+            r = xex_active ? cold_boot_xex() : rd_kind[0] == 2 ? cold_boot_basic() : cold_boot_atari();
             res = !r ? 0 : (r & 0xFF) ? (r & 0xFF) : 0x84;
             break;
         }
         if (m[0] == 0x18) {
             if (!mb_path(buf, path, sizeof path)) { res = 0x81; break; }
             if (pc_path(path)) { res = pl_files() ? 0x82 : PL_E_NOLINK; break; }   // not in step 1
-            if (ns_kind(path)) { res = 0x82; break; }
+            if (ns_kind(path) || spec_path(path)) { res = 0x82; break; }
             char *e = strrchr(path, '.');
             if (!kind && e && strlen(e) == 4)
                 for (int i = 0; i < 8; i++) {
@@ -2022,17 +2162,24 @@ static void a816_mailbox(void) {
                     if (j == 3) { kind = i < 2 ? 1 : i < 5 ? 2 : 3; break; }
                 }
         }
-        if (kind < 1 || kind > 3 || (uint32_t)s >= ATR_DRIVES) { res = 0x83; break; }
+        // (step 3) kind 4: a BASIC program to run ("Run in Atari": the boot disk on D1:, answered
+        // as an executable, 2); kind 5: a folder as a DOS 2 disk on drive ARG0 (answered as 1)
+        if (kind < 1 || kind > 5 || (m[0] == 0x19 && kind > 3) || (uint32_t)s >= ATR_DRIVES) { res = 0x83; break; }
         if (m[0] == 0x19) {                              // EJECT
             if (kind == 3) { reg_cart_mode = 0; strcpy(mounted_cart_name, "None"); break; }
             if (!s && xex_active) { f_close(&xex_file); xex_active = false; }
+            if (!s && rd_kind[0] == 2) rd_drop(0, 0);   // (the Run in Atari disk)
             if (kind == 1 && atr_mounted[s]) { f_close(&atr_file[s]); atr_mounted[s] = false; }
+            if (kind == 1 && rd_kind[s] == 1) rd_drop(s, 1);   // (the folder disk: saved, forgotten)
             break;
         }
+        if ((kind == 1 || kind == 5) && rd_kind[s]) rd_drop(s, kind == 1);   // (what was there)
+        if ((kind == 2 || kind == 4) && rd_kind[0]) rd_drop(0, 1);
         mount_silent = 1;                                // MOUNT: no OSD popups
-        r = kind == 1 ? mount_atr(path, s) : kind == 2 ? mount_xex(path) : load_cartridge(path);
+        r = kind == 1 ? mount_atr(path, s) : kind == 2 ? mount_xex(path) : kind == 3 ? load_cartridge(path)
+          : kind == 4 ? mount_run(path) : mount_folder(path, s, 1);
         mount_silent = 0;
-        val = kind;
+        val = kind == 4 ? 2 : kind == 5 ? 1 : kind;
         res = !r ? 0 : r > 0 ? r : r == -6 ? FR_DISK_ERR : 0x84;
         if (kind == 3 && !r) name_from_path(mounted_cart_name, path);
         break;
@@ -2077,6 +2224,9 @@ static void a816_mailbox(void) {
         break;
     }
     case 0x1C:
+        fd_flush();                                      // (step 3) the folder disk saved, then off
+        for (int i = 0; i < ATR_DRIVES; i++) if (rd_kind[i] == 1) rd_drop(i, 0);
+        if (prn_job) prn_end();                          //   and a classic print job finished
         for (int i = 0; i < MB_FILES; i++) if (mb_open & (1 << i)) val++;
         res = mb_close_all();
         for (int i = 0; i < ATR_DRIVES; i++) {
@@ -2169,6 +2319,289 @@ DWORD get_fattime(void) {
         return (y - 1980) << 25 | mo << 21 | d << 16;
     }
     return fat_from2000(clk_base + (time_millis() - clk_ms) / 1000);
+}
+
+// ── Step 3: printing, the folder disk, "Run in Atari" (cold) ──────────────────────────────
+
+// "/PRN:" 1, "/PRN:..." 2, "/D1:"-"/D4:" exactly 3-6, else 0 (any case)
+static int spec_path(const char *p) {
+    if (p[0] != '/') return 0;
+    if ((p[1] | 0x20) == 'p' && (p[2] | 0x20) == 'r' && (p[3] | 0x20) == 'n' && p[4] == ':') return p[5] ? 2 : 1;
+    if ((p[1] | 0x20) == 'd' && p[2] >= '1' && p[2] <= '0' + ATR_DRIVES && p[3] == ':' && !p[4]) return 3 + p[2] - '1';
+    return 0;
+}
+
+// ---- print jobs ----
+// A job is written as "/Printouts/.YYYY-MM-DD HH.MM.SS NAME.txt" and renamed to the name without
+// the dot when it is complete, so a job is whole when it appears.
+static char prn_hname[MB_FILES][96] __attribute__((section(".sdbuf")));   // a /PRN: handle's job
+static char prn_cname[96] __attribute__((section(".sdbuf")));             // the classic job's
+static FIL  prn_fil;                      // the classic job's file (open once its text passed 192 KB)
+static uint8_t prn_fopen;
+static prn_conv_t prn_cv;
+static uint32_t prn_n, prn_secs;
+
+static uint32_t now_secs(void) {          // seconds since 2000 (0 before the clock was given)
+    return clk_set ? clk_base + (time_millis() - clk_ms) / 1000 : 0;
+}
+static char *put_n(char *d, uint32_t v, int w) {   // v as w decimal digits
+    for (int i = w - 1; i >= 0; i--) { d[i] = '0' + v % 10; v /= 10; }
+    return d + w;
+}
+// a new job's file: final name (the shown one) -> final, the open file (under the dotted name).
+// name: the job's name (the program, "Atari"); secs: when it started. 0 or a FatFs code.
+static int prn_create(FIL *f, const char *name, uint32_t secs, char *final) {
+    char t[96], nm[25];
+    int k = 0;
+    while (*name == ' ' || *name == '.') name++;
+    for (; *name && k < 24; name++) {
+        char c = *name;
+        if ((uint8_t)c < 32 || strchr("\\/:*?\"<>|", c)) c = '_';
+        nm[k++] = c;
+    }
+    while (k && (nm[k - 1] == ' ' || nm[k - 1] == '.')) k--;
+    nm[k] = 0;
+    if (!k) strcpy(nm, "Job");
+    uint32_t ft = secs ? fat_from2000(secs) : get_fattime();
+    FRESULT r = f_mkdir("/Printouts");
+    if (r && r != FR_EXIST) return r;
+    for (int n = 1; n < 100; n++) {
+        char *d = final;
+        strcpy(d, "/Printouts/");
+        d += 11;
+        d = put_n(d, (ft >> 25) + 1980, 4); *d++ = '-';
+        d = put_n(d, ft >> 21 & 15, 2); *d++ = '-';
+        d = put_n(d, ft >> 16 & 31, 2); *d++ = ' ';
+        d = put_n(d, ft >> 11 & 31, 2); *d++ = '.';
+        d = put_n(d, ft >> 5 & 63, 2); *d++ = '.';
+        d = put_n(d, secs ? secs % 60 : (ft & 31) * 2, 2); *d++ = ' ';
+        strcpy(d, nm);
+        d += strlen(d);
+        if (n > 1) { *d++ = ' '; if (n > 9) *d++ = '0' + n / 10; *d++ = '0' + n % 10; }
+        strcpy(d, ".txt");
+        strcpy(t, "/Printouts/.");
+        strcat(t, final + 11);
+        FILINFO fi;
+        if (f_stat(final, &fi) == FR_OK) continue;      // taken (also by a job being written)
+        r = f_open(f, t, FA_CREATE_NEW | FA_WRITE | FA_READ);
+        if (r == FR_EXIST) continue;
+        return r;
+    }
+    return FR_EXIST;
+}
+static uint32_t prn_done(FIL *f, const char *final) {   // the job's file closed and given its name
+    char t[96];
+    uint32_t r = f_close(f);
+    strcpy(t, "/Printouts/.");
+    strcat(t, final + 11);
+    if (!r) r = f_rename(t, final);
+    if (!r) prn_count++;
+    uart_printf("print: %s %d\n", final + 11, (int)r);
+    return r;
+}
+// a /PRN: handle: name = what follows "/PRN:"
+static int prn_hopen(int h, const char *name) { return prn_create(&mb_fil[h], name, now_secs(), prn_hname[h]); }
+static uint32_t prn_hclose(int h) {
+    uint32_t r = prn_done(&mb_fil[h], prn_hname[h]);
+    mb_open &= ~(1 << h);
+    mb_prn &= ~(1 << h);
+    return r;
+}
+
+// the classic job: its text so far into its file (opened at the first time)
+static void prn_flush(void) {
+    UINT bw;
+    if (!prn_fopen) {
+        if (prn_create(&prn_fil, "Atari", prn_secs, prn_cname)) { prn_n = 0; return; }   // (lost: the card)
+        prn_fopen = 1;
+    }
+    f_write(&prn_fil, PRN_TXT, prn_n, &bw);
+    prn_n = 0;
+}
+static void prn_end(void) {
+    uint8_t out[2];
+    int k = prn_finish(&prn_cv, out);
+    for (int i = 0; i < k; i++) PRN_TXT[prn_n++] = out[i];
+    if (prn_n || !prn_fopen) prn_flush();
+    if (prn_fopen) prn_done(&prn_fil, prn_cname);
+    prn_fopen = 0;
+    prn_job = 0;
+}
+// the records in the ring -> text; the end of the job (3 s without data, the machine frozen)
+static void prn_service(void) {
+    uint8_t rec[48], out[48 + 256];
+    while (prn_tail != prn_head) {
+        uint32_t t = prn_tail;
+        int n = PRN_RAW[t++ & (PRN_RING - 1)];
+        for (int i = 0; i < n; i++) rec[i < 48 ? i : 47] = PRN_RAW[t++ & (PRN_RING - 1)];
+        prn_tail = t;
+        if (n > 48) n = 48;
+        if (!prn_job) {
+            prn_job = 1; prn_n = 0; prn_fopen = 0;
+            memset(&prn_cv, 0, sizeof prn_cv);
+            prn_secs = now_secs();
+        }
+        int k = prn_record(&prn_cv, rec, n, out);
+        if (prn_n + k > PRN_TMAX) prn_flush();
+        for (int i = 0; i < k; i++) PRN_TXT[prn_n++] = out[i];
+    }
+    if (prn_job && (time_millis() - prn_t > 3000 || (reg_a816_keymod & 0x200))) prn_end();
+}
+
+// ---- the folder disk ----
+static int8_t fd_slot = -1;
+void fd_poll(void) { in_tick(); sio_poll(); }
+uint32_t fd_fattime(void) { return get_fattime(); }
+// a file the firmware or Horizon has open: not replaced now (compared by its first cluster, or,
+// for an empty file, by its directory entry)
+int fd_busy(const char *path) {
+    FIL p;
+    if (f_open(&p, path, FA_READ)) return 0;
+    uint32_t c = p.obj.sclust, ds = p.dir_sect, dp = p.dir_ptr - fs.win;
+    f_close(&p);
+    for (int h = 0; h < MB_FILES; h++) {
+        FIL *f = &mb_fil[h];
+        if (!(mb_open & (1 << h)) || (mb_pc & (1 << h))) continue;
+        if (c ? f->obj.sclust == c : (f->dir_sect == ds && (uint32_t)(f->dir_ptr - fs.win) == dp)) return 1;
+    }
+    for (int s = 0; s < ATR_DRIVES; s++)
+        if (atr_mounted[s] && c && atr_file[s].obj.sclust == c) return 1;
+    if (xex_active && c && xex_file.obj.sclust == c) return 1;
+    return 0;
+}
+static void fd_service(void) {
+    fd_sync(FD_ST, FD_IMG);
+    fd_fail = FD_ST->fail;
+    if (!FD_ST->pending) fd_wr = 0;
+    fd_tl = time_millis();
+}
+static void fd_flush(void) {               // everything the Atari closed saved (a few tries)
+    if (fd_slot < 0) return;
+    for (int k = 0; k < 5 && FD_ST->pending; k++) fd_sync(FD_ST, FD_IMG);
+    if (!FD_ST->pending) fd_wr = 0;
+}
+// /atari.ini: the folder disk remembered (drive 1-4) or forgotten (0): the lines "folder=" and
+// "folderdrive=" replaced, every other line kept
+static void ini_folder(const char *path, int drive) {
+    if (drive == option_folderdrive && (!drive || !strcmp(path, option_folder))) return;
+    FIL f;
+    UINT n = 0, bw;
+    char *in = INI_BUF, *out = INI_BUF + 4096;
+    uint32_t o = 0;
+    int crlf = 0;
+    if (!f_open(&f, OPTION_FILE, FA_READ)) { f_read(&f, in, 4095, &n); f_close(&f); }
+    in[n] = 0;
+    for (char *l = in; *l; ) {
+        char *e = l;
+        while (*e && *e != '\n') e++;
+        if (e > l && e[-1] == '\r') crlf = 1;
+        char *k = l;
+        while (*k == ' ' || *k == '\t') k++;
+        int skip = (!memcmp(k, "folder", 6) && (k[6] == '=' || k[6] == ' ')) ||
+                   (!memcmp(k, "folderdrive", 11) && (k[11] == '=' || k[11] == ' '));
+        if (*e) e++;
+        if (!skip) while (l < e) out[o++] = *l++;
+        l = e;
+    }
+    if (o && out[o - 1] != '\n') { if (crlf) out[o++] = '\r'; out[o++] = '\n'; }
+    if (drive) {
+        char *d = out + o;
+        strcpy(d, "folder="); strcat(d, path); strcat(d, crlf ? "\r\nfolderdrive=" : "\nfolderdrive=");
+        o += strlen(d);
+        out[o++] = '0' + drive;
+        if (crlf) out[o++] = '\r';
+        out[o++] = '\n';
+    }
+    if (!f_open(&f, OPTION_FILE, FA_CREATE_ALWAYS | FA_WRITE)) { f_write(&f, out, o, &bw); f_close(&f); }
+    option_folderdrive = drive;
+    strcpy(option_folder, drive ? path : "");
+}
+static int mount_folder(const char *path, int slot, int remember) {
+    for (int i = 0; i < ATR_DRIVES; i++) if (rd_kind[i] == 1) rd_drop(i, 0);   // one folder disk
+    if (atr_mounted[slot]) { f_close(&atr_file[slot]); atr_mounted[slot] = false; }
+    if (!slot && xex_active) { f_close(&xex_file); xex_active = false; }
+    if (rd_kind[slot]) rd_drop(slot, 0);
+    int r = fd_build(FD_ST, FD_IMG, path);
+    uart_printf("folder disk: %s on D%d: %d files, %d left out, %d free (%d)\n", path, slot + 1,
+                FD_ST->shown, FD_ST->skipped, FD_ST->nfree, r);
+    if (r) { FD_ST->dir[0] = 0; return r; }
+    rd_kind[slot] = 1; rd_base[slot] = FD_IMG; rd_nsec[slot] = FD_NSEC;
+    atr_readonly[slot] = false; atr_sector_size[slot] = 128;
+    fd_slot = slot; fd_wr = 0; fd_fail = 0;
+    if (remember) ini_folder(path, slot + 1);
+    return 0;
+}
+// the memory disk on slot out: the folder disk saved first (forget: and /atari.ini forgets it)
+static void rd_drop(int slot, int forget) {
+    if (rd_kind[slot] == 1) {
+        fd_flush();
+        FD_ST->dir[0] = 0;
+        fd_slot = -1; fd_wr = 0;
+        if (forget) ini_folder("", 0);
+    }
+    rd_kind[slot] = 0;
+    atr_readonly[slot] = false;
+}
+// "Run in Atari": a BASIC program (a listing, or a SAVE file) as the boot disk on D1:
+static int mount_run(const char *path) {
+    FIL f;
+    UINT br;
+    int r = f_open(&f, path, FA_READ);
+    if (r) return r;
+    uint32_t n = f_size(&f);
+    uint8_t *raw = RUN_IMG + 0x8000, *o = RUN_IMG + (BAS_DATASEC - 1) * 128;
+    if (!n || n > RUN_MAX - 0x8000) { f_close(&f); return -1; }
+    r = f_read(&f, raw, n, &br);
+    f_close(&f);
+    if (r || br != n) return r ? r : -6;
+    int tok = n >= 14 && !raw[0] && !raw[1] && !raw[2] && raw[3] == 1;   // LOMEM 0, VNTP $0100
+    uint32_t m = 0;
+    if (tok) for (; m < n; m++) o[m] = raw[m];
+    else {                                     // LF, CR LF, CR -> $9B; TAB -> blank
+        for (uint32_t i = 0; i < n; i++) {
+            uint8_t c = raw[i];
+            if (c == '\r') { c = 0x9B; if (i + 1 < n && raw[i + 1] == '\n') i++; }
+            else if (c == '\n') c = 0x9B;
+            else if (c == '\t') c = ' ';
+            o[m++] = c;
+        }
+        if (m && o[m - 1] != 0x9B) o[m++] = 0x9B;
+        while (m && o[m - 1] == 0x9B) {         // trailing empty lines, and a last RUN (it runs anyway)
+            uint32_t b = m - 1;
+            while (b && o[b - 1] != 0x9B) b--;
+            uint32_t a = b, e = m - 1;
+            while (a < e && o[a] == ' ') a++;
+            while (e > a && o[e - 1] == ' ') e--;
+            int run = e - a == 3 && (o[a] | 0x20) == 'r' && (o[a + 1] | 0x20) == 'u' && (o[a + 2] | 0x20) == 'n';
+            if (e != a && !run) break;
+            m = b;
+        }
+    }
+    for (int i = 0; i < BAS_NSEC * 128; i++) RUN_IMG[i] = bas_loader_img[i];
+    for (int i = BAS_NSEC * 128; i < (BAS_DATASEC - 1) * 128; i++) RUN_IMG[i] = 0;
+    RUN_IMG[BAS_P_LEN] = m; RUN_IMG[BAS_P_LEN + 1] = m >> 8; RUN_IMG[BAS_P_LEN + 2] = m >> 16;
+    RUN_IMG[BAS_P_MODE] = tok;
+    for (uint32_t i = m; i & 127; i++) o[i] = 0;
+    if (atr_mounted[0]) { f_close(&atr_file[0]); atr_mounted[0] = false; }
+    if (xex_active) { f_close(&xex_file); xex_active = false; }
+    rd_kind[0] = 2; rd_base[0] = RUN_IMG; rd_nsec[0] = BAS_DATASEC - 1 + (m + 127) / 128;
+    atr_readonly[0] = true; atr_sector_size[0] = 128;
+    uart_printf("run: %s, %d bytes, %s\n", path, (int)m, tok ? "SAVE file" : "listing");
+    return 0;
+}
+// a cold start of the classic machine: its print job ends; the folder disk is saved, then built
+// again from the folder (so it shows what Horizon changed meanwhile)
+static void classic_cold_hooks(void) {
+    if (prn_job) prn_end();
+    if (fd_slot >= 0) {
+        char d[128];
+        int s = fd_slot;
+        fd_flush();
+        strcpy(d, FD_ST->dir);
+        rd_kind[s] = 0;
+        fd_slot = -1;
+        if (!fd_build(FD_ST, FD_IMG, d)) { rd_kind[s] = 1; fd_slot = s; fd_wr = 0; }
+    }
 }
 
 // Is there anything for a816_mailbox to do? It runs from SDRAM (cold), and the PicoRV32's
@@ -2343,7 +2776,8 @@ void pl_dev_request(const uint8_t *p, uint32_t n) {
         uart_catch = (char *)dv_out; uart_catch_n = 0; uart_catch_max = sizeof dv_out;
         uart_printf("ST u:%d bs:%d rom:%d x:%d m:%d%d%d%d c:%b s:%d st:%d e:%d cn:%d br:%d"
                     " link rx:%d bad:%d retry:%d pc:%d"
-                    " in gap:%d ev:%d ksent:%d klost:%d msent:%d mlost:%d stk:%d\n",
+                    " in gap:%d ev:%d ksent:%d klost:%d msent:%d mlost:%d stk:%d"
+                    " prn:%d fd:%d/%d/%d\n",
                     (int)time_millis(), bridge_boot_stage, bridge_rom_ok, xex_active ? 1 : 0,
                     atr_mounted[0] ? 1 : 0, atr_mounted[1] ? 1 : 0,
                     atr_mounted[2] ? 1 : 0, atr_mounted[3] ? 1 : 0,
@@ -2352,7 +2786,8 @@ void pl_dev_request(const uint8_t *p, uint32_t n) {
                     (*(volatile uint32_t *)_ebss != 0x53544B21u) ? 1 : 0, boot_retries,
                     (int)pl_rx_bytes(), (int)pl_rx_bad(), (int)pl_retries(), pl_files(),
                     (int)(in_gap / 27), (int)in_nev, (int)gk_sent, (int)gk_lost,
-                    (int)gm_sent, (int)gm_lost, stack_used());
+                    (int)gm_sent, (int)gm_lost, stack_used(),
+                    (int)prn_count, fd_slot + 1, fd_slot >= 0 ? FD_ST->pending : 0, fd_slot >= 0 ? (int)FD_ST->conflicts : 0);
         in_gap = 0; in_nev = 0;                         // (the meters start again)
         dv_n = uart_catch_n;
         uart_catch = 0;
@@ -2476,6 +2911,11 @@ static void bridge_poll(void) {
     pl_poll();
     if (ns_work) ns_service();                            // (step 2) answers put aside, credit
     else if (ns_npend && time_millis() - ns_t > 250) { ns_t = time_millis(); ns_service(); }   // their timeouts
+    // (step 3) the printer's records, the end of a print job (3 s without data, or the classic
+    // machine frozen); the folder disk saved after 1.5 s without the Atari using it (10 s after
+    // a failed save). Only flags and the clock here: nothing from SDRAM while idle.
+    if (prn_head != prn_tail || (prn_job && (time_millis() - prn_t > 3000 || (reg_a816_keymod & 0x200)))) prn_service();
+    if (fd_wr && time_millis() - fd_tl > (fd_fail ? 10000u : 1500u)) fd_service();
     busy = 0;
 }
 // Stack canary at the very bottom of the stack region (= _ebss, no heap in this
@@ -2631,6 +3071,9 @@ int main_app() {
         mount_silent = 1;
         if (mount_atr("/HDD.ATR", 3) == 0) uart_printf("boot: hdd mounted on D4\n");
         mount_silent = 0;
+        if (option_folderdrive >= 1 && option_folderdrive <= ATR_DRIVES && option_folder[0])   // (step 3)
+            uart_printf("boot: folder disk %s on D%d: %d\n", option_folder, option_folderdrive,
+                        mount_folder(option_folder, option_folderdrive - 1, 0));
     }
    
     if (rom_ok == 0) {
@@ -2682,13 +3125,18 @@ int main_app() {
                     // transiently on HW (same FatFs mid-state family as
                     // load_option's documented remount-retry).
                     mount_silent = 1;
-                    int mr = mount_xex(bridge_req_path);
+                    char *e = strrchr(bridge_req_path, '.');   // (step 3) .BAS / .LST: Run in Atari
+                    int bas = e && (!strcasecmp(e, ".bas") || !strcasecmp(e, ".lst"));
+                    if (rd_kind[0]) rd_drop(0, 1);
+                    int mr = bas ? mount_run(bridge_req_path) : mount_xex(bridge_req_path);
                     if (mr != 0) {
                         delay(100);
-                        mr = mount_xex(bridge_req_path);
+                        mr = bas ? mount_run(bridge_req_path) : mount_xex(bridge_req_path);
                     }
                     mount_silent = 0;
-                    if (mr == 0) {
+                    if (mr == 0 && bas) {
+                        cold_boot_basic();
+                    } else if (mr == 0) {
                         cold_boot_xex();
                     } else {
                         uart_printf("run: mount failed %d\n", mr);
@@ -2719,6 +3167,81 @@ static uint32_t last_kbd_time = 0;
 uint8_t ch_raw[64];          // last raw bytes from the CH9350 (diagnosis, read with fwpeek)
 uint8_t ch_raw_i;
 
+// one byte of the CH9350's stream (the UART, or the INJECT test generator's reports)
+HOT_FN void ch_byte(uint8_t b) {
+    switch (ch_state) {
+        case CH9350_STATE_IDLE:
+            if (b == 0x57) {
+                ch_state = CH9350_STATE_AB;
+            }
+            break;
+        case CH9350_STATE_AB:
+            if (b == 0xAB) {
+                ch_state = CH9350_STATE_CMD;
+            } else if (b != 0x57) {
+                ch_state = CH9350_STATE_IDLE;
+            }
+            break;
+        case CH9350_STATE_CMD:
+            ch_cmd = b;
+            ch_state = CH9350_STATE_LEN;
+            break;
+        case CH9350_STATE_LEN:
+            ch_len = b;
+            ch_idx = 0;
+            if (ch_len > 0 && ch_len <= 16) {
+                ch_state = CH9350_STATE_DATA;
+            } else {
+                ch_state = CH9350_STATE_IDLE;
+            }
+            break;
+        case CH9350_STATE_DATA:
+            ch_buf[ch_idx++] = b;
+            if (ch_idx >= ch_len) {
+                // Packet fully received! Verify checksum.
+                uint8_t sum = 0;
+                // the sum covers the report and the serial byte, not the type byte
+                // (measured: 57 AB 88 07 20 00 F3 03 00 14 0A)
+                for (int i = 1; i < ch_len - 1; i++) {
+                    sum += ch_buf[i];
+                }
+                // (as the hardware decoder uart_kbd_ch9350.sv: the sum with or without the
+                // type byte; keyboard reports of type $10 or $11)
+                if (sum == ch_buf[ch_len - 1] || (uint8_t)(sum + ch_buf[0]) == ch_buf[ch_len - 1]) {
+                    // Checksum ok. Extract keyboard reports.
+                    if ((ch_cmd == 0x88 || ch_cmd == 0x83) && (ch_buf[0] & 0xFE) == 0x10) {
+                        uint8_t modifier = ch_buf[1];
+                        uint8_t key1 = ch_buf[3]; // ch_buf[2] is reserved
+                        uint8_t key2 = ch_buf[4];
+                        uint8_t key3 = ch_buf[5];
+                        uint8_t key4 = ch_buf[6];
+                        
+                        kv_set0(modifier | (key1 << 8) | (key2 << 16) | (key3 << 24));
+                        kv_set1((option_arrow_joystick ? 0x200 : 0x000) | key4);
+                        last_kbd_time = time_millis();
+                    } else if ((ch_cmd == 0x88 || ch_cmd == 0x83) && (ch_buf[0] & 0xF0) == 0x20 && ch_len >= 5) {
+                        // relative mouse report: buttons, dx, dy, wheel (57 AB 88 07 2x btn dx dy wheel serial sum)
+                        in_mouse(ch_buf[1], (int8_t)ch_buf[2], (int8_t)ch_buf[3], ch_len >= 7 ? (int8_t)ch_buf[4] : 0);
+                    }
+                }
+                ch_state = CH9350_STATE_IDLE;
+            }
+            break;
+    }
+}
+
+// a whole report from the test generator, through the parser with a state of its own (so it
+// never mixes with a real report half received from the UART)
+void ch_frame(const uint8_t *f, int n) {
+    int st = ch_state;
+    uint8_t cmd = ch_cmd, len = ch_len, idx = ch_idx, buf[16];
+    memcpy(buf, ch_buf, 16);
+    ch_state = CH9350_STATE_IDLE;
+    for (int i = 0; i < n; i++) ch_byte(f[i]);
+    ch_state = st; ch_cmd = cmd; ch_len = len; ch_idx = idx;
+    memcpy(ch_buf, buf, 16);
+}
+
 void uart_keyboard_poll(void) {
     // Process pending bytes in the UART receiver, but BOUNDED: a continuous RX
     // stream (e.g. noise on a repurposed/floating UART pin) must not spin here
@@ -2732,64 +3255,7 @@ void uart_keyboard_poll(void) {
         }
         uint8_t b = val & 0xFF;
         ch_raw[ch_raw_i++ & 63] = b;
-        
-        switch (ch_state) {
-            case CH9350_STATE_IDLE:
-                if (b == 0x57) {
-                    ch_state = CH9350_STATE_AB;
-                }
-                break;
-            case CH9350_STATE_AB:
-                if (b == 0xAB) {
-                    ch_state = CH9350_STATE_CMD;
-                } else if (b != 0x57) {
-                    ch_state = CH9350_STATE_IDLE;
-                }
-                break;
-            case CH9350_STATE_CMD:
-                ch_cmd = b;
-                ch_state = CH9350_STATE_LEN;
-                break;
-            case CH9350_STATE_LEN:
-                ch_len = b;
-                ch_idx = 0;
-                if (ch_len > 0 && ch_len <= 16) {
-                    ch_state = CH9350_STATE_DATA;
-                } else {
-                    ch_state = CH9350_STATE_IDLE;
-                }
-                break;
-            case CH9350_STATE_DATA:
-                ch_buf[ch_idx++] = b;
-                if (ch_idx >= ch_len) {
-                    // Packet fully received! Verify checksum.
-                    uint8_t sum = 0;
-                    // the sum covers the report and the serial byte, not the type byte
-                    // (measured: 57 AB 88 07 20 00 F3 03 00 14 0A)
-                    for (int i = 1; i < ch_len - 1; i++) {
-                        sum += ch_buf[i];
-                    }
-                    if (sum == ch_buf[ch_len - 1]) {
-                        // Checksum ok. Extract keyboard reports.
-                        if ((ch_cmd == 0x88 || ch_cmd == 0x83) && ch_buf[0] == 0x10) {
-                            uint8_t modifier = ch_buf[1];
-                            uint8_t key1 = ch_buf[3]; // ch_buf[2] is reserved
-                            uint8_t key2 = ch_buf[4];
-                            uint8_t key3 = ch_buf[5];
-                            uint8_t key4 = ch_buf[6];
-                            
-                            kv_set0(modifier | (key1 << 8) | (key2 << 16) | (key3 << 24));
-                            kv_set1((option_arrow_joystick ? 0x200 : 0x000) | key4);
-                            last_kbd_time = time_millis();
-                        } else if ((ch_cmd == 0x88 || ch_cmd == 0x83) && (ch_buf[0] & 0xF0) == 0x20 && ch_len >= 5) {
-                            // relative mouse report: buttons, dx, dy, wheel (57 AB 88 07 2x btn dx dy wheel serial sum)
-                            in_mouse(ch_buf[1], (int8_t)ch_buf[2], (int8_t)ch_buf[3], ch_len >= 7 ? (int8_t)ch_buf[4] : 0);
-                        }
-                    }
-                    ch_state = CH9350_STATE_IDLE;
-                }
-                break;
-        }
+        ch_byte(b);
     }
 
     // Safety timeout: if no keyboard packet received for 1 second, clear keys

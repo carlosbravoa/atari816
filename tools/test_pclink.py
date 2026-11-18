@@ -150,6 +150,35 @@ class Unfinished(unittest.TestCase):
         self.assertEqual(self.read("old.txt"), "new content")
         self.assertFalse(os.path.exists(os.path.join(self.root, "OLD.TXT")))
 
+    def test_printout_becomes_pdf(self):
+        """(Step 3) a marked job written to Printouts/*.pdf is a PDF on the PC, the text is not kept"""
+        import pdfprint
+        os.mkdir(os.path.join(self.root, "Printouts"))
+        h = self.create(b"/PRINTOUTS/2026-11-18 15.30.12 Edit.pdf")
+        job = pdfprint.MARK + b"title=Edit\ndate=2026-11-18 15:30\n\nHello, printer\n\x0cPage two\n"
+        self.write(h, job)
+        self.assertEqual(self.close(h), 0)
+        name = os.path.join(self.root, "Printouts", "2026-11-18 15.30.12 Edit.pdf")
+        with open(name, "rb") as f:
+            pdf = f.read()
+        self.assertTrue(pdf.startswith(b"%PDF-1.4") and pdf.rstrip().endswith(b"%%EOF"))
+        self.assertIn(b"(Hello, printer) '", pdf)
+        self.assertIn(b"/Count 2", pdf)
+        self.assertEqual(os.listdir(os.path.join(self.root, "Printouts")), ["2026-11-18 15.30.12 Edit.pdf"])
+
+    def test_unmarked_pdf_and_other_folders_untouched(self):
+        import pdfprint
+        os.mkdir(os.path.join(self.root, "Printouts"))
+        h = self.create(b"/Printouts/real.pdf")      # not marked: kept as written
+        self.write(h, b"%PDF-1.7 something")
+        self.close(h)
+        self.assertEqual(self.read("Printouts/real.pdf"), "%PDF-1.7 something")
+        h = self.create(b"/job.pdf")                 # marked, but not in Printouts
+        self.write(h, pdfprint.MARK + b"\nx")
+        self.close(h)
+        with open(os.path.join(self.root, "job.pdf"), "rb") as f:
+            self.assertTrue(f.read().startswith(pdfprint.MARK))
+
     def test_read_back(self):
         h = self.create(b"/rb.bin")
         self.write(h, b"abcdef")

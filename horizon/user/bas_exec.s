@@ -283,7 +283,8 @@ st_print:
         bne     :+
         inc     z:tp
         stz     pnl
-        lda     ccol                    ; the next column of 10
+        jsr     pr_pos                  ; the next column of 10
+        lda     pcol
         jsr     tabstop
         bra     @l
 :       cmp     #TK_TAB
@@ -308,7 +309,8 @@ st_print:
 @end:   lda     pnl
         beq     :+
         jsr     con_nl
-:       jmp     stmt_end
+:       stz     lpon                    ; (0.23: the end of an LPRINT)
+        jmp     stmt_end
 
 ; the accumulator on the console (a number: no spaces around it)
 print_acc:
@@ -346,7 +348,7 @@ paren_int:
         pla
         rts
 
-; spaces up to the next multiple of 10 after column A
+; spaces up to the next multiple of 10 after column A (the width pwid: pr_pos first)
 tabstop:
         ldx     #0
 :       cmp     #10
@@ -361,21 +363,24 @@ tabstop:
         asl     a
         asl     a
         adc     z:t0
-        cmp     ccols
+        cmp     pwid
         bcc     tabto
         jmp     con_nl
-; spaces up to column A (a new line first when past it)
-tabto:  cmp     ccols
+; spaces up to column A (a new line first when past it); the console's, or (LPRINT) the
+; print job's
+tabto:  jsr     pr_pos
+        cmp     pwid
         bcc     :+
-        lda     ccols
+        lda     pwid
         dec     a
 :       sta     z:t0
-        cmp     ccol
+        cmp     pcol
         bcs     :+
         jsr     con_nl
+        stz     pcol
 :       lda     z:t0
         sec
-        sbc     ccol
+        sbc     pcol
 ; A spaces
 spaces: tax
         beq     :++
@@ -1501,6 +1506,7 @@ run_at: jsr     line_start
 
 ; RUN and CLR: no values, no loops, DATA from the start, the default palette and sound
 run_clear:
+        jsr     lp_end                  ; (0.23) a new run, a new print job
         jsr     clr_all
         jsr     snd_off
         jsr     game_reset              ; (2.0) sprites, pictures, samples, full screen
@@ -1519,6 +1525,11 @@ st_new: jsr     prog_new
         jmp     main_ready
 
 st_list:
+        jsr     list_args
+        jsr     list_range
+        jmp     stmt_end
+; LIST's and LLIST's lines: [n], [n]-[m] -> lfrom, lto
+list_args:
         stz     lfrom
         lda     #$FFFF
         sta     lto
@@ -1539,8 +1550,7 @@ st_list:
         beq     @go
         jsr     list_num
         sta     lto
-@go:    jsr     list_range
-        jmp     stmt_end
+@go:    rts
 ; a line number in LIST (a plain number token)
 list_num:
         jsr     peek

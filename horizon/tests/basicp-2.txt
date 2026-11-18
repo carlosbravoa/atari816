@@ -1,0 +1,13 @@
+Hello printer
+1-23.51E+10 0.25
+A         B         C
+TAB         X   Y
+no end - joined
+line 1
+line 2
+line 3
+
+20 LPRINT "Hello";" ";"printer"
+30 LPRINT 1;-2;3.5;1E+10;" ";0.25
+40 LPRINT "A","B","C"
+the end

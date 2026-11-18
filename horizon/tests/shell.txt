@@ -8,7 +8,8 @@ built-ins: help, ls [path] (or dir), cat file, cd [path], pwd, ps, date [set],
 files: rm path..., mkdir path, mv from to, cp from to (to: a folder too)
 internet (the PC link): get URL [to] downloads (http:// https:// ftp://);
   a URL is a path: cp, cat take one too
-Atari: mount file [1-4], eject d1-d4|cart|xex, boot, run file
+Atari: mount file [1-4], eject d1-d4|cart|xex, boot, run file (.bas .lst too)
+print file...: each file to the printer (/Printouts; Programs > Printer)
 other words run <WORD>.PRG from /BIN, /SYSTEM or /SYSTEM/TESTS (or a .PRG path);
   the rest of the line is its argument; a trailing & runs it in the background
 names with spaces: "in quotes"; ctrl-C stops the foreground job
@@ -108,7 +109,7 @@ usage: eject d1-d4|cart|xex
 booting the Atari: F12 returns to Horizon
 > run long.txt
 booting the Atari: F12 returns to Horizon
-run: unknown file type (.atr .xfd .xex .com .exe .car .rom .bin)
+run: unknown file type (.atr .xfd .xex .com .exe .car .rom .bin .bas .lst)
 > run blue.xex
 booting the Atari: F12 returns to Horizon
 > run
@@ -145,7 +146,8 @@ usage: run file
   Charlie november 158 (Demo) [!].xex                     20  2026-11-01 12:00
   Charlie november 174 (Demo) [!].xex                     20  2026-11-01 12:00
   Charlie november 190 (Demo) [!].xex                     20  2026-11-01 12:00
--- more: any key, q to stop --K  Charlie november 206 (Demo) [!].xex                     20  2026-11-01 12:00
+-- more: any key, q to stop --
+K  Charlie november 206 (Demo) [!].xex                     20  2026-11-01 12:00
   Charlie november 222 (Demo) [!].xex                     20  2026-11-01 12:00
   Charlie november 238 (Demo) [!].xex                     20  2026-11-01 12:00
   Echo hotel 012 (Demo) [!].xex                           20  2026-11-01 12:00
@@ -173,7 +175,8 @@ usage: run file
   Folder 07                                            <DIR>  2026-11-01 12:00
   Folder 08                                            <DIR>  2026-11-01 12:00
   Folder 09                                            <DIR>  2026-11-01 12:00
--- more: any key, q to stop --K> cd "../disks/xex/R - Z"
+-- more: any key, q to stop --
+K> cd "../disks/xex/R - Z"
 > pwd
 /disks/xex/R - Z
 > dir

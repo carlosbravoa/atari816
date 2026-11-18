@@ -1,4 +1,4 @@
-# Horizon ABI (version 0.22)
+# Horizon ABI (version 0.23)
 
 This file describes the interface between Horizon and user programs. `user/horizon.inc`
 holds the same definitions for ca65.
@@ -52,7 +52,7 @@ PBR:PC-1.
 | $22 | read | X, Y = {u8 handle, u24 buffer, u16 length} | A = bytes | Fewer bytes than asked = end of file |
 | $23 | write | same block | A = bytes | |
 | $24 | seek | A = handle, X = offset low 16, Y = offset high 16 | A = position low, X = position high | |
-| $25 | stat | X, Y = {u24 path, u24 out} | A = size low, X = size high | `out` gets 9 bytes: u32 size, u8 attr (bit 4 = directory, bit 0 = read-only, $20 = archive), u32 FAT time (fdate << 16 \| ftime) |
+| $25 | stat | X, Y = {u24 path, u24 out} | A = size low, X = size high | `out` gets 9 bytes: u32 size, u8 attr (bit 4 = directory, bit 0 = read-only, $20 = archive), u32 FAT time (fdate << 16 \| ftime). (0.23) Some names answer about the machine instead: `/PRN:` (the print jobs finished), `/PC:` (the gateway's services), `/D1:` .. `/D4:` (the folder disk): see "Printing, Run in Atari and the folder disk (0.23)" |
 | $26 | readdir | X, Y = {u24 path, u24 buffer, u16 length, u16 skip} | A = entries | Entries are packed into the buffer: u32 size, u8 attr, u8 name length, name (no terminator). Without "." and ".."; in the I/O processor's order: the directory's own (FatFs) order on the board, sorted by name in the emulator. Programs that show a list sort it themselves (Files, the file dialog, FILES do). `skip` entries are skipped, for continuation. The buffer must have room for the path, which the kernel copies there first (an I/O processor rule) |
 | $27 | delete | X, Y = path | - | |
 | $28 | mkdir | X, Y = path | - | |
@@ -74,7 +74,7 @@ PBR:PC-1.
 | $55 | joystick | A = 0 | A = directions, X = triggers | (0.15) The two DB9 ports (JOY_PORT, JOY_TRIG), 1 = pressed. A: bits 0-3 port 1 (JOY_UP 1, JOY_DOWN 2, JOY_LEFT 4, JOY_RIGHT 8), bits 4-7 port 2 the same; X: bit 0 port 1's trigger, bit 1 port 2's. A = 1 is a test aid: X = directions and Y = triggers are ORed into what the ports give from then on (0, 0: off). EINVAL for another A. Any task may read them |
 | $5F | mouse_inject | A = dx \| dy << 8, X = wheel \| buttons << 8 (signed bytes) | - | Test aid: feeds one MOUSE event through the same kernel path as the I/O processor's (pointer, queue, coalescing) |
 | $60 | classic_show | - | - | Holder only (else EINVAL). Lets the classic Atari run (it is frozen whenever the desktop is shown, REV $06+) and hands the screen (NV_CTRL.ENABLE = 0) and the keyboard (KB_ROUTE = 1) to the classic Atari, and blocks until the system key (F12) is pressed. That F12 press gives no $FF event. Then the classic Atari is frozen again, the desktop and keyboard come back, the key queue is emptied, and key events are swallowed until every key reported down meanwhile has been released (at least 30 ms, at most 300 ms). Interruptible by kill |
-| $61 | classic_mount | X, Y = path, A = kind \| slot << 8 | A = kind mounted (1 disk, 2 executable, 3 cartridge) | Kind 0 = by extension (.ATR .XFD disk; .XEX .COM .EXE executable; .CAR .ROM .BIN cartridge), 1 disk, 2 executable, 3 cartridge. Slot 0-3 = D1:-D4: (disks only; an executable is the virtual boot disk on D1:). Mount only, no reset: the classic machine is frozen while the desktop is shown. Errors: $44 no file, $C3 bad kind, slot or extension, $C4 not a valid image, $C5 the firmware menu is open, $C2 the firmware does not know the op. A large cartridge can take seconds (the caller blocks; other tasks run). (0.18) A cartridge: the I/O processor loads its image into banks $70 and up (its SDRAM from $400000), so the kernel first takes those banks out of the pool (size / 64 KB, at most 12: 768 KB) and keeps them until the cartridge is ejected; ENOMEM if one of them is in use (then nothing is mounted). The kernel allocates its own runs of banks (the screen, window bitmaps) below $70 first |
+| $61 | classic_mount | X, Y = path, A = kind \| slot << 8 | A = kind mounted (1 disk, 2 executable, 3 cartridge) | Kind 0 = by extension (.ATR .XFD disk; .XEX .COM .EXE executable; .CAR .ROM .BIN cartridge), 1 disk, 2 executable, 3 cartridge, (0.23) 4 CK_BASRUN (a BASIC program: answered as 2), 5 CK_FOLDER (a folder as a disk: answered as 1); see "Printing, Run in Atari and the folder disk (0.23)". Slot 0-3 = D1:-D4: (disks only; an executable is the virtual boot disk on D1:). Mount only, no reset: the classic machine is frozen while the desktop is shown. Errors: $44 no file, $C3 bad kind, slot or extension, $C4 not a valid image, $C5 the firmware menu is open, $C2 the firmware does not know the op. A large cartridge can take seconds (the caller blocks; other tasks run). (0.18) A cartridge: the I/O processor loads its image into banks $70 and up (its SDRAM from $400000), so the kernel first takes those banks out of the pool (size / 64 KB, at most 12: 768 KB) and keeps them until the cartridge is ejected; ENOMEM if one of them is in use (then nothing is mounted). The kernel allocates its own runs of banks (the screen, window bitmaps) below $70 first |
 | $62 | classic_eject | A = kind \| slot << 8 | - | Kind 1 disk (slot 0 also ejects the executable), 2 executable, 3 cartridge. Ejecting an empty slot is OK |
 | $63 | classic_boot | - | - | Keyboard holder only (else EINVAL). In order: lets the classic machine run, routes the keyboard to it, sends CLASSIC_BOOT and waits (0.2-0.8 s), then shows it exactly as classic_show does (F12 returns, the machine is frozen again). On a failed boot, freeze and keyboard are put back (held keys swallowed) and the error is returned. (0.18) A = CB_STAY ($C01D): the same cold boot, then the classic machine is frozen again and not shown (the call returns at once after the boot): what the Desktop does when a cartridge is attached or ejected, as switching a real machine off and on |
 | $64 | classic_query | A = item: 0-3 D1:-D4:, 4 executable, 5 cartridge; X, Y = 128-byte buffer | A = length (0 = nothing mounted) | The absolute path mounted there, as recorded by classic_mount / classic_eject (mounts made by the firmware's own menu are not seen). (0.19) A cartridge the I/O processor loaded by itself at power-on (`boot=ash` in /atari.ini) is asked for at start (op $1E CLASSIC_STATE): its banks are reserved as classic_mount reserves them, and item 5 reports its path |
@@ -219,6 +219,76 @@ gateway on a PC connected (and not started with `--no-net`), a **URL is a path**
   PC, $D3 another network error, $52 all four stream handles in use. `user/horizon.inc` names
   them (E_NOSVC ...).
 - Programs on the Atari816 can reach whatever the PC can reach, including the home network.
+
+**Printing, Run in Atari and the folder disk (0.23).** The PC link's step 3. The kernel passes
+these paths on like any other (`:` is a normal character; they start with `/`); nothing new in
+the kernel.
+
+- **Printing: `/PRN:NAME`.** OPEN (any case for `PRN`; any mode counts as "create") gives a
+  normal file handle (0-3): a **print job**. WRITE (also READ and SEEK) works as on any card
+  file; CLOSE finishes the job (so does the kernel's close at a program's end or crash). The I/O
+  processor writes it as `/Printouts/YYYY-MM-DD HH.MM.SS NAME.txt` (its clock: the time
+  SYS_TIME gave, as for file dates; `/Printouts` is made if missing). NAME is the text after
+  `/PRN:`, cut to 24 characters, `\ / : * ? " < > |` and bytes below 32 made `_`, blanks and
+  dots at both ends removed (empty: `Job`); when that name is taken: `... NAME 2.txt`, `3`, ...
+  up to 99. While the job is open its file has a `.` in front of its name
+  (`/Printouts/.2026-11-18 15.30.12 Edit.txt`); CLOSE gives it its name, so a job is complete
+  when it appears. Programs that list `/Printouts` leave out names starting with `.`. Horizon's
+  programs use their own name as NAME (`Edit`, `Write`, `Sheet`, `BASIC`, `Shell`, `Files`);
+  the classic Atari's jobs are named `Atari`.
+- **What a job holds:** plain text, LF ($0A) line ends (CR LF is accepted), FF ($0C) starts a
+  new page, Latin-1 / ASCII. Lines longer than about 80 characters are wrapped on the PC side;
+  there is no other formatting.
+- **The classic Atari's printer (P:)**: the I/O processor answers the Atari's printer; what it
+  prints becomes a job `... Atari.txt` (ATASCII turned into text: $9B a line end, inverse video
+  as normal characters, graphics characters as look-alikes). The job ends after 3 s without
+  data, or when the classic machine is frozen or cold booted.
+- **STAT of exactly `/PRN:`**: size = the number of print jobs finished since the I/O processor
+  started (both kinds), attribute $10, time = now. A program that waits for new jobs asks this
+  (cheap) and reads `/Printouts` only when the number changed (the Desktop, Printer). Other
+  calls on `/PRN:...` paths (READDIR, DELETE, MKDIR, RENAME, LOAD, classic_mount, STAT of
+  `/PRN:NAME`): $C2.
+- **STAT of exactly `/PC:`** answers, as its size, the gateway's services: bit 0 PCS_FILES (the
+  PC volume), 1 PCS_DEV (developer), 2 PCS_NET (connections), 3 PCS_FETCH (URLs), 4 PCS_PRINT
+  (it makes PDFs, below). (Before 0.23 the size was 0.)
+- **PDF on the PC:** a file created (mode 2) as `/PC:/Printouts/NAME.pdf` whose content starts
+  with the 13 bytes ESC `A816PRINT 1` LF (`1B 41 38 31 36 50 52 49 4E 54 20 31 0A`), then the
+  lines `title=TEXT` LF, `date=YYYY-MM-DD HH:MM` LF, an empty line (LF), then the job's text,
+  is turned into a PDF (A4, Courier) by the gateway when it is closed. `/SYSTEM/PRINTD.PRG
+  PATH` does this for one job (exit code 0 sent, 1 an error, 2 no PC or no PCS_PRINT); the
+  Desktop runs it for every new job when the PC has PCS_PRINT, and Printer's "Send to PC".
+- **Run in Atari: classic_mount kind 4 (CK_BASRUN).** The path is a BASIC program on the card:
+  a text listing (LF or CR LF lines, or the Atari's $9B; any extension, normally .BAS or .LST)
+  or an Atari BASIC tokenised SAVE file (the I/O processor tells them apart). It becomes the
+  virtual boot disk on D1:, in place of D1: and the executable, exactly like an executable:
+  the answer is **2** (the kernel records it as item 4, "executable"; classic_query and the
+  Atari panel show it as the program). classic_boot afterwards cold boots with Atari BASIC on;
+  a small boot program types the program in and RUNs it (a last `RUN` line of the listing is left out: the loader types RUN itself). A cartridge must be ejected first (Atari BASIC is needed): ulib `atari_run` does. Errors as for kind 2: $44 no file,
+  $C4 not a valid program (empty, or larger than 96 KB). ulib `atari_run` (the shell's `run`,
+  Files' and the Desktop's "Run in Atari") uses it for `.BAS` and `.LST`.
+- **The folder disk: classic_mount kind 5 (CK_FOLDER)**, A = 5 \| slot << 8 (slot 0-3 =
+  D1:-D4:). The path is a folder on the card (made if missing). That drive then shows the folder
+  to the classic Atari as an Atari DOS 2.0S single-density disk built from the folder's files;
+  what the Atari writes is copied back into the folder. The answer is **1** (the kernel records
+  the folder's path as the drive's). Mounting the same folder on the same drive again is a
+  **refresh**: the Atari's changes not yet saved are saved first, then the disk is built again
+  from the folder. classic_eject kind 1 of that drive saves the changes first, then ejects.
+  Only one drive can be the folder disk: mounting a folder on another drive moves it (eject the
+  old drive first, so the kernel's record of it goes too: the Desktop does). The I/O processor
+  keeps it in /atari.ini (`folder=PATH`, `folderdrive=N`): mounted again at power-on, forgotten
+  at eject (a restart of Horizon forgets the kernel's record: classic_query then says nothing
+  for that drive, STAT still answers).
+  Which files show: names that fit Atari DOS 8.3 (1-8 letters or digits, the first a letter,
+  optionally a dot and 1-3 letters or digits; any case on the card, shown in upper case), at
+  most 64 files in name order; a file needs max(1, ceil(size / 125)) sectors and all of them
+  together at most 707 (in name order: a file that does not fit is left out and the next ones
+  are tried); folders inside are ignored. A file left out is not shown and never changed or
+  deleted by the Atari.
+- **STAT of exactly `/D1:` .. `/D4:`**: for the folder disk's drive: size bits 0-7 = the files
+  shown, bits 8-15 = the files of the folder left out (a bad name, too many, too big), bits
+  16-31 = the free sectors on the disk; attribute $10 \| FD_SAVING (bit 0: the Atari's changes
+  wait to be saved into the folder); time = when the disk was last built or saved. Any other
+  drive: $44.
 
 **File handles.** The I/O processor has 4 file handles (and, from 0.22, 4 stream handles) for the whole system. The kernel records
 which task owns each one. A task can only use its own handles, and they are closed when it

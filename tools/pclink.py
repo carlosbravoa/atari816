@@ -35,6 +35,8 @@ import threading
 import time
 import urllib.parse
 
+import pdfprint   # (step 3) print jobs as PDF
+
 BAUD = 1_500_000
 MAXPAY = 1040            # largest payload of a frame
 CHUNK = 1024             # file data per frame
@@ -46,6 +48,7 @@ NCH = 16
 F_DATA, F_ACK = 0x01, 0x02
 MORE = 0x01
 SV_FILES, SV_DEV, SV_NET, SV_FETCH = 0x01, 0x02, 0x04, 0x08
+SV_PRINT = 0x10         # (step 3) marked files written to Printouts/*.pdf become PDF files
 
 C_HELLO, C_HELLO_ACK, C_PING, C_PONG, C_BYE, C_NOSESSION, C_BOOT = 1, 2, 3, 4, 5, 6, 7
 
@@ -639,6 +642,7 @@ class FileServer:
             if (not self._inside(os.path.realpath(os.path.dirname(final)))
                     or os.path.islink(final) or os.path.isdir(final)):
                 raise Refused(FR_DENIED)
+            self._printout(tmp, final)
             try:
                 os.replace(tmp, final)
             except OSError as e:
@@ -650,6 +654,24 @@ class FileServer:
                     shutil.copyfileobj(src, out)
         finally:
             self._unlink(tmp)
+
+    def _printout(self, tmp, final):
+        """(Step 3) A print job from the Atari816: a file `Printouts/NAME.pdf` (directly in the
+        folder Printouts at the top of the shared folder) that starts with the marker becomes the
+        PDF (tools/pdfprint.py) before it is put in place; the text itself is not kept."""
+        d = os.path.dirname(os.path.realpath(final)) if os.path.exists(final) else os.path.realpath(os.path.dirname(final))
+        if (os.path.dirname(d) != self.root or os.path.basename(d).lower() != "printouts"
+                or not final.lower().endswith(".pdf")):
+            return
+        with open(tmp, "rb") as f:
+            data = f.read()
+        if not pdfprint.is_job(data):
+            return
+        pdf = pdfprint.convert(data)
+        with open(tmp, "wb") as f:
+            f.write(pdf)
+        if self.log:
+            self.log(f"print: {os.path.basename(final)} ({len(pdf)} bytes of PDF)")
 
     # ---- paths ----
     def _inside(self, real):
@@ -1775,7 +1797,7 @@ class Gateway:
         self.dev_owner = None
         self.dev_lock = threading.Lock()
         self.files_q = queue.Queue()
-        services = SV_FILES | SV_DEV | (SV_NET | SV_FETCH if net else 0)
+        services = SV_FILES | SV_DEV | SV_PRINT | (SV_NET | SV_FETCH if net else 0)
         self.link = Link(port=port, services=services, name="atari816-link",
                          on_frame=self._on_frame, on_log=self._on_log,
                          on_state=self._on_state, verbose=verbose)
@@ -1821,12 +1843,15 @@ class Gateway:
         elif ch == CH_DEV:
             owner = self.dev_owner
             if owner:
+                # the last frame of the answer: the channel is free BEFORE the tool sees the
+                # answer (it may send its next request at once; released afterwards, the next
+                # request's answer found no owner and was dropped)
+                if len(payload) >= 4 and not payload[2] & MORE:
+                    self._release(owner)
                 try:
                     sock_send(owner, ord("P"), payload)
                 except OSError:
                     pass
-                if len(payload) >= 4 and not payload[2] & MORE:
-                    self._release(owner)
         elif ch in (CH_NET, CH_FETCH):
             if self.net:
                 self.net.frame(ch, payload)               # (never blocks)

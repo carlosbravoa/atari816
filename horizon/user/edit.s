@@ -15,6 +15,17 @@
 ; is dropped (and remembered: the file is written back with CR LF); other bytes are kept
 ; (shown as '?', tabs as spaces to the next multiple of 8 columns). Saving joins the lines
 ; with LF (CR LF), so a file ending in a line end ends with an empty last line here.
+; (0.23) Atari line ends: a file whose first piece (its first 4 KB) holds a $9B and no LF
+; is an Atari file (a listing the classic Atari wrote with LIST "D:..."): $9B ends a line
+; (so does a LF byte later in it), and bytes $A0-$FF (inverse video of $20-$7F) are shown
+; and kept with bit 7 cleared: inverse video is lost when the file is saved; other bytes
+; are kept. Saving writes $9B line ends again (no CR), so the Atari can ENTER the file;
+; the status line says "Atari line ends" while such a file is open. New files and LF / CR
+; LF files keep their line ends.
+; (0.23) File > Print (ctrl-P): the whole text as a print job "/PRN:Edit" (O_CREATE, written
+; in pieces as a save is) with LF line ends (also for CR LF and Atari files), a line end
+; after the last line unless it is empty; then "Printed" on the status line (until the
+; next key press, click or menu), or an alert with the error code.
 ; Cursor and selection: (line, column) pairs, cl:cc the cursor, al:ac the other end.
 ;
 ; The view. Rows of LH pixels show the text in the fixed 8x12 font (default) or the UI
@@ -295,7 +306,10 @@ loop:   lda     pend
         jsr     ui_getev
         bcs     loop
 @got:   inc     pendn
-        ldx     #.loword(ctls)
+        lda     stnote                  ; (0.23) a note on the status line: gone at the
+        beq     :+                      ; next key press, click or menu
+        jsr     noteoff
+:       ldx     #.loword(ctls)
         jsr     ui_event
         cmp     #UA_CHANGE
         bne     :+
@@ -328,6 +342,25 @@ loop:   lda     pend
         beq     onmenu
         jmp     loop
 
+; (0.23) the status line's note (stnote, "Printed") gone at a key press, a button, a menu
+noteoff:
+        lda     ui_ev
+        and     #$00FF
+        cmp     #WE_KEY
+        bne     :+
+        lda     ui_ev+5
+        and     #$00FF
+        bne     @off
+        rts
+:       cmp     #WE_BUTTON
+        beq     @off
+        cmp     #WE_MENU
+        bne     :+
+@off:   stz     stnote
+        lda     #1
+        sta     pend
+:       rts
+
 ; the view drawn now (if anything is due)
 flush:  stz     pendn
         lda     pend
@@ -356,7 +389,7 @@ onmenu: jsr     flush
         tay
         jmp     (mtab,x)
 m_file: tyx
-        cpx     #12
+        cpx     #16
         jcs     loop
         jmp     (ftab,x)
 m_edit: tyx
@@ -503,6 +536,8 @@ onkey:  jsr     ui_menukey              ; (0.15) the menu key: the pop-up menu
         jeq     m_repl
         cmp     #12
         jeq     m_goto
+        cmp     #16
+        jeq     m_print
         cmp     #KEY_LEFT
         jeq     k_wleft
         cmp     #KEY_RIGHT
@@ -2026,7 +2061,11 @@ sbupdate:
 ; text changes, with its paper (no blank moment).
 stupdate:
         ldy     #.loword(stbuf)
-        ldx     #.loword(t_line)
+        ldx     stnote                  ; (0.23) a note ("Printed") instead
+        beq     :+
+        jsr     scat
+        bra     @right
+:       ldx     #.loword(t_line)
         jsr     scat
         lda     cl
         inc     a
@@ -2040,7 +2079,7 @@ stupdate:
         lda     cc
         inc     a
         jsr     snum
-        ldy     #.loword(stbuf2)
+@right: ldy     #.loword(stbuf2)
         lda     #0
         sta     a:0,y
         lda     emod
@@ -2050,6 +2089,10 @@ stupdate:
 :       lda     wrap
         beq     :+
         ldx     #.loword(t_wrap)
+        jsr     scat
+:       lda     atari                   ; (0.23) a file with Atari line ends
+        beq     :+
+        ldx     #.loword(t_atari)
         jsr     scat
 :       lda     st_ok
         beq     @draw
@@ -2961,6 +3004,7 @@ tx_reset:
         stz     toff
         stz     emod
         stz     crlf
+        stz     atari
         stz     dr_ok
         stz     mt_ok
         jsr     ub_clear
@@ -4917,6 +4961,60 @@ anchor0:
         sta     ac
         rts
 
+; (0.23) the first piece of a file read (A bytes at SB:0; afirst set): an Atari file when
+; it holds a $9B and no LF -> atari (A kept)
+atscan: ldx     afirst
+        beq     @out
+        stz     afirst
+        sta     crn
+        stz     z:sp
+        ldx     sbank
+        stx     z:sp+2
+        ldx     #0                      ; X: a $9B seen
+        ldy     #0
+@l:     cpy     crn
+        bcs     @end
+        lda     [sp],y
+        and     #$00FF
+        cmp     #10
+        beq     @no
+        cmp     #$9B
+        bne     :+
+        ldx     #1
+:       iny
+        bra     @l
+@no:    ldx     #0
+@end:   stx     atari
+        lda     crn
+@out:   rts
+
+; (0.23) A bytes at SB:0 of an Atari file: $9B -> LF (a line end), $A0-$FF (inverse video
+; of $20-$7F) -> bit 7 cleared, the rest kept (A kept)
+atconv: sta     crn
+        stz     z:sp
+        ldx     sbank
+        stx     z:sp+2
+        ldy     #0
+        sep     #$20
+        .a8
+@l:     cpy     crn
+        bcs     @out
+        lda     [sp],y
+        cmp     #$9B
+        bne     :+
+        lda     #10
+        bra     @put
+:       cmp     #$A0
+        bcc     @nx
+        and     #$7F
+@put:   sta     [sp],y
+@nx:    iny
+        bra     @l
+@out:   rep     #$20
+        .a16
+        lda     crn
+        rts
+
 ; A bytes at SB:0 with each CR before an LF removed -> A = the new count (crfin: a CR
 ; held at the end when more follows)
 crfilter:
@@ -5009,6 +5107,8 @@ load0:  jsr     tx_reset
 @new:   rts
 :       sta     fh
         stz     crhold
+        lda     #1                      ; (the first piece decides: an Atari file?)
+        sta     afirst
 @chunk: stz     z:t4                    ; a CR held from the last piece first
         lda     crhold
         cmp     #2
@@ -5045,8 +5145,13 @@ load0:  jsr     tx_reset
 :       lda     z:t5
         clc
         adc     z:t4
-        jsr     crfilter
-        stz     isrc
+        jsr     atscan
+        ldx     atari                   ; (an Atari file: its line ends, no CR LF)
+        beq     :+
+        jsr     atconv
+        bra     :++
+:       jsr     crfilter
+:       stz     isrc
         ldx     sbank
         stx     isrc+2
         cmp     #0
@@ -5055,7 +5160,7 @@ load0:  jsr     tx_reset
         bcs     @full
 :       lda     z:t5
         cmp     #CHUNK
-        bcs     @chunk
+        jcs     @chunk
         bra     @close
 @err:   pha
         lda     fh
@@ -5078,14 +5183,55 @@ load0:  jsr     tx_reset
         stz     emod
         rts
 
-; write the text to fpath -> C set: failed (said so)
-save:   ptr     fpath
-        lda     #O_CREATE
-        sys     SYS_OPEN
+; write the text to fpath with the file's own line ends (LF, CR LF, or (0.23) Atari's
+; $9B) -> C set: failed (said so)
+save:   lda     #10
+        ldx     crlf
+        beq     :+
+        lda     #13
+:       ldx     atari
+        beq     :+
+        lda     #$9B
+:       stz     wfin
+        ldx     #.loword(fpath)
+        jsr     wtext
         bcc     :+
         ldx     #.loword(m_cantsave)
         jsr     errbox
         sec
+        rts
+:       stz     emod
+        lda     ub_top                  ; (undo back to here: not modified)
+        sta     ub_save
+        jsr     settitle
+        clc
+        rts
+
+; (0.23) File > Print (ctrl-P): the whole text as a print job "/PRN:Edit", LF line ends
+; (a last line that is not empty gets one too); "Printed" on the status line, or an alert
+m_print:
+        jsr     flush
+        lda     #1
+        sta     wfin
+        lda     #10
+        ldx     #.loword(t_prn)
+        jsr     wtext
+        bcc     :+
+        ldx     #.loword(m_cantprint)
+        jsr     errbox
+        bra     :++
+:       lda     #.loword(t_printed)
+        sta     stnote
+:       jsr     refresh
+        jmp     loop
+
+; the text written to path X (our bank), line end A (10 LF, 13 CR LF, $9B Atari's); wfin
+; set: a line end after the last line too, unless it is empty -> C set: A = the error
+wtext:  sta     eol
+        ldy     #^fpath
+        lda     #O_CREATE
+        sys     SYS_OPEN
+        bcc     :+
         rts
 :       sta     fh
         stz     z:dp
@@ -5130,16 +5276,20 @@ save:   ptr     fpath
         bra     :-
 :       rep     #$20
         .a16
-        lda     cpi                     ; the line end (not after the last line)
-        inc     a
+        lda     cpi                     ; the line end (not after the last line, unless
+        inc     a                       ; wfin and it is not empty)
         cmp     nl
-        bcs     :++
-        lda     crlf
-        beq     :+
-        lda     #13
+        bcc     :+
+        lda     wfin
+        beq     :+++
+        lda     llen
+        beq     :+++
+:       lda     eol
+        cmp     #13
+        bne     :+
         jsr     @put
-:       lda     #10
-        jsr     @put
+        lda     #10
+:       jsr     @put
 :       stx     cpn
         inc     cpi
         bra     @l
@@ -5148,19 +5298,11 @@ save:   ptr     fpath
         bcs     @err
         lda     fh
         sys     SYS_CLOSE
-        bcs     @err2
-        stz     emod
-        lda     ub_top                  ; (undo back to here: not modified)
-        sta     ub_save
-        jsr     settitle
-        clc
         rts
 @err:   pha
         lda     fh
         sys     SYS_CLOSE
         pla
-@err2:  ldx     #.loword(m_cantsave)
-        jsr     errbox
         sec
         rts
 @put:   txy
@@ -5341,7 +5483,7 @@ setmod: lda     emod
         .segment "RODATA"
 ; (0.15) with the shortcuts, as Write's (win_menu reads the list to its end)
 menus:  .byte   "File", 0, "New", 9, "Ctrl+N", 0, "Open...", 9, "Ctrl+O", 0, "Save", 9, "Ctrl+S", 0
-        .byte   "Save as...", 0, "-", 0, "Close", 9, "Ctrl+W", 0, 0
+        .byte   "Save as...", 0, "-", 0, "Print", 9, "Ctrl+P", 0, "-", 0, "Close", 9, "Ctrl+W", 0, 0
         .byte   "Edit", 0, "Undo", 9, "Ctrl+Z", 0, "Redo", 9, "Ctrl+Y", 0, "-", 0, "Cut", 9, "Ctrl+X", 0
         .byte   "Copy", 9, "Ctrl+C", 0, "Paste", 9, "Ctrl+V", 0, "Select all", 9, "Ctrl+A", 0, "-", 0
         .byte   "Find...", 9, "Ctrl+F", 0, "Find next", 9, "F3", 0, "Replace...", 9, "Ctrl+H", 0
@@ -5349,7 +5491,7 @@ menus:  .byte   "File", 0, "New", 9, "Ctrl+N", 0, "Open...", 9, "Ctrl+O", 0, "Sa
         .byte   "View", 0, "Fixed font", 0, "Proportional font", 0, "-", 0, "Word wrap", 0, "-", 0
         .byte   "Word count", 0, 0, 0
 mtab:   .addr   m_file, m_edit, m_view
-ftab:   .addr   m_new, m_open, m_save, m_saveas, loop, m_close
+ftab:   .addr   m_new, m_open, m_save, m_saveas, loop, m_print, loop, m_close
 popitems: .byte "Undo", 9, "Ctrl+Z", 0, "Redo", 9, "Ctrl+Y", 0, "-", 0, "Cut", 9, "Ctrl+X", 0
         .byte   "Copy", 9, "Ctrl+C", 0, "Paste", 9, "Ctrl+V", 0, "Select all", 9, "Ctrl+A", 0, 0
 etab:   .addr   m_undo, m_redo, loop, m_cut, m_copy, m_paste, m_all, loop, m_find, m_fnext
@@ -5367,6 +5509,10 @@ t_of:   .byte   " of ", 0
 t_col:  .byte   ", column ", 0
 t_modif: .byte  "Modified", 0
 t_wrap: .byte   "   Wrap", 0
+t_atari: .byte  "   Atari line ends", 0
+t_prn:  .byte   "/PRN:Edit", 0
+t_printed: .byte "Printed", 0
+m_cantprint: .byte "Cannot print ", 0
 t_find: .byte   "Find", 0
 t_findc: .byte  "Find:", 0
 t_repl: .byte   "Replace", 0
@@ -5508,6 +5654,10 @@ ac:     .res    2
 goalx:  .res    2
 emod:   .res    2
 crlf:   .res    2
+atari:  .res    2                       ; (0.23) the file has Atari line ends ($9B)
+afirst: .res    2                       ;   (loading: the first piece is next)
+eol:    .res    2                       ; wtext: the line end, a last one too
+wfin:   .res    2
 crhold: .res    2
 crn:    .res    2
 kmods:  .res    2
@@ -5595,9 +5745,10 @@ sbl_max: .res   2
 sbl_page: .res  2
 st_ok:  .res    2                       ; the status line is drawn
 stbuf:  .res    48
-stbuf2: .res    24
+stbuf2: .res    48
 stlast: .res    48
-stlast2: .res   24
+stlast2: .res   48
+stnote: .res    2                       ; (0.23) the status line's note (0: none)
 wmode:  .res    2
 wstop:  .res    2
 wpx:    .res    2

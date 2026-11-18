@@ -1,0 +1,23 @@
+# (0.23) Edit: Atari line ends and File > Print (text shell). The card copy gets
+# tests/editp.lst as /PROG.LST: Atari line ends ($9B), an inverse word ($C8 $C5 ...).
+# Edit shows its lines, the status line says "Atari line ends" (shot 1); a line typed at
+# the top, ctrl-S (saved with $9B line ends again, the inverse word cleared: compared with
+# tests/editp-lst.txt), ctrl-P: "Printed" on the status line (shot 2); the job
+# /Printouts/2026-01-01 00.00.00 Edit.txt has LF line ends (tests/editp-job1.txt). Then
+# ctrl-N, two lines typed (the last one without a line end), F10: File open with Print
+# (shot 3), Print chosen from the keyboard: the job "... Edit 2.txt" (tests/editp-job2.txt:
+# a line end after the last line).
+1500 {esc}
++1500 edit PROG.LST\n
+# shot 1 at 5.0 s
+5500 5 REM PRINTED\n
+7000 {dE0}s{uE0}
+7500 {dE0}p{uE0}
+# shot 2 at 8.5 s
+9000 {dE0}n{uE0}
+9500 Dear printer,\nthis line came from Edit.
+12500 {d43}{u43}
+# shot 3 at 13.5 s: File open; Down x4: New, Open, Save, Save as, Print (separator skipped)
+14000 {down}{down}{down}{down}
++500 \n
+# shot 4 at 16.0 s: "Printed"
