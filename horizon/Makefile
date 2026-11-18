@@ -34,6 +34,8 @@ PROGS  += download bbs
 PROGS  += printer
 SYSPROGS := desk sh about
 SYSPROGS += printd
+# (0.24) the screen saver (the Desktop starts it; its art: tools/mksaver.py)
+SYSPROGS += saver
 TESTPROGS := selftest bench mouse mtest wdemo hello count spin tick regs crash ping pong keys ftest leak hog ktest stest gtest
 # programs linked with the controls library (build/ui.lib from user/ui*.s, API in user/ui.inc)
 UIPROGS := edit wfiles desk paint settings basic sheet about
@@ -224,6 +226,8 @@ $(SD)/SYSTEM/INIT.PRG: user/init.s user/horizon.inc user/version.inc user/prog.c
 	$(LD65) -C user/prog.cfg -o $@ $(B)/init.o $(B)/ulib.o
 
 $(B)/ui.lib: $(UISRC) user/ui.inc user/horizon.inc user/version.inc user/icons.inc | $(B)
+	@# (0.24) made afresh: ar65 a keeps the members of objects no longer built
+	rm -f $@
 	for f in $(UISRC); do $(CA65) -I user -o $(B)/$$(basename $$f .s).o $$f || exit 1; \
 	  $(AR65) a $@ $(B)/$$(basename $$f .s).o || exit 1; done
 
@@ -265,6 +269,10 @@ all: $(SD)/SYSTEM/BBS.TXT
 $(TSD)/SYSTEM/INIT.PRG: $(SD)/SYSTEM/BBS.TXT
 $(SD)/SYSTEM/BBS.TXT: sdfiles/BBS.TXT | $(SD)/SYSTEM
 	cp $< $@
+# (0.24) the screen saver's sprites: six desktop icons, About's stripes, "Atari816", a star
+$(SD)/SYSTEM/SAVER.PRG: user/saver_art.inc
+user/saver_art.inc: sdfiles/icons.txt kernel/font8x12.txt tools/mksaver.py tools/mkicons.py
+	python3 tools/mksaver.py sdfiles/icons.txt kernel/font8x12.txt $@
 # Calculator and Solitaire are one assembly unit each
 $(SD)/BIN/CALC.PRG: $(wildcard user/calc_*.s)
 $(SD)/BIN/SOLITAIR.PRG: $(wildcard user/sol_*.s user/sol_*.inc)
@@ -413,6 +421,7 @@ test: all $(EMU)
 	@$(MAKE) --no-print-directory test-net
 	@$(MAKE) --no-print-directory test-print
 	@$(MAKE) --no-print-directory test-23
+	@$(MAKE) --no-print-directory test-24
 	@rm -rf build/run-sd; cp -r $(SD) build/run-sd; touch build/run-sd/SYSTEM/NODESK; cp tests/basic.bas build/run-sd/BT.BAS
 	@$(EMU) $(EMUFLAGS) $(CARDDATE) --headless --sd build/run-sd --max-seconds $(BASSECS) \
 	    --keys "$$(python3 tests/keyscript.py tests/basic-t.keys)" \
@@ -710,6 +719,33 @@ pictures-23:
 	cp $(B)/desk23b.md5 tests/pictures/$(call REV7IF,desk23b)
 	python3 -c "from PIL import Image; import glob; [Image.open(f).save('tests/pictures/' + f.split('/')[-1][:-4] + '.png') for f in sorted(glob.glob('$(B)/desk23[0-9]*.ppm') + glob.glob('$(B)/desk23b[0-9]*.ppm'))]"
 
+# (0.24) the screen saver (tests/saver.src; tests/mousegen.py makes tests/saver.keys): the card's
+# /SYSTEM/CONFIG says saver=4 (seconds: the test hook). It starts, a key wakes it (the desktop
+# back: shot 3 = shot 1), a click wakes it and is swallowed (shot 6 = shot 4: nothing selected),
+# Settings' row and Test, no saver while BASIC runs in full screen or the classic Atari is
+# shown. REV $0B: the sprites; REV $0A and older the stripes block drawn by the CPU
+# (tests/pictures/saver-rev10.md5 for REV $08-$0A, saver-rev7.md5). make pictures-24 freezes
+# the pictures.
+SVSHOTS := 10.5 15 17.5 19 24 26.5 30 32.5 35 48 51.5 58 60
+SVMD5 = $(if $(findstring --rev 7,$(EMUFLAGS)),saver-rev7.md5,$(if $(findstring --rev,$(EMUFLAGS)),saver-rev10.md5,saver.md5))
+SVSFX = $(if $(findstring --rev 7,$(EMUFLAGS)),-rev7,$(if $(findstring --rev,$(EMUFLAGS)),-rev10,))
+test-24: all $(EMU)
+	@PREP='printf "saver=4\n" > SYSTEM/CONFIG' DESK=1 sh tests/shots.sh "$(EMU) $(EMUFLAGS) $(CARDDATE)" $(SD) saver 61 $(SVSHOTS)
+	@if diff -u tests/pictures/$(SVMD5) $(B)/saver.md5; then echo "PASS  0.24 the screen saver: started after the delay, Settings' row and Test, not while a program is in full screen or the classic Atari is shown"; \
+	else echo "FAIL  0.24 screen saver pictures (look at $(B)/saver*.ppm, then make pictures-24)"; exit 1; fi
+	@if [ "$$(grep ' saver1.ppm' $(B)/saver.md5 | cut -c1-32)" = "$$(grep ' saver3.ppm' $(B)/saver.md5 | cut -c1-32)" ] \
+	  && [ "$$(grep ' saver4.ppm' $(B)/saver.md5 | cut -c1-32)" = "$$(grep ' saver6.ppm' $(B)/saver.md5 | cut -c1-32)" ] \
+	  && [ "$$(grep ' saver1.ppm' $(B)/saver.md5 | cut -c1-32)" != "$$(grep ' saver2.ppm' $(B)/saver.md5 | cut -c1-32)" ]; \
+	then echo "PASS  0.24 the screen saver: woken by a key or a click, the desktop exactly as before (the click swallowed)"; \
+	else echo "FAIL  0.24 screen saver: the desktop after waking ($(B)/saver1.ppm / saver3.ppm, saver4.ppm / saver6.ppm)"; exit 1; fi
+	@if grep -l 'emu816: blitter:' $(B)/saver.err; then echo "FAIL  blitter rules (the screen saver session)"; exit 1; \
+	else echo "PASS  blitter rules: the screen saver session"; fi
+
+pictures-24:
+	cp $(B)/saver.md5 tests/pictures/$(SVMD5)
+	@# (an older revision: only the pictures that differ from the default ones)
+	python3 -c "from PIL import Image; import glob; d = {l.split()[1]: l.split()[0] for l in open('tests/pictures/saver.md5')}; n = {l.split()[1]: l.split()[0] for l in open('$(B)/saver.md5')}; [Image.open(f).save('tests/pictures/' + f.split('/')[-1][:-4] + '$(SVSFX).png') for f in sorted(glob.glob('$(B)/saver[0-9]*.ppm')) if not '$(SVSFX)' or n[f.split('/')[-1]] != d[f.split('/')[-1]]]"
+
 pictures-net:
 	cp $(B)/download.md5 tests/pictures/$(call REV7,download)
 	cp $(B)/bbs.md5 tests/pictures/$(call REV7IF,bbs)
@@ -800,6 +836,7 @@ pictures-print:
 	python3 -c "from PIL import Image; import glob; [Image.open(f).save('tests/pictures/' + f.split('/')[-1][:-4] + '.png') for f in sorted(glob.glob('$(B)/printer[0-9]*.p[np][gm]'))]"
 
 .PHONY: test-games pictures-games test-pc pictures-pc test-net pictures-net test-23 pictures-23 test-print pictures-print
+.PHONY: test-24 pictures-24
 
 clean:
 	rm -rf build

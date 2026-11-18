@@ -442,6 +442,7 @@ int main(int argc, char **argv)
     clock_t t0 = clock();
     Cpu65816 *c = &M.cpu;
     int rc = 0;
+    uint64_t wai_cycles = 0;            /* (--stats) cycles the CPU spent waiting in WAI */
 
     while (!c->stopped) {
         if (c->cycles >= M.next_event) {
@@ -449,7 +450,9 @@ int main(int argc, char **argv)
             if (M.mb.restart) machine_restart();
         }
         if (c->waiting && !c->nmi && !c->irq) {     /* WAI: jump to the next device event */
+            uint64_t w0 = c->cycles;
             c->cycles = M.next_event > c->cycles ? M.next_event : c->cycles + 1;
+            wai_cycles += c->cycles - w0;
             if (c->cycles >= limit) { rc = 3; break; }
             continue;
         }
@@ -477,6 +480,8 @@ int main(int argc, char **argv)
         fprintf(stderr, "emu816: %s after %.3f s emulated (%llu cycles), %.3f s host: %.1f MHz (%.1fx real time)\n",
                 rc == 3 ? "time limit" : "STP", emu, (unsigned long long)c->cycles, host,
                 host > 0 ? c->cycles / host / 1e6 : 0, host > 0 ? emu / host : 0);
+        fprintf(stderr, "emu816: the CPU waited (WAI) %llu cycles: busy %.1f%%\n", (unsigned long long)wai_cycles,
+                c->cycles ? 100.0 * (c->cycles - wai_cycles) / c->cycles : 0.0);
         fprintf(stderr, "emu816: %llu instructions, %llu IRQ, %llu NMI, %llu ABORT, %llu refused accesses, "
                 "%llu mailbox requests, %llu blits, %llu frames\n",
                 (unsigned long long)c->n_insn, (unsigned long long)c->n_irq, (unsigned long long)c->n_nmi,

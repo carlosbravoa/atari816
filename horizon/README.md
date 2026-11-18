@@ -12,7 +12,7 @@ It boots into the Desktop (or, with `/SYSTEM/NODESK` on the card, into the text 
 
 | Folder | Contents |
 | --- | --- |
-| `/SYSTEM` | `HORIZON.SYS` (the kernel), `INIT.PRG`, the system programs `DESK.PRG` (the Desktop), `SH.PRG` (the shell), `ABOUT.PRG`, (0.23) `PRINTD.PRG` (sends a print job to the PC), the settings files `CONFIG` (Settings), `PROGRAMS` (the Desktop's Programs menu) and `NODESK` (optional: boot into the text shell), and (0.14) `ICONS` (the Desktop's icons, made from `sdfiles/icons.txt`), `CLOCK` (the last time set, written by the Desktop and the shell) and `LAYOUT` (where the desktop icons are), (0.22) `URLS` (the Downloader's last addresses) and `BBS.TXT` (the BBS terminal's address book). Files hides it and refuses to start its programs |
+| `/SYSTEM` | `HORIZON.SYS` (the kernel), `INIT.PRG`, the system programs `DESK.PRG` (the Desktop), `SH.PRG` (the shell), `ABOUT.PRG`, (0.23) `PRINTD.PRG` (sends a print job to the PC), (0.24) `SAVER.PRG` (the screen saver), the settings files `CONFIG` (Settings), `PROGRAMS` (the Desktop's Programs menu) and `NODESK` (optional: boot into the text shell), and (0.14) `ICONS` (the Desktop's icons, made from `sdfiles/icons.txt`), `CLOCK` (the last time set, written by the Desktop and the shell) and `LAYOUT` (where the desktop icons are), (0.22) `URLS` (the Downloader's last addresses) and `BBS.TXT` (the BBS terminal's address book). Files hides it and refuses to start its programs |
 | `/SYSTEM/TESTS` | Test and demo programs: SELFTEST, HELLO, COUNT, SPIN, TICK, REGS, CRASH, FTEST, PING, PONG, KEYS, MOUSE, MTEST, BENCH, WDEMO, LEAK, HOG, (0.15) KTEST, (0.17) STEST, (0.18) GTEST |
 | `/BIN` | The applications: WFILES (Files), TERM (Terminal), EDIT, WRITE, SHEET, PAINT, BASIC, CALC, SOLITAIR, (0.17) QUABRICK (Quabricks; its samples QUABRICK.SFX, its high scores QUABRICK.DAT), SETTINGS, (0.22) DOWNLOAD (the Downloader), BBS (the BBS terminal), (0.23) PRINTER (Printer), and the shell's tools FILES (the text browser), CAT, DIR, MEM |
 | `/Desktop` | Created by the Desktop if missing: what is in it shows as icons on the desktop (0.14: shortcuts are `.LNK` files, below) |
@@ -591,6 +591,7 @@ names with spaces: "in quotes"; ctrl-C stops the foreground job
 | `user/bbs.s`, `user/atascii.txt`, `tools/mkatascii.py` | (0.22) the BBS terminal (telnet, the ATASCII and ASCII / VT52 / ANSI screens, the address book /SYSTEM/BBS.TXT); its 8x8 ATASCII font: the graphics characters drawn in atascii.txt, the rest from the console font -> `user/atascii.inc` |
 | `tests/net/`, `tests/bbsserver.py` | (0.22) the test "web" for emu816 --net-root (`files.test`) and the scripted loopback BBS of the BBS terminal's session |
 | `sdfiles/icons.txt`, `tools/mkicons.py` | (0.14) the Desktop's icons as text art -> `/SYSTEM/ICONS` and `user/icons.inc` |
+| `user/saver.s`, `tools/mksaver.py` | (0.24) the screen saver (`/SYSTEM/SAVER.PRG`); its sprites (six desktop icons, About's stripes, "Atari816", a star) -> `user/saver_art.inc` |
 | `user/horizon.inc` | User ABI: syscall numbers, error codes, macros (`sys`, `print`, `ptr`, `exit`, long branches) |
 | `user/ulib.s` | User library: line-buffered output and number printing, HID-to-ASCII (US, shift, caps lock, ctrl), `read_char`, `getline` (echo, backspace, ctrl-C), `parse_dec`, `spawn`, `exit_a`, `args_init` |
 | `user/init.s`, `user/tinit.s` | INIT of the normal and of the test SD card |
@@ -1005,6 +1006,63 @@ bus time (see emu/README.md, "Memory timing"). Expect the same factor on the CPU
   source stride), SYS_WGEOM, SYS_TNAME, WE_DROP's modifiers, the date routines (ui_clk*,
   `user/uidate.s`), shortcuts (ui_lnkread, ui_mklink), program and file icons (ui_prog,
   ui_ficon). See ABI.md and ui.inc.
+
+## Version 0.24 (the screen saver)
+
+The desktop no longer sits still on the screen for hours: after a time without input a
+**screen saver** shows sprites drifting on a black screen, and any key, click or mouse move
+brings the desktop back exactly as it was (ABI.md, "Idle time and the screen saver (0.24)").
+
+- **When.** Settings' new row "Screen saver": Off, 1 min, 5 min (the default), 10 min, and
+  **Test** (starts it at once). Kept in /SYSTEM/CONFIG as `saver=SECONDS` (0-3600; the tests
+  use a few seconds). The kernel counts the seconds without input (setting 6): any key,
+  mouse event or pressed joystick (read by any program) sets it to 0, whichever program gets
+  it, also during a long card or PC request. It does not count while the classic Atari is
+  shown (F12), a program is in full-screen mode (a game, BASIC's `SCREEN 1`; in front or in
+  the background), a mouse button is held (a drag) or a menu is open. The Desktop looks
+  every second and starts `/SYSTEM/SAVER.PRG` (detached) when the delay is reached, once
+  until the next input. It does not start while one of the Desktop's own dialogs is open
+  (the Desktop waits there).
+- **What it shows** (`user/saver.s`): its own small window in full-screen mode (320 x 180, a
+  black framebuffer of one bank: the desktop's own picture is never touched) and Marga's 16
+  sprites, 4 bpp: the word "Atari816" (two 32 x 16 sprites, its rows in colours that slowly
+  move round a colour wheel), About's rainbow stripes, six desktop icons (SD card, Atari,
+  Files, PC, disk, cartridge; their black outline a dark blue-grey) and seven stars that
+  twinkle (three phases in one palette bank), all at different speeds, bouncing off the
+  edges, moved once a frame (vsync). None is wider than 32 pixels, so a line never has more
+  than 512 sprite pixels: none is left out. The art is made at build time from the icons and
+  the console font (`tools/mksaver.py` -> `user/saver_art.inc`), all original.
+- **Without sprites** (REV $0A and older, or another program holds sprites so `spr_alloc`
+  fails): the stripes block alone, drawn by the CPU into the black framebuffer, at a new
+  place once a second.
+- **Waking.** A key or a button pressed (the saver waits up to half a second for its
+  release: neither the press nor the release reaches any program, so a click does not land
+  on whatever is under it and Alt does not open the menu bar), the wheel, the pointer moved
+  by more than 6 pixels (smaller jitter is ignored), a joystick change. F12 still works: the
+  kernel leaves full-screen mode as always, the saver ends and the classic Atari is shown at
+  once (F12 again: the desktop). Alt+Tab, or another program opening a window, also end it.
+  Programs keep running (downloads, copies, music, timers); the sound is not muted; a
+  notice in the menu bar ("Printed: ...") simply runs its course under it. When the saver
+  has ended, the Desktop draws its status again (the free memory).
+- **Its cost.** About 1.5 ms of CPU a frame (9 %; emu816's board-timing model, measured with
+  the new `--stats` line "the CPU waited (WAI)"): the objects moved by the saver, one
+  `spr_move` for the sprites that moved by a pixel, a `pal_set` of 9 or 10 colours every 4
+  or 8 frames, and the input looked at every fourth frame. The fallback: about 0.5 ms a
+  frame (REV $07: mostly waking up for vsync).
+- **Kernel** (57 bytes in bank $01, 131 in k2): setting 5 (the delay) and 6 (the idle
+  seconds, kept by the 10 ms tick's second); `spr_move` with A = $8000 | count moves several
+  sprites in one call, and a single `spr_move` now rebuilds only its own sprite's record (it
+  rebuilt all 16: 16 moves a frame cost the saver over half the CPU).
+- **Also:** emu816 `--stats` prints the cycles the CPU waited in WAI (the rest is the
+  load); the Makefile's `ui.lib` is made afresh (`ar65 a` kept members of objects no longer
+  built); `core/test/fatfs_host` was removed (the firmware functions it extracted, the OSD's
+  "New blank disk" and the H: device, are gone; its file-backed disk layer, `diskio_host.c`,
+  moved to `core/test/fdisk_host`, which used it).
+- **Tests:** `make test-24` (part of `make test`): tests/saver.src, the card's
+  /SYSTEM/CONFIG saying `saver=4`: the saver starts, a key wakes it (the picture equals the
+  one before), a click on the SD card icon wakes it and is swallowed (the icon not selected),
+  Settings' row and Test, no saver while BASIC runs `SCREEN 1` or the classic Atari is
+  shown; the fallback at REV $0A and older (tests/pictures/saver-rev10.md5, saver-rev7.md5).
 
 ## Version 0.23 (the PC link, step 3: printing, the folder disk, Run in Atari)
 

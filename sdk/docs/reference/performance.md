@@ -96,7 +96,9 @@ or row (21) of tiles every 8 frames and the panel's few letters when they change
 about 1.8 ms of CPU a frame in all (every syscall included) in the emulator.
 
 Sprites cost no CPU time and no blits at all: `spr_set` of 15 entries, or `spr_move`, once a
-frame, and Marga draws them. Scrolling with `fs_scroll` is one call a frame whatever the
+frame, and Marga draws them. (Horizon 0.24) Each syscall still costs about 0.1 ms on the board:
+move many sprites with one `spr_move` (A = $8000 | count, a table), and only those that moved
+by a pixel. The screen saver moves 16 sprites so for about 1.5 ms of CPU a frame in all. Scrolling with `fs_scroll` is one call a frame whatever the
 distance.
 
 ## What fits in a frame

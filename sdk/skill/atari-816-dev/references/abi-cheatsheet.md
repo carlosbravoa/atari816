@@ -115,11 +115,11 @@ it yourself (`dec5` / `digit` in `SDK/templates/game/main.s`: A -> ASCII digits)
 | $8E | SYS_WGEOM | A win, X,Y {i16 x ($8000 stays), y, u16 w, h} | |
 | $8F | SYS_TNAME | A id (0 me; \| $8000: read into X,Y 16 bytes), X,Y name | |
 | $90 | SYS_WPOPUP | A win, X,Y {u24 items, i16 x ($8000 pointer), y, u8 flags (1 keyboard)} (0.15; blocks) | A item / $FFFF |
-| $79-$7B, $87, $8D, $5F | ws_redraw, ws_stats, ws_config, setting, ws_closeall, mouse_inject | measurements / system (setting 4 = the sound volume, Lau's master, 0.18) | |
+| $79-$7B, $87, $8D, $5F | ws_redraw, ws_stats, ws_config, setting, ws_closeall, mouse_inject | measurements / system (setting 4 = the sound volume, Lau's master, 0.18; 0.24: 5 the screen saver's delay in s, 6 the seconds without input, read only) | |
 | $91 | SYS_SPRALLOC | A count 1-16, X own window (0.18, REV $0B) | A first sprite (lower = in front) |
 | $92 | SYS_SPRFREE | A first, X count; A $FFFF all of yours | |
 | $93 | SYS_SPRSET | A count, X,Y entries {u8 sprite, u8 ctrl SPR_*, i16 x, y, u24 image, u8 pal} | all from the next frame |
-| $94 | SYS_SPRMOVE | A sprite, X x, Y y | |
+| $94 | SYS_SPRMOVE | A sprite, X x, Y y; (0.24) A $8000\|count, X,Y entries {u8 sprite, u8 0, i16 x, y} | |
 | $95 | SYS_SPRSHOW | A sprite, X 1/0 | |
 | $96 | SYS_FSENTER | A own win, X,Y {u8 mode FS_*, u8 flags FS_PTR, u16 stride (16n), u16 rows, u24 base (256-aligned), u8 0} | full screen while focused |
 | $97 | SYS_FSLEAVE | A win | |

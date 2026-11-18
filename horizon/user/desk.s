@@ -72,6 +72,10 @@
 ; the Atari's changes saved, the disk built again from the folder); the line under the rows
 ; says "12 files, 3 left out, 120 free sectors" (", saving..." while the Atari's changes wait
 ; to be saved), looked at every second while the panel is open.
+; (0.24) The screen saver: every second the Desktop compares the seconds without input (kernel
+; setting 6) with the delay Settings chose (setting 5; 0 = off) and starts /SYSTEM/SAVER.PRG
+; (detached) when it is reached, once until the next input (svcheck); when the saver has ended,
+; the status is drawn again.
 ; Force quit: a dialog listing the running programs; the one chosen is killed.
 ; Restart / Shut down (and WE_SYSREQ, asked by a program with SYS_SYSREQ: no confirmation):
 ; every other window gets WE_CLOSE (SYS_WSCLOSEALL); the programs may ask to save; one that
@@ -3448,7 +3452,8 @@ fd_row: asl     a
 ; numbers; every 5 s (as before 0.23: at the timer's 5th, 10th, ... second, by the uptime,
 ; so a tick lost while a dialog was open does not move them) the status, /Desktop and what
 ; the Atari has loaded
-tick:   sys     SYS_UPTIME              ; the timer's second this tick belongs to (first:
+tick:   jsr     svcheck                 ; (0.24) the screen saver
+        sys     SYS_UPTIME              ; the timer's second this tick belongs to (first:
         sec                             ; the uptime before anything waits for the I/O
         sbc     tm0                     ; processor)
         sta     z:lo
@@ -3484,6 +3489,59 @@ five:   jsr     clock                   ; the 5-s work
         bcc     :+
         jmp     atchanged
 :       rts
+
+; (0.24, every second) the screen saver: when the seconds without input (kernel setting 6)
+; reach its delay (setting 5, 0 = off), /SYSTEM/SAVER.PRG is started (detached), once until
+; the next input. The kernel does not count while the classic Atari is shown, a program is in
+; full-screen mode (the saver itself too), a mouse button is held or a menu is open. When the
+; saver has ended, the status is drawn again (the free memory it took while it ran).
+svcheck:
+        lda     svtid                   ; the saver ended?
+        beq     @idle
+        stz     z:t
+@s:     lda     z:t
+        ptr     info
+        sys     SYS_TINFO
+        lda     info
+        and     #$00FF
+        cmp     svtid
+        bne     :+
+        lda     info+1
+        and     #$00FF
+        cmp     #4                      ; (a zombie)
+        bne     @idle
+:       inc     z:t
+        lda     z:t
+        cmp     #16
+        bcc     @s
+        stz     svtid
+        jsr     clock
+@idle:  lda     #6
+        ldx     #$FFFF
+        sys     SYS_SETTING
+        sta     z:t
+        lda     #5
+        ldx     #$FFFF
+        sys     SYS_SETTING
+        cmp     #0
+        beq     @clr
+        cmp     z:t
+        beq     :+
+        bcs     @clr                    ; not yet
+:       lda     svdone
+        bne     @out
+        inc     svdone
+        stz     z:u_arg
+        stz     z:u_arg+2
+        ldx     #.loword(p_saver)
+        ldy     #^p_saver
+        lda     #1 | SP_DETACH
+        jsr     spawn
+        bcs     @out
+        sta     svtid
+        rts
+@clr:   stz     svdone
+@out:   rts
 
 ; after the classic Atari was shown (SYS_CLASSIC, SYS_CBOOT: the Desktop waited there, its
 ; timer's events queued): when one of the timer's 5-s seconds passed meanwhile, its work now
@@ -4863,6 +4921,7 @@ p_prn:  .byte   "/PRN:", 0
 p_prd:  .byte   "/Printouts", 0
 p_prdd: .byte   "/Printouts/", 0
 p_printd: .byte "/SYSTEM/PRINTD.PRG", 0
+p_saver: .byte  "/SYSTEM/SAVER.PRG", 0
 p_printer: .byte "/BIN/PRINTER.PRG", 0
 t_printer: .byte "Printer", 0
 t_prd:  .byte   "Printed: ", 0
@@ -5145,6 +5204,8 @@ tsec:   .res    2                       ; (tick: this one's)
 prnoti: .res    2                       ; prscan: new jobs give a notice
 prpc:   .res    2                       ; prscan: the PC asked (1 no PDFs, 2 PDFs)
 prsnt:  .res    2                       ; prscan: PRINTD started
+svdone: .res    2                       ; (0.24) the screen saver was started (until the next input)
+svtid:  .res    2                       ; its task id while it may run (0: none)
 prsent: .res    2                       ; the notice: "(to the PC)"
 prmax:  .res    PNAMEL                  ; the greatest job name seen (without ".txt")
 prold:  .res    PNAMEL                  ; (prscan: before it)

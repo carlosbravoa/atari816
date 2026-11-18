@@ -93,6 +93,8 @@ boot:   sei
         sta     rep_delay
         lda     #5
         sta     rep_rate
+        lda     #300                    ; (0.24) the screen saver after 5 minutes
+        sta     sv_delay
         kprint  "\n"
         kprint  KVERSION_STR
         kprint  "\n"

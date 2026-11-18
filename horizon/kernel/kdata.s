@@ -153,6 +153,8 @@ smp_vol:    .res    2
 cart_nb:    .res    2           ; (0.18) banks from CART_B0 kept for the attached cartridge           ; (0.18) setting 4: the sound volume (Lau's master), 0-15
 rep_delay:  .res    2
 rep_rate:   .res    2
+in_idle:    .res    2           ; (0.24) setting 6: seconds without input (ws14.s clk_tick)
+sv_delay:   .res    2           ; (0.24) setting 5: the screen saver's delay in seconds, 0 = off
 rep_u:      .res    2           ; the key repeating (0 none), its modifiers, countdown
 rep_m:      .res    2
 rep_n:      .res    2

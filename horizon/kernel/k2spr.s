@@ -343,12 +343,15 @@ spr_size:
         rts
 
 ; ---- $94 spr_move(A = sprite, X = x, Y = y): its position only (the cheap call) ----
+; (0.24) A = $8000 | count (1-16): count entries {u8 sprite, u8 0, i16 x, i16 y} at X, Y, all
+; moved in one call (checked first: EINVAL, EFAULT, and then nothing moves)
 k2_sprmove:
         jsr     spr_old
         bcc     :+
         rtl
 :       ldx     cur
         lda     t_a,x
+        bmi     spr_many
         jsr     spr_mine
         bcs     @bad
         txy
@@ -357,7 +360,66 @@ k2_sprmove:
         sta     sp_x,y
         lda     t_y,x
         sta     sp_y,y
-        jsr     spr_sync
+        sty     kx6                     ; (0.24) only its own record (16 a frame were costly)
+        jsr     spr_vset
+        ldx     kx6
+        jsr     spr_rec1
+        jmp     k2_ok0
+@bad:   jmp     k2_inval
+spr_many:
+        and     #$7FFF
+        beq     @bad
+        cmp     #17
+        bcs     @bad
+        sta     kx5
+        asl     a                       ; * 6
+        adc     kx5
+        asl     a
+        sta     kt2
+        sta     kx5
+        stz     kt3
+        lda     t_x,x
+        sta     kt0
+        lda     t_y,x
+        sta     kt1
+        jsl     f_uaccess
+        bcc     :+
+        jmp     k2_fault
+:       lda     kphys
+        sta     kp2
+        lda     kphys+2
+        sta     kp2+2
+        ldy     #0                      ; every sprite the caller's
+@chk:   lda     [kp2],y
+        and     #$00FF
+        jsr     spr_mine
+        bcs     @bad
+        tya
+        adc     #6
+        tay
+        cpy     kx5
+        bcc     @chk
+        jsr     spr_vset
+        ldy     #0
+@set:   lda     [kp2],y
+        and     #$00FF
+        jsr     spr_mine
+        stx     kx6
+        iny
+        iny
+        lda     [kp2],y
+        sta     sp_x,x
+        iny
+        iny
+        lda     [kp2],y
+        sta     sp_y,x
+        iny
+        iny
+        phy
+        jsr     spr_rec1
+        ply
+        cpy     kx5
+        bcc     @set
         jmp     k2_ok0
 @bad:   jmp     k2_inval
 
@@ -394,7 +456,18 @@ spr_sync:
         cmp     #$0B
         bcs     :+
         rts
-:       lda     #NONE                   ; the window whose sprites may show
+:       jsr     spr_vset
+        ldx     #30
+@spr:   stx     kx6
+        jsr     spr_rec1
+        ldx     kx6
+        dex
+        dex
+        bpl     @spr
+        rts
+; (0.24) spr_vis: the window whose sprites may show (and its content's place, kg_cx0 ..)
+spr_vset:
+        lda     #NONE
         sta     spr_vis
         lda     fs_act
         beq     @desk
@@ -411,14 +484,7 @@ spr_sync:
         jsl     f_win_visible           ; nothing over its content (kg_cx0 .. kg_cy1 = it)
         bcc     @each
         stx     spr_vis
-@each:  ldx     #30
-@spr:   stx     kx6
-        jsr     spr_rec1
-        ldx     kx6
-        dex
-        dex
-        bpl     @spr
-        rts
+@each:  rts
 
 ; sprite kx6 (*2): its record built in kx0 .. kx3 and compared with sp_rec
 spr_rec1:

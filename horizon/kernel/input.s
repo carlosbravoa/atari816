@@ -34,6 +34,7 @@ input_init:
 ; queue an event: A = usage, X = modifiers | down << 8 (dropped when the queue is full).
 ; Called from interrupt service: may wake or kill, never switches.
 key_put:
+        stz     in_idle                 ; (0.24) any key: not idle (the screen saver)
         cmp     #$45                    ; F12: reported through the NMI as $FF
         bne     :+
         rts

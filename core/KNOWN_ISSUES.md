@@ -35,7 +35,9 @@ Writing to mounted disks (SAVE from DOS/BASIC, formatting) was broken in several
 stacked ways: writes to D2: failed with ERROR 139, "successful" writes could leave the
 disk image's filesystem inconsistent, and — worst — long write sessions could corrupt
 the **SD card's own FAT filesystem** (in extreme cases wiping it). Root causes, all
-fixed in v2.4 and verified on hardware + a host-side FatFs test suite (`test/fatfs_host/`):
+fixed in v2.4 and verified on hardware + a host-side FatFs test suite (`test/fatfs_host/`,
+removed in Horizon 0.24: the firmware functions it tested, the OSD's "New blank disk" and the H:
+device, are gone; `test/fdisk_host/` tests the folder disk on the same kind of image):
 
 - the SIO write handler performed the slow SD write *before* sending the data-frame ACK,
   blowing the OS's ACK window → retry storms and half-applied multi-sector operations;

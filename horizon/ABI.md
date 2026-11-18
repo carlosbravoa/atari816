@@ -1,4 +1,4 @@
-# Horizon ABI (version 0.23)
+# Horizon ABI (version 0.24)
 
 This file describes the interface between Horizon and user programs. `user/horizon.inc`
 holds the same definitions for ca65.
@@ -108,7 +108,7 @@ PBR:PC-1.
 | $84 | win_drop | A = window (any program's), X, Y = string (127 characters) | - | Drag and drop: the window gets WE_DROP (a, b = the pointer in its content, c = the sender's task id) and reads the string with win_dropget |
 | $85 | win_dropget | A = own window, X, Y = 128-byte buffer | - | The last string dropped on that window |
 | $86 | ws_palette | A = index, X = red \| green << 8, Y = blue | - | Sets one palette entry. 0-15 (the UI colours): the system palette, for everyone (Settings' desktop colour, entries 2 and 3). (0.18) 16-255: the entry becomes the caller's own (if nobody holds it; EAGAIN if another program does) and shows its colour while one of its windows has the focus; see "Palette entries". In full-screen mode: the program's own palette, all 256 entries |
-| $87 | setting | A = id, X = value ($FFFF: read only) | A = the old value | 0 mouse speed 1-4, 1 alert (beep) volume 0-15 (0 silent), 2 key repeat delay in 10 ms ticks (0 = no repeat; default 40), 3 key repeat interval in ticks (default 5), (0.18) 4 the sound volume 0-15: Lau's master volume, volume x 17 (default 8; 0.17 used setting 1 for it). A held key (not a modifier) repeats as further down events |
+| $87 | setting | A = id, X = value ($FFFF: read only) | A = the old value | 0 mouse speed 1-4, 1 alert (beep) volume 0-15 (0 silent), 2 key repeat delay in 10 ms ticks (0 = no repeat; default 40), 3 key repeat interval in ticks (default 5), (0.18) 4 the sound volume 0-15: Lau's master volume, volume x 17 (default 8; 0.17 used setting 1 for it), (0.24) 5 the screen saver's delay in seconds (0 = off, default 300; Settings offers 0, 60, 300, 600; the Desktop reads it), 6 the seconds since the last input (read only in practice; writing it is a test aid): see "Idle time and the screen saver". A held key (not a modifier) repeats as further down events |
 | $88 | win_title | A = own window, X, Y = string | - | A new title (31 characters) |
 | $89 | ws_pointer | A = 0 arrow, 1 drag (a document), 2 crosshair, 3 column resize, 4 row resize (0.13; hot spot at the centre) | - | The pointer's shape (back to the arrow when the task exits or the window system ends) |
 | $8A | ws_mouse | A = window ($FF: none), X, Y = 10-byte buffer | A = buttons, X = the window under the pointer ($FF: none) | The pointer now, without waiting for an event: {i16 x, i16 y on the screen, i16 x, i16 y relative to the content of window A (any program's; with $FF the screen position again), u16 buttons (bit 0 left, 1 right, 2 middle)}. X is the top-most window there as win_at gives it ($FF also for the menu bar, and without the window system). Window A must exist (EINVAL); without the window system only $FF is allowed |
@@ -121,7 +121,7 @@ PBR:PC-1.
 | $91 | spr_alloc | A = count 1-16, X = own window | A = the first sprite | (0.18) count sprites in a row (sprite 0 is in front of 1, ...), hidden, without an image, for that window (its content's coordinates; the screen's in full-screen mode). See "Sprites". ENODEV before REV $0B, EINVAL a bad count or not the caller's window, EAGAIN no such run free |
 | $92 | spr_free | A = first sprite, X = count; A = $FFFF: all of the caller's | - | (0.18) EINVAL: one of them is not the caller's (then none is freed) |
 | $93 | spr_set | A = count 1-16, X, Y = count entries of 10 bytes | - | (0.18) Entry: u8 sprite, u8 ctrl (Marga's CTRL: SPR_EN 1 shown, SPR_HFLIP 2, SPR_VFLIP 4, SPR_MAG 8, SPR_WIDE 16 (4 bpp), SPR_TALL 32, SPR_BPP4 64, SPR_BEHIND 128), i16 x, i16 y, u24 image, u8 pal (4 bpp: the palette bank 0-15). Every field of each sprite; all of them change together from the next frame on. Checked first, then set: EINVAL a sprite not the caller's, an image not 16-byte aligned; EFAULT an image (256 / 512 bytes at 8 bpp, 128-512 at 4 bpp) not wholly in the caller's memory; then nothing changes |
-| $94 | spr_move | A = sprite, X = x, Y = y | - | (0.18) Its position only: the cheap per-frame call |
+| $94 | spr_move | A = sprite, X = x, Y = y | - | (0.18) Its position only: the cheap per-frame call. (0.24) A = $8000 \| count (1-16): X, Y = count entries of 6 bytes {u8 sprite, u8 0, i16 x, i16 y}, all moved in one call (checked first: EINVAL a sprite not the caller's, EFAULT the table; then nothing moves). Before 0.24 every spr_move rebuilt all 16 records; now only the sprites it moves |
 | $95 | spr_show | A = sprite, X = 1 show, 0 hide | - | (0.18) EINVAL: not the caller's, or shown without an image (never given, or its bank was freed) |
 | $96 | fs_enter | A = own window, X, Y = 10-byte block | - | (0.18) Full-screen mode for that window: {u8 mode (FS_640X8 0, FS_640X4 1, FS_320X8 2), u8 flags (FS_PTR 1: the pointer shown; not in 320x180), u16 stride (a multiple of 16, at least 640 / 320 / 320, at most 4096), u16 rows (360 / 360 / 180 .. 1024), u24 base (256-byte aligned: row 0), u8 0}. rows x stride bytes from base must be the caller's memory (EFAULT). Again for the same window: a new framebuffer, mode or geometry from the next frame on (page flipping; the scroll set must still fit, else EINVAL). EAGAIN: another window is in full-screen mode; EINVAL: a bad value, a backdrop or terminal window. See "Full-screen mode" |
 | $97 | fs_leave | A = own window | - | (0.18) Back to the desktop. EINVAL: not in full-screen mode |
@@ -369,7 +369,7 @@ own (below).
 Marga's 16 sprites (REV $0B; ENODEV before): `spr_alloc` takes count sprites in a row for one of
 the caller's windows (lower numbers are in front), `spr_set` gives each its image, position,
 size, flips, magnification, BEHIND and 4 bpp palette bank (a table: many sprites in one call,
-all changing together), `spr_move` moves one (the cheap call), `spr_show` shows or hides one,
+all changing together), `spr_move` moves one (the cheap call; 0.24: or several in one call), `spr_show` shows or hides one,
 `spr_free` gives them back. Positions are relative to the window's content (to the screen in
 full-screen mode). Images: 8 bpp 16x16 (256 bytes) or 16x32 (512); 4 bpp 16x16 (128), 32x16,
 16x32 (256), 32x32 (512); rows top to bottom; colour 0 transparent; 16-byte aligned; in the
@@ -385,6 +385,30 @@ to Marga in the vertical blank (NV_SPR_COMMIT), so a frame never shows half of a
 A program's sprites are freed when it ends or closes their window; a sprite whose image lies
 in a bank the program frees loses its image (hidden; `spr_show` then gives EINVAL until
 `spr_set` gives a new one).
+
+### Idle time and the screen saver (0.24)
+
+The kernel counts the **seconds without input** (`setting` 6): every key event (also F12),
+every mouse event (a move, a button, the wheel, whatever program gets it, and also while a
+long I/O request runs: the step-22 input layer brings them) and every `joystick` read that finds
+a direction or a trigger pressed set it to 0. It stays 0 while the classic Atari is shown, while
+a program is in full-screen mode (in front or in the background), while a mouse button is held
+(a drag) and while a menu of the bar or a pop-up menu is open. It stops at 65535.
+
+The **Desktop** compares it every second with `setting` 5 (the delay in seconds, 0 = off; the
+kernel starts with 300, Settings sets it from /SYSTEM/CONFIG `saver=`) and starts
+`/SYSTEM/SAVER.PRG` (detached) when the delay is reached, once until the next input. The saver
+is an ordinary program: a small plain window put in full-screen mode (320 x 180, a black
+framebuffer of one bank), Marga's 16 sprites drifting on it (REV $0B; without sprites, or when
+`spr_alloc` fails because another program holds them, one block drawn by the CPU at a new place
+once a second), and the end of the program brings the desktop back unchanged (the kernel's
+way out of full-screen mode: the window closes, the focus goes back to the window below). It
+ends at a key or a button pressed (it waits up to half a second for its release, so neither
+reaches another program), the wheel, the pointer moved by more than 6 pixels, a joystick change
+or the loss of the focus (F12 shows the classic Atari at once; Alt+Tab; another program's new
+window). Because of the full-screen rule above, it never starts over a full-screen game or the
+classic Atari, and the kernel needs nothing else for it. A program may read setting 6 (a
+program of its own that dims or pauses when nobody is there); it should not write it.
 
 ### Full-screen mode
 

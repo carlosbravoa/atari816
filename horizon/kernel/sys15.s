@@ -41,6 +41,11 @@ sys_joy:
         a16
         and     #$00FF
         ora     joy_tx
+        pha                             ; (0.24) something pressed: not idle
+        ora     t_x,x
+        beq     :+
+        stz     in_idle
+:       pla
         jmp     set_ok
 
 ; ---- $0F vsync() -> A = the frame counter (REV $09+: NV_FRAME; before: the vertical blanks

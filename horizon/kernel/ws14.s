@@ -694,14 +694,29 @@ sys_tset:
         lda     #0
         jmp     set_ok
 
-; (the 10 ms tick, interrupt service) the clock
+; (the 10 ms tick, interrupt service) the clock; (0.24) and the seconds without input
+; (in_idle, setting 6): key_put, mouse_event and a joystick read that finds something pressed
+; set it to 0; it stays 0 while the classic machine is shown, a program is in full-screen
+; mode, a mouse button is held (a drag) or a menu is open (of the bar or a pop-up: the keys
+; go there)
 clk_tick:
         inc     clk_sub
         lda     clk_sub
         cmp     #100
-        bcc     :+
+        bcc     @out
         stz     clk_sub
         inc     clk_sec
         bne     :+
         inc     clk_sec+2
-:       rts
+:       lda     mn_open                 ; (NONE: 0)
+        inc     a
+        ora     cls_on
+        ora     fs_on
+        ora     ms_btn
+        beq     :+
+        stz     in_idle
+        rts
+:       inc     in_idle
+        bne     @out
+        dec     in_idle                 ; (saturates)
+@out:   rts

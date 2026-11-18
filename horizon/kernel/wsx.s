@@ -292,11 +292,13 @@ sys_wspal:
 
 ; ---- $87 setting(A = id, X = value, $FFFF = only read) -> A = the old value.
 ; 0 mouse speed 1-4, 1 beep volume 0-15, 2 key repeat delay (10 ms ticks, 0 = off),
-; 3 key repeat interval (ticks), (0.18) 4 the sound volume 0-15 (Lau's master volume) ----
+; 3 key repeat interval (ticks), (0.18) 4 the sound volume 0-15 (Lau's master volume),
+; (0.24) 5 the screen saver's delay in seconds (0 = off; the Desktop reads it), 6 the seconds
+; since the last input (clk_tick; writing it is a test aid) ----
 sys_setting:
         ldx     cur
         lda     t_a,x
-        cmp     #5
+        cmp     #7
         bcc     :+
         jmp     err_inval
 :       asl     a
@@ -312,7 +314,7 @@ sys_setting:
         jsr     au_master               ; (0.18) Lau's master volume follows setting 4
 :       pla
         jmp     set_ok
-set_tab: .addr  ms_speed, snd_vol, rep_delay, rep_rate, smp_vol
+set_tab: .addr  ms_speed, snd_vol, rep_delay, rep_rate, smp_vol, sv_delay, in_idle
 
 ; ---- $88 win_title(A = window, X, Y = string): a new title (31 characters) ----
 sys_wtitle:

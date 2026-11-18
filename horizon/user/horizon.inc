@@ -151,7 +151,10 @@ SYS_WDROPGET  = $85   ; A = own window, X, Y = 128-byte buffer: the last string 
 SYS_WSPAL     = $86   ; A = palette index, X = red | green << 8, Y = blue (desktop: 2 and 3)
 SYS_SETTING   = $87   ; A = id, X = value ($FFFF: read only) -> A = old: 0 mouse speed 1-4, 1 beep (alert) volume 0-15,
                       ;   2 key repeat delay (10 ms ticks, 0 off), 3 key repeat interval (ticks), (0.18) 4 the sound volume 0-15
-                      ;   (Lau's master volume, x 17; default 8; before 0.18 it followed 1)
+                      ;   (Lau's master volume, x 17; default 8; before 0.18 it followed 1), (0.24) 5 the screen saver's
+                      ;   delay in seconds (0 off; default 300; the Desktop reads it), 6 the seconds since the last key,
+                      ;   mouse or joystick input (not counted while the classic Atari shows, a program is in full-screen
+                      ;   mode, a button is held or a menu is open; writing it is a test aid)
 SYS_WTITLE    = $88   ; A = own window, X, Y = string: its new title (31 characters)
 SYS_WPTR      = $89   ; A = pointer shape (PTR_*): 0 arrow, 1 drag (carrying a document), 2 crosshair, 3 column resize, 4 row resize (hot spot centre)
 SYS_WMOUSE    = $8A   ; A = window ($FF none), X, Y = 10 bytes {i16 x, y screen, i16 x, y content, u16 buttons} -> A = buttons, X = window under it
@@ -170,7 +173,8 @@ SYS_SPRALLOC  = $91   ; A = count 1-16, X = own window -> A = the first of count
 SYS_SPRFREE   = $92   ; A = first sprite, X = count; A = $FFFF: every sprite of the caller
 SYS_SPRSET    = $93   ; A = count 1-16, X, Y = count entries {u8 sprite, u8 ctrl (SPR_*), i16 x, i16 y, u24 image, u8 pal}: all
                       ;   from the next frame on; the image (16-byte aligned) must be the caller's memory (EFAULT)
-SYS_SPRMOVE   = $94   ; A = sprite, X = x, Y = y (the window's content, or the full screen): the cheap call
+SYS_SPRMOVE   = $94   ; A = sprite, X = x, Y = y (the window's content, or the full screen): the cheap call;
+                      ;   (0.24) A = $8000 | count (1-16): X, Y = count entries {u8 sprite, u8 0, i16 x, i16 y}, all in one call
 SYS_SPRSHOW   = $95   ; A = sprite, X = 1 show / 0 hide
 SYS_FSENTER   = $96   ; A = own window, X, Y = {u8 mode (FS_*), u8 flags, u16 stride, u16 rows, u24 base, u8 0}: full screen
 SYS_FSLEAVE   = $97   ; A = own window: back to the desktop

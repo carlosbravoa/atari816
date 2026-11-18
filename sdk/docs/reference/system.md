@@ -424,9 +424,15 @@ In: A = id, X = new value ($FFFF = only read). Out: A = the old value. Ids:
 | 2 | key repeat delay in 10 ms ticks (0 = no repeat; default 40) |
 | 3 | key repeat interval in ticks (default 5) |
 | 4 | (Horizon 0.18) the sound volume 0-15: Lau's master volume, volume x 17 (default 8; before 0.18 Lau followed setting 1) |
+| 5 | (Horizon 0.24) the screen saver's delay in seconds (0 = off; default 300) |
+| 6 | (Horizon 0.24) the seconds since the last key, mouse or joystick input, to any program (it stays 0 while the classic Atari is shown, a program is in full-screen mode, a mouse button is held or a menu is open; stops at 65535). Read it only (writing it is a test aid) |
 
 These are the user's settings (Settings saves them): change them only in a settings
 program. A game reads setting 4 only if it wants to show it; Lau applies it to every voice.
+A program may read setting 6 to notice that nobody is there (pause a demo, dim its own
+display); the Desktop uses 5 and 6 to start the screen saver (`/SYSTEM/SAVER.PRG`, Horizon
+0.24). A full-screen game never sees the screen saver: while it is in full-screen mode the
+count stays 0.
 ```asm
         lda     #2              ; key repeat delay
         ldx     #$FFFF          ; read only

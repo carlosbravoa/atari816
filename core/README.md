@@ -121,7 +121,8 @@ python3 tools/atari.py --help                    # all commands
 | --- | --- |
 | 65C816 machine in simulation | `sim_a816/run.sh` (self test), `sim_a816/run.sh +prog=NAME.bin` for `bringup1_sim.bin`, `nvtest_sim.bin`, `blitlist_sim.bin`, `sampler_sim.bin`, `sprtest_sim.bin` (`+timeout_ms=3000`), `sprsceneN.bin` (`+ppm2` keeps the last frames for comparing with emu816), `BLITTEST.BIN`; `sim_a816/run_blit.sh` (random blitter test). The testbench compares every pixel of Marga's output with its own model (bitmap, scrolling, pointer, sprites); `+fixlat` gives the SDRAM's own latencies instead of random ones |
 | On the board | `make -C sw/a816`, then `tools/atari.py run816 sw/a816/X.BIN`: `A816.BIN` (self test), `BLITTEST.BIN`, `BLITLIST.BIN`, `SAMPLER.BIN`, `SPRTEST.BIN`, `SYSTEST.BIN`, `FSBENCH.BIN` (SD speed), `PCBENCH.BIN` (the same on the PC volume, needs the gateway), `TIMING.BIN` (CPU and Ali speed by access kind and video mode: emu816's memory model is calibrated against it, emu/README.md "Memory timing"); `PLAYDEMO.BIN`, `SPLIT.BIN`, `SPRDEMO.BIN` and `SCROLLDEMO.BIN` are for ears and eyes. The list is at the top of `sw/a816/Makefile` |
-| FatFs volume safety (host) | `test/fatfs_host/run_tests.sh` |
+| The folder disk (host) | `test/fdisk_host/run_tests.sh` |
+| PC link framing (host) | `test/pclink_host/run_tests.py` |
 
 ## Pins
 

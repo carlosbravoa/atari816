@@ -58,4 +58,4 @@ f_ws_paint_req: lda     #W_WS                   ; the window-system thread goes 
         .export wo_dir, wm_x, wm_y, wm_btn, wm_nbtn, ws_mods, cap_w, ws_mbank, ws_scr
 
 ; what k2.s keeps that bank $01 reads
-        .import fs_act, ls_task
+        .import fs_act, ls_task, fs_on

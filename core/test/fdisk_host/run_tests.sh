@@ -10,7 +10,7 @@ MKFS=${MKFS:-/usr/sbin/mkfs.vfat}
 FSCK=${FSCK:-/usr/sbin/fsck.fat}
 FW=../../firmware
 gcc -O1 -g -Wall -Wno-unused-function -DHOST_FATFS_TEST -DFD_HOST -iquote $FW -I$FW/fatfs \
-    -o fdisk_host harness.c $FW/fdisk.c ../fatfs_host/diskio_host.c $FW/fatfs/ff.c $FW/fatfs/ffunicode.c || exit 1
+    -o fdisk_host harness.c $FW/fdisk.c diskio_host.c $FW/fatfs/ff.c $FW/fatfs/ffunicode.c || exit 1
 img=fdisk_test.img
 rm -f $img; truncate -s 16M $img; $MKFS $img > /dev/null || exit 1
 ./fdisk_host $img; rc=$?

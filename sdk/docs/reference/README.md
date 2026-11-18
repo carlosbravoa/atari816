@@ -1,6 +1,6 @@
 # Programmer's reference
 
-The interface between Horizon 0.18 (and 0.22's internet, 0.23's printing) and its programs, reorganised by topic with an example
+The interface between Horizon 0.18 (and 0.22's internet, 0.23's printing, 0.24's idle time) and its programs, reorganised by topic with an example
 for each call. The source of truth is `horizon/ABI.md` (and the sources it names);
 `make -C sdk check` compares this reference with `horizon/user/horizon.inc`, `ui.inc` and
 the kernel's syscall table, and assembles every example.

@@ -2,7 +2,9 @@
 ;
 ;   settings          the "Settings" window, two pages chosen by the two buttons at its top:
 ;                     Desktop: desktop colour, mouse speed, key repeat, alert volume, sound
-;                       volume. Every change applies at once (the desktop recolours live).
+;                       volume, (0.24) the screen saver (Off, 1, 5, 10 minutes; Test starts
+;                       /SYSTEM/SAVER.PRG at once). Every change applies at once (the desktop
+;                       recolours live).
 ;                     Classic Atari: the I/O processor's /atari.ini (memory, stereo, keyboard
 ;                       layout, arrow keys as joystick, scanlines, horizontal position, boot
 ;                       cartridge). These apply at the next full restart.
@@ -29,8 +31,11 @@
 ;   repeat_rate=5           key repeat interval in 10 ms ticks, 1-100
 ;   sound=8                 (0.18) sound volume 0-15, kernel setting 4: Lau's master volume
 ;                           (value x 17), which every program's samples follow
+;   saver=300               (0.24) the screen saver's delay in seconds, 0-3600 (0 = off),
+;                           kernel setting 5; the panel offers 0, 60, 300 and 600 (another
+;                           value, e.g. a test's few seconds, shows no button chosen)
 ; Save writes all of them (the file is rebuilt; other lines are not kept). The panel reads
-; the live kernel values for the last five and the file (or the defaults) for the desktop
+; the live kernel values for the last six and the file (or the defaults) for the desktop
 ; colours (the kernel has no call to read the palette back).
 ;
 ; /atari.ini (read by the I/O processor at power-on and at a full restart; its parser is
@@ -53,7 +58,7 @@
 
 T       = 32                            ; the page selector's height (above the pages)
 W       = 360                           ; content size
-H       = T + 260
+H       = T + 288
 CX      = 112                           ; the controls' column (labels at LX)
 LX      = 12
 CW      = 236                           ; the controls' column width
@@ -70,8 +75,9 @@ R_RATE  = T + 100
 R_TRY   = T + 128
 R_BEEP  = T + 156
 R_SND   = T + 184
-SEPY    = T + 216
-R_BTN   = T + 228
+R_SAVER = T + 212                       ; (0.24)
+SEPY    = T + 244
+R_BTN   = T + 256
 RA      = T + 8                         ; the Classic Atari rows: every 24 pixels
 RA_RAM  = RA
 RA_SND  = RA + 24
@@ -86,7 +92,7 @@ AMAX    = 4096                          ; /atari.ini at most AMAX - 1 bytes
 NAK     = 7                             ; its keys
 AV_HPOS = 12                            ; aval offsets
 AV_BOOT = 10
-NSET    = 5                             ; kernel settings 0-4 in val (words)
+NSET    = 6                             ; kernel settings 0-5 in val (words)
 SNDN    = 3200                          ; the sound Test sample: 0.2 s at 16 kHz, 8-bit
 
         .segment "CODE"
@@ -326,6 +332,13 @@ onclick:
 :       cpx     #.loword(b_stest)
         bne     :+
         jsr     snd_test
+        jmp     loop
+:       cpx     #.loword(b_svtest)      ; (0.24) the screen saver now
+        bne     :+
+        ldx     #.loword(p_saver)
+        ldy     #0
+        lda     #0
+        jsr     ui_launch
         jmp     loop
 :       cpx     #.loword(b_dflt)
         bne     @tog
@@ -937,8 +950,8 @@ setpal: lda     #C_DESK
         sys     SYS_WSPAL
         rts
 
-; 16 bytes X -> Y (cur, orig, dflt)
-copy16: lda     #7
+; 18 bytes X -> Y (cur, orig, dflt)
+copy16: lda     #8
         bra     :+
 ; 14 bytes X -> Y (aval, aorig, adflt)
 copy14: lda     #6
@@ -1699,11 +1712,14 @@ k_beep: .byte   "beep=", 0
 k_rdel: .byte   "repeat_delay=", 0
 k_rrate: .byte  "repeat_rate=", 0
 k_sound: .byte  "sound=", 0
-; (the numeric keys in the order of the kernel settings 0-4: val's)
-keys:   .addr   k_desk, k_desk2, k_mouse, k_beep, k_rdel, k_rrate, k_sound, 0
-lims:   .word   1, 4, 0, 15, 0, 250, 1, 100, 0, 15
-; defaults: mouse, beep, delay, rate, sound (words), desk, desk2 (r, g, b bytes) = cur's layout
-dflt:   .word   1, 8, 40, 5, 8
+k_saver: .byte  "saver=", 0
+p_saver: .byte  "/SYSTEM/SAVER.PRG", 0
+; (the numeric keys in the order of the kernel settings 0-5: val's)
+keys:   .addr   k_desk, k_desk2, k_mouse, k_beep, k_rdel, k_rrate, k_sound, k_saver, 0
+lims:   .word   1, 4, 0, 15, 0, 250, 1, 100, 0, 15, 0, 3600
+; defaults: mouse, beep, delay, rate, sound, saver (words), desk, desk2 (r, g, b bytes) = cur's
+; layout
+dflt:   .word   1, 8, 40, 5, 8, 300
         .byte   36, 92, 112, 46, 104, 124
 ; /atari.ini: the keys (aval's order), the firmware's defaults, a bit for each key
 ak_ram: .byte   "ram", 0
@@ -1747,6 +1763,9 @@ grp_d:  .addr   b_pg1
         .addr   b_r1
         .word   3
         .addr   v_rate, cur + 6
+        .addr   b_sv1                   ; (0.24)
+        .word   4
+        .addr   v_saver, cur + 10
         .word   0
 grp_a:  .addr   b_pg1
         .word   2
@@ -1775,6 +1794,7 @@ plists: .addr   ctl_d, ctl_a
 v_mouse: .word  1, 2, 3, 4
 v_delay: .word  0, 25, 40, 60
 v_rate: .word   10, 5, 3
+v_saver: .word  0, 60, 300, 600
 v_01:   .word   0, 1
 v_ram:  .word   128, 320
 v_scan: .word   0, 1, 2, 3
@@ -1785,6 +1805,10 @@ t_rate: .byte   "Repeat rate:", 0
 t_try:  .byte   "Try here:", 0
 t_beep: .byte   "Alert volume:", 0
 t_svol: .byte   "Sound volume:", 0
+t_saver: .byte  "Screen saver:", 0
+s_1m:   .byte   "1 min", 0
+s_5m:   .byte   "5 min", 0
+s_10m:  .byte   "10 min", 0
 t_ram:  .byte   "Memory:", 0
 t_snd:  .byte   "Sound:", 0
 t_kbd:  .byte   "Keyboard:", 0
@@ -1839,7 +1863,8 @@ al_rerr: .word  3, t_title, m_rerr, s_ok, 0, 0
 ; the control lists of the pages (the page buttons and the bottom row on both)
 ctl_d:  .addr   b_pg1, b_pg2, l_desk, l_mouse, l_delay, l_rate, l_try, l_beep, l_svol
         .addr   b_m1, b_m2, b_m3, b_m4, b_d1, b_d2, b_d3, b_d4, b_r1, b_r2, b_r3
-        .addr   f_try, sb_vol, b_test, sb_snd, b_stest, b_dflt, b_cancel, b_save, 0
+        .addr   f_try, sb_vol, b_test, sb_snd, b_stest
+        .addr   l_saver, b_sv1, b_sv2, b_sv3, b_sv4, b_svtest, b_dflt, b_cancel, b_save, 0
 ctl_a:  .addr   b_pg1, b_pg2, l_ram, l_snd, l_kbd, l_joy, l_scan, l_hpos, l_boot
         .addr   b_ram1, b_ram2, b_snd1, b_snd2, b_kbd1, b_kbd2
         .addr   b_joy1, b_joy2, b_sc1, b_sc2, b_sc3, b_sc4, sb_hpos, b_bt1, b_bt2
@@ -1848,13 +1873,14 @@ ctl_a:  .addr   b_pg1, b_pg2, l_ram, l_snd, l_kbd, l_joy, l_scan, l_hpos, l_boot
 allc:   .addr   l_desk, l_mouse, l_delay, l_rate, l_try, l_beep, l_svol
         .addr   b_m1, b_m2, b_m3, b_m4, b_d1, b_d2, b_d3, b_d4, b_r1, b_r2, b_r3
         .addr   f_try, sb_vol, b_test, sb_snd, b_stest
+        .addr   l_saver, b_sv1, b_sv2, b_sv3, b_sv4, b_svtest
         .addr   b_pg1, b_pg2, b_dflt, b_cancel, b_save
         .addr   l_ram, l_snd, l_kbd, l_joy, l_scan, l_hpos, l_boot
         .addr   b_ram1, b_ram2, b_snd1, b_snd2, b_kbd1, b_kbd2
         .addr   b_joy1, b_joy2, b_sc1, b_sc2, b_sc3, b_sc4, sb_hpos, b_bt1, b_bt2, 0
 
         .segment "DATA"
-wblk:   .word   (640 - W - 2) / 2, 56 - T, W, H
+wblk:   .word   (640 - W - 2) / 2, 20, W, H
         .faraddr t_title
         .byte   0
 b_pg1:  mkbtn   LX, TABY, TABW, 0, s_pg1        ; the page buttons
@@ -1887,6 +1913,12 @@ sb_snd: .byte   UT_HSCROLL, 0                   ; (0.18) the sound volume
         .word   CX, R_SND + 3, VOLX - 4 - CX, UI_SBW, 0
         .word   0, 15, 1, 1, 0, 0
 b_stest: mkbtn  CX + 180, R_SND, 56, 0, s_test
+l_saver: mklab  LX, R_SAVER + 6, t_saver       ; (0.24) the screen saver
+b_sv1:  mkbtn   CX, R_SAVER, 44, 0, s_off
+b_sv2:  mkbtn   CX + 48, R_SAVER, 44, 0, s_1m
+b_sv3:  mkbtn   CX + 96, R_SAVER, 44, 0, s_5m
+b_sv4:  mkbtn   CX + 144, R_SAVER, 44, 0, s_10m
+b_svtest: mkbtn CX + 192, R_SAVER, 44, 0, s_test
 ; the sound Test: SNDN samples of snd at 16 kHz, 8-bit, both volumes 255, any voice
 spb:    .faraddr snd
         .faraddr SNDN
@@ -1934,10 +1966,10 @@ rpend:  .res    2                       ; /atari.ini written: offer the restart
 aerr:   .res    2                       ; /atari.ini unreadable (1) or too large (2)
 alen:   .res    2
 rw:     .res    6
-cur:    .res    16                      ; mouse, beep, delay, rate, sound (words), desk, desk2
+cur:    .res    18                      ; mouse, beep, delay, rate, sound, saver (words), desk, desk2
 val     = cur
 desk    = cur + NSET * 2
-orig:   .res    16
+orig:   .res    18
 aval:   .res    14                      ; ram, stereo, kbdlayout, joystick, scanlines, boot, hpos
 aorig:  .res    14
 c0:     .res    6                       ; (parse: three numbers)

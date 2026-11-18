@@ -8,7 +8,7 @@
 #        an "x" held for 1.2 s in the "Try here" field (it repeats)
 #   20.5 after Save: the panel is closed, the desktop stays wine; /SYSTEM/CONFIG written
 # The pointer starts at (320, 180); moves of at most 100. The panel's content is at
-# (140, 72) on the screen.
+# (140, 68) on the screen (0.24: 72 before the Screen saver row).
 # Programs menu (100, 8) > Terminal (fourth item, y 66)
 3000 M -100:-100:0:0
 +50 M -100:-72:0:0
@@ -45,7 +45,7 @@
 # hold "x" in the Try here field (it has the focus) for 1.2 s
 15500 {d1b}
 +1200 {u1b}
-# Save (456, 310; 0.18: below the new Sound volume row)
-18000 M 63:72:0:0
+# Save (456, 334; 0.18: below the new Sound volume row; 0.24: below the Screen saver row)
+18000 M 63:96:0:0
 +300 M 0:0:0:1
 +100 M 0:0:0:0

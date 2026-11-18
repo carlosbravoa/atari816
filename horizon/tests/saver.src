@@ -1,0 +1,45 @@
+# (0.24) The screen saver (DESK=1; tests/mousegen.py makes tests/saver.keys from this; the
+# card's /SYSTEM/CONFIG says saver=4: it starts after 4 s without input, the test hook).
+# Small pointer moves keep it away until 9 s. Shots (s):
+#   1  10.5  the desktop with Files (the picture to come back to)
+#   2  15.0  the saver (started at about 13 s): the sprites on black (REV $0B), or the
+#            stripes block alone, drawn by the CPU (REV $0A and older: no sprites)
+#   3  17.5  a key (16 s) woke it: the desktop exactly as in shot 1
+#   4  19.0  the pointer on the SD card icon (not clicked)
+#   5  24.0  the saver again
+#   6  26.5  a click (25 s) woke it and was swallowed: the desktop exactly as in shot 4 (the
+#            SD card icon not selected)
+#   7  30.0  Settings: the "Screen saver" row (Off, 1 min, 5 min, 10 min, Test; 4 s is none of
+#            them)
+#   8  32.5  Test clicked (31 s): the saver at once
+#   9  35.0  a key (33.5 s) woke it: Settings as in shot 7, with the pointer on Test
+#  10  48.0  BASIC (Programs > BASIC) runs a full-screen program (SCREEN 1: GCLS 20, a VSYNC loop) since
+#            about 42 s: no saver while a program holds the full screen
+#  11  51.5  Esc (49 s): Break, the BASIC window back
+#  12  58.0  F12 (52 s): the classic Atari (black in emu816), no saver while it is shown
+#  13  60.0  F12 again (58.5 s): the desktop as it was (BASIC's window)
+1500 move 321 180
+3000 move 320 180
+4500 move 321 180
+6000 move 320 180
+7500 move 321 180
+9000 move 320 180
+16000 key a
+18000 move 595 45
+25000 click
+27000 move 40 8
+27400 click
+27900 move 40 38
+28300 click
+30500 move 465 290
+31000 click
+33500 key a
+35500 key {esc}
+36500 move 100 8
+36900 click
+37400 move 100 52
+37800 click
+40000 key 10 SCREEN 1:GCLS 20\n20 VSYNC:GOTO 20\nRUN\n
+49000 key {esc}
+52000 key {F12}
+58500 key {F12}

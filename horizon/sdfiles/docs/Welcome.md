@@ -16,6 +16,10 @@ When the machine starts, Horizon shows the *desktop*: a menu bar at the top, the
 
 Press `F12` to switch to the 8-bit Atari; press it again to come back to the desktop exactly as you left it.
 
+### The screen saver
+
+When nobody touches the keyboard, the mouse or a joystick for five minutes, the screen turns black and a few shapes drift across it. Any key, click or mouse move brings the desktop back exactly as it was; that first key or click does nothing else. **Settings** chooses the time (or *Off*), and its *Test* button starts it at once.
+
 ## Writing here
 
 Write keeps the document as **Markdown**, plain text that any computer can read:

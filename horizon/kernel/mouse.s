@@ -114,6 +114,7 @@ ms_scale:
 ; one mouse event: ms_dx, ms_dy, ms_dw (signed bytes), ms_nb (buttons). Interrupt service
 ; or kernel context; may wake the holder, never switches.
 mouse_event:
+        stz     in_idle                 ; (0.24) not idle (the screen saver)
         lda     ms_dx
         jsr     sext8
         jsr     ms_scale

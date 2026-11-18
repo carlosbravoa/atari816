@@ -9,4 +9,4 @@
         .import w_cy, w_st, w_qn, ws_palette, vs_pal, vs_seq, vs_frame, vs_stride
         .import vs_base, bl_on, fo_w, ms_x, ms_y, scr_ctrl, wo_x, wo_y
         .import wo_dir, wm_x, wm_y, wm_btn, wm_nbtn, ws_mods, cap_w, ws_mbank, ws_scr
-        .export fs_act, ls_task
+        .export fs_act, ls_task, fs_on

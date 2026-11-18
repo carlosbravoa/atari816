@@ -280,6 +280,20 @@ In: A = one of your sprites, X = x, Y = y. Its position only: the cheap per-fram
         ldy     z:t2            ; y
         sys     SYS_SPRMOVE
 ```
+(Horizon 0.24) A = $8000 | count (1-16): X, Y point at count entries of 6 bytes
+`{u8 sprite, u8 0, i16 x, i16 y}`, all moved in one call (one syscall instead of count; each
+sprite is checked first: EINVAL, EFAULT, and then nothing moves). Put only the sprites that
+moved by a pixel in it. Since 0.24 a move also costs the kernel only the sprites it moves
+(before, every spr_move rebuilt all 16 records).
+```asm
+mv:     .byte   3, 0            ; sprite 3 to (100, 40), sprite 4 to (132, 40)
+        .word   100, 40
+        .byte   4, 0
+        .word   132, 40
+mvgo:   lda     #$8000 | 2      ; (the code, elsewhere)
+        ptr     mv
+        sys     SYS_SPRMOVE
+```
 
 ### $95 spr_show (SYS_SPRSHOW)
 In: A = one of your sprites, X = 1 show, 0 hide. EINVAL: not yours, or shown without an image
