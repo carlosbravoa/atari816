@@ -101,9 +101,9 @@
   <text class="h" x="84" y="292">SD card</text>
   <text class="s" x="84" y="310">FAT32</text>
 
-  <rect class="ext" x="14" y="340" width="140" height="110" rx="6"/>
-  <text class="h" x="84" y="362">PC</text>
-  <text class="s" x="84" y="380">(or a Raspberry Pi)</text>
+  <rect class="ext" x="14" y="340" width="140" height="110" rx="6" stroke-dasharray="6 4"/>
+  <text class="h" x="84" y="362">PC (optional)</text>
+  <text class="s" x="84" y="380">or a Raspberry Pi,</text>
   <text class="s" x="84" y="398">running atari816-link:</text>
   <text class="s" x="84" y="414">a shared folder,</text>
   <text class="s" x="84" y="430">the clock, the internet</text>
