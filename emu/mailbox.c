@@ -2,7 +2,12 @@
  * directory standing in for the FAT32 SD card.
  *
  * Result codes (response ARG0): 0 OK, 1..19 FatFs FRESULT, $80 bad handle, $81 bad address,
- * $82 unsupported op. Host errno values are mapped to the FRESULT FatFs would return.
+ * $82 unsupported op, $87 no PC link, $88 PC link lost, $89 not the same volume. Host errno
+ * values are mapped to the FRESULT FatFs would return.
+ *
+ * The PC volume (PC link step 1): paths starting "/PC:" (then the end or '/') are served
+ * from the --pc-folder directory, as the firmware serves them from the PC gateway's shared
+ * folder. Without --pc-folder (or after --pc-drop-at) the volume is absent: $87.
  * The I/O processor polls every MB_POLL CPU cycles and serves one request per poll.
  */
 
@@ -21,7 +26,8 @@ enum { FR_OK, FR_DISK_ERR, FR_INT_ERR, FR_NOT_READY, FR_NO_FILE, FR_NO_PATH, FR_
        FR_DENIED, FR_EXIST, FR_INVALID_OBJECT, FR_WRITE_PROTECTED, FR_INVALID_DRIVE,
        FR_NOT_ENABLED, FR_NO_FILESYSTEM, FR_MKFS_ABORTED, FR_TIMEOUT, FR_LOCKED,
        FR_NOT_ENOUGH_CORE, FR_TOO_MANY_OPEN_FILES, FR_INVALID_PARAMETER };
-enum { MB_BAD_HANDLE = 0x80, MB_BAD_ADDR = 0x81, MB_UNSUPPORTED = 0x82 };
+enum { MB_BAD_HANDLE = 0x80, MB_BAD_ADDR = 0x81, MB_UNSUPPORTED = 0x82,
+       MB_NO_PC = 0x87, MB_PC_LOST = 0x88, MB_NOT_SAME = 0x89 };
 
 #define MAXPATH 128                 /* the firmware's path buffer */
 
@@ -34,6 +40,7 @@ enum { MB_BAD_HANDLE = 0x80, MB_BAD_ADDR = 0x81, MB_UNSUPPORTED = 0x82 };
  * of the 65C816, as the I/O processor's does. */
 #define EMU_BUILD_DATE 820540800u           /* 2026-01-01 00:00, in seconds since 2000-01-01 */
 static int host_path(const char *fat, char *out, size_t n);
+static int host_path_in(const char *root, const char *fat, char *out, size_t n, int pc);
 static int      clk_set;
 static uint32_t clk_base;
 static uint64_t clk_cyc;
@@ -54,39 +61,103 @@ static time_t fw_now(void)
     return mktime(&tm);
 }
 
+/* ── The PC volume: --pc-folder, the PC's clock (--pc-time), the link's drops ──
+ * The link is up from power-on until --pc-drop-at, and again from --pc-back-at (a new
+ * session: handles opened before the drop stay dead). */
+const char *mailbox_pc_root;
+time_t      mailbox_pc_time;
+double      mailbox_pc_drop = -1, mailbox_pc_back = -1;
+
+static double emu_sec(void) { return (double)M.cpu.cycles / CPU_HZ; }
+
+static int pc_up(void)
+{
+    if (!mailbox_pc_root) return 0;
+    double t = emu_sec();
+    if (mailbox_pc_drop < 0 || t < mailbox_pc_drop) return 1;
+    return mailbox_pc_back > mailbox_pc_drop && t >= mailbox_pc_back;
+}
+
+static uint8_t pc_session(void)
+{
+    return mailbox_pc_drop >= 0 && mailbox_pc_back > mailbox_pc_drop && emu_sec() >= mailbox_pc_back ? 2 : 1;
+}
+
+/* the PC's local time: --pc-time counting on with emulated time, else the host's clock */
+static time_t pc_now(void)
+{
+    return mailbox_pc_time ? mailbox_pc_time + (time_t)emu_sec() : time(NULL);
+}
+
+/* "/PC:" (any case), then the end or '/': a path on the PC volume */
+static int is_pc(const char *p)
+{
+    return !strncasecmp(p, "/PC:", 4) && (!p[4] || p[4] == '/');
+}
+
+/* the part after "/PC:" names its root ("" or only '/') */
+static int pc_is_root(const char *p)
+{
+    p += 4;
+    while (*p == '/') p++;
+    return !*p;
+}
+
 /* --card-date: the date STAT reports for every file not created or written in this run (the
  * test cards are fresh copies, so their host dates say nothing); the files this run stamped */
 time_t        mailbox_card_date;
 static char **stamped;
+static time_t *stamped_t;                   /* the date each one got (a folder's host date
+                                             * changes when something is put in it) */
 static int    nstamped;
 
-static int was_stamped(const char *host)
+static int stamped_at(const char *host)
 {
-    for (int i = 0; i < nstamped; i++) if (!strcmp(stamped[i], host)) return 1;
-    return 0;
+    for (int i = 0; i < nstamped; i++) if (!strcmp(stamped[i], host)) return i;
+    return -1;
+}
+static int was_stamped(const char *host) { return stamped_at(host) >= 0; }
+
+/* STAT's date: --card-date for what the run did not write, else the date it gave */
+static time_t stat_date(const char *host, time_t mtime)
+{
+    if (!mailbox_card_date) return mtime;
+    int i = stamped_at(host);
+    return i < 0 ? mailbox_card_date : stamped_t[i];
 }
 
-static void stamp(const char *host)
+static void stamp_at(const char *host, time_t when)
 {
-    if (mailbox_card_date && !was_stamped(host) && nstamped < 4096) {
-        char **n = realloc(stamped, (nstamped + 1) * sizeof *n);
-        if (n) { stamped = n; stamped[nstamped++] = strdup(host); }
+    if (mailbox_card_date) {
+        int i = stamped_at(host);
+        if (i >= 0) stamped_t[i] = when;
+        else if (nstamped < 4096) {
+            char **n = realloc(stamped, (nstamped + 1) * sizeof *n);
+            time_t *nt = realloc(stamped_t, (nstamped + 1) * sizeof *nt);
+            if (n) stamped = n;
+            if (nt) stamped_t = nt;
+            if (n && nt) { stamped_t[nstamped] = when; stamped[nstamped++] = strdup(host); }
+        }
     }
     struct timespec ts[2];
-    ts[0].tv_sec = ts[1].tv_sec = fw_now();
+    ts[0].tv_sec = ts[1].tv_sec = when;
     ts[0].tv_nsec = ts[1].tv_nsec = 0;
     utimensat(AT_FDCWD, host, ts, 0);
 }
+
+/* a card file gets the firmware's clock (FatFs), a PC file the PC's (the gateway writes it) */
+static void stamp(const char *host, int pc) { stamp_at(host, pc ? pc_now() : fw_now()); }
 
 static void close_file(Mailbox *m, int i)
 {
     if (!m->f[i]) return;
     int bad = fclose(m->f[i]);
     m->f[i] = NULL;
-    if (m->fdirty[i] && m->fhost[i]) stamp(m->fhost[i]);
+    if (m->fdirty[i] && m->fhost[i]) stamp(m->fhost[i], m->fpc[i]);
     free(m->fhost[i]);
     m->fhost[i] = NULL;
     m->fdirty[i] = 0;
+    m->fpc[i] = 0;
     (void)bad;
 }
 
@@ -177,10 +248,16 @@ static int errno_fr(int e, const char *host)
  * FRESULT. The last component may not exist yet. */
 static int host_path(const char *fat, char *out, size_t n)
 {
-    Mailbox *m = &M.mb;
-    if (!m->root) return FR_NOT_READY;
     if (fat[0] == '0' && fat[1] == ':') fat += 2;          /* drive prefix */
-    size_t len = snprintf(out, n, "%s", m->root);
+    return host_path_in(M.mb.root, fat, out, n, 0);
+}
+
+/* the same in any root; pc = 1: the PC volume, where ".." is "denied" (it would leave the
+ * shared folder) as the gateway answers */
+static int host_path_in(const char *root, const char *fat, char *out, size_t n, int pc)
+{
+    if (!root) return FR_NOT_READY;
+    size_t len = snprintf(out, n, "%s", root);
     const char *p = fat;
     while (*p) {
         while (*p == '/' || *p == '\\') p++;
@@ -189,7 +266,7 @@ static int host_path(const char *fat, char *out, size_t n)
         while (*e && *e != '/' && *e != '\\') e++;
         size_t cl = e - p;
         if (cl == 1 && p[0] == '.') { p = e; continue; }
-        if (cl == 2 && p[0] == '.' && p[1] == '.') return FR_INVALID_NAME;    /* no escaping */
+        if (cl == 2 && p[0] == '.' && p[1] == '.') return pc ? FR_DENIED : FR_INVALID_NAME;   /* no escaping */
         if (cl > 255) return FR_INVALID_NAME;
         char comp[256];
         memcpy(comp, p, cl);
@@ -211,13 +288,37 @@ static int host_path(const char *fat, char *out, size_t n)
         if (len >= n) return FR_INVALID_NAME;
         p = e;
     }
-    /* existing objects must resolve inside the root (no symlink escapes) */
+    /* existing objects must resolve inside the root (no symlink escapes); a new name must
+     * be in a folder inside it */
     char real[4096], rroot[4096];
-    if (realpath(out, real) && realpath(m->root, rroot)) {
-        size_t rl = strlen(rroot);
-        if (strncmp(real, rroot, rl) || (real[rl] && real[rl] != '/')) return FR_DENIED;
+    if (!realpath(root, rroot)) return FR_DISK_ERR;
+    if (!realpath(out, real)) {
+        struct stat ls;
+        if (!lstat(out, &ls)) return FR_DENIED;          /* a dangling symlink */
+        char par[4096];
+        snprintf(par, sizeof par, "%s", out);
+        char *sl = strrchr(par, '/');
+        if (sl && sl > par) *sl = 0;
+        if (!realpath(par, real)) return FR_OK;          /* the folder is missing: FR_NO_PATH later */
     }
+    size_t rl = strlen(rroot);
+    if (strncmp(real, rroot, rl) || (real[rl] && real[rl] != '/')) return FR_DENIED;
     return FR_OK;
+}
+
+/* any FAT path: the card, or (/PC:) the PC volume. *pc = 1 for the PC; $87 if it is absent */
+static int resolve(const char *fat, char *out, size_t n, int *pc)
+{
+    *pc = is_pc(fat);
+    if (!*pc) return host_path(fat, out, n);
+    if (!pc_up()) return MB_NO_PC;
+    return host_path_in(mailbox_pc_root, fat + 4, out, n, 1);
+}
+
+/* a handle of the PC volume whose link session has ended */
+static int pc_dead(Mailbox *m, int h)
+{
+    return m->fpc[h] && (!pc_up() || m->fsess[h] != pc_session());
 }
 
 static uint32_t fat_time(time_t t)
@@ -267,6 +368,7 @@ static void serve(Mailbox *m, uint8_t *msg)
     uint32_t arg1 = msg[12] | msg[13] << 8 | msg[14] << 16 | (uint32_t)msg[15] << 24;
     FILE *f = (arg0 < MB_FILES) ? m->f[arg0] : NULL;
     struct stat st;
+    int pc = 0;
 
     m->n_req++;
     switch (msg[0]) {
@@ -277,22 +379,24 @@ static void serve(Mailbox *m, uint8_t *msg)
         while (h < MB_FILES && m->f[h]) h++;
         if (h == MB_FILES) { res = FR_TOO_MANY_OPEN_FILES; break; }
         if (!mb_path(buf, path, sizeof path)) { res = MB_BAD_ADDR; break; }
-        if ((res = host_path(path, host, sizeof host))) break;
+        if ((res = resolve(path, host, sizeof host, &pc))) break;
         if (!stat(host, &st) && S_ISDIR(st.st_mode)) { res = fl >= 2 ? FR_EXIST : FR_NO_FILE; break; }
         FILE *nf = fopen(host, mode[fl]);
         if (!nf) { res = errno_fr(errno, host); break; }
         m->f[h] = nf; m->fmode[h] = rw[fl]; val = h;
+        m->fpc[h] = pc; m->fsess[h] = pc_session();
         m->fhost[h] = strdup(host);
         m->fdirty[h] = fl >= 2;                          /* created (or appended): dated at close */
         break;
     }
     case 0x02:                                           /* CLOSE */
         if (!f) { res = MB_BAD_HANDLE; break; }
-        if (ferror(f)) res = FR_DISK_ERR;
-        close_file(m, arg0);
+        if (ferror(f) && !pc_dead(m, arg0)) res = FR_DISK_ERR;
+        close_file(m, arg0);                             /* (a dead PC handle: freed, OK) */
         break;
     case 0x03: case 0x04:                                /* READ, WRITE */
         if (!f) { res = MB_BAD_HANDLE; break; }
+        if (pc_dead(m, arg0)) { res = MB_PC_LOST; break; }
         if (!(m->fmode[arg0] & (msg[0] == 0x04 ? 2 : 1))) { res = FR_DENIED; break; }
         fseek(f, 0, SEEK_CUR);                           /* allow switching read/write */
         val = xfer(f, buf, len, msg[0] == 0x04, &res);
@@ -300,6 +404,7 @@ static void serve(Mailbox *m, uint8_t *msg)
         break;
     case 0x05:                                           /* SEEK */
         if (!f) { res = MB_BAD_HANDLE; break; }
+        if (pc_dead(m, arg0)) { res = MB_PC_LOST; break; }
         if (!(m->fmode[arg0] & 2)) {                     /* read-only: FatFs clips to the size */
             fseek(f, 0, SEEK_END);
             long sz = ftell(f);
@@ -311,14 +416,21 @@ static void serve(Mailbox *m, uint8_t *msg)
     case 0x06: {                                         /* STAT */
         uint8_t o[9];
         if (!mb_path(buf, path, sizeof path)) { res = MB_BAD_ADDR; break; }
-        if ((res = host_path(path, host, sizeof host))) break;
+        if ((res = resolve(path, host, sizeof host, &pc))) break;
         const char *q = path; while (*q == '/') q++;
         if (!*q) { res = FR_INVALID_NAME; break; }       /* FatFs cannot stat the root */
-        if (stat(host, &st)) { res = errno_fr(errno, host); break; }
-        uint32_t sz = S_ISDIR(st.st_mode) ? 0 : (uint32_t)st.st_size;
-        uint32_t t = fat_time(mailbox_card_date && !was_stamped(host) ? mailbox_card_date : st.st_mtime);
+        uint32_t sz, t;
+        uint8_t attr;
+        if (pc && pc_is_root(path)) {                    /* the PC volume's root: the PC's clock */
+            sz = 0; attr = 0x10; t = fat_time(pc_now());
+        } else {
+            if (stat(host, &st)) { res = errno_fr(errno, host); break; }
+            sz = S_ISDIR(st.st_mode) ? 0 : (uint32_t)st.st_size;
+            t = fat_time(stat_date(host, st.st_mtime));
+            attr = fat_attr(host, &st);
+        }
         o[0] = sz; o[1] = sz >> 8; o[2] = sz >> 16; o[3] = sz >> 24;
-        o[4] = fat_attr(host, &st);
+        o[4] = attr;
         o[5] = t; o[6] = t >> 8; o[7] = t >> 16; o[8] = t >> 24;
         if (!mb_put(buf, o, 9)) res = MB_BAD_ADDR;
         val = sz;
@@ -326,7 +438,8 @@ static void serve(Mailbox *m, uint8_t *msg)
     }
     case 0x07: {                                         /* READDIR */
         if (!mb_path(buf, path, sizeof path)) { res = MB_BAD_ADDR; break; }
-        if ((res = host_path(path, host, sizeof host))) break;
+        if ((res = resolve(path, host, sizeof host, &pc))) break;
+        int card_root = !strcmp(path, "/") && pc_up();   /* the card's root: "PC:" at the end */
         DIR *d = opendir(host);
         if (!d) { res = errno == ENOTDIR ? FR_NO_PATH : errno_fr(errno, host); break; }
         char **names = NULL;
@@ -335,23 +448,35 @@ static void serve(Mailbox *m, uint8_t *msg)
         while ((de = readdir(d))) {
             if (!strcmp(de->d_name, ".") || !strcmp(de->d_name, "..")) continue;
             if (strlen(de->d_name) > 255) continue;
+            if (pc && de->d_name[0] == '.') continue;    /* the gateway hides dot files */
             if (nn == cap) names = realloc(names, (cap = cap ? 2 * cap : 64) * sizeof *names);
             names[nn++] = strdup(de->d_name);
         }
         closedir(d);
         qsort(names, nn, sizeof *names, cmpstr);         /* deterministic order */
         uint32_t off = 0;
+        int full = 0;
         for (size_t i = 0; i < nn; i++) {
             if (arg0) { arg0--; continue; }
             char hp[4400];
             snprintf(hp, sizeof hp, "%s/%s", host, names[i]);
             if (stat(hp, &st)) continue;
+            if (pc) {                                    /* a symlink out of the folder: not shown */
+                char real[4096], rroot[4096];
+                if (!realpath(hp, real) || !realpath(mailbox_pc_root, rroot)) continue;
+                size_t rl = strlen(rroot);
+                if (strncmp(real, rroot, rl) || (real[rl] && real[rl] != '/')) continue;
+            }
             uint32_t nl = strlen(names[i]), sz = S_ISDIR(st.st_mode) ? 0 : (uint32_t)st.st_size;
             uint8_t h[6] = { sz, sz >> 8, sz >> 16, sz >> 24, fat_attr(hp, &st), nl };
-            if (off + 6 + nl > len) break;
+            if (off + 6 + nl > len) { full = 1; break; }
             if (!mb_put(buf + off, h, 6) || !mb_put(buf + off + 6, (uint8_t *)names[i], nl)) { res = MB_BAD_ADDR; break; }
             off += 6 + nl;
             val++;
+        }
+        if (card_root && !res && !full && !arg0 && off + 9 <= len) {    /* the skip counts it too */
+            static const uint8_t e[9] = { 0, 0, 0, 0, 0x10, 3, 'P', 'C', ':' };
+            if (mb_put(buf + off, e, 9)) { off += 9; val++; } else res = MB_BAD_ADDR;
         }
         for (size_t i = 0; i < nn; i++) free(names[i]);
         free(names);
@@ -359,31 +484,31 @@ static void serve(Mailbox *m, uint8_t *msg)
     }
     case 0x08: case 0x09:                                /* MKDIR, DELETE */
         if (!mb_path(buf, path, sizeof path)) { res = MB_BAD_ADDR; break; }
-        if ((res = host_path(path, host, sizeof host))) break;
-        if (msg[0] == 0x08) { if (mkdir(host, 0777)) res = errno_fr(errno, host); else stamp(host); }
+        if ((res = resolve(path, host, sizeof host, &pc))) break;
+        if (pc && pc_is_root(path)) { res = msg[0] == 0x08 ? FR_EXIST : FR_DENIED; break; }
+        if (msg[0] == 0x08) { if (mkdir(host, 0777)) res = errno_fr(errno, host); else stamp(host, pc); }
         else if (!lstat(host, &st) && S_ISDIR(st.st_mode)) { if (rmdir(host)) res = errno_fr(errno, host); }
         else if (unlink(host)) res = errno_fr(errno, host);
         break;
     case 0x0A: {                                         /* RENAME "old\0new" */
         static char to[MAXPATH], hto[4096];
         if (!mb_path(buf, path, sizeof path) || !mb_path(buf + strlen(path) + 1, to, sizeof to)) { res = MB_BAD_ADDR; break; }
-        if ((res = host_path(path, host, sizeof host)) || (res = host_path(to, hto, sizeof hto))) break;
+        int pc2 = 0;
+        int r1 = resolve(path, host, sizeof host, &pc), r2 = resolve(to, hto, sizeof hto, &pc2);
+        if (r1 == MB_NO_PC || r2 == MB_NO_PC) { res = MB_NO_PC; break; }
+        if (pc != pc2) { res = MB_NOT_SAME; break; }     /* the card and the PC volume */
+        if ((res = r1) || (res = r2)) break;
+        if (pc && (pc_is_root(path) || pc_is_root(to))) { res = FR_DENIED; break; }
         if (lstat(host, &st)) { res = errno_fr(errno, host); break; }
         if (!lstat(hto, &st)) { res = FR_EXIST; break; }
         if (rename(host, hto)) res = errno_fr(errno, hto);
-        else if (mailbox_card_date && was_stamped(host)) {   /* FatFs keeps the date */
-            struct stat s2;
-            if (!stat(hto, &s2)) {
-                struct timespec ts[2] = { s2.st_atim, s2.st_mtim };
-                stamp(hto);
-                utimensat(AT_FDCWD, hto, ts, 0);
-            }
-        }
+        else if (mailbox_card_date && was_stamped(host))     /* FatFs keeps the date */
+            stamp_at(hto, stamped_t[stamped_at(host)]);
         break;
     }
     case 0x10: {                                         /* LOAD whole file to ARG0 */
         if (!mb_path(buf, path, sizeof path)) { res = MB_BAD_ADDR; break; }
-        if ((res = host_path(path, host, sizeof host))) break;
+        if ((res = resolve(path, host, sizeof host, &pc))) break;
         if (!stat(host, &st) && S_ISDIR(st.st_mode)) { res = FR_NO_FILE; break; }
         FILE *lf = fopen(host, "rb");
         if (!lf) { res = errno_fr(errno, host); break; }
@@ -406,6 +531,7 @@ static void serve(Mailbox *m, uint8_t *msg)
         } else {
             if (msg[0] == 0x18) {
                 if (!mb_path(buf, path, sizeof path)) { res = MB_BAD_ADDR; goto cl_log; }
+                if (is_pc(path)) { res = pc_up() ? MB_UNSUPPORTED : MB_NO_PC; goto cl_log; }   /* (not in step 1) */
                 const char *e = strrchr(path, '.');
                 if (!kind && e && strlen(e) == 4)
                     for (int i = 0; i < 8; i++) {
@@ -451,7 +577,8 @@ static void serve(Mailbox *m, uint8_t *msg)
         fprintf(stderr, "emu816: SYS_RESTART %u -> %02X\n", (unsigned)arg0, (unsigned)res);
         break;
     case 0x1C:                                           /* SYS_SYNC (stub) */
-        /* the firmware flushes and closes everything on the card: here, close the files */
+        /* the firmware flushes and closes everything on the card and closes the PC volume's
+         * files: here, close the files */
         close_all(m);
         fprintf(stderr, "emu816: SYS_SYNC -> 00\n");
         break;

@@ -285,51 +285,72 @@ wire        siocmd_a_sel = mem_valid && (mem_addr == 32'h0200_00ac);
 wire        siocmd_b_sel = mem_valid && (mem_addr == 32'h0200_00b0);
 assign      siocmd_ack   = siocmd_b_sel && (|mem_wstrb);
 
-// ── BL616 USB-C serial bridge: RX-only receiver (PC -> firmware) ─────────────
-// Fixed 115200 8N1 (27 MHz / 234). The simpleuart stays whole for the keyboard
-// (RX) and PC logs (TX); this is the independent PC->firmware direction.
-//   0x0200_00c0 (R): {8'b0, seq[7:0], 6'b0, overrun, valid, data[7:0]}
-//                (W): ack — clears valid + overrun
-localparam BLRX_DIV = 9'd234;
-wire        blrx_sel = mem_valid && (mem_addr == 32'h0200_00c0);
+// ── BL616 USB-C serial bridge: receiver (PC -> firmware) ─────────────────────
+// 8N1, bit time = div + 1 clocks (27 MHz / (div + 1)); div resets to 234 (115200) and
+// the firmware sets the link's rate (PC link, Docs/05-pc-link.md). A 2048-byte FIFO in one
+// block RAM holds what arrives while the firmware is busy (a whole link frame fits).
+// The simpleuart keeps the keyboard (RX) and drives the PC direction (TX).
+//   0x0200_00c0 (R): {4'b0, count[11:0], 6'b0, overrun, valid, data[7:0]}
+//                    valid = 1: data is the oldest byte, and this read removes it.
+//                    overrun: a byte arrived while the FIFO was full and was lost (sticky).
+//                    count = bytes in the FIFO (including the one returned).
+//                (W): bit 0 = 1 empties the FIFO; any write clears overrun
+//   0x0200_00c4 (RW): bits 9:0 = div
+wire        blrx_sel  = mem_valid && (mem_addr == 32'h0200_00c0);
+wire        blrxd_sel = mem_valid && (mem_addr == 32'h0200_00c4);
+reg  [9:0]  blrx_div   = 10'd234;
 reg  [1:0]  blrx_sync  = 2'b11;
 reg  [7:0]  blrx_shift = 8'd0;
 reg  [3:0]  blrx_bit   = 4'd0;      // 0=idle 1=start-centre 2..9=data 10=stop-centre
-reg  [8:0]  blrx_tick  = 9'd0;
-reg  [7:0]  blrx_data  = 8'd0;
-reg  [7:0]  blrx_seq   = 8'd0;
-reg         blrx_valid = 1'b0;
+reg  [9:0]  blrx_tick  = 10'd0;
 reg         blrx_over  = 1'b0;
+reg  [7:0]  blrx_mem [0:2047];      // one block RAM
+reg  [10:0] blrx_wp = 11'd0, blrx_wpd = 11'd0, blrx_rp = 11'd0;
+reg  [7:0]  blrx_q;
+reg         blrx_we = 1'b0;
+reg  [7:0]  blrx_wd;
+wire [10:0] blrx_cnt   = blrx_wpd - blrx_rp;      // wpd: the byte is readable from the RAM
+wire        blrx_valid = blrx_cnt != 11'd0;
+always @(posedge clk) begin
+    if (blrx_we) blrx_mem[blrx_wp] <= blrx_wd;
+    blrx_q <= blrx_mem[blrx_rp];
+end
 always @(posedge clk) begin
     blrx_sync <= {blrx_sync[0], bl616_rx};
+    blrx_we   <= 1'b0;
     if (!resetn) begin
-        blrx_bit <= 4'd0; blrx_valid <= 1'b0; blrx_over <= 1'b0; blrx_seq <= 8'd0;
+        blrx_bit <= 4'd0; blrx_over <= 1'b0; blrx_div <= 10'd234;
+        blrx_wp <= 11'd0; blrx_wpd <= 11'd0; blrx_rp <= 11'd0;
     end else begin
+        if (blrx_we) blrx_wp <= blrx_wp + 11'd1;
+        blrx_wpd <= blrx_wp;
         case (blrx_bit)
-        4'd0:  if (!blrx_sync[1]) begin blrx_bit <= 4'd1; blrx_tick <= BLRX_DIV >> 1; end
-        4'd1:  if (blrx_tick == 9'd0) begin              // centre of start bit
-                   if (!blrx_sync[1]) begin blrx_bit <= 4'd2; blrx_tick <= BLRX_DIV; end
+        4'd0:  if (!blrx_sync[1]) begin blrx_bit <= 4'd1; blrx_tick <= blrx_div >> 1; end
+        4'd1:  if (blrx_tick == 10'd0) begin             // centre of start bit
+                   if (!blrx_sync[1]) begin blrx_bit <= 4'd2; blrx_tick <= blrx_div; end
                    else blrx_bit <= 4'd0;                // glitch — re-arm
-               end else blrx_tick <= blrx_tick - 9'd1;
-        4'd10: if (blrx_tick == 9'd0) begin              // centre of stop bit
-                   if (blrx_sync[1]) begin               // stop valid -> latch byte
-                       if (blrx_valid) blrx_over <= 1'b1;
-                       blrx_data  <= blrx_shift;
-                       blrx_valid <= 1'b1;
-                       blrx_seq   <= blrx_seq + 8'd1;
+               end else blrx_tick <= blrx_tick - 10'd1;
+        4'd10: if (blrx_tick == 10'd0) begin             // centre of stop bit
+                   if (blrx_sync[1]) begin               // stop valid -> into the FIFO
+                       if (blrx_wp + 11'd1 == blrx_rp) blrx_over <= 1'b1;   // full: lost
+                       else begin blrx_we <= 1'b1; blrx_wd <= blrx_shift; end
                    end
                    blrx_bit <= 4'd0;
-               end else blrx_tick <= blrx_tick - 9'd1;
-        default: if (blrx_tick == 9'd0) begin            // data bits, LSB first
+               end else blrx_tick <= blrx_tick - 10'd1;
+        default: if (blrx_tick == 10'd0) begin           // data bits, LSB first
                    blrx_shift <= {blrx_sync[1], blrx_shift[7:1]};
-                   blrx_tick  <= BLRX_DIV;
+                   blrx_tick  <= blrx_div;
                    blrx_bit   <= blrx_bit + 4'd1;
-               end else blrx_tick <= blrx_tick - 9'd1;
+               end else blrx_tick <= blrx_tick - 10'd1;
         endcase
-        if (blrx_sel && (|mem_wstrb)) begin              // firmware ack (last wins)
-            blrx_valid <= 1'b0;
-            blrx_over  <= 1'b0;
+        if (blrx_sel && !(|mem_wstrb) && blrx_valid)     // a read takes the byte
+            blrx_rp <= blrx_rp + 11'd1;
+        if (blrx_sel && (|mem_wstrb)) begin
+            blrx_over <= 1'b0;
+            if (mem_wdata[0]) blrx_rp <= blrx_wpd;       // empty the FIFO
         end
+        if (blrxd_sel && mem_wstrb[0]) blrx_div[7:0] <= mem_wdata[7:0];
+        if (blrxd_sel && mem_wstrb[1]) blrx_div[9:8] <= mem_wdata[9:8];
     end
 end
 
@@ -357,7 +378,7 @@ assign mem_ready = bram_ready || ram_ready || textdisp_reg_char_sel || simpleuar
             cart_reg_sel || sio_cap_idx_sel || sio_cap_data_sel || siocmd_a_sel || siocmd_b_sel ||
             a816_ctrl_sel || a816_dbg_sel || a816_mbq_sel || a816_mbr_sel || a816_mbi_sel ||
             a816_key_sel || a816_kmod_sel ||
-            video_opts_sel || h_offset_sel || ram_select_sel || blrx_sel;
+            video_opts_sel || h_offset_sel || ram_select_sel || blrx_sel || blrxd_sel;
 
 // ── BUS-STALL DETECTOR (diagnostic) ──────────────────────────────────────────
 // The CPU hangs if mem_valid stays high but mem_ready never asserts. Classify a
@@ -373,7 +394,7 @@ wire any_sel_dbg = bram_sel || ram_sel || textdisp_reg_char_sel || simpleuart_re
             romload_reg_ctrl_sel || romload_reg_data_sel || joystick_reg_sel ||
             time_reg_sel || cycle_reg_sel || id_reg_sel ||
             spiflash_reg_byte_sel || spiflash_reg_word_sel || spiflash_reg_ctrl_sel ||
-            sio_reg_sel || virt_kbd_reg0_sel || virt_kbd_reg1_sel || cart_reg_sel || blrx_sel ||
+            sio_reg_sel || virt_kbd_reg0_sel || virt_kbd_reg1_sel || cart_reg_sel || blrx_sel || blrxd_sel ||
             a816_ctrl_sel || a816_dbg_sel || a816_mbq_sel || a816_mbr_sel || a816_mbi_sel ||
             a816_key_sel || a816_kmod_sel;
 reg        dbg_stall_undec = 1'b0;
@@ -402,7 +423,8 @@ assign mem_rdata = bram_ready ? bram_rdata :
         joystick_reg_sel ? {4'b0, joy2, 4'b0, joy1} :
         simpleuart_reg_div_sel ? simpleuart_reg_div_do :
         simpleuart_reg_dat_sel ? simpleuart_reg_dat_do :
-        blrx_sel ? {8'b0, blrx_seq, 6'b0, blrx_over, blrx_valid, blrx_data} : 
+        blrx_sel ? {5'b0, blrx_cnt, 6'b0, blrx_over, blrx_valid, blrx_q} :
+        blrxd_sel ? {22'b0, blrx_div} :
         time_reg_sel ? time_reg :
         cycle_reg_sel ? cycle_reg :
         id_reg_sel ? {16'b0, CORE_ID} :

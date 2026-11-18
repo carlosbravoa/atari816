@@ -8,6 +8,7 @@ core/LICENSES/).
 
   horizon/        GPL-3.0-or-later              horizon/LICENSE
   emu/            GPL-3.0-or-later              emu/LICENSE
+  tools/          GPL-3.0-or-later              tools/LICENSE
   sdk/            MIT                           sdk/LICENSE
   Docs/           CC-BY-SA-4.0                  Docs/LICENSE
   core/           original work: CC-BY-NC-SA-4.0 OR GPL-3.0-or-later,

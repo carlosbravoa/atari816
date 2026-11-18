@@ -21,11 +21,14 @@
 ;   Released on a folder row of the same window (".." too): moved into it. On another
 ;   window: that window gets the full path (SYS_WDROP; this one reloads 0.6 s later). A path
 ;   dropped here is moved (SYS_RENAME) into the folder row under the pointer, else this folder.
+;   (0.20) Between the card and the PC volume (/PC:, the PC link) a move is a copy, then the
+;   source deleted (ui_mvtree).
 ;   Menus: File: Open, New window, New folder..., Rename..., Delete, Add to desktop (0.14: a
 ;          shortcut in /Desktop, ui_mklink), Close.
 ;          Edit: Copy (the selected entry's full path to the clipboard), Paste (copies the
 ;          file named on the clipboard into this folder, 32 KB at a time through a bank;
-;          "Copy of NAME" when NAME is there already; folders are not copied).
+;          "Copy of NAME" when NAME is there already; (0.20) a folder is copied with
+;          everything in it; between the card and the PC both ways: ui_cptree).
 ;          View: Show system files (a check mark), Parent folder.
 ;   Open: a folder is entered (and becomes the current directory); a file goes to ui_open
 ;   (the controls library: its program by its type, a .PRG started, refused under /SYSTEM;
@@ -61,6 +64,8 @@ start:  sta     argl
         exit    1
 :       sta     z:wsown
         jsr     ui_init
+        lda     #.loword(cpprog)        ; (0.20) a large file copied: how far, on the footer
+        sta     ui_cpcb
         sys     SYS_BALLOC              ; the entry records
         bcc     :+
         jsr     stopws
@@ -1025,7 +1030,9 @@ domove: ldy     #0                      ; pth2 inside pth: pth2 starts with pth 
         ldx     #.loword(m_exists)
         jsr     say
         jmp     loop
-:       jsr     rename2
+:       ldx     #.loword(pth)           ; (0.20 ui_mvtree: between the card and the PC
+        ldy     #.loword(pth2)          ; volume a copy, then the source deleted)
+        jsr     ui_mvtree
         jcs     oops
         ldx     #.loword(pth2)          ; (selected if it is in this list now)
         jsr     basename
@@ -1206,17 +1213,7 @@ paste:  lda     #.loword(clbuf)
         bcs     :+
         lda     #$44
         jmp     oops
-:       lda     st+4
-        and     #$0010
-        beq     :+
-        ldx     #.loword(m_nofold)
-        jsr     say
-        jmp     loop
-:       lda     st                      ; its size
-        sta     z:csize
-        lda     st+2
-        sta     z:csize+2
-        ldx     #.loword(pth2)          ; here / its name
+:       ldx     #.loword(pth2)          ; here / its name
         jsr     cwdto
         stx     z:pe
         ldx     #.loword(clbuf)
@@ -1253,84 +1250,12 @@ paste:  lda     #.loword(clbuf)
         jsr     say
         jmp     loop
 
-; copy clbuf to pth2 (new), 32 KB at a time through a bank of its own
+; copy clbuf to pth2 (new): a file, or (0.20) a folder and everything in it (ui_cptree,
+; also between the card and the PC volume)
 docopy: ldx     #.loword(clbuf)
-        ldy     #^clbuf
-        lda     #O_READ
-        sys     SYS_OPEN
+        ldy     #.loword(pth2)
+        jsr     ui_cptree
         jcs     oops
-        sta     z:h1
-        ldx     #.loword(pth2)
-        ldy     #^pth2
-        lda     #O_CREATE
-        sys     SYS_OPEN
-        bcc     :+
-        pha
-        lda     z:h1
-        sys     SYS_CLOSE
-        pla
-        jmp     oops
-:       sta     z:h2
-        sys     SYS_BALLOC
-        bcc     :+
-        lda     #ENOMEM
-        sta     z:err
-        stz     z:cbank
-        bra     @fail
-:       sta     z:cbank
-        stz     z:kdone
-        lda     z:csize+1               ; the size in K
-        lsr     a
-        lsr     a
-        sta     z:ktot
-@lp:    lda     z:h1                    ; read up to 32 KB
-        jsr     rwset
-        sys     SYS_READ
-        bcs     @err
-        cmp     #0
-        beq     @done
-        sta     rwblk+4
-        sta     z:cnt
-        lda     z:h2                    ; write them
-        sep     #$20
-        .a8
-        sta     rwblk
-        rep     #$20
-        .a16
-        ptr     rwblk
-        sys     SYS_WRITE
-        bcs     @err
-        cmp     z:cnt
-        beq     :+
-        lda     #$01FF                  ; (fewer: the card is full)
-        bra     @err
-:       lda     z:kdone
-        clc
-        adc     #32
-        sta     z:kdone
-        lda     z:ktot                  ; a large file: say how far
-        cmp     #33
-        bcc     @lp
-        jsr     progress
-        bra     @lp
-@err:   sta     z:err
-@fail:  lda     z:cbank
-        beq     :+
-        sys     SYS_BFREE
-:       lda     z:h2
-        sys     SYS_CLOSE
-        lda     z:h1
-        sys     SYS_CLOSE
-        ptr     pth2                    ; (no half copy left)
-        sys     SYS_DELETE
-        lda     z:err
-        jmp     oops
-@done:  lda     z:cbank
-        sys     SYS_BFREE
-        lda     z:h2
-        sys     SYS_CLOSE
-        lda     z:h1
-        sys     SYS_CLOSE
         ldx     #.loword(pth2)          ; the copy selected
         jsr     basename
         ldy     #.loword(came)
@@ -1338,19 +1263,19 @@ docopy: ldx     #.loword(clbuf)
         jsr     reload
         jmp     loop
 
-; the read / write block {handle A, buffer cbank:0000, 32768} -> X, Y
-rwset:  sep     #$20
-        .a8
-        sta     rwblk
-        lda     z:cbank
-        sta     rwblk+3
-        rep     #$20
-        .a16
-        stz     rwblk+1
-        lda     #32768
-        sta     rwblk+4
-        ptr     rwblk
-        rts
+; (0.20) ui_cptree's call after each 32 KB: a large file says how far
+cpprog: lda     ui_cpk
+        sta     z:kdone
+        lda     ui_cpsize+1             ; its size in K
+        lsr     a
+        lsr     a
+        sta     z:ktot
+        cmp     #33
+        bcc     :+
+        lda     ui_cpname
+        sta     z:bn
+        jmp     progress
+:       rts
 
 ; "Copying 64 of 300 K: NAME" on the footer
 progress:
@@ -3132,12 +3057,15 @@ m_cnom: .byte   "Not enough free memory for the cartridge", 0
 m_long: .byte   "The path is too long", 0
 m_self: .byte   "A folder cannot be moved into itself", 0
 m_there: .byte  "It is already in that folder", 0
-m_nofold: .byte "Folders cannot be copied", 0
 m_noclip: .byte "The clipboard holds no file. Copy a file first.", 0
 m_full: .byte   "The card is full", 0
 m_full2: .byte  "The folder is not empty", 0
+m_nopc: .byte   "No PC link: the PC is not connected", 0        ; (0.20)
+m_pclost: .byte "The PC link was lost", 0
+m_notsame: .byte "The card and the PC are not the same volume", 0
 errtab: .word   $C3, m_unk, $C4, m_img, $44, m_nf, $45, m_nf, $C5, m_iop, $48, m_exists
-        .word   $47, m_denied, $46, m_badname, ENOMEM, m_nomem, $01FF, m_full, 0
+        .word   $47, m_denied, $46, m_badname, ENOMEM, m_nomem, $01FF, m_full
+        .word   $C7, m_nopc, $C8, m_pclost, $C9, m_notsame, 0
 pow10:  .word   10000, 1000, 100, 10, 1
 KUP     = 9                             ; kind: the ".." entry (after the FT_* types)
 icons:  .addr   ic_blank, ic_folder, ic_atari, ic_prg, ic_page, ic_page, ic_pic, ic_page
@@ -3245,7 +3173,6 @@ st:     .res    10
 sblk:   .res    8
 rnblk:  .res    8
 clblk:  .res    8
-rwblk:  .res    8
 argl:   .res    2
 argx:   .res    2
 
@@ -3331,9 +3258,5 @@ hasup:  .res    2                       ; 1: entry 0 is ".."
 atroot: .res    2                       ; 1: the folder is the root
 showsys: .res   2                       ; View > Show system files
 pp2:    .res    2
-h1:     .res    2
-h2:     .res    2
-cbank:  .res    2
 kdone:  .res    2
 ktot:   .res    2
-csize:  .res    4

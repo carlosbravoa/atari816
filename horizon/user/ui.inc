@@ -289,6 +289,25 @@ FT_LINK    = 9          ; (0.14) .lnk: a shortcut (ui_open opens its target)
 ; ui_clkload        the clock never set: /SYSTEM/CLOCK becomes its provisional start
 ;                   (SYS_TSET CLK_SAVED). C set: nothing loaded.
 ; ui_clksave        the clock (set or loaded) written to /SYSTEM/CLOCK. C set: not saved.
+;                   (0.20) ui_clkload first asks the PC (ui_clkpc) when the clock is not set.
+; ui_clkpc          (0.20) the PC link: when the PC volume is there (STAT /PC: works), its
+;                   time (the PC's clock) sets the clock (CLK_SET) and is saved to
+;                   /SYSTEM/CLOCK. C set: no PC volume (nothing changed).
+;
+; ---------------------------------------------------------------- copying (0.20, uicopy.s)
+; Paths in the program's bank. Self-contained (no zero page; the shell links it too).
+; ui_cptree         X = source, Y = destination (the new name): a file copied (a file there is
+;                   replaced), or a folder and everything in it (the destination folder must
+;                   not exist). Not into itself (EINVAL). C set: A = error (a file copied in
+;                   part is deleted; what was copied before it stays). Works between the card
+;                   and the PC volume (/PC:) both ways.
+; ui_rmtree         X = path: a file deleted, or a folder and everything in it. C set: A = error.
+; ui_mvtree         X = from, Y = to: moved (SYS_RENAME); between the card and the PC volume
+;                   (SYS_RENAME's $C9) copied with ui_cptree, then the source deleted with
+;                   ui_rmtree. C set: A = error ($48: "to" is there already).
+; ui_cpcb           (word) a routine called after every 32 KB copied, 0 = none (the default):
+;                   ui_cpname = the file's name (in the library's copy of the path), ui_cpk =
+;                   K of it copied so far, ui_cpsize = its size (u32). It may change A, X, Y.
 CK_YEAR  = 0
 CK_MON   = 2
 CK_DAY   = 4
@@ -324,7 +343,8 @@ CK_WDAY  = 12
 .global ui_launch, ui_spawnerr, ui_ftype, ui_open
 .global ui_lnkread, ui_mklink, ui_prog, ui_ficon, ui_lktgt, ui_lktitl, ui_lkargs
 .global ui_clk, ui_clksplit, ui_clkjoin, ui_clkcheck, ui_clkmdays, ui_clkfmt, ui_clklong
-.global ui_clkparse, ui_clkload, ui_clksave
+.global ui_clkparse, ui_clkload, ui_clksave, ui_clkpc
+.global ui_cptree, ui_rmtree, ui_mvtree, ui_cpcb, ui_cpname, ui_cpk, ui_cpsize
 .global ui_ev                   ; 8 bytes: the event (ui_getev)
 .globalzp ui_win, ui_x, ui_y, ui_w, ui_h, ui_font, ui_c2, ui_rsel
 

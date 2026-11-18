@@ -20,7 +20,7 @@ make sst             # downloads the SingleStepTests sample that make test uses 
 ```
 emu816 [--sd DIR] [--load FILE@ADDR]... [--max-seconds N] [--trace]
        [--keys LIST] [--mouse LIST] [--shot FILE.ppm] [--shot-at SECONDS] [--stats] [--headless] [--fast]
-       [--ideal-timing] [--boot-cart PATH] PROGRAM.BIN
+       [--ideal-timing] [--boot-cart PATH] [--pc-folder DIR] [--pc-time T] PROGRAM.BIN
 ```
 
 | Option | Meaning |
@@ -41,7 +41,11 @@ emu816 [--sd DIR] [--load FILE@ADDR]... [--max-seconds N] [--trace]
 | `--headless` | SDL builds open a window by default; this flag suppresses it (accepted and ignored in plain builds) |
 | `--fast` | SDL: keep the window but do not throttle to real time |
 | `--ideal-timing` | The time model before Horizon 0.19: every CPU cycle ideal (no cache misses, SDRAM write stalls or cache sweeps) and Ali's older per-pixel rates. Programs then run about twice as fast as on the board (see "Memory timing") |
-| `--card-date YYYY-MM-DDTHH:MM` | The date STAT reports for every file this run did not create or write (Horizon's tests run on fresh copies of the card, whose host dates mean nothing); the files the run writes keep the date SYS_TIME gives them |
+| `--card-date YYYY-MM-DDTHH:MM` | The date STAT reports for every file this run did not create or write, on the card and on the PC volume (Horizon's tests run on fresh copies of the card, whose host dates mean nothing); the files the run writes keep the date SYS_TIME gives them |
+| `--pc-folder DIR` | The PC volume of the PC link: paths starting `/PC:` are served from DIR (see "The PC volume" below). Without it the volume is absent: those paths answer $87 |
+| `--pc-time YYYY-MM-DDTHH:MM` | The PC's clock at power-on; it counts on with emulated time. STAT `/PC:` reports it, and the PC files the run writes get it as their date. Default: the host's clock. (The PC files the run did not write get `--card-date`, as the card's) |
+| `--pc-drop-at SECONDS` | The PC link drops at this emulated time: open PC handles answer $88, new `/PC:` calls $87, the `PC:` entry leaves the root |
+| `--pc-back-at SECONDS` | The link comes back at this time (after `--pc-drop-at`): a new session; handles from before the drop stay dead ($88) |
 | `--boot-cart PATH` | A cartridge (a FAT path on `--sd`) that the I/O processor loaded by itself at power-on (`boot=ash` in /atari.ini): CLASSIC\_STATE ($1E) reports it, from power-on and after a full restart |
 
 Exit codes: 0 when the program executes STP, 3 at the `--max-seconds` limit, 1 on a usage
@@ -170,7 +174,10 @@ Result codes in ARG0 are:
 | 1-19 | FatFs FRESULT (4 NO_FILE, 5 NO_PATH, 6 INVALID_NAME, 7 DENIED, 8 EXIST, 18 TOO_MANY_OPEN_FILES, ...). Host errno values are mapped to the FRESULT FatFs would return |
 | $80 | Bad handle |
 | $81 | Bad address: >= $80:0000, or anywhere in bank $10, which the firmware cannot reach |
-| $82 | Unsupported operation (TIME $30, MOUNT, UNMOUNT and anything unknown, as in the current firmware) |
+| $82 | Unsupported operation (TIME $30, MOUNT, UNMOUNT and anything unknown, as in the current firmware; CLASSIC_MOUNT of a `/PC:` path while the PC volume is there) |
+| $87 | No PC link: a `/PC:` path while the PC volume is absent |
+| $88 | PC link lost: READ, WRITE or SEEK on a handle of the PC volume opened before the link dropped |
+| $89 | Not the same volume: RENAME between the card and the PC volume |
 
 The open formats match the firmware:
 
@@ -193,6 +200,28 @@ Mapping FAT paths to the `--sd` directory:
 - `..` components answer FR_INVALID_NAME.
 - Any existing path that resolves outside the directory, for example through a symlink,
   answers FR_DENIED.
+
+**The PC volume** (PC link step 1, `--pc-folder DIR`; the firmware gets it from the PC
+gateway over the USB serial link):
+
+- A path whose first four characters are `/PC:` (any case), followed by the end or `/`, is on
+  the PC volume; `/PC:` alone is its root. The rest is resolved in DIR like a card path
+  (each component exact first, then ignoring case), never outside DIR: `..` and anything that
+  resolves outside it, a symlink pointing out (existing or dangling) or a new name in such a
+  folder, answer FR_DENIED (7). Deleting a folder that is not empty: 7.
+- Absent (no `--pc-folder`, or after `--pc-drop-at`): every path op on a `/PC:` path (OPEN,
+  STAT, READDIR, MKDIR, DELETE, RENAME, LOAD) answers $87; CLASSIC_MOUNT of one too ($82 while
+  present).
+- READDIR of `/` (exactly) gives one more entry at the end while the volume is there: `PC:`,
+  size 0, attr $10; the skip count counts it. READDIR on the volume: names starting with `.`
+  are left out, sorted by name, symlinks pointing out of DIR left out.
+- STAT of `/PC:`: size 0, attr $10, time = the PC's current time (`--pc-time`, counting on with
+  emulated time; else the host's clock). STAT of anything else: as on the card (`--card-date`
+  for the files the run did not write; the files it wrote: the PC's time at their close).
+- The 4 handles are shared by both volumes. RENAME between them: $89. After a drop, READ,
+  WRITE and SEEK on a PC handle answer $88 (also after `--pc-back-at`: a new session); CLOSE
+  frees it and answers 0. SYS_SYNC closes the PC's files too. A transfer takes no extra time
+  here (on the board: about 50-150 KB/s, a few ms a call).
 
 **Keyboard events** follow the firmware's "Keyboard events" block:
 
@@ -438,6 +467,7 @@ every 512 CPU cycles here.
 | A816.BIN | The self test (FREDDIE II, timers, preemption, watchdog, mailbox), run with `--sd` pointing at a copy of itself. Uses `core/sw/a816/A816.BIN` when it exists |
 | BRINGUP1.BIN | RAM test, LOOP ($5948, the board $5947), READ and MVN (within 3 % of the board's values) |
 | tests/asm/mbdemo | Mailbox: open/read/close, LOAD, READDIR (and with skip), create/write/STAT/DELETE, error codes $80/$81/$82/6/5. Waits with WAI on the IOP interrupt |
+| tests/asm/pctest | The PC volume, three runs: with `--pc-folder` (the `PC:` entry at the end of the root and the skip count, STAT `/PC:` = `--pc-time`, case-insensitive names, a file written, read back and seeked, MKDIR, RENAME inside the volume, $89 across, `..` and a symlink out denied, $87 / $82 for CLASSIC_MOUNT), without it ($87 everywhere, the root unchanged), and with `--pc-drop-at` / `--pc-back-at` ($88 on old handles, CLOSE frees them, the entry gone and back). Outputs `tests/expected/pctest*.txt`; nothing may be written outside the folder |
 | tests/asm/cpuirq | COP and BRK frames, an MVN interrupted 88 times by a 50 us timer, WAI with I clear, the NMI edge rule |
 | tests/asm/nvcdemo | Palette writes, every blitter operation, the pointer, 3 VBLANKs = 49,975 us (60.03 Hz). Picture checked by md5 |
 | tests/asm/nvcmode1/2 | 4 bpp and 320x180 modes, the LINE interrupt, BASE_PENDING. Picture checked by md5 |

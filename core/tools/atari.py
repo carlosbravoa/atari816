@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: CC-BY-NC-SA-4.0 OR GPL-3.0-or-later
 # Copyright (c) 2026 Carlos Bravo
-"""atari.py — CLI for the Tang Nano 20K Atari PC Link (BL616 USB-C serial).
+"""atari.py — developer CLI for the Atari816 over the PC link (USB-C serial, BL616).
+
+The requests go through the gateway (tools/atari816-link at the top of the repository) when
+it runs, else straight over the serial port (Docs/04-pc-link.md).
 
 Usage:
   atari.py ports                     # list candidate serial ports
@@ -37,14 +40,13 @@ Usage:
                                      #   scoped; type NEW in BASIC after
 
 Protocol implementation lives in atari_link.py (shared with the desktop app,
-atari_gui.py). Needs: pip install pyserial.
+atari_gui.py) on top of tools/pclink.py. Needs: pip install pyserial.
 Linux: sudo modprobe ftdi_sio if no /dev/ttyUSB* appears.
 """
 import argparse
 import sys
 
-from atari_link import (AtariLink, LinkError, MenuTakeover,
-                        list_ports, sd_name, BAUD)
+from atari_link import AtariLink, LinkError, list_ports, sd_name
 
 
 def _progress(name):
@@ -66,15 +68,14 @@ def cmd_ports(args):
 def cmd_ping(args):
     with AtariLink(args.port) as l:
         if l.ping():
-            print("A8OK — bridge is alive (both directions)")
+            print(f"the Atari816 answers (via {l.dev.via})")
         else:
-            sys.exit("no reply — check the Atari is booted and the port is right")
+            sys.exit("no reply — check the board is on and the port is right")
 
 
 def cmd_log(args):
-    # settle=False: the log tail WANTS the BL616's stored backlog
-    with AtariLink(args.port, timeout=0.5, settle=False) as l:
-        print(f"— tailing {l.port} @ {BAUD} (Ctrl-C to stop) —")
+    with AtariLink(args.port) as l:
+        print(f"— the firmware's log via {l.dev.via} (Ctrl-C to stop) —")
         try:
             while True:
                 d = l.read_log()
@@ -118,12 +119,9 @@ def cmd_type(args):
 
 def cmd_kbd(args):
     import os
-    import select
     import termios
     import tty
-    print("live keyboard -> Atari  (Ctrl-] to exit; F12 on the Atari keyboard "
-          "opens its menu and ends the session)")
-    ended_by_menu = False
+    print("live keyboard -> the classic Atari  (Ctrl-] to exit)")
     with AtariLink(args.port) as l:
         sess = l.kbd_session()
         fd = sys.stdin.fileno()
@@ -131,23 +129,14 @@ def cmd_kbd(args):
         try:
             tty.setraw(fd)
             while True:
-                r, _, _ = select.select([fd, l.ser.fileno()], [], [])
-                try:
-                    if l.ser.fileno() in r:
-                        sess.poll_takeover()
-                        continue
-                    ch = os.read(fd, 1)
-                    if ch == b"\x1d":          # Ctrl-]
-                        break
-                    sess.send_key(ch.decode("latin1"))
-                except MenuTakeover:
-                    ended_by_menu = True
+                ch = os.read(fd, 1)
+                if ch == b"\x1d":          # Ctrl-]
                     break
+                sess.send_key(ch.decode("latin1"))
         finally:
             termios.tcsetattr(fd, termios.TCSADRAIN, old_t)
         sess.end()
-    print("\nsession closed" +
-          (" — OSD menu opened on the Atari" if ended_by_menu else ""))
+    print("\nsession closed")
 
 
 def cmd_status(args):

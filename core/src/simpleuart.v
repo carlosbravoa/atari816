@@ -35,6 +35,11 @@ module simpleuart #(parameter integer DEFAULT_DIV = 1) (
 	output        reg_dat_wait
 );
 	reg [15:0] cfg_divider /* synthesis syn_keep=1 */;
+	// Atari816: the transmitter has its own divider (bits 31:16 of the register; 0 = use
+	// the receiver's). The receiver listens to the keyboard (CH9350, 115200) while the
+	// transmitter talks to the PC link at its own rate.
+	reg [15:0] cfg_txdiv;
+	wire [15:0] tx_divider = cfg_txdiv != 16'd0 ? cfg_txdiv : cfg_divider;
 
 	reg [3:0] recv_state;
 	reg [15:0] recv_divcnt;
@@ -52,7 +57,7 @@ module simpleuart #(parameter integer DEFAULT_DIV = 1) (
 	reg [15:0] send_divcnt;
 	reg send_dummy;
 
-	assign reg_div_do = cfg_divider;
+	assign reg_div_do = {cfg_txdiv, cfg_divider};
 
 	assign reg_dat_wait = reg_dat_we && (send_bitcnt != 0 || send_dummy);
 	assign reg_dat_do = rx_have ? {24'b0, rx_head} : ~0;
@@ -60,11 +65,12 @@ module simpleuart #(parameter integer DEFAULT_DIV = 1) (
 	always @(posedge clk) begin
 		if (!resetn) begin
 			cfg_divider <= DEFAULT_DIV;
+			cfg_txdiv <= 16'd0;
 		end else begin
 			if (reg_div_we[0]) cfg_divider[ 7: 0] <= reg_div_di[ 7: 0];
 			if (reg_div_we[1]) cfg_divider[15: 8] <= reg_div_di[15: 8];
-			// if (reg_div_we[2]) cfg_divider[23:16] <= reg_div_di[23:16];
-			// if (reg_div_we[3]) cfg_divider[31:24] <= reg_div_di[31:24];
+			if (reg_div_we[2]) cfg_txdiv[ 7: 0] <= reg_div_di[23:16];
+			if (reg_div_we[3]) cfg_txdiv[15: 8] <= reg_div_di[31:24];
 		end
 	end
 
@@ -134,7 +140,7 @@ module simpleuart #(parameter integer DEFAULT_DIV = 1) (
 				send_pattern <= {1'b1, reg_dat_di[7:0], 1'b0};
 				send_bitcnt <= 10;
 				send_divcnt <= 0;
-			end else if (send_divcnt > cfg_divider && send_bitcnt != 0) begin
+			end else if (send_divcnt > tx_divider && send_bitcnt != 0) begin
 				send_pattern <= {1'b1, send_pattern[9:1]};
 				send_bitcnt <= send_bitcnt - 1;
 				send_divcnt <= 0;

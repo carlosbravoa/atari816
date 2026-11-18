@@ -76,7 +76,7 @@ The two SD cards differ only in `/SYSTEM/INIT.PRG`:
 - **`build/tsd`:** INIT (`user/tinit.s`) runs `/SYSTEM/TESTS/SELFTEST.PRG`, waits for it and exits,
   so the run ends with `[halt] no tasks`.
 
-`make test` runs twenty-four tests (`make test EMUFLAGS="--rev 7"` runs them on a board without
+`make test` runs twenty-five tests (`make test EMUFLAGS="--rev 7"` runs them on a board without
 the blitter: the software drawing paths; both must pass):
 
 1. **Regression.** SELFTEST runs on the test card with `--console-us 0`, `90` and `2000`.
@@ -275,6 +275,21 @@ the blitter: the software drawing paths; both must pass):
    SPRITES.BAS, Esc, DRIFT.BAS (title, play), Esc (the desktop, the window with the last
    picture), SCROLLER.BAS (full screen, panel, raster bands), Alt+Tab, Esc, CONT, SCREEN 0:
    ten pictures (`basic2s*.png`).
+25. **The PC volume** (0.20, `make test-pc` alone): emu816 serves `/PC:` from a fresh copy of
+   `tests/pc` (`--pc-folder build/run-pc`) with the PC's clock fixed (`--pc-time
+   2026-03-04T05:06`; the PC files the run did not write get `--card-date`). `tests/pcshell.keys`
+   (text shell; the folder also gets HELLO.PRG as hello.prg): `date` (the clock came from the
+   PC), `ls /PC:` with dates, `cd /pc:`, `cat`, `cp` both ways (a file, a folder), `mv` from the
+   card to the PC (a file, a folder: copy, then delete), a program run from the PC, `mv` inside
+   the PC; its console must equal `tests/pcshell.txt`, and the files must be where they should
+   be on both sides. `tests/pcshell2.keys` without the volume: `ls`, `cd`, `cp`, `cat`, `mv`
+   answer "no PC link" at once (`tests/pcshell2.txt`). `tests/pcdesk.src` (Desktop, with
+   `--pc-drop-at 27.5 --pc-back-at 35.5`): the PC icon, BLUE.XEX and the docs folder dropped
+   on it (copied), Files at /PC: (a date on the footer), copy and paste from the PC to the
+   card, README.TXT dragged from the card's window into the PC's (moved), the icon gone after
+   the drop and back after the return, the file dialog (Edit, ctrl-O) at the root with the
+   `PC:` folder and in /PC:; nine pictures (`pcdesk*.png`; `pcdesk-rev7.md5`: the free memory
+   in the bar is read at other moments), the files on both sides and /SYSTEM/CLOCK checked.
 
 The Desktop sessions (`DESK=1` in `tests/shots.sh`) get `tests/desk.programs` as their
 Programs menu (the order of 0.12), so programs added to `sdfiles/PROGRAMS` do not change
@@ -297,6 +312,36 @@ works on the board.
 
 To run on hardware, copy `build/sd/SYSTEM`, `build/sd/BIN` and `build/sd/README.TXT` to
 the SD card.
+
+## The PC volume (0.20)
+
+With the PC link, a folder of your PC is a second volume of the Atari816, next to the SD
+card. How to start the gateway on the PC: see the root README, "PC link".
+
+- **Its name is `/PC:`.** `/PC:/Games/blue.xex` is a file in the shared folder. Names are not
+  case-sensitive (`/pc:` works too); new files get the case you type. Every program reaches it
+  through the normal file calls: `ls /PC:`, `cd /PC:`, `cat`, running a program from it, Edit's
+  Open and Save dialogs. In the card's root (`/`) the volume shows as a folder named `PC:` at
+  the end of the list (the shell's `ls /`; Files and the dialogs sort it among the folders).
+  Files whose names start with `.` on the PC are not shown.
+- **The Desktop** shows a "PC" icon (a monitor) under the Atari icon while the volume is
+  there; it is looked at every 5 s, so the icon comes when the gateway connects and goes when
+  it stops. A double click opens Files at `/PC:`. A file or folder dropped on it (from Files or
+  from the desktop) is copied into `/PC:`; a file from the PC dropped on the SD card icon is
+  copied to the card's root. The icon's place is kept in /SYSTEM/LAYOUT as `:PC`, also while
+  the PC is away.
+- **Copy and move between the card and the PC** work both ways, for files and for whole
+  folders: Files' Copy and Paste, a drag between two Files windows, the shell's `cp` and `mv`.
+  A move between the two volumes is a copy, then the original is deleted (only when the whole
+  copy worked). Inside one volume a move is a rename, as before.
+- **The clock:** when Horizon starts with the PC there (the Desktop, the shell), and when the
+  PC icon comes, the clock is set from the PC's clock and saved in /SYSTEM/CLOCK. Without the
+  PC nothing changes: the last saved time (provisional), or the time you set.
+- **Errors:** "no PC link" (the PC is not connected: $C7), "the PC link was lost" (the link
+  stopped during the operation, or a file was opened before it stopped: $C8), "not on the
+  same volume" ($C9, a rename between the card and the PC; Files, the shell and the Desktop
+  copy instead).
+- The volume is slower than the card: about 50-150 KB/s, a few ms for each operation.
 
 ## The shell and the file browser
 
@@ -441,7 +486,8 @@ names with spaces: "in quotes"; ctrl-C stops the foreground job
 | `tools/mkqbart.py`, `tools/mkqbsfx.py` | (0.17) Quabricks' art (`user/qb_art.inc`: its colours in local entries (1.1), the block tiles with rounded corners, the logo, the big fonts) and its samples (`/BIN/QUABRICK.SFX`) |
 | `user/uipop.s` | (0.15) ui_popup, ui_popat, ui_menukey, ui_chime, ui_beep, the text field's pop-up menu |
 | `user/ktest.s` | (0.15) KTEST, the test of the kernel's 0.15 additions |
-| `user/uidate.s` | (0.14) the date: seconds to a calendar date and back, `/SYSTEM/CLOCK` (also linked by the shell) |
+| `user/uidate.s` | (0.14) the date: seconds to a calendar date and back, `/SYSTEM/CLOCK` (also linked by the shell); (0.20) the clock from the PC (ui_clkpc) |
+| `user/uicopy.s` | (0.20) copying and deleting files and whole folders, and moves between the card and the PC volume (ui_cptree, ui_rmtree, ui_mvtree; also linked by the shell) |
 | `sdfiles/icons.txt`, `tools/mkicons.py` | (0.14) the Desktop's icons as text art -> `/SYSTEM/ICONS` and `user/icons.inc` |
 | `user/horizon.inc` | User ABI: syscall numbers, error codes, macros (`sys`, `print`, `ptr`, `exit`, long branches) |
 | `user/ulib.s` | User library: line-buffered output and number printing, HID-to-ASCII (US, shift, caps lock, ctrl), `read_char`, `getline` (echo, backspace, ctrl-C), `parse_dec`, `spawn`, `exit_a`, `args_init` |
@@ -857,6 +903,29 @@ bus time (see emu/README.md, "Memory timing"). Expect the same factor on the CPU
   source stride), SYS_WGEOM, SYS_TNAME, WE_DROP's modifiers, the date routines (ui_clk*,
   `user/uidate.s`), shortcuts (ui_lnkread, ui_mklink), program and file icons (ui_prog,
   ui_ficon). See ABI.md and ui.inc.
+
+## Version 0.20 (the PC link, step 1)
+
+The I/O processor firmware shows one folder of the PC as a second volume, `/PC:` (see "The PC
+volume" above and ABI.md, "The PC volume"); the kernel did not change (bank $01 2,109 bytes
+left, k2 711, k3 2,386: as in 0.19). New I/O results: $87 no PC link, $88 PC link lost, $89 not
+the same volume (Horizon errors $C7, $C8, $C9).
+
+- **The controls library:** `uicopy.s` (ui_cptree: a file or a whole folder copied, 32 KB at a
+  time, a callback for the progress; ui_rmtree: a file or a folder and everything in it
+  deleted; ui_mvtree: SYS_RENAME, and on $C9 ui_cptree then ui_rmtree). `ui_clkpc` (uidate.s):
+  STAT `/PC:` answers with the PC's current time; that sets the clock (CLK_SET) and
+  /SYSTEM/CLOCK. `ui_clkload` asks it first when the clock is not set.
+- **Desktop:** the third fixed icon (kind K_PC) while STAT `/PC:` works (in every rescan,
+  every 5 s); the number of fixed icons is now a variable (`nfix`). When it comes, ui_clkpc.
+  Drops: onto the PC icon copied into /PC:, onto the SD card icon from the PC copied; other
+  moves through ui_mvtree. `sdfiles/icons.txt` has the PC icon (ICO_PC, the last one).
+- **Files:** a move (a drag) through ui_mvtree; Paste through ui_cptree, so folders are
+  copied too (before 0.20 they were refused); the messages for $C7-$C9.
+- **The shell:** `cp` through ui_cptree (a folder too), `mv` through ui_mvtree; the messages
+  "no PC link", "the PC link was lost", "not on the same volume".
+- **emu816:** `--pc-folder DIR`, `--pc-time`, `--pc-drop-at`, `--pc-back-at` (emu/README.md).
+- Tests: "Build, run, test", 25.
 
 ## Version 0.19 (sheets)
 
@@ -1316,6 +1385,10 @@ ABI.md, "The games round", has the rules; `user/gtest.s` tests them.
   longer lets a click overtake the move before it.
 
 ## Current limits
+
+- The PC volume (0.20): one shared folder; no Atari disk images mounted from it (CLASSIC_MOUNT
+  of a `/PC:` path answers $82: copy the image to the card first); a long copy blocks the
+  program doing it (Files, the Desktop, the shell) until it ends.
 
 - Desktop: 16 windows including the menu bar and an open drop-down; menus 2045 bytes per
   window (the Desktop's Programs menu: 16 programs), 12 titles in the bar;

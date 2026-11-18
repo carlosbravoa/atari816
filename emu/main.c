@@ -7,6 +7,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <sys/stat.h>
 #ifdef HAVE_SDL
 #include <SDL.h>
 #endif
@@ -274,7 +275,13 @@ static void usage(void)
         "  --boot-cart PATH     a cartridge (FAT path on --sd) the I/O processor loaded at power-on\n"
         "                       (boot=ash): CLASSIC_STATE ($1E) reports it\n"
         "  --card-date YYYY-MM-DDTHH:MM  the date STAT reports for every file this run did not write\n"
-        "                       (the tests: a fresh copy of the card has no meaningful dates)\n"
+        "                       (the tests: a fresh copy of the card has no meaningful dates;\n"
+        "                       also the files of --pc-folder)\n"
+        "  --pc-folder DIR      the PC volume (PC link): /PC: paths are served from DIR\n"
+        "  --pc-time YYYY-MM-DDTHH:MM  the PC's clock at power-on (it counts on with emulated time;\n"
+        "                       default: the host's clock)\n"
+        "  --pc-drop-at SECONDS the PC link drops at this emulated time\n"
+        "  --pc-back-at SECONDS and comes back at this one (a new session)\n"
         "  --ideal-timing       every CPU cycle ideal: no cache misses, SDRAM write or sweep stalls,\n"
         "                       the blitter's older speed model (the timing before Horizon 0.19)\n"
         "  --console-us N       DBG_OUT busy for N us after each byte; bytes written while busy are dropped\n"
@@ -317,12 +324,15 @@ int main(int argc, char **argv)
         else if (!strcmp(a, "--stats")) stats = 1;
         else if (!strcmp(a, "--ideal-timing")) M.fr.ideal = 1;
         else if (!strcmp(a, "--boot-cart") && i + 1 < argc) mailbox_boot_cart = argv[++i];
-        else if (!strcmp(a, "--card-date") && i + 1 < argc) {
+        else if ((!strcmp(a, "--card-date") || !strcmp(a, "--pc-time")) && i + 1 < argc) {
             struct tm tm = { 0 };
             if (sscanf(argv[++i], "%d-%d-%dT%d:%d", &tm.tm_year, &tm.tm_mon, &tm.tm_mday, &tm.tm_hour, &tm.tm_min) != 5) usage();
             tm.tm_year -= 1900; tm.tm_mon -= 1; tm.tm_isdst = -1;
-            mailbox_card_date = mktime(&tm);
+            if (a[2] == 'c') mailbox_card_date = mktime(&tm); else mailbox_pc_time = mktime(&tm);
         }
+        else if (!strcmp(a, "--pc-folder") && i + 1 < argc) mailbox_pc_root = argv[++i];
+        else if (!strcmp(a, "--pc-drop-at") && i + 1 < argc) mailbox_pc_drop = atof(argv[++i]);
+        else if (!strcmp(a, "--pc-back-at") && i + 1 < argc) mailbox_pc_back = atof(argv[++i]);
         else if (!strcmp(a, "--console-us") && i + 1 < argc) console_us = atof(argv[++i]);
         else if (!strcmp(a, "--keys") && i + 1 < argc) parse_keys(argv[++i]);
         else if (!strcmp(a, "--mouse") && i + 1 < argc) parse_mouse(argv[++i]);
@@ -362,6 +372,13 @@ int main(int argc, char **argv)
     }
 
     M.mb.root = sd;
+    if (mailbox_pc_root) {                              /* the PC volume's folder must exist */
+        struct stat st;
+        if (stat(mailbox_pc_root, &st) || !S_ISDIR(st.st_mode)) {
+            fprintf(stderr, "emu816: --pc-folder %s: not a folder\n", mailbox_pc_root);
+            return 1;
+        }
+    }
     restart_prog = prog;
     M.nvc.on_frame = on_frame;
     for (int i = 0; i < nshots; i++) if (shot_at[i] > 1e29 || shot_at[i] < 0.1) M.nvc.want = 1;

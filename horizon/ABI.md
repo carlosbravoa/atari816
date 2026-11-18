@@ -1,4 +1,4 @@
-# Horizon ABI (version 0.19)
+# Horizon ABI (version 0.20)
 
 This file describes the interface between Horizon and user programs. `user/horizon.inc`
 holds the same definitions for ca65.
@@ -43,7 +43,7 @@ PBR:PC-1.
 | $0C | sysreq | A = 1 shut down, 2 restart, 3 full restart | - | (0.13) Asks the Desktop: the backdrop window gets WE_SYSREQ (a = A, c = the caller's task id); the Desktop asks every program to close, then restarts or shuts down (no confirmation: the asker confirmed). EINVAL without the window system or a backdrop. The shell's `restart` and `shutdown` use it |
 | $0D | time_get | - | A = seconds low, X = seconds high, Y = state | (0.14) The clock: seconds since 2000-01-01 00:00, counted by the 10 ms tick from the value time_set gave (the board has no battery clock). Y: 0 CLK_NONE never set (it counts from 0 since the start), 1 CLK_SAVED a provisional value (the last one saved, loaded at start by the Desktop or the shell), 2 CLK_SET set in this session. The controls library turns it into a date (ui_clk*, ui.inc) |
 | $0F | vsync | - | A = the frame counter (as frame, $9E) | (0.15) Blocks until the next vertical blank begins (NV_LINE 360; 60.03 a second), for games that draw once a frame. (0.18) From REV $09 Marga's VBLANK interrupt ends the wait and A is NV_FRAME, so a program sees the frames it missed (a difference above 1); before REV $09 the moment is derived from the raster line with a one-shot TIMER1 (the VBLANK interrupt as well) and A counts the vertical blanks waited for by any task. (0.18) Then it also waits until the caller's draw list is done and makes the CPU see what Ali wrote. Interruptible by kill |
-| $0E | time_set | A = seconds low, X = high, Y = 1 CLK_SAVED or 2 CLK_SET | - | (0.14) The clock counts from there (the second starts now). EINVAL for another Y. Programs keep the value across restarts themselves: the Desktop and the shell save it to `/SYSTEM/CLOCK` (one line `YYYY-MM-DD HH:MM:SS`) when it is set and before a restart or shut down, and load it at start (ui_clkload / ui_clksave). (0.19) The kernel also gives the time to the I/O processor (op $1D SYS_TIME), which counts on from it and stamps the files it writes with it (STAT's FAT time; `ls` in the shell and Files' footer show it); until a time is given, files get the firmware's build date (an older firmware: a fixed date) |
+| $0E | time_set | A = seconds low, X = high, Y = 1 CLK_SAVED or 2 CLK_SET | - | (0.14) The clock counts from there (the second starts now). EINVAL for another Y. Programs keep the value across restarts themselves: the Desktop and the shell save it to `/SYSTEM/CLOCK` (one line `YYYY-MM-DD HH:MM:SS`) when it is set and before a restart or shut down, and load it at start (ui_clkload / ui_clksave). (0.19) The kernel also gives the time to the I/O processor (op $1D SYS_TIME), which counts on from it and stamps the files it writes with it (STAT's FAT time; `ls` in the shell and Files' footer show it); until a time is given, files get the firmware's build date (an older firmware: a fixed date). (0.20) With the PC volume there, the Desktop and the shell set the clock from the PC (stat of `/PC:`; CLK_SET, saved) at start, and the Desktop again whenever the PC volume comes back (ui_clkpc) |
 | $10 | bank_alloc | - | A = bank | A fresh 64 KB bank owned by the task (VALID + WRITE). Contents undefined. ENOMEM when none is left |
 | $11 | bank_free | A = bank | - | Only a bank from bank_alloc: not the window or code bank, else EINVAL |
 | $12 | mem_info | - | A = free banks, X = total banks | Total = free + owned by tasks + kernel banks taken from the pool: 92 on 8 MB, of which the kernel keeps 4 for the screen ($7C-$7F) |
@@ -56,7 +56,7 @@ PBR:PC-1.
 | $26 | readdir | X, Y = {u24 path, u24 buffer, u16 length, u16 skip} | A = entries | Entries are packed into the buffer: u32 size, u8 attr, u8 name length, name (no terminator). Without "." and ".."; in the I/O processor's order: the directory's own (FatFs) order on the board, sorted by name in the emulator. Programs that show a list sort it themselves (Files, the file dialog, FILES do). `skip` entries are skipped, for continuation. The buffer must have room for the path, which the kernel copies there first (an I/O processor rule) |
 | $27 | delete | X, Y = path | - | |
 | $28 | mkdir | X, Y = path | - | |
-| $29 | rename | X, Y = {u24 old path, u24 new path} | - | Renames or moves a file or folder on the card (I/O processor RENAME). Both paths are resolved like any other. Errors as for open |
+| $29 | rename | X, Y = {u24 old path, u24 new path} | - | Renames or moves a file or folder on the card (I/O processor RENAME). Both paths are resolved like any other. Errors as for open. (0.20) Inside the PC volume too; between the card and the PC volume: $C9 (copy, then delete: the controls library's ui_mvtree does it) |
 | $30 | spawn | X, Y = block {u24 path, u24 args, u8 priority (bit 7 SP_DETACH)} | A = task id | `args` = a zero-terminated argument string of at most 127 characters, or 0 for none; the kernel copies it to the top of the child's window (see Task start conditions). Priority 0 (highest) to 3. Returns once the program is loaded: a load error is returned here and no task is left behind (the causes a launcher tells apart: ENOMEM no banks, EAGAIN no task slot, $44/$45 no such file, EINVAL not a valid program, ERUNNING a single-instance program already runs). SP_DETACH ($80 in the priority byte): the child has no waiting parent and is freed at its exit (the parent still gets the load result) |
 | $31 | wait | A = task id | A = exit code | Only for the caller's own children. Blocks until the child exits, then frees it. ECHILD if the task is not a child (or was already waited for). Interruptible by kill |
 | $32 | kill | A = task id | - | Any live task, including the caller. The target exits with code $FF80 at its next return to user mode. A sleep, wait, recv or input_read in progress is cut short. A pending file operation finishes first. ECHILD (5) if no such task |
@@ -147,6 +147,33 @@ turns every path into an absolute one and resolves `.`, `..` and repeated `/` be
 I/O processor sees it (FatFs runs without relative paths). The result must fit in 127
 characters (the I/O processor's limit), else EINVAL. The I/O processor serves one request at a time. A task that makes
 a file call blocks until the answer arrives; the other tasks keep running.
+
+**The PC volume** (0.20, the PC link). With the PC gateway connected, the I/O processor shows
+one folder of the PC as a second volume: a path whose first four characters are `/PC:` (any
+case), followed by the end or `/`, is on it; `/PC:` alone is its root. The kernel treats `:`
+as a normal character (`..` from `/PC:` gives `/`). On the PC volume:
+
+- Every file call works as on the card (open in all modes, read, write, seek, close, stat,
+  readdir, mkdir, delete, rename inside the volume, spawn and load), with the same 4 handles
+  (a handle can be a card file or a PC file) and the same error codes ($44 no file, $45 no
+  path, $46 bad name, $47 denied: also anything that would leave the shared folder and a
+  folder that is not empty, $48 exists, $52 too many open files, $41 another I/O error).
+- Names are looked up ignoring case; new files get the case given. Names starting with `.`
+  are not listed. readdir lists by name (the gateway sorts).
+- readdir of `/` (the card's root, exactly "/") gives one more entry at the end while the
+  volume is there: a folder named `PC:` (size 0, attribute $10); `skip` counts it like any
+  other entry.
+- stat of `/PC:` (its root) answers size 0, attribute $10 and, as its time, the PC's
+  **current** local time (FAT format, 2-second steps): this is how programs learn the PC's
+  clock (see time_set, and ui_clkpc in the controls library). stat of anything else on it:
+  the PC file's size, attribute ($10 folder, $01 read-only, else $20) and modification time.
+- When the volume is not there (no gateway, or one without the file service), every call on a
+  `/PC:` path fails at once with $C7. If the link drops, a call in progress fails with $C8
+  (within about 3 s), and later read, write and seek on a handle opened on the PC fail with
+  $C8; close frees such a handle (OK). sync (`SYS_SYNC`) also closes the PC's files.
+- classic_mount of a `/PC:` path: $C7 without the volume, $C2 with it (not in this step: copy
+  the image to the card).
+- Speed: about 50-150 KB/s, a few ms for each call.
 
 **File handles.** The I/O processor has 4 handles for the whole system. The kernel records
 which task owns each one. A task can only use its own handles, and they are closed when it
@@ -612,7 +639,7 @@ order of lines from different tasks depends on timing.
 | 7 | ENOSYS | Unknown syscall |
 | 8 | ERUNNING | (0.13) spawn / task_single: a single-instance program runs already; its windows were raised |
 | 9 | ENODEV | (0.17) The hardware is not there: the sample calls on a board without Lau (REV < $0A); (0.18) sprites and fs_scroll before REV $0B, fs_raster and win_vbl before REV $09 (BASIC 2.0 says "Not available on this machine") |
-| $40 + n | I/O | I/O processor result n. n is a FatFs FRESULT: 4 no file, 5 no path, 6 invalid name, 7 denied, 8 exists, 18 too many open files. $80 is a bad handle, $81 a bad address |
+| $40 + n | I/O | I/O processor result n. n is a FatFs FRESULT: 4 no file, 5 no path, 6 invalid name, 7 denied, 8 exists, 18 too many open files. $80 is a bad handle, $81 a bad address. (0.20) The PC volume: $C7 no PC link (the volume is not there), $C8 the PC link was lost (during the call, or the handle was opened before the link dropped), $C9 not the same volume (rename between the card and the PC) |
 
 ## Program format
 

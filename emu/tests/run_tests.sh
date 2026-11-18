@@ -143,6 +143,30 @@ out=$($EMU --max-seconds 5 --mouse "100:5:-3:0:0,150:300:-200:0:1,200:0:0:2:1,25
 out=$($EMU --max-seconds 20 --keys "0:1E:1,100:04:1,150:04:0,200:E1:1,220:05:1,260:05:0,300:E1:0,400:45:1,450:45:0,500:04:1,501:05:1,502:06:1,503:07:1,504:08:1,600:04:0,600:05:0,600:06:0,600:07:0,600:08:0,700:1E:0" $T/asm/kbtest.bin)
 [ "$out" = "$(cat $T/expected/kbtest.txt)" ] && ok "kbtest (KEY events, modifiers, 4-key limit, F12 NMI)" || bad "kbtest" "$out"
 
+# ── the PC volume (PC link step 1, --pc-folder): /PC: paths, the "PC:" entry at the end of the
+# card's root, STAT /PC: = the PC's clock (--pc-time), a file round trip, $89 for a RENAME
+# between the volumes, confinement (.., a symlink out); absent: $87; a drop: $88 ──
+pcfix() {
+    rm -rf "$TMP/pc" "$TMP/outside"
+    mkdir -p "$TMP/pc/sub" "$TMP/outside"
+    printf 'Notes kept on the PC.\n' > "$TMP/pc/Notes.txt"
+    printf 'deep data' > "$TMP/pc/sub/Deep.bin"
+    echo hidden > "$TMP/pc/.hidden"
+    ln -s ../outside "$TMP/pc/out"
+}
+PCT="--sd $TMP/fix --card-date 2025-12-25T10:30 --pc-time 2026-03-04T05:06 --max-seconds 15"
+pcfix
+out=$($EMU $PCT --pc-folder "$TMP/pc" $T/asm/pctest.bin 2>/dev/null)
+if [ "$out" = "$(cat $T/expected/pctest.txt)" ] && [ "$(cat "$TMP/pc/Made/Moved.txt")" = "Written by pctest into the PC folder." ] \
+   && [ -z "$(ls -A "$TMP/outside")" ]; then
+    ok "pctest (the PC volume: root entry, clock, round trip, \$89, confinement)"; else bad "pctest" "$out"; fi
+pcfix
+out=$($EMU $PCT $T/asm/pctest.bin 2>/dev/null)
+[ "$out" = "$(cat $T/expected/pctest-absent.txt)" ] && ok "pctest without --pc-folder (\$87, the root unchanged)" || bad "pctest absent" "$out"
+pcfix
+out=$($EMU $PCT --pc-folder "$TMP/pc" --pc-drop-at 1 --pc-back-at 1.5 $T/asm/pctest.bin 2>/dev/null)
+[ "$out" = "$(cat $T/expected/pctest-drop.txt)" ] && ok "pctest with --pc-drop-at, --pc-back-at (\$88, a new session)" || bad "pctest drop" "$out"
+
 # ── 4. CPU: SingleStepTests/65816 sample (tests/fetch_sst.py downloads it) ──
 if ls $T/sst/*.txt >/dev/null 2>&1; then
     res=$($T/cputest $T/sst/*.txt | tail -1)

@@ -56,7 +56,7 @@ openFPGALoader -b tangnano20k impl/atari800_tn20k/impl/pnr/atari800_tn20k.fs   #
 ./flash_it.sh                     # both to flash: cold.bin and the bitstream
 ```
 
-Close any PC link session (`tools/atari.py log`) first: loads fail while the serial port is open.
+Stop the PC link gateway (`../tools/atari816-link`) and any `tools/atari.py` command first: loads fail while the serial port is open.
 
 ## SD card
 
@@ -100,6 +100,10 @@ joystick games; features beyond that were removed to make room for the native ma
 ## PC link and tools
 
 The USB-C cable of the board carries a serial port to the I/O processor (`pip install pyserial`).
+Since the PC link (`../Docs/04-pc-link.md`) it carries framed packets at 1.5 Mbaud: the log, the
+PC volume served by the gateway (`../tools/atari816-link`, see the root README) and the
+requests of these developer tools. The tools go through the gateway when it runs, else they
+open the port themselves for the time of the command.
 
 ```bash
 python3 tools/atari.py log                       # firmware and 65C816 debug log
@@ -116,7 +120,7 @@ python3 tools/atari.py --help                    # all commands
 | What | How |
 | --- | --- |
 | 65C816 machine in simulation | `sim_a816/run.sh` (self test), `sim_a816/run.sh +prog=NAME.bin` for `bringup1_sim.bin`, `nvtest_sim.bin`, `blitlist_sim.bin`, `sampler_sim.bin`, `sprtest_sim.bin` (`+timeout_ms=3000`), `sprsceneN.bin` (`+ppm2` keeps the last frames for comparing with emu816), `BLITTEST.BIN`; `sim_a816/run_blit.sh` (random blitter test). The testbench compares every pixel of Marga's output with its own model (bitmap, scrolling, pointer, sprites); `+fixlat` gives the SDRAM's own latencies instead of random ones |
-| On the board | `make -C sw/a816`, then `tools/atari.py run816 sw/a816/X.BIN`: `A816.BIN` (self test), `BLITTEST.BIN`, `BLITLIST.BIN`, `SAMPLER.BIN`, `SPRTEST.BIN`, `SYSTEST.BIN`, `FSBENCH.BIN` (SD speed), `TIMING.BIN` (CPU and Ali speed by access kind and video mode: emu816's memory model is calibrated against it, emu/README.md "Memory timing"); `PLAYDEMO.BIN`, `SPLIT.BIN`, `SPRDEMO.BIN` and `SCROLLDEMO.BIN` are for ears and eyes. The list is at the top of `sw/a816/Makefile` |
+| On the board | `make -C sw/a816`, then `tools/atari.py run816 sw/a816/X.BIN`: `A816.BIN` (self test), `BLITTEST.BIN`, `BLITLIST.BIN`, `SAMPLER.BIN`, `SPRTEST.BIN`, `SYSTEST.BIN`, `FSBENCH.BIN` (SD speed), `PCBENCH.BIN` (the same on the PC volume, needs the gateway), `TIMING.BIN` (CPU and Ali speed by access kind and video mode: emu816's memory model is calibrated against it, emu/README.md "Memory timing"); `PLAYDEMO.BIN`, `SPLIT.BIN`, `SPRDEMO.BIN` and `SCROLLDEMO.BIN` are for ears and eyes. The list is at the top of `sw/a816/Makefile` |
 | FatFs volume safety (host) | `test/fatfs_host/run_tests.sh` |
 
 ## Pins

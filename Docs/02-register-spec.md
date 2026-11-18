@@ -498,7 +498,9 @@ A ring is empty when HEAD equals TAIL and full when HEAD + 1 equals TAIL.
 | $21 | UNMOUNT | ARG0 = drive | 0 |
 | $30 | TIME | none | Seconds since 2000-01-01 |
 
-Paths are FAT32 paths, UTF-8, zero-terminated. LOAD streams a whole file straight into RAM, for ROM images, cartridge images and programs. $40 to $5F are reserved for FujiNet sockets later.
+Paths are FAT32 paths, UTF-8, zero-terminated. LOAD streams a whole file straight into RAM, for ROM images, cartridge images and programs. $40 to $5F are reserved for FujiNet sockets later (or the PC link's internet services, `04-pc-link.md`, "Step 2").
+
+**The PC volume** (PC link, `04-pc-link.md`): a path that starts with `/PC:` (any case; then the end or `/`) is in the folder that the gateway on a connected PC shares. OPEN, CLOSE, READ, WRITE, SEEK, STAT, READDIR, MKDIR, DELETE, RENAME and LOAD work on it, with the same four handles. READDIR of `/` lists a folder `PC:` last while it is there; STAT of `/PC:` gives the PC's clock as its time. Results added: $87 no PC link (at once), $88 PC link lost (during the operation, or a handle of an ended link session; CLOSE frees such a handle and answers 0), $89 RENAME between the card and the PC volume. CLASSIC_MOUNT of such a path answers $82.
 
 ### Events (I/O processor to Horizon, TAG = 0)
 

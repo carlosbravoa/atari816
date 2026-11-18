@@ -22,7 +22,7 @@ The examples assume the usual `.a16` / `.i16` and these names from your program:
 | `ENOSYS` | 7 | Unknown syscall |
 | `ERUNNING` | 8 | A single-instance program runs already (its windows were raised) |
 | `ENODEV` | 9 | (0.17) The hardware is not there: the sample calls without Lau (REV < $0A) |
-| `EIO` | $40 | + the I/O processor's result: $44 no such file, $45 no such path, $46 bad name, $47 denied, $48 exists, $52 too many open files; $C0 + n for the classic ops |
+| `EIO` | $40 | + the I/O processor's result: $44 no such file, $45 no such path, $46 bad name, $47 denied, $48 exists, $52 too many open files; $C0 + n for the classic ops; (0.20) $C7 no PC link, $C8 the PC link was lost, $C9 not the same volume (the PC volume, `/PC:`) |
 
 ## Tasks
 

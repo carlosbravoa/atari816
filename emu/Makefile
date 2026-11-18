@@ -20,7 +20,7 @@ tests/cputest: tests/cputest.c cpu65816.c cpu65816.h
 	$(CC) $(CFLAGS) -o $@ tests/cputest.c cpu65816.c $(LDLIBS)
 
 ASMTESTS = tests/asm/mbdemo.bin tests/asm/nvcdemo.bin tests/asm/cpuirq.bin tests/asm/nvcmode1.bin tests/asm/nvcmode2.bin \
-           tests/asm/copabort.bin tests/asm/eirq.bin tests/asm/kbtest.bin tests/asm/nmihold.bin tests/asm/mousetest.bin
+           tests/asm/copabort.bin tests/asm/eirq.bin tests/asm/kbtest.bin tests/asm/nmihold.bin tests/asm/mousetest.bin tests/asm/pctest.bin
 
 # the test programs are rebuilt when ca65 is available (the .bin files are kept)
 tests/asm/%.bin: tests/asm/%.s tests/asm/common.inc tests/asm/a816.cfg

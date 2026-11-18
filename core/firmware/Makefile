@@ -24,7 +24,7 @@ CFLAGS  = -Wall -Os -g -ffunction-sections -fdata-sections -mabi=ilp32 -march=rv
 LFLAGS = -mabi=ilp32 -march=rv32i -msave-restore -Os -Wl,-Map=firmware.map,--build-id=none,-Bstatic,-T,baremetal.ld,--gc-sections -nostdlib
 LIBS = -lgcc
 
-SRCS := start.S firmware.c picorv32.c spi_sd.c spiflash.c \
+SRCS := start.S firmware.c pclink.c picorv32.c spi_sd.c spiflash.c \
 	fatfs/diskio.c fatfs/ff.c fatfs/ffunicode.c
 OBJS := $(SRCS:.c=.o)
 OBJS := $(OBJS:.S=.o)

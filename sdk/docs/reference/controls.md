@@ -234,6 +234,15 @@ s_msg:  .byte   "Saved.", 0
 | `ui_spawnerr` | A = a spawn error, X = name | the "Cannot start NAME" alert |
 | `ui_ftype` | X = name or path | -> A = `FT_*` by the extension |
 | `ui_open` | X = full path | opens it with its program (a folder in Files, .BAS in BASIC, an Atari file in the classic machine, ...) |
+| `ui_cptree` | X = source path, Y = destination path (the new name) | (Horizon 0.20) copies a file (a file there is replaced), or a folder and everything in it (the destination folder must not exist); also between the card and the PC volume `/PC:`. C set: A = error |
+| `ui_rmtree` | X = path | (0.20) deletes a file, or a folder and everything in it. C set: A = error |
+| `ui_mvtree` | X = from, Y = to | (0.20) moves (`SYS_RENAME`); between the card and the PC volume (error $C9) it copies, then deletes the source. C set: A = error ($48: "to" exists) |
+| `ui_clkpc` | - | (0.20) when the PC volume is there, sets the clock from the PC's clock and saves it to /SYSTEM/CLOCK. C set: no PC volume |
+
+Paths are in the program's bank. These routines do not need the rest of the library (no
+zero page): a console program can link them too. `ui_cpcb` (a word, 0 = none) may hold a
+routine that `ui_cptree` calls after every 32 KB (for a progress line: `ui_cpk` = K copied of
+the current file, `ui_cpsize` its size, `ui_cpname` its name).
 
 ```asm
         ldx     #.loword(s_edit)

@@ -26,7 +26,8 @@ active development; interfaces can still change.
 | [`horizon/`](horizon/) | Horizon, the operating system, and its programs (65816 assembly, ca65/ld65) |
 | [`emu/`](emu/) | emu816, a C emulator of the native machine, for developing on a PC |
 | [`sdk/`](sdk/) | The SDK: getting-started guide, programmer's reference, templates, examples, tools |
-| [`Docs/`](Docs/) | Design documents: architecture, register specification, bring-up log |
+| [`tools/`](tools/) | `atari816-link`, the PC side of the PC link (shares a folder of the PC with the Atari816) |
+| [`Docs/`](Docs/) | Design documents: architecture, register specification, bring-up log, the PC link |
 
 ## How to try it
 
@@ -36,6 +37,36 @@ active development; interfaces can still change.
   [`core/README.md`](core/README.md), then prepare a FAT32 SD card with Horizon as described
   in [`sdk/docs/getting-started.md`](sdk/docs/getting-started.md), section 6, and
   [`horizon/README.md`](horizon/README.md).
+
+## The PC link
+
+The USB cable that powers the board also connects it to the PC. With the gateway running on
+the PC, one folder of the PC appears on the Atari816 as a second volume, **`/PC:`**: a "PC"
+icon on the desktop, a `PC:` folder in Files, usable from the shell and from every program
+(copy between the card and the PC both ways, open and save, start programs from it). The
+Atari816 also takes the PC's time when the gateway connects, so the clock no longer needs to
+be set by hand.
+
+```
+pip install pyserial
+tools/atari816-link                 # shares ~/Atari816 (made if missing)
+tools/atari816-link ~/somewhere     # shares another folder
+tools/atari816-link --read-only     # the Atari816 can read, not change anything
+```
+
+Leave it running; stop it with Ctrl-C. It finds the board by itself and reconnects when the
+board is reset or plugged in again. The icon appears within a few seconds and goes away when
+the gateway stops.
+
+- **Only that folder** is shared. Nothing outside it can be read or changed: `..`, hidden
+  names (starting with `.`) and links that point out of the folder are refused.
+- **No network.** The gateway opens no network port. It only talks to the board over USB,
+  and to the developer tools through a socket in your runtime folder that only you can use.
+- Without the gateway the Atari816 works as before; `/PC:` then answers "no PC link".
+- Linux: your user must be allowed to use the serial port (group `dialout`). Stop the gateway
+  before you load a new bitstream with openFPGALoader.
+
+The protocol, for anyone who wants to write another gateway: [`Docs/04-pc-link.md`](Docs/04-pc-link.md).
 
 ## What you must supply yourself
 
@@ -52,6 +83,7 @@ in [`LICENSES/`](LICENSES/) and [`core/LICENSES/`](core/LICENSES/). See [`LICENS
 | --- | --- |
 | `horizon/` | GPL-3.0-or-later |
 | `emu/` | GPL-3.0-or-later |
+| `tools/` | GPL-3.0-or-later |
 | `sdk/` | MIT |
 | `Docs/` | CC-BY-SA-4.0 |
 | `core/` (original work) | CC-BY-NC-SA-4.0 OR GPL-3.0-or-later, at your option ([`core/LICENSE-PORT`](core/LICENSE-PORT)) |

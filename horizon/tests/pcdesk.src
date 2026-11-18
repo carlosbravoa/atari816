@@ -1,0 +1,45 @@
+# (0.20) The PC volume on the Desktop (DESK=1; tests/mousegen.py makes tests/pcdesk.keys from
+# this). emu816 --pc-folder on a fresh copy of tests/pc, --pc-time 2026-03-04T05:06 (the PC's
+# clock), --pc-drop-at 27.5 --pc-back-at 35.5 (the link drops, then comes back). Files is at
+# (24, 24); its rows from y 61, 12 apart. The PC icon is at (595, 160). Shots (s):
+#   1   7.0  the PC icon under the Atari; the clock set from the PC (05:06)
+#   2  16.0  BLUE.XEX and the docs folder dropped on the PC icon (copied into /PC:), then
+#            a double click on the PC icon: Files at /PC:
+#   3  17.0  Notes.txt selected in it: its date on the footer (then ctrl-C)
+#   4  21.0  the first Files window raised, ctrl-V: Notes.txt copied from the PC to the card
+#   5  26.0  README.TXT dragged from the card's window into the PC's: moved (a copy, then
+#            the card's file deleted)
+#   6  33.5  the link dropped at 27.5 s: the PC icon is gone
+#   7  41.5  the link back at 35.5 s: the PC icon again (the clock set from the PC again)
+#   8  48.5  Edit from the Programs menu, ctrl-O: the file dialog lists the card's root with
+#            the PC: folder
+#   9  51.5  "pc", Enter: the dialog in /PC:
+7500 move 100 157
+7900 press
+8000 drag 595 160
+10300 release
+10800 move 100 109
+11200 press
+11300 drag 595 160
+13000 release
+13500 move 595 160
+13600 dclick
+16500 move 124 133
+16600 click
+17100 key {dE0}c{uE0}
+18500 move 35 30
+18600 click
+19100 key {dE0}v{uE0}
+21500 move 100 193
+21900 press
+22000 drag 342 200
+24000 release
+24500 move 450 300
+42500 move 105 6
+42600 click
+43500 move 120 22
+43600 click
+46500 key {dE0}o{uE0}
+49500 key pc
+50000 key \n
+52500 key {esc}

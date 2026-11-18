@@ -1,0 +1,13 @@
+> ls /PC:
+dir: no PC link
+> cd /PC:
+cd: no PC link
+> cp /README.TXT /PC:
+cp: /README.TXT: no PC link
+> cat /PC:/x.txt
+cat: no PC link
+> mv /README.TXT /PC:/R.TXT
+mv: /README.TXT: no PC link
+> ls /pc:/x
+dir: no PC link
+> 

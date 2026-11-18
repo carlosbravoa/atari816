@@ -1,44 +1,39 @@
 # SPDX-License-Identifier: CC-BY-NC-SA-4.0 OR GPL-3.0-or-later
 # Copyright (c) 2026 Carlos Bravo
-"""atari_link.py — protocol library for the Tang Nano 20K Atari PC Link.
+"""atari_link.py - the developer tools' side of the Atari816 PC link.
 
-One implementation of the serial-bridge protocol (v1, firmware >= v2.5), shared by
-the CLI (atari.py) and the desktop app (atari_gui.py). Wire behavior is identical
-to the hardware-proven CLI code: strict '+' flow control, 50 ms beat after command
-bytes, checksum-verified transfers.
+Since the PC link (Docs/04-pc-link.md) the serial port carries framed packets. The
+developer commands (send a file, restart the 65C816, read memory, press keys...) are
+requests on the link's developer channel. This module keeps the AtariLink class that
+atari.py, atari_gui.py and a816_screen.py use, on top of tools/pclink.py:
 
-Protocol (single-byte commands, replies are raw bytes):
-  0x05 ENQ                       -> "A8OK\\n" in the log stream
-  0x01 PUT nlen name size32LE    -> '+', per-256B-chunk '+', sum16LE -> 'K'/'E'
-  0x02 RUN nlen name             -> '+'  (mounts the .xex + cold-boots it)
-  0x03 COLD / 0x04 WARM          -> '+'
-  0x06 EJECT                     -> '+'
-  0x07 TYPE len16LE ...          -> '+', per-char '+', 'K' ('M' = Atari took
-                                    the keyboard back via F12/S2)
-  0x13 PEEK816 addr24 width16 rows16 stride24 flags8
-                                 -> '+', data, sum16LE (of the raw bytes). Atari816:
-                                    65C816 memory; flags bit 0 = RLE (h<128: h+1
-                                    literals, h>=128: next byte x (h-125)); bit 1 =
-                                    XOR2 (byte ^= byte two before, per span); bit 2 =
-                                    sum only (no data)
+  - if the gateway (`tools/atari816-link`) is running, the requests go through it (its
+    Unix socket), and the PC volume stays served;
+  - otherwise the port is opened here, for the time of the command.
+
+Developer channel ops (payload: op, tag, flags, result, then the data):
+  $01 INFO        -> the firmware's status line
+  $02 PUT         size u32 + path, then frames of offset u32 + data -> result
+  $03 RESTART816  [1 = /A816.BIN only]
+  $04 RUN path    (a .xex: mount + cold boot)     $05 COLD   $06 WARM   $07 EJECT
+  $08 KEY mod hid hold10ms      $09 MOUSE dx dy wheel buttons      $0A TYPE text
+  $0B PEEK addr16 len16         $0C POKE addr16 bytes              $0D FWPEEK addr32 len16
+  $0E PEEK816 addr32 width16 rows16 stride32 flags8 -> data + sum16
+      (flags bit 0 RLE: h < 128: h + 1 literals, h >= 128: next byte x (h - 125);
+       bit 1 XOR2: byte ^= the byte two before, per row; bit 2: the sum only)
+  $0F ECHO   $10 SOURCE len32   $11 SINK   (link tests)
 """
 import os
+import queue
 import sys
 import time
 
-import serial
-import serial.tools.list_ports
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.normpath(os.path.join(HERE, "..", "..", "tools")))
+import pclink  # noqa: E402
+from pclink import LinkError, list_ports  # noqa: E402,F401
 
-BAUD = 115200
-
-# Protocol refusal byte (firmware BRIDGE_NAK). 0x15 = ASCII NAK — a control char
-# that never appears in the firmware's ASCII log text, so scanning for it in a
-# stream that interleaves logs and replies is unambiguous. (Before 2026-07-21
-# the firmware refused with '-', which collided with log content like filenames
-# — a log '-' was misread as a refusal. Old firmware still sends '-'; the tools
-# no longer treat it as a refusal, so against old firmware a genuine refusal
-# degrades to a timeout instead of a false-positive on the happy path.)
-NAK = 0x15
+BAUD = pclink.BAUD
 
 
 def _screencode_to_ascii(c):
@@ -48,42 +43,16 @@ def _screencode_to_ascii(c):
     return chr(a) if 32 <= a < 127 else "."
 
 
-class LinkError(Exception):
-    pass
-
-
 class MenuTakeover(Exception):
-    """The user pressed F12/S2 on the Atari — it took the keyboard back."""
-
-
-def list_ports():
-    return sorted(serial.tools.list_ports.comports(), key=lambda p: p.device)
+    """(Kept for old callers; the firmware menu is gone and never takes the keyboard.)"""
 
 
 def usb_ports():
-    """Only real USB serial devices (drops motherboard ttyS* noise)."""
     return [p for p in list_ports() if p.vid is not None]
 
 
 def auto_port():
-    """The BL616 enumerates FT2232-style: two ports, same VID:PID —
-    interface 0 = JTAG, interface 1 = the UART. Pick the SECOND of a pair."""
-    cands = usb_ports()
-    if not cands:
-        raise LinkError("No USB serial ports found — is the board connected "
-                        "and powered? (Linux: sudo modprobe ftdi_sio)")
-    if len(cands) == 1:
-        return cands[0].device
-    for i in range(len(cands) - 1):
-        a, b = cands[i], cands[i + 1]
-        if (a.vid, a.pid) == (b.vid, b.pid) and a.vid is not None:
-            return b.device
-    for p in cands:
-        text = f"{p.description} {p.manufacturer or ''}".lower()
-        if any(k in text for k in ("sipeed", "bl616", "jtag", "debug", "serial")):
-            return p.device
-    listing = "\n".join(f"  {p.device}  {p.description}" for p in cands)
-    raise LinkError("Can't auto-pick a port. Candidates:\n" + listing)
+    return pclink.auto_port()
 
 
 def sd_name(path, override=None, default_dir="PC"):
@@ -91,77 +60,55 @@ def sd_name(path, override=None, default_dir="PC"):
     name = override or (f"{default_dir}/" + os.path.basename(path)
                         if default_dir else os.path.basename(path))
     name = name.upper().lstrip("/")
-    if len(name) > 63:
-        raise LinkError(f"path too long for the bridge: {name}")
+    if len(name) > 150:
+        raise LinkError(f"path too long: {name}")
     return name
 
 
+def _check(res, what):
+    if res:
+        raise LinkError(f"{what}: the firmware answered error ${res:02X}")
+
+
 class AtariLink:
-    """One open connection. Not thread-safe — serialize access externally."""
+    """One connection for developer requests. Not thread-safe."""
 
     def __init__(self, port=None, timeout=1.0, settle=True):
-        self.port = port or auto_port()
-        self._timeout = timeout
-        # exclusive: a second reader steals bytes mid-frame — two atari_net
-        # instances once split an event stream 50/50 (HW-hit; one served the
-        # request, the other broke the next one). Fail loudly instead.
-        self.ser = serial.Serial(self.port, BAUD, timeout=timeout, exclusive=True)
-        self.backlog = b""          # what the firmware logged while no PC reader was attached
-        if settle:
-            self._settle_drain()
+        self.dev = pclink.DevClient(port=port, timeout=max(10.0, timeout))
+        self.port = self.dev.via if self.dev.sock else self.dev.link.port
+        self.backlog = b""
+        self.dev.subscribe_log(self._log)
+        self._lines = queue.Queue()
 
-    def _settle_drain(self, quiet=0.25, limit=3.0):
-        """The BL616 stores firmware log output while no PC reader is attached
-        and delivers the backlog on the next open (7+ KB takes ~0.7 s at
-        115200). Read until the line goes quiet so stale logs are never
-        mistaken for live replies. (A single reset_input_buffer loses this
-        race — the backlog is still streaming in.)"""
-        end = time.time() + limit
-        deadline = time.time() + quiet
-        old_to = self.ser.timeout
-        self.ser.timeout = 0.05
-        try:
-            while time.time() < deadline and time.time() < end:
-                b = self.ser.read(4096)
-                if b:
-                    self.backlog += b          # kept for callers that want it (ashterm's log)
-                    deadline = time.time() + quiet
-        finally:
-            self.ser.timeout = old_to
+    on_log = None          # on_log(bytes): a firmware log line arrived (with its newline)
 
-    def reconnect(self, wait=4.0, deadline=20.0):
-        """Recover from a BL616 USB drop: the device re-enumerates within a few
-        seconds (usually to the same ttyUSB node). `wait` also lets an aborted
-        firmware type-session time out (3 s per-char getc) before we resume."""
-        try:
-            self.ser.close()
-        except Exception:
-            pass
+    def _log(self, data):
+        line = data + b"\n"
+        if self.on_log is not None:
+            try:
+                self.on_log(line)
+            except Exception:
+                pass
+        else:
+            self._lines.put(line)
+
+    def reconnect(self, wait=1.0, deadline=20.0):
+        self.close()
         time.sleep(wait)
         end = time.time() + deadline
         while True:
             try:
-                port = self.port
-                try:
-                    port = auto_port()      # node may have moved
-                except LinkError:
-                    pass
-                self.ser = serial.Serial(port, BAUD, timeout=self._timeout,
-                                         exclusive=True)
-                self.port = port
-                break
-            except (serial.SerialException, OSError):
+                self.dev = pclink.DevClient(timeout=10.0)
+                self.dev.subscribe_log(self._log)
+                return
+            except Exception:
                 if time.time() > end:
                     raise
                 time.sleep(1)
-        try:
-            self.ser.reset_input_buffer()
-        except Exception:
-            pass
 
     def close(self):
         try:
-            self.ser.close()
+            self.dev.close()
         except Exception:
             pass
 
@@ -171,243 +118,120 @@ class AtariLink:
     def __exit__(self, *exc):
         self.close()
 
-    # ── plumbing ────────────────────────────────────────────────────────────
-    def _expect(self, want, what, timeout=3):
-        """Scan for a reply byte in `want`, skipping interleaved log bytes."""
-        deadline = time.time() + timeout
-        skipped = b""
-        try:
-            while time.time() < deadline:
-                b = self.ser.read(1)
-                if b:
-                    if b in want:
-                        return b
-                    if b == bytes([NAK]):
-                        raise LinkError(f"{what}: firmware refused (NAK)")
-                    skipped += b
-            raise LinkError(f"{what}: timeout (skipped {skipped!r})")
-        finally:
-            if skipped and self.on_log is not None:   # interleaved firmware log lines
-                try:
-                    self.on_log(skipped)
-                except Exception:
-                    pass
+    def _req(self, op, args=b"", frames=(), timeout=None, progress=None, what="request"):
+        res, data = self.dev.request(op, args, frames=frames, timeout=timeout, progress=progress)
+        _check(res, what)
+        return data
 
-    # Optional: on_log(bytes) receives whatever the firmware sent between replies (its
-    # uart log: mounts, SIO/SD errors, transfers) instead of it being discarded before
-    # the next command. Off by default; ashterm uses it for its session log.
-    on_log = None
-
-    def _take_pending(self):
-        if self.on_log is None:
-            return
-        try:
-            n = self.ser.in_waiting
-            if n:
-                self.on_log(self.ser.read(n))
-        except Exception:
-            pass
-
-    def _cmd(self, byte):
-        """Framed command (firmware >= v3.2.1): sync 0xA8, the dispatch beat (firmware
-        main-loop latency, 1-byte RX register), then cmd + complement check together —
-        the firmware is in its tight header read by then."""
-        self._take_pending()
-        self.ser.reset_input_buffer()
-        self.ser.write(b"\xa8")
-        time.sleep(0.05)
-        self.ser.write(bytes([byte, byte ^ 0xFF]))
-
-    # ── commands ────────────────────────────────────────────────────────────
+    # ---- commands ----
     def ping(self, timeout=2):
-        self._cmd(0x05)
-        deadline = time.time() + timeout
-        buf = b""
-        while time.time() < deadline:
-            buf += self.ser.read(64)
-            if b"A8OK" in buf:
-                return True
-        return False
+        try:
+            return self.dev.request(pclink.D_ECHO, b"A8OK", timeout=timeout)[1] == b"A8OK"
+        except LinkError:
+            return False
 
     def send(self, data, name, progress=None):
-        """PUT `data` to /`name` on the SD. progress(sent, total) if given."""
-        self._cmd(0x01)
-        self.ser.write(bytes([len(name)]) + name.encode("ascii") +
-                       len(data).to_bytes(4, "little"))
-        self._expect(b"+", "open")
-        sent = 0
-        while sent < len(data):
-            chunk = data[sent:sent + 256]
-            self.ser.write(chunk)
-            self._expect(b"+", f"chunk @{sent}", timeout=5)
-            sent += len(chunk)
-            if progress:
-                progress(sent, len(data))
-        self.ser.write((sum(data) & 0xFFFF).to_bytes(2, "little"))
-        if self._expect(b"KE", "checksum") == b"E":
-            raise LinkError("checksum mismatch — file deleted on the Atari, retry")
+        """Write `data` to /`name` on the SD card (folders are created)."""
+        name = name.lstrip("/")
+        frames = [off.to_bytes(4, "little") + data[off:off + pclink.CHUNK]
+                  for off in range(0, len(data), pclink.CHUNK)]
+        cb = None
+        if progress:
+            def cb(done, total):
+                progress(min(len(data), max(0, done - 1) * pclink.CHUNK), len(data))
+        self._req(pclink.D_PUT, len(data).to_bytes(4, "little") + name.encode() + b"\0",
+                  frames=frames, timeout=30, progress=cb, what="send")
+        if progress:
+            progress(len(data), len(data))
 
     def run(self, data, name, progress=None):
-        """PUT then boot. `data` must be a .xex ($FFFF header)."""
+        """Send then boot. `data` must be a .xex ($FFFF header)."""
         if data[:2] != b"\xff\xff":
             raise LinkError("not a .xex (missing $FFFF header)")
         self.send(data, name, progress)
-        self._cmd(0x02)
-        self.ser.write(bytes([len(name)]) + name.encode("ascii"))
-        self._expect(b"+", "run")
+        self._req(pclink.D_RUN, name.lstrip("/").encode() + b"\0", what="run")
 
     def eject(self):
-        self._cmd(0x06)
-        self._expect(b"+", "eject")
+        self._req(pclink.D_EJECT, what="eject")
 
     def reset(self, warm=False, keep=False):
         if not keep:
             self.eject()
-            time.sleep(0.05)
-        self._cmd(0x04 if warm else 0x03)
-        self._expect(b"+", "reset")
+        self._req(pclink.D_WARM if warm else pclink.D_COLD, what="reset")
 
     def restart816(self, test=False):
         """Reload /SYSTEM/HORIZON.SYS (or /A816.BIN) and restart the 65C816."""
-        self._cmd(0x11 if test else 0x10)   # 0x11: /A816.BIN only
-        self._expect(b"+", "restart816", timeout=10)
+        self._req(pclink.D_RESTART816, bytes([1 if test else 0]), timeout=15, what="restart816")
 
     def key(self, hid, mod=0, hold_ms=100):
         """Press one raw HID key (mod bit0=Ctrl, bit1=Shift) for hold_ms, release."""
-        self._cmd(0x0E)
-        self.ser.write(bytes([mod & 0xFF, hid & 0xFF, max(1, min(255, hold_ms // 10))]))
-        self._expect(b"+", "key", timeout=5)
+        self._req(pclink.D_KEY, bytes([mod & 0xFF, hid & 0xFF, max(1, min(255, hold_ms // 10))]),
+                  what="key")
 
     def mouse(self, dx=0, dy=0, wheel=0, buttons=0):
         """Inject a mouse movement for the 65C816 side (MOUSE event)."""
-        self._cmd(0x12)
-        self.ser.write(bytes([dx & 0xFF, dy & 0xFF, wheel & 0xFF, buttons & 0xFF]))
-        self._expect(b"+", "mouse", timeout=5)
+        self._req(pclink.D_MOUSE, bytes([dx & 0xFF, dy & 0xFF, wheel & 0xFF, buttons & 0xFF]),
+                  what="mouse")
 
     def type_text(self, text, progress=None):
-        """Paste text as keystrokes (~18 chars/s). progress(done, total)."""
+        """Paste text as keystrokes on the classic machine (~18 chars/s)."""
         data = text.replace("\r\n", "\n").encode("ascii", "replace")
-        self._cmd(0x07)
-        self.ser.write(len(data).to_bytes(2, "little"))
-        self._expect(b"+", "type start")
-        for i, b in enumerate(data):
-            self.ser.write(bytes([b]))
-            self._expect(b"+", f"char {i}", timeout=5)
+        done = 0
+        for i in range(0, len(data), 200):
+            part = data[i:i + 200]
+            self._req(pclink.D_TYPE, part, timeout=len(part) * 0.4 + 10, what="type")
+            done += len(part)
             if progress:
-                progress(i + 1, len(data))
-        self._expect(b"K", "type end")
+                progress(done, len(data))
 
     def type_lines(self, text, progress=None, retries=4):
-        """Type line-by-line, self-healing across BL616 USB drops: each line is
-        its own type session; a line whose session dies anywhere is flushed
-        (bare RETURN) and retyped whole — idempotent for numbered BASIC lines,
-        safe for immediate-mode commands that haven't executed yet."""
         lines = [l for l in text.replace("\r\n", "\n").split("\n") if l != ""]
         for n, line in enumerate(lines):
-            for attempt in range(retries + 1):
-                try:
-                    self.type_text(line + "\n")
-                    break
-                except Exception:
-                    if attempt == retries:
-                        raise
-                    # ride out the drop: reconnect may itself hiccup while the
-                    # device re-enumerates — keep trying within this attempt
-                    for _ in range(3):
-                        try:
-                            self.reconnect()
-                            self.type_text("\n")     # flush any partial line
-                            break
-                        except Exception:
-                            time.sleep(2)
+            self.type_text(line + "\n")
             if progress:
                 progress(n + 1, len(lines))
 
     def type_key(self, ch):
-        """Type ONE character (bounded 1-char session). ~110 ms round-trip;
-        suits GUI live-keyboard use without holding a session open."""
         data = ch.encode("ascii", "replace")[:1]
-        if not data:
-            return
-        self._cmd(0x07)
-        self.ser.write(b"\x01\x00" + data)
-        self._expect(b"+", "type start")
-        self._expect(b"+", "key", timeout=5)
-        self._expect(b"K", "type end")
+        if data:
+            self._req(pclink.D_TYPE, data, timeout=5, what="type")
 
     def kbd_session(self):
-        """Open a live session; returns a KbdSession. Firmware services SIO
-        between keystrokes; F12/S2 on the Atari ends it (MenuTakeover)."""
-        self._cmd(0x07)
-        self.ser.write(b"\xff\xff")
-        self._expect(b"+", "session start")
         return KbdSession(self)
 
     def status(self, timeout=3):
-        """One parseable status line from the firmware (0x08)."""
-        self._take_pending()
-        self.ser.reset_input_buffer()
-        self._cmd(0x08)
-        deadline = time.time() + timeout
-        buf = b""
-        while time.time() < deadline:
-            buf += self.ser.read(64)
-            if b"ST " in buf and b"\n" in buf[buf.index(b"ST "):]:
-                line = buf[buf.index(b"ST "):]
-                return line[:line.index(b"\n")].decode("ascii", "replace")
-        raise LinkError("status: no reply")
+        """The firmware's status line."""
+        return self._req(pclink.D_INFO, timeout=timeout, what="status").decode("ascii", "replace").strip()
 
     def peek(self, addr, length):
-        """Read Atari memory (0x09): returns `length` bytes from `addr`."""
+        """Read classic machine memory: `length` (1..1024) bytes from `addr`."""
         if not 0 < length <= 1024:
             raise LinkError("peek length 1..1024")
-        self._cmd(0x09)
-        self.ser.write(addr.to_bytes(2, "little") + length.to_bytes(2, "little"))
-        self._expect(b"+", "peek")
-        data = b""
-        deadline = time.time() + 5
-        while len(data) < length + 2 and time.time() < deadline:
-            data += self.ser.read(length + 2 - len(data))
-        if len(data) < length + 2:
-            raise LinkError(f"peek: short read ({len(data)}/{length + 2})")
-        payload, sum_rx = data[:length], int.from_bytes(data[length:], "little")
-        if sum(payload) & 0xFFFF != sum_rx:
-            raise LinkError("peek: checksum mismatch")
-        return payload
+        return self._req(pclink.D_PEEK, addr.to_bytes(2, "little") + length.to_bytes(2, "little"),
+                         what="peek")
 
     def fwpeek(self, addr, length):
-        """Read FIRMWARE memory (0x0D): PicoRV32 BSRAM 0x0000-0xFFFF —
-        remote inspection of firmware globals (debug aid)."""
+        """Read the I/O processor's own memory (debug aid)."""
         if not 0 < length <= 1024:
             raise LinkError("fwpeek length 1..1024")
-        self._cmd(0x0D)
-        self.ser.write(addr.to_bytes(2, "little") + length.to_bytes(2, "little"))
-        self._expect(b"+", "fwpeek")
-        data = b""
-        deadline = time.time() + 5
-        while len(data) < length + 2 and time.time() < deadline:
-            data += self.ser.read(length + 2 - len(data))
-        if len(data) < length + 2:
-            raise LinkError(f"fwpeek: short read ({len(data)}/{length + 2})")
-        payload, sum_rx = data[:length], int.from_bytes(data[length:], "little")
-        if sum(payload) & 0xFFFF != sum_rx:
-            raise LinkError("fwpeek: checksum mismatch")
-        return payload
+        return self._req(pclink.D_FWPEEK, addr.to_bytes(4, "little") + length.to_bytes(2, "little"),
+                         what="fwpeek")
+
+    def poke(self, addr, data):
+        """Write bytes into classic machine memory."""
+        if not 0 < len(data) <= 1000:
+            raise LinkError("poke length 1..1000")
+        self._req(pclink.D_POKE, addr.to_bytes(2, "little") + bytes(data), what="poke")
 
     def peek816(self, addr, length=None, width=None, rows=1, stride=0, rle=True, xor2=False):
-        """Read 65C816 memory (0x13): `length` bytes from the native 24-bit `addr`,
-        or `rows` spans of `width` bytes `stride` apart (a framebuffer). Returns bytes.
-        Reads SDRAM behind the 65C816's write-through cache, so it sees every completed
-        CPU and blitter write and never pauses the CPU. Bank $10 and $80+ read as 0.
-        Large reads are split into requests of about 64 KB (the firmware's main loop
-        waits while one streams). rle / xor2 only change the encoding on the wire
-        (xor2 suits dithered pictures; plain RLE suits everything else)."""
+        """Read 65C816 memory: `length` bytes from the native 24-bit `addr`, or `rows` spans
+        of `width` bytes `stride` apart (a framebuffer). Reads SDRAM behind the 65C816's
+        write-through cache, so it sees every completed CPU and blitter write and never pauses
+        the CPU. Bank $10 and $80+ read as 0. Large reads are split into ~64 KB requests."""
         if width is None:
             width, rows, stride = length, 1, 0
         if not (0 < width <= 0xFFFF and rows > 0):
             raise LinkError("peek816: width 1..65535, rows >= 1")
-        if rows == 1 and width > 0x10000:
-            raise LinkError("peek816: use width/rows for more than 64 KB")
         out = bytearray()
         per = max(1, 0x10000 // width)
         r = 0
@@ -427,45 +251,31 @@ class AtariLink:
 
     def _peek816_req(self, addr, width, rows, stride, flags):
         total = width * rows
-        rle = flags & 1
-        self._cmd(0x13)
-        self.ser.write((addr & 0xFFFFFF).to_bytes(3, "little") + width.to_bytes(2, "little") +
-                       rows.to_bytes(2, "little") + (stride & 0xFFFFFF).to_bytes(3, "little") +
-                       bytes([flags]))
-        self._expect(b"+", "peek816")
+        d = self._req(pclink.D_PEEK816,
+                      (addr & 0xFFFFFF).to_bytes(4, "little") + width.to_bytes(2, "little") +
+                      rows.to_bytes(2, "little") + (stride & 0xFFFFFFFF).to_bytes(4, "little") +
+                      bytes([flags]), timeout=30, what="peek816")
+        if len(d) < 2:
+            raise LinkError("peek816: short answer")
+        sum_rx = int.from_bytes(d[-2:], "little")
         if flags & 4:
-            old_to = self.ser.timeout
-            self.ser.timeout = 5
-            try:
-                d = self.ser.read(2)
-            finally:
-                self.ser.timeout = old_to
-            if len(d) < 2:
-                raise LinkError("sum816: no reply")
-            return int.from_bytes(d, "little")
-        old_to = self.ser.timeout
-        self.ser.timeout = 5
-        try:
-            def get(n):
-                d = self.ser.read(n)
-                if len(d) < n:
-                    raise LinkError(f"peek816: short read ({len(out)}/{total})")
-                return d
+            return sum_rx
+        d = d[:-2]
+        if not flags & 1:
+            out = bytearray(d)
+        else:
             out = bytearray()
-            if not rle:
-                out += get(total)
-            else:
-                while len(out) < total:
-                    h = get(1)[0]
-                    if h < 128:
-                        out += get(h + 1)
-                    else:
-                        out += get(1) * (h - 125)
-                if len(out) != total:
-                    raise LinkError("peek816: RLE overrun")
-            sum_rx = int.from_bytes(get(2), "little")
-        finally:
-            self.ser.timeout = old_to
+            i = 0
+            while i < len(d):
+                h = d[i]
+                if h < 128:
+                    out += d[i + 1:i + 2 + h]
+                    i += 2 + h
+                else:
+                    out += d[i + 1:i + 2] * (h - 125)
+                    i += 2
+        if len(out) != total:
+            raise LinkError(f"peek816: {len(out)} bytes, expected {total}")
         if flags & 2:                                   # undo XOR2, span by span
             for r0 in range(0, total, width):
                 for i in range(r0 + 2, r0 + width):
@@ -475,129 +285,43 @@ class AtariLink:
         return bytes(out)
 
     def shot816(self, path=None, **kw):
-        """Screenshot of the 65C816's native screen (Marga) as an RGB image.
-        Returns a816_screen.Shot (width, height, rgb bytes, info); writes a PNG to
-        `path` if given. See a816_screen.py for how the video state is found."""
-        import os
-        import sys
-        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        """Screenshot of the 65C816's native screen (Marga) as an RGB image; a PNG at `path`
+        if given. See a816_screen.py for how the video state is found."""
+        sys.path.insert(0, HERE)
         import a816_screen
         shot = a816_screen.capture(self, **kw)
         if path:
             shot.save_png(path)
         return shot
 
-    def poke(self, addr, data):
-        """Write bytes into Atari memory (0x0A)."""
-        if not 0 < len(data) <= 256:
-            raise LinkError("poke length 1..256")
-        self._cmd(0x0A)
-        self.ser.write(addr.to_bytes(2, "little") +
-                       len(data).to_bytes(2, "little"))
-        self._expect(b"+", "poke")
-        self.ser.write(bytes(data))
-        self._expect(b"K", "poke end")
-
     def screen(self):
-        """Text dump of the Atari's screen (GR.0 assumed): 24 lines x 40 cols,
-        read from screen RAM via SAVMSC ($58/59). The AI-eyes command."""
+        """Text dump of the classic machine's screen (GR.0): 24 x 40, via SAVMSC."""
         savmsc = int.from_bytes(self.peek(0x58, 2), "little")
         raw = self.peek(savmsc, 960)
-        lines = []
-        for row in range(24):
-            lines.append("".join(_screencode_to_ascii(c)
-                                 for c in raw[row * 40:(row + 1) * 40]))
-        return "\n".join(lines)
+        return "\n".join("".join(_screencode_to_ascii(c) for c in raw[r * 40:(r + 1) * 40])
+                         for r in range(24))
 
     def alive(self):
         """Is the 6502 running? Watch the OS jiffy counter (RTCLOK $12-14)."""
         a = self.peek(0x12, 3)
         time.sleep(0.1)
-        b = self.peek(0x12, 3)
-        return a != b
+        return a != self.peek(0x12, 3)
 
-    def hdd_install(self):
-        """Install the H: handler ABOVE MEMLO (bug #19: a fixed $0900 sat on
-        resident MyDOS): read MEMLO ($02E7), assemble at page-aligned
-        MEMLO+$200 (hdd_handler.plan_install — the cushion clears BASIC's
-        tokenize buffer at LOMEM; DOS-less this is the HW-proven $0900), poke
-        it, register 'H' in HATABS ($031A), raise MEMLO past the end.
-        Session-scoped (RESET clears HATABS — re-run). BASIC only picks up the
-        raised MEMLO on NEW — tell the user to type NEW right after.
-        Returns (load_addr, end_addr, new_memlo)."""
-        import os
-        import sys
-        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-        from hdd_handler import plan_install
-        memlo = int.from_bytes(self.peek(0x02E7, 2), "little")
+    def read_log(self, max_bytes=4096, timeout=0.5):
+        """Firmware log lines received since the last call (bytes, newline-separated)."""
+        out = b""
         try:
-            load, code, new_memlo = plan_install(memlo)
-        except ValueError as e:
-            raise LinkError(f"hdd-install: {e}")
-        # already installed? scan HATABS for 'H'
-        hatabs = self.peek(0x031A, 38)
-        for i in range(0, 36, 3):
-            if hatabs[i] == 0:
-                free = i
-                break
-            if hatabs[i] == ord('H'):
-                raise LinkError("H: already installed (RESET to clear)")
-        else:
-            raise LinkError("HATABS full")
-        for off in range(0, len(code), 256):
-            self.poke(load + off, code[off:off + 256])
-        back = self.peek(load, min(len(code), 64))
-        if bytes(back) != code[:len(back)]:
-            raise LinkError("handler verify failed")
-        self.poke(0x031A + free,
-                  bytes([ord('H'), load & 0xFF, load >> 8]))
-        self.poke(0x02E7, bytes([new_memlo & 0xFF, new_memlo >> 8]))
-        return load, load + len(code), new_memlo
-
-    def r_installed(self):
-        """True if an 'R' device is already registered in HATABS ($031A)."""
-        hatabs = self.peek(0x031A, 38)
-        return any(hatabs[i] == ord('R') for i in range(0, 36, 3))
-
-    def r_install(self, force=False):
-        """Install the R: (850 modem) handler ABOVE MEMLO — same mechanism as
-        hdd_install(), registering 'R' in HATABS ($031A) so BobTerm (which needs
-        a resident R: handler) finds it. Session-scoped: RESET clears HATABS.
-        Returns (load_addr, end_addr, new_memlo). Raises if R: already present
-        (unless force)."""
-        import os
-        import sys
-        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-        from r_handler import plan_install
-        memlo = int.from_bytes(self.peek(0x02E7, 2), "little")
-        try:
-            load, code, new_memlo = plan_install(memlo)
-        except ValueError as e:
-            raise LinkError(f"r-install: {e}")
-        hatabs = self.peek(0x031A, 38)
-        free = None
-        for i in range(0, 36, 3):
-            if hatabs[i] == ord('R') and not force:
-                raise LinkError("R: already installed (RESET to clear)")
-            if hatabs[i] == 0 and free is None:
-                free = i
-        if free is None:
-            raise LinkError("HATABS full")
-        for off in range(0, len(code), 256):
-            self.poke(load + off, code[off:off + 256])
-        back = self.peek(load, min(len(code), 64))
-        if bytes(back) != code[:len(back)]:
-            raise LinkError("handler verify failed")
-        self.poke(0x031A + free, bytes([ord('R'), load & 0xFF, load >> 8]))
-        self.poke(0x02E7, bytes([new_memlo & 0xFF, new_memlo >> 8]))
-        return load, load + len(code), new_memlo
-
-    def read_log(self, max_bytes=4096):
-        """Drain any pending firmware log bytes (non-blocking-ish)."""
-        return self.ser.read(max_bytes)
+            out += self._lines.get(timeout=timeout)
+            while len(out) < max_bytes:
+                out += self._lines.get_nowait()
+        except queue.Empty:
+            pass
+        return out
 
 
 class KbdSession:
+    """Live keyboard: every key is one TYPE request."""
+
     def __init__(self, link):
         self.link = link
         self.open = True
@@ -605,24 +329,12 @@ class KbdSession:
     def send_key(self, ch):
         if not self.open:
             raise LinkError("session closed")
-        b = ch.encode("ascii", "replace")[:1]
-        if b == b"\r":
-            b = b"\n"
-        self.link.ser.write(b)
-        r = self.link._expect(b"+M", "key", timeout=5)
-        if r == b"M":
-            self.open = False
-            raise MenuTakeover()
+        if ch == "\r":
+            ch = "\n"
+        self.link.type_key(ch)
 
     def poll_takeover(self):
-        """Check for an unsolicited 'M' (F12 pressed while we're idle)."""
-        b = self.link.ser.read(1)
-        if b == b"M":
-            self.open = False
-            raise MenuTakeover()
+        pass
 
     def end(self):
-        if self.open:
-            self.link.ser.write(b"\x00")
-            self.link._expect(b"K", "session end")
-            self.open = False
+        self.open = False

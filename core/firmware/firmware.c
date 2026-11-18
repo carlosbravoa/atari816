@@ -7,13 +7,13 @@
 #include "fatfs/ff.h"
 #include "firmware.h"
 #include "xex_loader.h"   // 6502 binary-load boot loader image (virtual D1: disk)
+#include "pclink.h"       // the PC link (Docs/04-pc-link.md)
 
 uint32_t CORE_ID;
 
 void uart_keyboard_poll(void);
-static void bridge_poll(void);   // serial bridge servicing (defined below)
-static void bridge_putc(uint8_t c);  // raw serial TX (defined below)
-extern int bridge_quiet;         // transfers own the serial TX channel (defined below)
+static void bridge_poll(void);   // PC link and mailbox servicing (defined below)
+DWORD fat_from2000(uint32_t t);  // seconds since 2000 -> FAT time (defined below)
 
 
 #define OPTION_FILE "/atari.ini"
@@ -1253,18 +1253,11 @@ static int cold_boot_xex(void) {               // returns load_system_roms() (0 
     return r;
 }
 
-// ── BL616 USB-C serial bridge — protocol v1 (PC tool: tools/atari.py) ────────
-// Single-byte commands, PC paces all transfers; replies are raw bytes.
-// Refusal/NAK = 0x15 (NAK, was '-' before 2026-07-21 — see BRIDGE_NAK below).
-//   0x05 ENQ                        -> "A8OK\n"
-//   0x01 PUT  nlen name size32LE    -> '+' | NAK; then '+' per 256-byte chunk;
-//        finally sum16LE from PC    -> 'K' | 'E' (mismatch deletes the file)
-//   0x02 RUN  nlen name             -> '+' | NAK; mounts the .xex + cold-boots
-//   0x03 COLD                       -> '+'  (like the menu's Hard Reset)
-//   0x04 WARM                       -> '+'  (like F9)
-// RUN/COLD/WARM are queued (bridge_req) and executed by the booted background
-// loop, where main's machine state is in scope. PUT runs inline and services
-// sio_poll() between chunks so the Atari's disk I/O stays alive mid-transfer.
+// ── PC link (Docs/04-pc-link.md; engine in pclink.c) ─────────────────────────────────
+// The serial port to the PC carries framed packets: the firmware's log (channel 1), the PC
+// volume (channel 2, a816_mailbox below) and the developer channel (channel 3: the PC tools
+// send files to the card, restart the 65C816, read memory, press keys; pl_dev_request below).
+// RUN / COLD / WARM are queued (bridge_req) and executed by the main loop.
 
 static FIL bridge_file;
 int bridge_req = 0;                     // 1 = run xex, 2 = cold boot, 3 = warm
@@ -1274,26 +1267,6 @@ char bridge_req_path[SD_PATH_MAX];      // full path, subfolders allowed (sd_res
 char mounted_atr_name[ATR_DRIVES][16] = {"None", "None", "None", "None"};
 int bridge_boot_stage = 0;   // 0 start, 1 sd ok, 2 options, 3 roms tried, 4 running
 int bridge_rom_ok = -1;
-int bridge_quiet = 0;                   // mute uart_printf during transfers: the
-                                        // protocol acks share the TX channel
-
-static void bridge_putc(uint8_t c) { reg_uart_data = c; }
-
-// Protocol refusal byte. MUST be a control char that never appears in the
-// firmware's ASCII log text: the PC tools scan a stream that interleaves log
-// chatter with protocol replies, and the old refusal byte '-' (0x2D) collides
-// with ordinary log content (filenames like "Astro-Droid.atr", "ad_dir")
-// -> the tool misreads a log '-' as a refusal (seen live). 0x15 = ASCII NAK.
-#define BRIDGE_NAK 0x15
-
-static int blrx_getc(uint32_t timeout_ms) {
-    uint32_t start = time_millis();
-    for (;;) {
-        uint32_t v = reg_blrx;
-        if (v & 0x100) { reg_blrx = 0; return (int)(v & 0xFF); }
-        if (time_millis() - start > timeout_ms) return -1;
-    }
-}
 
 // FS half of PUT — kept protocol-free so test/fatfs_host extracts and
 // exercises them against a disk image before any hardware run.
@@ -1326,81 +1299,6 @@ int bridge_put_chunk(const uint8_t *buf, unsigned int len) {
 }
 int bridge_put_close(void) {
     return f_close(&bridge_file) == FR_OK ? 0 : -1;
-}
-
-// nlen + name -> "/PATH/NAME" (max 63 chars, subfolders + leading '/' ok)
-static int bridge_read_name(char *path) {
-    int nlen = blrx_getc(1000);
-    if (nlen <= 0 || nlen > 63) return -1;
-    int k = 0;
-    path[k++] = '/';
-    for (int i = 0; i < nlen; i++) {
-        int c = blrx_getc(1000);
-        if (c < 0) return -1;
-        if (i == 0 && c == '/') continue;
-        path[k++] = (char)c;
-    }
-    path[k] = '\0';
-    return 0;
-}
-
-static void bridge_cmd_put(void) {
-    char path[68];
-    uint8_t buf[256];
-    bridge_quiet = 1;
-    if (bridge_read_name(path)) { bridge_quiet = 0; bridge_putc(BRIDGE_NAK); return; }
-    uint32_t size = 0;
-    for (int i = 0; i < 4; i++) {
-        int c = blrx_getc(1000);
-        if (c < 0) { bridge_quiet = 0; bridge_putc(BRIDGE_NAK); return; }
-        size |= (uint32_t)c << (8 * i);
-    }
-    if (bridge_mkdirs(path) || bridge_put_open(path)) {
-        bridge_quiet = 0; bridge_putc(BRIDGE_NAK); return;
-    }
-    bridge_putc('+');
-    uint16_t sum = 0;
-    uint32_t left = size;
-    while (left > 0) {
-        unsigned int chunk = left > 256 ? 256 : left;
-        int r = 0;                              // -1 = RX byte lost, >0 = FRESULT
-        for (unsigned int i = 0; i < chunk; i++) {
-            int c = blrx_getc(2000);
-            if (c < 0) { r = -1; break; }
-            buf[i] = (uint8_t)c;
-            sum += (uint8_t)c;
-        }
-        if (r == 0) r = bridge_put_chunk(buf, chunk);
-        if (r) {
-            // Abort. After a card-level error (FR_DISK_ERR/FR_INT_ERR) do NOT
-            // rewrite directory + FAT sectors on top of it — leave the partial
-            // file for fsck rather than risk the volume (2026-10-12 incident).
-            bridge_put_close();
-            if (r != (int)FR_DISK_ERR && r != (int)FR_INT_ERR) f_unlink(path);
-            bridge_quiet = 0;
-            bridge_putc(BRIDGE_NAK);
-            uart_printf("put abort @%d: %s %d\n", (int)(size - left),
-                        r < 0 ? "rx lost" : "f_write", r);
-            return;
-        }
-        left -= chunk;
-        sio_poll();                 // Atari runs live behind the transfer
-        // '+' is the LAST thing before the tight getc loop: it tells the PC
-        // "stream now" — anything slow must happen BEFORE it (the RX register
-        // holds ONE byte; bytes arriving while we're busy would be lost).
-        bridge_putc('+');
-    }
-    int c0 = blrx_getc(1000), c1 = blrx_getc(1000);
-    int cr = bridge_put_close();
-    bridge_quiet = 0;
-    if (c0 < 0 || c1 < 0 || cr != 0 ||
-        (uint16_t)(c0 | (c1 << 8)) != sum) {
-        f_unlink(path);
-        bridge_putc('E');
-        return;
-    }
-    bridge_putc('K');
-    uart_printf("put %s %d\n", path, (int)size);
 }
 
 // ── KEY injection: ASCII -> (HID keycode, shift) on the ATARI layout ─────────
@@ -1454,175 +1352,6 @@ static const uint8_t ascii2hid_pc[95] = {
     /* { */ 0, /* | */ 0x31|KSH, /* } */ 0, /* ~ */ 0
 };
 
-// getc that keeps the machine alive while waiting — for open-ended typing
-// sessions where the next keystroke may be seconds away. Safe with the 1-byte
-// RX register: per-char acks mean at most one byte is ever in flight.
-static int blrx_getc_serviced(uint32_t timeout_ms) {
-    uint32_t start = time_millis();
-    for (;;) {
-        uint32_t v = reg_blrx;
-        if (v & 0x100) { reg_blrx = 0; return (int)(v & 0xFF); }
-        if (time_millis() - start > timeout_ms) return -1;
-        sio_poll();
-        uart_keyboard_poll();
-        {   // F12/S2 pressed on the REAL keyboard: the user wants the OSD —
-            // yield: end the live session so the main loop can open the menu.
-            int j1, j2;
-            joy_get(&j1, &j2);
-            if ((j1 & 0x8) || (j1 & 0x200)) return -2;
-        }
-    }
-}
-
-// Press one char on the virtual keyboard (blocking ~55 ms; SIO stays alive).
-// Typing reaches the core only while the OSD overlay is OFF (inputs are
-// masked while the menu is open) — same rule as the OPTION-hold boot inject.
-static void bridge_type_char(uint8_t c) {
-    uint8_t e;
-    if (c == '\n' || c == '\r') e = 0x28;             // RETURN
-    else if (c == 0x08 || c == 0x7F) e = 0x2A;         // Backspace
-    else if (c == 0x09) e = 0x2B;                      // Tab
-    else if (c == 0x1B) e = 0x29;                      // Esc
-    else if (c < 0x20 || c > 0x7E) return;             // unmappable -> skip
-    else { e = (option_kbd_layout ? ascii2hid_pc : ascii2hid)[c - 0x20]; if (!e) return; }
-    // OS same-key debounce (KEYDEL, ~3 jiffies): a re-press of the SAME key
-    // within ~50 ms of the previous press is ignored — doubled characters
-    // ("LL", "00") lost their second copy at our 55 ms cadence (HW-observed).
-    static uint8_t prev_e = 0;
-    if (e == prev_e)
-        sio_delay(45);
-    prev_e = e;
-    uint32_t mod = (e & KSH) ? 0x02 : 0x00;            // left shift
-    reg_virt_kbd_0 = ((uint32_t)(e & 0x7F) << 8) | mod;
-    sio_delay(30);
-    reg_virt_kbd_0 = 0;
-    sio_delay(25);
-    // After RETURN the OS/BASIC is busy processing the line (tokenizing a
-    // long BASIC line takes >55 ms) and the keyboard buffer holds ONE char —
-    // typing two chars into that window loses the first (HW-observed: pasted
-    // lines lost their first digit after long predecessors). Let it settle.
-    if (e == 0x28)
-        sio_delay(250);
-}
-
-// 0x0E KEY: mod, hid, hold(x10 ms) -> '+' after press+release. Raw HID inject for
-// everything TYPE's ASCII table can't reach: console keys (F6/F7/F8 = Start/Select/
-// Option), F-keys, Esc, arrows. mod bit0 = Ctrl, bit1 = Shift (HID modifier byte).
-static void bridge_cmd_key(void) {
-    int m = blrx_getc(1000), k = blrx_getc(1000), h = blrx_getc(1000);
-    if (m < 0 || k < 0 || h < 0) { bridge_putc(BRIDGE_NAK); return; }
-    reg_virt_kbd_0 = ((uint32_t)(k & 0xFF) << 8) | (uint32_t)(m & 0xFF);
-    // Release is DEFERRED (joy_get() clears it after the hold): the main loop must see the
-    // key down, otherwise firmware hotkeys (F12/F9/F11, OSD navigation) never notice it.
-    virt_key_release_at = time_millis() + (h ? h * 10 : 100);
-    bridge_putc('+');
-}
-
-// 0x07 TYPE: len16LE -> '+', then per char: byte in, '+' out; ends with 'K'.
-// Per-character flow control: typing (~55 ms/char) dwarfs the ack round-trip,
-// and the 1-byte RX register cannot absorb streaming ahead.
-static void bridge_cmd_type(void) {
-    bridge_quiet = 1;
-    int l0 = blrx_getc(1000), l1 = blrx_getc(1000);
-    if (l0 < 0 || l1 < 0) { bridge_quiet = 0; bridge_putc(BRIDGE_NAK); return; }
-    uint32_t len = (uint32_t)l0 | ((uint32_t)l1 << 8);
-    int live = (len == 0xFFFF);      // live session: until 0x00, SIO serviced
-    bridge_putc('+');
-    for (uint32_t i = 0; live || i < len; i++) {
-        int c = live ? blrx_getc_serviced(120000) : blrx_getc(3000);
-        if (c == -2) { bridge_quiet = 0; bridge_putc('M'); return; }  // menu
-        if (c < 0) { bridge_quiet = 0; bridge_putc(BRIDGE_NAK); return; }
-        if (live && c == 0x00) break;
-        bridge_type_char((uint8_t)c);
-        bridge_putc('+');
-    }
-    bridge_quiet = 0;
-    bridge_putc('K');
-}
-
-// 0x08 STATUS: one parseable text line — the OSD debug line, remotely.
-static void bridge_cmd_status(void) {
-    extern char _ebss[];
-    uart_printf("ST u:%d bs:%d rom:%d x:%d m:%d%d%d%d c:%b s:%d st:%d e:%d cn:%d"
-                " hd:%d%d nt:%d,%d br:%d\n",
-                (int)time_millis(), bridge_boot_stage, bridge_rom_ok,
-                xex_active ? 1 : 0,
-                atr_mounted[0] ? 1 : 0, atr_mounted[1] ? 1 : 0,
-                atr_mounted[2] ? 1 : 0, atr_mounted[3] ? 1 : 0,
-                dbg_last_sio_cmd, dbg_last_sio_sector, dbg_last_sio_status,
-                (int)dbg_sio_err_count,
-                (*(volatile uint32_t *)_ebss != 0x53544B21u) ? 1 : 0,
-                0, 0,                            // hd: H: device removed (kept for the line format)
-                0, 0, boot_retries);             // nt: network device removed (kept for the line format)
-}
-
-// 0x09 PEEK addr16 len16 -> '+', raw bytes, sum16. Reads ATARI memory through
-// the SDRAM window — screen RAM, zero page, anything (remote eyes).
-static void bridge_cmd_peek(void) {
-    bridge_quiet = 1;
-    int a0 = blrx_getc(1000), a1 = blrx_getc(1000);
-    int l0 = blrx_getc(1000), l1 = blrx_getc(1000);
-    uint32_t len = (uint32_t)l0 | ((uint32_t)l1 << 8);
-    if (a0 < 0 || a1 < 0 || l0 < 0 || l1 < 0 || len > 1024) {
-        bridge_quiet = 0; bridge_putc(BRIDGE_NAK); return;
-    }
-    uint32_t addr = (uint32_t)a0 | ((uint32_t)a1 << 8);
-    bridge_putc('+');
-    uint16_t sum = 0;
-    for (uint32_t i = 0; i < len; i++) {
-        uint8_t b = *(volatile uint8_t *)(0x00200000u + ((addr + i) & 0xFFFFu));
-        bridge_putc(b);
-        sum += b;
-    }
-    bridge_putc(sum & 0xFF);
-    bridge_putc(sum >> 8);
-    bridge_quiet = 0;
-}
-
-// 0x0D FWPEEK addr16 len16 -> '+' data sum16. Reads FIRMWARE memory (BSRAM,
-// 0x0000-0xFFFF) instead of Atari RAM — remote inspection of fw globals
-// (added for the 0xC000 clobber triage; harmless to keep: read-only).
-static void bridge_cmd_fwpeek(void) {
-    bridge_quiet = 1;
-    int a0 = blrx_getc(1000), a1 = blrx_getc(1000);
-    int l0 = blrx_getc(1000), l1 = blrx_getc(1000);
-    uint32_t len = (uint32_t)l0 | ((uint32_t)l1 << 8);
-    if (a0 < 0 || a1 < 0 || l0 < 0 || l1 < 0 || len > 1024) {
-        bridge_quiet = 0; bridge_putc(BRIDGE_NAK); return;
-    }
-    uint32_t addr = (uint32_t)a0 | ((uint32_t)a1 << 8);
-    bridge_putc('+');
-    uint16_t sum = 0;
-    for (uint32_t i = 0; i < len; i++) {
-        uint8_t b = *(volatile uint8_t *)((addr + i) & 0xFFFFu);
-        bridge_putc(b);
-        sum += b;
-    }
-    bridge_putc(sum & 0xFF);
-    bridge_putc(sum >> 8);
-    bridge_quiet = 0;
-}
-
-// 0x0A POKE addr16 len16 bytes -> '+' ... 'K'. Remote writes into Atari memory.
-static void bridge_cmd_poke(void) {
-    bridge_quiet = 1;
-    int a0 = blrx_getc(1000), a1 = blrx_getc(1000);
-    int l0 = blrx_getc(1000), l1 = blrx_getc(1000);
-    uint32_t len = (uint32_t)l0 | ((uint32_t)l1 << 8);
-    if (a0 < 0 || a1 < 0 || l0 < 0 || l1 < 0 || len > 256) {
-        bridge_quiet = 0; bridge_putc(BRIDGE_NAK); return;
-    }
-    uint32_t addr = (uint32_t)a0 | ((uint32_t)a1 << 8);
-    bridge_putc('+');                // in the tight loop from here — stream
-    for (uint32_t i = 0; i < len; i++) {
-        int c = blrx_getc(2000);
-        if (c < 0) { bridge_quiet = 0; bridge_putc(BRIDGE_NAK); return; }
-        *(volatile uint8_t *)(0x00200000u + ((addr + i) & 0xFFFFu)) = (uint8_t)c;
-    }
-    bridge_quiet = 0;
-    bridge_putc('K');
-}
-
 // ── Atari816 bring-up 1 ─────────────────────────────────────────────────────
 // The 65C816's native $00:0000-$0F:FFFF sits at firmware address 0x100000 + native
 // (physical SDRAM 0x300000). Its cache is only flushed while RUN = 0, so every write
@@ -1672,7 +1401,12 @@ static void a816_start(int test) {   // test: /A816.BIN only (run816)
 // ── Atari816 I/O processor mailbox (register spec, "I/O processor mailbox") ──
 // Two rings of 16-byte messages in the 65C816's RAM. One request is served per call.
 // Result codes: 0 OK, 1..19 FatFs FRESULT, $80 bad handle, $81 bad address, $82 unsupported,
-// $83-$85 see ops $18-$1A, $86 refused: the card was synced (SYS_SYNC) and not mounted again.
+// $83-$85 see ops $18-$1A, $86 refused: the card was synced (SYS_SYNC) and not mounted again,
+// $87 no PC link, $88 PC link lost, $89 RENAME between the card and the PC.
+// The PC volume: a path "/PC:" or "/PC:/..." (any case) is a file or folder in the folder the
+// gateway on the PC shares (Docs/04-pc-link.md); the same ops and the same 4 handles work on
+// it. Without a gateway such ops answer $87 at once. "/" lists a folder "PC:" last while the
+// PC volume is there, and STAT "/PC:" gives the PC's clock as the time.
 // Ops: $01-$0A files, $10 LOAD, $18-$1A classic machine, $1B SYS_RESTART, $1C SYS_SYNC,
 // $1D SYS_TIME, $1E CLASSIC_STATE.
 // When data reaches the card (FatFs, FF_FS_TINY, one shared 512-byte sector window): a WRITE
@@ -1694,7 +1428,11 @@ static uint32_t clk_base, clk_ms;       // SYS_TIME ($1D): seconds since 2000 at
 static uint8_t  clk_set;   // keys a816_mailbox found nothing new in
 volatile uint32_t a816_dbg[4];        // debug (fwpeek): last keymod, keys, poll count, mbi
 static FIL     mb_fil[MB_FILES];
-static uint8_t mb_open;                 // bit n = mb_fil[n] in use
+static uint8_t mb_open;                 // bit n = handle n in use
+// PC volume (paths "/PC:..."): a handle can be a file on the PC, served by the gateway
+static uint8_t  mb_pc;                  // bit n = handle n is a PC file
+static uint8_t  mb_pch[MB_FILES];       // the gateway's handle
+static uint32_t mb_pcep[MB_FILES];      // the link session (pl_epoch) it was opened in
 
 static inline __attribute__((always_inline)) uint32_t rd2(volatile uint32_t *r) {   // a register clocked by the 65C816
     uint32_t a, b = *r;
@@ -1761,11 +1499,77 @@ static uint32_t mb_xfer(FIL *f, uint32_t n, uint32_t len, int wr, uint32_t *res)
 
 void a816_mouse(int btn, int dx, int dy, int wheel) { ms_btn = btn; ms_dx += dx; ms_dy += dy; ms_wheel += wheel; }
 
+// ---- the PC volume (Docs/04-pc-link.md, "The PC volume") ----
+// "/PC:" or "/PC:/..." (any case) -> the path on the PC ("/" or "/..."), else 0
+static const char *pc_path(const char *p) {
+    if (p[0] != '/' || (p[1] | 0x20) != 'p' || (p[2] | 0x20) != 'c' || p[3] != ':') return 0;
+    if (p[4] == 0) return "/";
+    return p[4] == '/' ? p + 4 : 0;
+}
+static uint8_t pc_args[264];                             // two paths of 127 + 2 + a header
+static int pc_args_path(int at, const char *path) {     // path into pc_args at `at` -> length
+    int n = strlen(path) + 1;
+    if (at + n > (int)sizeof pc_args) return -1;
+    memcpy(pc_args + at, path, n);
+    return at + n;
+}
+// A response stream into 65C816 memory (READ, LOAD, READDIR's entries).
+typedef struct { uint32_t dst, n, skip, err; uint8_t hdr[16]; } pc_sink_t;
+// (hot: it runs for every frame of a READ or LOAD) block RAM -> 65C816 memory, in 32-bit
+// stores where it can: an SDRAM access costs the I/O processor much more than a byte
+// from block RAM. 0 = an address the I/O processor cannot reach.
+static int pc_put816(uint32_t n, const uint8_t *s, uint32_t len) {
+    while (len) {
+        if (n >= 0x800000 || (n >> 16) == 0x10) return 0;
+        uint32_t room = 0x100000 - (n & 0xFFFFF);
+        uint8_t *d = (uint8_t *)(n < 0x400000 ? n ^ 0x100000 : n ^ 0x300000);   // see mb_ptr
+        if (room > len) room = len;
+        uint32_t k = room;
+        while (k && ((uint32_t)d & 3)) { *d++ = *s++; k--; }
+        uint32_t *w = (uint32_t *)d;
+        for (; k >= 4; k -= 4, s += 4) *w++ = s[0] | s[1] << 8 | s[2] << 16 | (uint32_t)s[3] << 24;
+        d = (uint8_t *)w;
+        while (k--) *d++ = *s++;
+        n += room; len -= room;
+    }
+    return 1;
+}
+static void pc_to816(const uint8_t *p, uint32_t n, void *ctx) {
+    pc_sink_t *k = ctx;
+    while (n && k->skip) {                               // a header first (READDIR: the count)
+        k->hdr[sizeof k->hdr - k->skip] = *p++; n--; k->skip--;
+    }
+    if (n && !k->err && !pc_put816(k->dst + k->n, p, n)) k->err = 0x81;
+    k->n += n;
+}
+static void pc_tohdr(const uint8_t *p, uint32_t n, void *ctx) {   // a small answer (OPEN, STAT)
+    pc_sink_t *k = ctx;
+    for (uint32_t i = 0; i < n && k->n < sizeof k->hdr; i++) k->hdr[k->n++] = p[i];
+}
+static uint32_t le32(const uint8_t *p) { return p[0] | p[1] << 8 | p[2] << 16 | (uint32_t)p[3] << 24; }
+static int pc_live(int h) { return pl_files() && mb_pcep[h] == pl_epoch(); }
+static uint32_t pc_close(int h) {        // the gateway's handle is closed (if still alive), slot free
+    uint32_t r = 0;
+    if (pc_live(h)) {
+        uint8_t a[4] = { mb_pch[h], 0, 0, 0 };
+        pc_sink_t k = { 0 };
+        r = pl_call(2, a, 4, 0, 0, pc_tohdr, &k);
+        if (r == PL_E_LOST || r == PL_E_NOLINK) r = 0;   // gone with the session anyway
+    }
+    mb_open &= ~(1 << h);
+    mb_pc &= ~(1 << h);
+    return r;
+}
+
 static uint32_t mb_close_all(void) {    // close every mailbox handle; first error, or 0
     uint32_t res = 0;
-    for (int i = 0; i < MB_FILES; i++)
-        if (mb_open & (1 << i)) { FRESULT r = f_close(&mb_fil[i]); if (r && !res) res = r; }
+    for (int i = 0; i < MB_FILES; i++) {
+        if (!(mb_open & (1 << i))) continue;
+        FRESULT r = (mb_pc & (1 << i)) ? pc_close(i) : f_close(&mb_fil[i]);
+        if (r && !res) res = r;
+    }
     mb_open = 0;
+    mb_pc = 0;
     return res;
 }
 
@@ -1835,8 +1639,7 @@ static void a816_mailbox(void) {
 
     if (!qbase || !rbase) {                              // 65C816 reset or not set up
         if (iop) {
-            for (int i = 0; i < MB_FILES; i++) if (mb_open & (1 << i)) f_close(&mb_fil[i]);
-            mb_open = 0;
+            mb_close_all();
             reg_a816_mbi = 0;
         }
         return;
@@ -1896,6 +1699,9 @@ static void a816_mailbox(void) {
     uint32_t arg0 = m[8] | m[9] << 8 | m[10] << 16 | (uint32_t)m[11] << 24;
     uint32_t arg1 = m[12] | m[13] << 8 | m[14] << 16 | (uint32_t)m[15] << 24;
     FIL *f = (arg0 < MB_FILES && (mb_open & (1 << arg0))) ? &mb_fil[arg0] : 0;
+    int pch = f && (mb_pc & (1 << arg0));                // a handle of a PC file
+    const char *pcp = 0;                                 // the PC path of a path op
+    pc_sink_t k = { 0 };
 
     // after SYS_SYNC every op below $1B (files, LOAD, classic machine) is refused with $86
     switch (mb_synced && m[0] < 0x1B ? 0x7F : m[0]) {
@@ -1910,22 +1716,72 @@ static void a816_mailbox(void) {
         while (h < MB_FILES && (mb_open & (1 << h))) h++;
         if (h == MB_FILES) res = FR_TOO_MANY_OPEN_FILES;
         else if (!mb_path(buf, path, sizeof path)) res = 0x81;
+        else if ((pcp = pc_path(path))) {                // a file on the PC
+            pc_args[0] = m[7] & 3; pc_args[1] = pc_args[2] = pc_args[3] = 0;
+            int na = pc_args_path(4, pcp);
+            if (na < 0) { res = FR_INVALID_NAME; break; }
+            if (!(res = pl_call(1, pc_args, na, 0, 0, pc_tohdr, &k))) {
+                mb_pch[h] = k.hdr[0]; mb_pcep[h] = pl_epoch();
+                mb_open |= 1 << h; mb_pc |= 1 << h; val = h;
+            }
+        }
         else if (!(res = f_open(&mb_fil[h], path, mode[m[7] & 3]))) { mb_open |= 1 << h; val = h; }
         break;
     }
     case 0x02:                                           // CLOSE
-        if (!f) res = 0x80; else { res = f_close(f); mb_open &= ~(1 << arg0); }
+        if (!f) res = 0x80;
+        else if (pch) res = pc_close(arg0);
+        else { res = f_close(f); mb_open &= ~(1 << arg0); }
         break;
     case 0x03: case 0x04:                                // READ, WRITE
-        if (!f) res = 0x80; else val = mb_xfer(f, buf, len, m[0] == 0x04, &res);
+        if (!f) res = 0x80;
+        else if (pch) {
+            uint8_t a[8] = { mb_pch[arg0], 0, 0, 0, len, len >> 8, 0, 0 };
+            uint32_t room;
+            uint8_t *p = mb_ptr(buf, &room);
+            if (!pc_live(arg0)) res = PL_E_LOST;
+            else if (len && (!room || room < len)) res = 0x81;
+            else if (m[0] == 0x03) {
+                k.dst = buf;
+                res = pl_call(3, a, 8, 0, 0, pc_to816, &k);
+                val = k.n;
+                if (!res) res = k.err;
+            } else {
+                res = pl_call(4, a, 4, p, len, pc_tohdr, &k);
+                if (!res) val = le32(k.hdr);
+            }
+        }
+        else val = mb_xfer(f, buf, len, m[0] == 0x04, &res);
         break;
     case 0x05:                                           // SEEK
-        if (!f) res = 0x80; else { res = f_lseek(f, arg1); val = f_tell(f); }
+        if (!f) res = 0x80;
+        else if (pch) {
+            uint8_t a[8] = { mb_pch[arg0], 0, 0, 0, arg1, arg1 >> 8, arg1 >> 16, arg1 >> 24 };
+            if (!pc_live(arg0)) res = PL_E_LOST;
+            else if (!(res = pl_call(5, a, 8, 0, 0, pc_tohdr, &k))) val = le32(k.hdr);
+        }
+        else { res = f_lseek(f, arg1); val = f_tell(f); }
         break;
     case 0x06: {                                         // STAT
         FILINFO fi;
         uint8_t o[9];
         if (!mb_path(buf, path, sizeof path)) { res = 0x81; break; }
+        if ((pcp = pc_path(path))) {
+            if (!pl_files()) { res = PL_E_NOLINK; break; }
+            if (pcp[1] == 0) {                           // its root: a folder, the PC's clock now
+                uint32_t t = fat_from2000(pl_pc_time());
+                o[0] = o[1] = o[2] = o[3] = 0; o[4] = 0x10;
+                o[5] = t; o[6] = t >> 8; o[7] = t >> 16; o[8] = t >> 24;
+            } else {
+                if (pc_args_path(0, pcp) < 0) { res = FR_INVALID_NAME; break; }
+                if ((res = pl_call(6, pc_args, strlen(pcp) + 1, 0, 0, pc_tohdr, &k))) break;
+                for (int i = 0; i < 5; i++) o[i] = k.hdr[i];
+                for (int i = 0; i < 4; i++) o[5 + i] = k.hdr[8 + i];
+            }
+            if (!mb_put(buf, o, 9)) res = 0x81;
+            val = le32(o);
+            break;
+        }
         if ((res = f_stat(path, &fi))) break;
         uint32_t t = (uint32_t)fi.fdate << 16 | fi.ftime;
         o[0] = fi.fsize; o[1] = fi.fsize >> 8; o[2] = fi.fsize >> 16; o[3] = fi.fsize >> 24;
@@ -1939,34 +1795,70 @@ static void a816_mailbox(void) {
         DIR d;
         FILINFO fi;
         uint32_t off = 0;
+        int full = 0;
         if (!mb_path(buf, path, sizeof path)) { res = 0x81; break; }
+        if ((pcp = pc_path(path))) {                     // skip u16, room u16, path
+            pc_args[0] = arg0; pc_args[1] = arg0 >> 8; pc_args[2] = len; pc_args[3] = len >> 8;
+            int na = pc_args_path(4, pcp);
+            if (na < 0) { res = FR_INVALID_NAME; break; }
+            k.dst = buf; k.skip = 4;                     // the count first, then the entries
+            res = pl_call(7, pc_args, na, 0, 0, pc_to816, &k);
+            if (!res) res = k.err;
+            val = k.hdr[12] | k.hdr[13] << 8;
+            break;
+        }
         if ((res = f_opendir(&d, path))) break;
         for (;;) {
             if ((res = f_readdir(&d, &fi)) || !fi.fname[0]) break;
             if (arg0) { arg0--; continue; }
             uint32_t nl = strlen(fi.fname);
             uint8_t  h[6] = { fi.fsize, fi.fsize >> 8, fi.fsize >> 16, fi.fsize >> 24, fi.fattrib, nl };
-            if (off + 6 + nl > len) break;
+            if (off + 6 + nl > len) { full = 1; break; }
             if (!mb_put(buf + off, h, 6) || !mb_put(buf + off + 6, (uint8_t *)fi.fname, nl)) { res = 0x81; break; }
             off += 6 + nl;
             val++;
         }
         f_closedir(&d);
+        // the card's root ends with the PC volume, a folder "PC:", while it is there
+        if (!res && !full && path[0] == '/' && !path[1] && pl_files()) {
+            static const uint8_t e[9] = { 0, 0, 0, 0, 0x10, 3, 'P', 'C', ':' };
+            if (arg0) arg0--;
+            else if (off + 9 <= len) { if (mb_put(buf + off, e, 9)) val++; else res = 0x81; }
+        }
         break;
     }
     case 0x08: case 0x09:                                // MKDIR, DELETE
         if (!mb_path(buf, path, sizeof path)) res = 0x81;
+        else if ((pcp = pc_path(path))) {
+            if (pc_args_path(0, pcp) < 0) res = FR_INVALID_NAME;
+            else res = pl_call(m[0], pc_args, strlen(pcp) + 1, 0, 0, pc_tohdr, &k);
+        }
         else res = m[0] == 0x08 ? f_mkdir(path) : f_unlink(path);
         break;
     case 0x0A: {                                         // RENAME "old\0new"
         static char to[128];
+        const char *pct;
         if (!mb_path(buf, path, sizeof path) || !mb_path(buf + strlen(path) + 1, to, sizeof to)) res = 0x81;
+        else if ((pcp = pc_path(path)) && (pct = pc_path(to))) {
+            int na = pc_args_path(0, pcp);
+            if (na < 0 || (na = pc_args_path(na, pct)) < 0) res = FR_INVALID_NAME;
+            else res = pl_call(0x0A, pc_args, na, 0, 0, pc_tohdr, &k);
+        }
+        else if (pcp || pc_path(to)) res = pl_files() ? PL_E_XVOL : PL_E_NOLINK;
         else res = f_rename(path, to);
         break;
     }
     case 0x10: {                                         // LOAD whole file to ARG0
         FIL lf;
         if (!mb_path(buf, path, sizeof path)) { res = 0x81; break; }
+        if ((pcp = pc_path(path))) {
+            if (pc_args_path(0, pcp) < 0) { res = FR_INVALID_NAME; break; }
+            k.dst = arg0 & 0xFFFFFF;
+            res = pl_call(0x10, pc_args, strlen(pcp) + 1, 0, 0, pc_to816, &k);
+            if (!res) res = k.err;
+            val = k.n;
+            break;
+        }
         if ((res = f_open(&lf, path, FA_READ))) break;
         val = mb_xfer(&lf, arg0 & 0xFFFFFF, f_size(&lf), 0, &res);
         f_close(&lf);
@@ -2014,6 +1906,7 @@ static void a816_mailbox(void) {
         }
         if (m[0] == 0x18) {
             if (!mb_path(buf, path, sizeof path)) { res = 0x81; break; }
+            if (pc_path(path)) { res = pl_files() ? 0x82 : PL_E_NOLINK; break; }   // not in step 1
             char *e = strrchr(path, '.');
             if (!kind && e && strlen(e) == 4)
                 for (int i = 0; i < 8; i++) {
@@ -2129,97 +2022,13 @@ static void a816_mailbox(void) {
     reg_a816_mbi = (iop & 0x30000) | (uint8_t)(rhead + 1) << 8 | (uint8_t)(qtail + 1);
 }
 
-// 0x13 PEEK816 addr24 width16 rows16 stride24 flags8 -> '+', data, sum16LE | NAK.
-// Reads 65C816 memory as the CPU sees it (native 24-bit addresses, mb_ptr's map): `rows`
-// spans of `width` bytes, `stride` apart (one span = a plain read; rows of a framebuffer =
-// a screenshot). Bytes the I/O processor cannot reach (bank $10, $80 and up) read 0.
-// sum16 is over the raw bytes. flags bit 0 = RLE: the data is sent as packets, header h
-// 0-127 = h + 1 literal bytes follow, 128-255 = the next byte repeated h - 125 (3-130) times.
-// Bit 1 = XOR2: from the third byte of each span on, a byte is sent XORed with the byte two
-// before it (dithered desktop pattern -> zeros; applied before RLE). Bit 2 = sum only: no
-// data, just '+' and sum16 (the PC uses it to tell whether a region changed).
-// Consistency: the 65C816's cache is write-through (a816_sys S_WR) and the blitter writes
-// SDRAM directly, so SDRAM always holds what was written; this never disturbs the CPU.
-// The main loop (mailbox, keys, mouse) waits while the reply streams, so the PC keeps
-// requests to about 64 KB.
-static uint8_t pk_lit[128];
-static uint32_t pk_nl, pk_sum;
-static void pk_flush_lit(void) {
-    if (!pk_nl) return;
-    bridge_putc((uint8_t)(pk_nl - 1));
-    for (uint32_t i = 0; i < pk_nl; i++) bridge_putc(pk_lit[i]);
-    pk_nl = 0;
-}
-static void bridge_cmd_peek816(void) {
-    uint8_t h[10];
-    bridge_quiet = 1;
-    for (int i = 0; i < 10; i++) {
-        int c = blrx_getc(1000);
-        if (c < 0) { bridge_quiet = 0; bridge_putc(BRIDGE_NAK); return; }
-        h[i] = (uint8_t)c;
-    }
-    uint32_t addr   = h[0] | h[1] << 8 | (uint32_t)h[2] << 16;
-    uint32_t width  = h[3] | h[4] << 8, rows = h[5] | h[6] << 8;
-    uint32_t stride = h[7] | h[8] << 8 | (uint32_t)h[9] << 16;
-    int c = blrx_getc(1000);
-    if (c < 0 || !width || !rows || width * rows > 0x100000) {
-        bridge_quiet = 0; bridge_putc(BRIDGE_NAK); return;
-    }
-    int rle = c & 1, x2 = c & 2, quiet = c & 4;
-    bridge_putc('+');
-    uint32_t run_n = 0;
-    uint8_t run_b = 0;
-    pk_nl = 0; pk_sum = 0;
-    for (uint32_t r = 0; r < rows; r++, addr += stride) {
-        uint8_t b1 = 0, b2 = 0;                   // raw bytes x - 1, x - 2
-        uint32_t wa = 1, wv = 0;                  // the 32-bit word last read (address, value):
-        for (uint32_t x = 0; x < width; x++) {    // a firmware SDRAM read costs ~13 us
-            uint32_t n = (addr + x) & 0xFFFFFF, room;
-            if ((n & ~3u) != wa) {
-                volatile uint32_t *p = (volatile uint32_t *)mb_ptr(n & ~3u, &room);
-                wa = n & ~3u;
-                wv = room ? *p : 0;
-            }
-            uint8_t b = (uint8_t)(wv >> ((n & 3) * 8));
-            pk_sum += b;
-            if (quiet) continue;
-            uint8_t raw = b;
-            if (x2 && x >= 2) b ^= b2;
-            b2 = b1; b1 = raw;
-            if (!rle) { bridge_putc(b); continue; }
-            if (run_n && b == run_b && run_n < 130) { run_n++; continue; }
-            if (run_n >= 3) { pk_flush_lit(); bridge_putc((uint8_t)(run_n + 125)); bridge_putc(run_b); }
-            else while (run_n--) { pk_lit[pk_nl++] = run_b; if (pk_nl == 128) pk_flush_lit(); }
-            run_b = b; run_n = 1;
-        }
-    }
-    if (rle && !quiet) {
-        if (run_n >= 3) { pk_flush_lit(); bridge_putc((uint8_t)(run_n + 125)); bridge_putc(run_b); }
-        else while (run_n--) { pk_lit[pk_nl++] = run_b; if (pk_nl == 128) pk_flush_lit(); }
-        pk_flush_lit();
-    }
-    bridge_putc(pk_sum & 0xFF);
-    bridge_putc((pk_sum >> 8) & 0xFF);
-    bridge_quiet = 0;
-}
-
 // ── The clock for file dates (SYS_TIME, $1D) ─────────────────────────────────────────────
 // FatFs (FF_FS_NORTC = 0) asks get_fattime() whenever it stamps a file. Before Horizon has
-// given the time: the build date, 00:00.
-DWORD get_fattime(void) {
+// given the time: the build date, 00:00. (From a PC link session start the gateway's clock
+// is used until Horizon gives the time again.)
+DWORD fat_from2000(uint32_t t) {         // seconds since 2000-01-01 -> FAT date << 16 | time
     static const uint8_t mdays[12] = { 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31 };
-    uint32_t y, mo, d, h, mi, sec;
-    if (!clk_set) {                                      // __DATE__ = "Nov 17 2026"
-        static const char mn[] = "JanFebMarAprMayJunJulAugSepOctNovDec";
-        const char *b = __DATE__;
-        mo = 1;
-        for (int i = 0; i < 12; i++)
-            if (b[0] == mn[i * 3] && b[1] == mn[i * 3 + 1] && b[2] == mn[i * 3 + 2]) mo = i + 1;
-        d = (b[4] == ' ' ? 0 : b[4] - '0') * 10 + b[5] - '0';
-        y = (b[7] - '0') * 1000 + (b[8] - '0') * 100 + (b[9] - '0') * 10 + b[10] - '0';
-        return (y - 1980) << 25 | mo << 21 | d << 16;
-    }
-    uint32_t t = clk_base + (time_millis() - clk_ms) / 1000;
+    uint32_t y, mo, h, mi, sec;
     sec = t % 60; t /= 60; mi = t % 60; t /= 60; h = t % 24; t /= 24;   // t = days since 2000
     for (y = 2000;; y++) {
         uint32_t n = (y & 3) ? 365 : 366;
@@ -2232,6 +2041,21 @@ DWORD get_fattime(void) {
         t -= n;
     }
     return (y - 1980) << 25 | (mo + 1) << 21 | (t + 1) << 16 | h << 11 | mi << 5 | sec / 2;
+}
+
+DWORD get_fattime(void) {
+    uint32_t y, mo, d;
+    if (!clk_set) {                                      // __DATE__ = "Nov 17 2026"
+        static const char mn[] = "JanFebMarAprMayJunJulAugSepOctNovDec";
+        const char *b = __DATE__;
+        mo = 1;
+        for (int i = 0; i < 12; i++)
+            if (b[0] == mn[i * 3] && b[1] == mn[i * 3 + 1] && b[2] == mn[i * 3 + 2]) mo = i + 1;
+        d = (b[4] == ' ' ? 0 : b[4] - '0') * 10 + b[5] - '0';
+        y = (b[7] - '0') * 1000 + (b[8] - '0') * 100 + (b[9] - '0') * 10 + b[10] - '0';
+        return (y - 1980) << 25 | mo << 21 | d << 16;
+    }
+    return fat_from2000(clk_base + (time_millis() - clk_ms) / 1000);
 }
 
 // Is there anything for a816_mailbox to do? It runs from SDRAM (cold), and the PicoRV32's
@@ -2247,61 +2071,319 @@ static int a816_mb_wanted(void) {
     return ms_dx || ms_dy || ms_wheel || ms_btn != ms_btn_sent;
 }
 
-static void bridge_poll(void) {
-    static int busy = 0;             // re-entry guard: bridge_poll is called from
-    uint32_t v = reg_blrx;           // many wait loops, incl. ones a command's own
-    if (busy) return;                // helpers may reach (e.g. message())
-    a816_poll();
-    if ((reg_a816_mbq | reg_a816_mbi) && a816_mb_wanted()) a816_mailbox();
-    if (!(v & 0x100)) return;
-    busy = 1;
-    reg_blrx = 0;                    // ack (clears valid + overrun)
-    // Framing (v3.2.1): every command is 0xA8, cmd, ~cmd. Stray bytes on the link (a
-    // resetting BL616, line noise) used to execute as commands — 0x03 = cold boot, 0x07 =
-    // type, 0x0A = poke. The PC sends 0xA8, the dispatch beat, then cmd+check together.
-    if ((v & 0xFF) != 0xA8) { busy = 0; return; }
-    {
-        int c = blrx_getc(100), k = blrx_getc(100);
-        if (c < 0 || k < 0 || (uint8_t)(c ^ 0xFF) != (uint8_t)k) { busy = 0; return; }
-        v = (uint32_t)c;
+// ── The developer channel (PC link channel 3; ops in Docs/04-pc-link.md) ─────────────────
+// Requests come from the PC tools (core/tools/atari.py), one at a time; the answer is sent
+// when the request is done (TYPE: when the text is typed). Frame payloads: op, tag, flags,
+// result, then data. Big answers (PEEK816) are sent as several frames (flag MORE).
+#define D_INFO 0x01
+#define D_PUT 0x02
+#define D_RESTART816 0x03
+#define D_RUN 0x04
+#define D_COLD 0x05
+#define D_WARM 0x06
+#define D_EJECT 0x07
+#define D_KEY 0x08
+#define D_MOUSE 0x09
+#define D_TYPE 0x0A
+#define D_PEEK 0x0B
+#define D_POKE 0x0C
+#define D_FWPEEK 0x0D
+#define D_PEEK816 0x0E
+#define D_ECHO 0x0F
+#define D_SOURCE 0x10
+#define D_SINK 0x11
+
+static uint8_t dv_out[1024] __attribute__((section(".sdbuf")));   // an answer being built
+static uint32_t dv_n;
+static uint8_t dv_hdr[4];                // op | $80, tag, flags, result
+static int dv_fail;                      // the link went down while answering
+
+static void dv_begin(const uint8_t *p) { dv_hdr[0] = p[0] | 0x80; dv_hdr[1] = p[1]; dv_hdr[2] = 0; dv_hdr[3] = 0; dv_n = 0; dv_fail = 0; }
+static void dv_flush(int more) {
+    dv_hdr[2] = more ? PL_RQ_MORE : 0;
+    if (!dv_fail && pl_send(PL_CH_DEV, dv_hdr, dv_out, dv_n)) dv_fail = 1;
+    dv_n = 0;
+}
+static void dv_put(uint8_t b) { dv_out[dv_n++] = b; if (dv_n == sizeof dv_out) dv_flush(1); }
+static void dv_end(uint8_t res) { dv_hdr[3] = res; dv_flush(0); }
+static void dv_reply(const uint8_t *p, uint8_t res) { dv_begin(p); dv_end(res); }
+
+// print into the answer (INFO): uart_printf with its output caught (picorv32.c, uart_putchar)
+extern char *uart_catch;
+extern int uart_catch_n, uart_catch_max;
+
+// TYPE: the text is typed by the main loop, one key every ~55 ms (typer_step)
+static char     ty_buf[256];
+static uint16_t ty_head, ty_n;
+static uint8_t  ty_phase, ty_prev, ty_tag, ty_wait;   // ty_wait: a TYPE answer is due
+static uint32_t ty_t;
+static void typer_step(void) {
+    uint32_t now = time_millis();
+    if ((int32_t)(now - ty_t) < 0) return;
+    if (ty_phase == 1) {                                 // key held long enough: release
+        reg_virt_kbd_0 = 0;
+        ty_phase = 0;
+        ty_t = now + (ty_prev == 0x28 ? 275 : 25);       // after RETURN the line is processed
+        return;
     }
-    switch (v & 0xFF) {
-    case 0x05: uart_printf("A8OK\n"); break;
-    case 0x10: case 0x11: a816_start((v & 0xFF) == 0x11); bridge_putc('+'); break;       // restart the 65C816 from the SD card
-    case 0x01: bridge_cmd_put(); break;
-    case 0x02:
-        if (bridge_read_name(bridge_req_path) == 0) { bridge_req = 1; bridge_putc('+'); }
-        else bridge_putc(BRIDGE_NAK);
-        break;
-    case 0x03: bridge_req = 2; bridge_putc('+'); break;
-    case 0x04: bridge_req = 3; bridge_putc('+'); break;
-    case 0x06:                       // EJECT the virtual .xex boot disk (D1:)
-        if (xex_active) {
-            f_close(&xex_file);
-            xex_active = false;
-            strncpy(mounted_atr_name[0], "None", 16);
-        }
-        bridge_putc('+');
-        break;
-    case 0x07: bridge_cmd_type(); break;
-    case 0x08: bridge_cmd_status(); break;
-    case 0x0D: bridge_cmd_fwpeek(); break;
-    case 0x0E: bridge_cmd_key(); break;
-    case 0x12: {                     // MOUSE: dx dy wheel buttons (test injection of a MOUSE event)
-        int a = blrx_getc(100), b = blrx_getc(100), c = blrx_getc(100), d = blrx_getc(100);
-        if (d < 0) { bridge_putc(BRIDGE_NAK); break; }
-        ms_dx += (int8_t)a; ms_dy += (int8_t)b; ms_wheel += (int8_t)c; ms_btn = d;
-        bridge_putc('+');
-        break;
+    if (!ty_n) {
+        if (ty_wait) { uint8_t q[2] = { D_TYPE, ty_tag }; ty_wait = 0; dv_reply(q, 0); }
+        return;
     }
-    case 0x09: bridge_cmd_peek(); break;
-    case 0x0A: bridge_cmd_poke(); break;
-    case 0x13: bridge_cmd_peek816(); break;
-    default: break;                  // tolerate stray bytes
+    uint8_t c = ty_buf[ty_head], e;
+    ty_head = (ty_head + 1) & 255; ty_n--;
+    if (c == '\n' || c == '\r') e = 0x28;                // RETURN
+    else if (c == 0x08 || c == 0x7F) e = 0x2A;           // Backspace
+    else if (c == 0x09) e = 0x2B;                        // Tab
+    else if (c == 0x1B) e = 0x29;                        // Esc
+    else if (c < 0x20 || c > 0x7E) return;               // unmappable: skipped
+    else { e = (option_kbd_layout ? ascii2hid_pc : ascii2hid)[c - 0x20]; if (!e) return; }
+    if (e == ty_prev && ty_phase == 0) {                 // the OS ignores a repeat within ~50 ms
+        ty_phase = 2; ty_t = now + 45;
+        ty_head = (ty_head - 1) & 255; ty_n++;
+        return;
     }
-    busy = 0;
+    ty_phase = 1;
+    ty_prev = e;
+    reg_virt_kbd_0 = ((uint32_t)(e & 0x7F) << 8) | ((e & KSH) ? 0x02 : 0x00);
+    ty_t = now + 30;
 }
 
+// PUT: frame 1 = size u32, path; then frames of offset u32 + data; the answer after the last
+static uint8_t  put_on, put_tag;
+static uint32_t put_size, put_done, put_err;
+static char     put_path[SD_PATH_MAX];
+
+static void dev_put(const uint8_t *p, uint32_t n) {
+    int last = !(p[2] & PL_RQ_MORE);
+    if (!put_on || p[1] != put_tag) {                    // the first frame of a PUT
+        if (put_on) bridge_put_close();
+        put_on = 1; put_tag = p[1]; put_done = 0; put_err = 0;
+        put_size = n >= 8 ? le32(p + 4) : 0;
+        uint32_t k = 0;
+        put_path[k++] = '/';
+        for (uint32_t i = 8; i < n && p[i] && k < sizeof put_path - 1; i++)
+            if (!(k == 1 && p[i] == '/')) put_path[k++] = p[i];
+        put_path[k] = 0;
+        if (mb_synced || bridge_mkdirs(put_path) || bridge_put_open(put_path)) {   // (after SYS_SYNC: refused)
+            put_err = FR_DENIED; put_on = 2;             // refused: data is ignored
+        }
+    } else if (put_on == 1 && !put_err) {
+        if (n < 8 || le32(p + 4) != put_done) put_err = FR_INT_ERR;
+        else {
+            int r = bridge_put_chunk(p + 8, n - 8);
+            if (r) put_err = r;
+            put_done += n - 8;
+        }
+    }
+    if (!last) return;
+    int opened = put_on == 1;
+    put_on = 0;
+    if (opened) {
+        int cr = bridge_put_close();
+        if (!put_err && (cr || put_done != put_size)) put_err = FR_INT_ERR;
+        // after a card-level error leave the partial file rather than touch the volume again
+        if (put_err && put_err != FR_DISK_ERR && put_err != FR_INT_ERR) f_unlink(put_path);
+        else if (put_err && put_done != put_size && put_err == FR_INT_ERR) f_unlink(put_path);
+    }
+    uart_printf("put %s %d%s\n", put_path, (int)put_done, put_err ? " failed" : "");
+    dv_reply(p, put_err);
+}
+
+// PEEK816 addr u32, width u16, rows u16, stride u32, flags u8: 65C816 memory as the CPU sees
+// it (mb_ptr's map), rows of `width` bytes `stride` apart (a framebuffer = a screenshot).
+// Bytes the I/O processor cannot reach (bank $10, $80 and up) read 0. The answer stream is
+// the data and then sum16 (of the raw bytes, little-endian). Flags bit 0 = RLE: packets, h
+// 0-127 = h + 1 literal bytes follow, 128-255 = the next byte repeated h - 125 (3-130) times;
+// bit 1 = XOR2: from the third byte of each row on, a byte is sent XORed with the raw byte
+// two before it (dithered desktop pattern -> zeros; before RLE); bit 2 = the sum only.
+// The SDRAM always holds what the CPU and the blitter wrote (write-through cache), so this
+// never disturbs the 65C816. Requests of up to 1 MB; the tools ask for about 64 KB at a time.
+static uint8_t  pk_lit[128];
+static uint32_t pk_nl;
+static void pk_flush_lit(void) {
+    if (!pk_nl) return;
+    dv_put((uint8_t)(pk_nl - 1));
+    for (uint32_t i = 0; i < pk_nl; i++) dv_put(pk_lit[i]);
+    pk_nl = 0;
+}
+static void pk_run(uint32_t run_n, uint8_t run_b) {
+    if (run_n >= 3) { pk_flush_lit(); dv_put((uint8_t)(run_n + 125)); dv_put(run_b); }
+    else while (run_n--) { pk_lit[pk_nl++] = run_b; if (pk_nl == 128) pk_flush_lit(); }
+}
+static void dev_peek816(const uint8_t *p, uint32_t n) {
+    if (n < 4 + 13) { dv_reply(p, 0x83); return; }
+    uint32_t addr = le32(p + 4) & 0xFFFFFF;
+    uint32_t width = p[8] | p[9] << 8, rows = p[10] | p[11] << 8, stride = le32(p + 12);
+    int c = p[16], rle = c & 1, x2 = c & 2, quiet = c & 4;
+    if (!width || !rows || width * rows > 0x100000) { dv_reply(p, 0x83); return; }
+    dv_begin(p);
+    uint32_t run_n = 0, sum = 0;
+    uint8_t run_b = 0;
+    pk_nl = 0;
+    for (uint32_t r = 0; r < rows && !dv_fail; r++, addr += stride) {
+        uint8_t b1 = 0, b2 = 0;                          // raw bytes x - 1, x - 2
+        uint32_t wa = 1, wv = 0;                         // the 32-bit word last read
+        for (uint32_t x = 0; x < width; x++) {
+            uint32_t a = (addr + x) & 0xFFFFFF, room;
+            if ((a & ~3u) != wa) {
+                volatile uint32_t *q = (volatile uint32_t *)mb_ptr(a & ~3u, &room);
+                wa = a & ~3u;
+                wv = room ? *q : 0;
+            }
+            uint8_t b = (uint8_t)(wv >> ((a & 3) * 8));
+            sum += b;
+            if (quiet) continue;
+            uint8_t raw = b;
+            if (x2 && x >= 2) b ^= b2;
+            b2 = b1; b1 = raw;
+            if (!rle) { dv_put(b); continue; }
+            if (run_n && b == run_b && run_n < 130) { run_n++; continue; }
+            pk_run(run_n, run_b);
+            run_b = b; run_n = 1;
+        }
+    }
+    if (rle && !quiet) { pk_run(run_n, run_b); pk_flush_lit(); }
+    dv_put(sum & 0xFF);
+    dv_put((sum >> 8) & 0xFF);
+    dv_end(0);
+}
+
+void pl_dev_request(const uint8_t *p, uint32_t n) {
+    if (n < 4) return;
+    const uint8_t *a = p + 4;
+    uint32_t na = n - 4;
+    switch (p[0]) {
+    case D_INFO: {                       // one text line: the firmware's state (old STATUS)
+        extern char _ebss[];
+        dv_begin(p);
+        uart_catch = (char *)dv_out; uart_catch_n = 0; uart_catch_max = sizeof dv_out;
+        uart_printf("ST u:%d bs:%d rom:%d x:%d m:%d%d%d%d c:%b s:%d st:%d e:%d cn:%d br:%d"
+                    " link rx:%d bad:%d retry:%d pc:%d\n",
+                    (int)time_millis(), bridge_boot_stage, bridge_rom_ok, xex_active ? 1 : 0,
+                    atr_mounted[0] ? 1 : 0, atr_mounted[1] ? 1 : 0,
+                    atr_mounted[2] ? 1 : 0, atr_mounted[3] ? 1 : 0,
+                    dbg_last_sio_cmd, dbg_last_sio_sector, dbg_last_sio_status,
+                    (int)dbg_sio_err_count,
+                    (*(volatile uint32_t *)_ebss != 0x53544B21u) ? 1 : 0, boot_retries,
+                    (int)pl_rx_bytes(), (int)pl_rx_bad(), (int)pl_retries(), pl_files());
+        dv_n = uart_catch_n;
+        uart_catch = 0;
+        dv_end(0);
+        break;
+    }
+    case D_PUT: dev_put(p, n); break;
+    case D_RESTART816:                   // a = 0: Horizon (or /A816.BIN); 1: /A816.BIN only
+        a816_start(na && a[0] == 1);
+        dv_reply(p, 0);
+        break;
+    case D_RUN: {                        // path of a .xex: mount it, cold boot (main loop)
+        uint32_t k = 0;
+        bridge_req_path[k++] = '/';
+        for (uint32_t i = 0; i < na && a[i] && k < SD_PATH_MAX - 1; i++)
+            if (!(k == 1 && a[i] == '/')) bridge_req_path[k++] = a[i];
+        bridge_req_path[k] = 0;
+        bridge_req = 1;
+        dv_reply(p, 0);
+        break;
+    }
+    case D_COLD: bridge_req = 2; dv_reply(p, 0); break;
+    case D_WARM: bridge_req = 3; dv_reply(p, 0); break;
+    case D_EJECT:                        // the virtual .xex boot disk (D1:)
+        if (xex_active) { f_close(&xex_file); xex_active = false; strncpy(mounted_atr_name[0], "None", 16); }
+        dv_reply(p, 0);
+        break;
+    case D_KEY:                          // mod, HID usage, hold (10 ms units): a raw key press
+        if (na < 3) { dv_reply(p, 0x83); break; }
+        reg_virt_kbd_0 = ((uint32_t)a[1] << 8) | a[0];
+        // released later by joy_get(): the main loop must see the key down (F12, F9)
+        virt_key_release_at = time_millis() + (a[2] ? a[2] * 10 : 100);
+        dv_reply(p, 0);
+        break;
+    case D_MOUSE:                        // dx, dy, wheel (signed), buttons: a MOUSE event
+        if (na < 4) { dv_reply(p, 0x83); break; }
+        ms_dx += (int8_t)a[0]; ms_dy += (int8_t)a[1]; ms_wheel += (int8_t)a[2]; ms_btn = a[3];
+        dv_reply(p, 0);
+        break;
+    case D_TYPE:                         // text typed on the classic keyboard; answer when done
+        if (ty_wait || na > 256 - ty_n) { dv_reply(p, 0x85); break; }
+        for (uint32_t i = 0; i < na; i++) { ty_buf[(ty_head + ty_n) & 255] = a[i]; ty_n++; }
+        ty_tag = p[1]; ty_wait = 1;
+        break;
+    case D_PEEK: {                       // addr u16, len u16: classic machine memory
+        uint32_t ad = a[0] | a[1] << 8, len = a[2] | a[3] << 8;
+        if (na < 4 || len > 1024) { dv_reply(p, 0x83); break; }
+        dv_begin(p);
+        for (uint32_t i = 0; i < len; i++) dv_put(*(volatile uint8_t *)(0x00200000u + ((ad + i) & 0xFFFFu)));
+        dv_end(0);
+        break;
+    }
+    case D_POKE: {                       // addr u16, bytes
+        uint32_t ad = a[0] | a[1] << 8;
+        if (na < 2) { dv_reply(p, 0x83); break; }
+        for (uint32_t i = 2; i < na; i++) *(volatile uint8_t *)(0x00200000u + ((ad + i - 2) & 0xFFFFu)) = a[i];
+        dv_reply(p, 0);
+        break;
+    }
+    case D_FWPEEK: {                     // addr u32, len u16: the I/O processor's own memory
+        uint32_t ad = le32(a), len = a[4] | a[5] << 8;
+        if (na < 6 || len > 1024) { dv_reply(p, 0x83); break; }
+        dv_begin(p);
+        for (uint32_t i = 0; i < len; i++) dv_put(*(volatile uint8_t *)(ad + i));
+        dv_end(0);
+        break;
+    }
+    case D_PEEK816: dev_peek816(p, n); break;
+    case D_ECHO:
+        dv_begin(p);
+        for (uint32_t i = 0; i < na; i++) dv_put(a[i]);
+        dv_end(0);
+        break;
+    case D_SOURCE: {                     // len u32: that many bytes (i & $FF) back (speed test)
+        uint32_t len = na >= 4 ? le32(a) : 0;
+        dv_begin(p);
+        for (uint32_t i = 0; i < len && !dv_fail; i++) dv_put((uint8_t)i);
+        dv_end(0);
+        break;
+    }
+    case D_SINK: {                       // frames of data, thrown away (speed test); answer: count
+        static uint32_t got;
+        got += na;
+        if (p[2] & PL_RQ_MORE) break;
+        dv_begin(p);
+        for (int i = 0; i < 4; i++) dv_put(got >> (8 * i));
+        got = 0;
+        dv_end(0);
+        break;
+    }
+    default:
+        dv_reply(p, 0x82);
+    }
+}
+
+// a link session started or ended. At the start the PC's clock dates the files on the card
+// (Horizon gives its own time again when its clock is set).
+void pl_session(int up) {
+    if (up) { clk_base = pl_pc_time(); clk_ms = time_millis(); clk_set = 1; }
+    uart_printf("link: %s\n", up ? "PC connected" : "PC gone");
+}
+
+// while the firmware waits for the PC: keep the keyboard and the classic disks served
+void pl_idle(void) {
+    uart_keyboard_poll();
+    sio_poll();
+}
+
+static void bridge_poll(void) {
+    static int busy = 0;             // re-entry guard
+    if (busy) return;
+    busy = 1;
+    a816_poll();
+    if ((reg_a816_mbq | reg_a816_mbi) && a816_mb_wanted()) a816_mailbox();
+    pl_poll();
+    if (ty_n | ty_wait | ty_phase) typer_step();
+    busy = 0;
+}
 // Stack canary at the very bottom of the stack region (= _ebss, no heap in this
 // firmware). The linker guarantees >= 4 KB between _ebss and STACK_TOP; if the
 // stack ever reaches the canary it has (nearly) collided with the top of bss —
@@ -2350,7 +2432,7 @@ static int cold_load(void) {
 int main_app(void);
 
 int main() {
-    reg_uart_clkdiv = 234;                     // 27000000 / 115200
+    pl_init();                                 // the PC link: its rate, the log (hot)
     uart_printf("boot: hot\n");
     for (;;) {
         int r = cold_load();
@@ -2367,8 +2449,6 @@ int main_app() {
     delay(200); // Give SD card time to stabilize power on startup
     CORE_ID = reg_core_id;
 
-    // Initialize UART
-    reg_uart_clkdiv = 234; // 27000000 / 115200;
 
     // Initialize SD Card
     int mounted = 0;

@@ -428,6 +428,18 @@ errmsg: cmp     #$44
         bne     :+
         print   "already running (its window was raised)"
         rts
+:       cmp     #EIO + $87              ; (0.20) the PC link's errors
+        bne     :+
+        print   "no PC link"
+        rts
+:       cmp     #EIO + $88
+        bne     :+
+        print   "the PC link was lost"
+        rts
+:       cmp     #EIO + $89
+        bne     :+
+        print   "not on the same volume"
+        rts
 :       pha
         print   "error $"
         pla
@@ -1140,26 +1152,15 @@ two_names:
         .a16
         rts
 
-; mv from to: rename, or move on the card
+; mv from to: rename, or move (0.20: between the card and the PC volume a copy, then the
+; source deleted: ui_mvtree)
 b_mv:   jsr     two_names
         bcc     :+
         print   "usage: mv from to\n"
         rts
-:       lda     #.loword(fname)
-        sta     sblk
-        lda     #.loword(fname2)
-        sta     sblk+3
-        sep     #$20
-        .a8
-        lda     #^fname
-        sta     sblk+2
-        lda     #^fname2
-        sta     sblk+5
-        rep     #$20
-        .a16
-        ldx     #.loword(sblk)
-        ldy     #^sblk
-        sys     SYS_RENAME
+:       ldx     #.loword(fname)
+        ldy     #.loword(fname2)
+        jsr     ui_mvtree
         bcc     :+
         pha
         print   "mv: "
@@ -1169,15 +1170,15 @@ b_mv:   jsr     two_names
         jmp     put_nl
 :       rts
 
-; cp from to: copy a file, 32 KB at a time through a bank of its own
+; cp from to: copy a file, 32 KB at a time through a bank of its own; (0.20) or a folder
+; and everything in it (ui_cptree; also between the card and the PC volume)
 b_cp:   jsr     two_names
         bcc     :+
         print   "usage: cp from to\n"
         rts
 :       ldx     #.loword(fname)
-        ldy     #^fname
-        lda     #O_READ
-        sys     SYS_OPEN
+        ldy     #.loword(fname2)
+        jsr     ui_cptree
         bcc     :+
         pha
         print   "cp: "
@@ -1185,73 +1186,7 @@ b_cp:   jsr     two_names
         pla
         jsr     errmsg
         jmp     put_nl
-:       sta     z:t2                    ; source handle
-        ldx     #.loword(fname2)
-        ldy     #^fname2
-        lda     #O_CREATE
-        sys     SYS_OPEN
-        bcc     :+
-        pha
-        print   "cp: "
-        ldx     #.loword(fname2)
-        ldy     #^fname2
-        jsr     out_str
-        print   ": "
-        pla
-        jsr     errmsg
-        jsr     put_nl
-        bra     @close1
-:       sta     z:t3                    ; destination handle
-        sys     SYS_BALLOC
-        bcc     :+
-        print   "cp: no memory\n"
-        bra     @close2
-:       sta     z:t4                    ; the buffer bank
-@loop:  lda     z:t2                    ; read up to 32 KB
-        jsr     @blk
-        sys     SYS_READ
-        bcs     @err
-        cmp     #0
-        beq     @done
-        sta     blk+4
-        lda     z:t3                    ; write them
-        sep     #$20
-        .a8
-        sta     blk
-        rep     #$20
-        .a16
-        ldx     #.loword(blk)
-        ldy     #^blk
-        sys     SYS_WRITE
-        bcs     @err
-        bra     @loop
-@err:   pha
-        print   "cp: "
-        pla
-        jsr     errmsg
-        jsr     put_nl
-@done:  lda     z:t4
-        sys     SYS_BFREE
-@close2:
-        lda     z:t3
-        sys     SYS_CLOSE
-@close1:
-        lda     z:t2
-        sys     SYS_CLOSE
-        rts
-@blk:   sep     #$20                    ; block {handle A, buffer t4:0000, 32768}
-        .a8
-        sta     blk
-        lda     z:t4
-        sta     blk+3
-        rep     #$20
-        .a16
-        stz     blk+1
-        lda     #32768
-        sta     blk+4
-        ldx     #.loword(blk)
-        ldy     #^blk
-        rts
+:       rts
 
 ; ---------------------------------------------------------------- Atari software
 ; mount file [drive 1-4]: the kind comes from the extension (adds to what is mounted)

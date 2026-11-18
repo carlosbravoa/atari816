@@ -9,7 +9,16 @@ The kernel makes every path absolute; the result must fit in 127 characters (EIN
   A handle (0-3) belongs to the task that opened it and is closed when it exits.
 - A file call blocks the caller until the answer comes; other tasks run meanwhile.
 - Errors are $40 + the FatFs result: $44 no such file, $45 no such path, $46 bad name,
-  $47 denied, $48 already exists, $52 too many open files; $C0 + n: an I/O processor error.
+  $47 denied, $48 already exists, $52 too many open files; $C0 + n: an I/O processor error
+  ($C7 no PC link, $C8 the PC link was lost, $C9 not the same volume: below).
+- (Horizon 0.20) **The PC volume.** With the PC link, one folder of the PC is a second volume:
+  paths starting `/PC:` (any case; `/PC:` alone is its root). Every call below works on it,
+  with the same handles and errors; a rename between the card and the PC answers $C9 (copy,
+  then delete: `ui_mvtree` in the controls library does it). Without the PC every `/PC:` call
+  answers $C7 at once; if the link drops, $C8. A readdir of `/` lists a folder `PC:` at the
+  end while the volume is there. A stat of `/PC:` gives the PC's current time (the clock).
+  It is slower than the card (about 50-150 KB/s, a few ms a call). See Horizon's ABI.md,
+  "The PC volume".
 - Data reaches the card when the file is closed (or at `SYS_SYNC`): close files you
   write before the user can switch off.
 
@@ -84,7 +93,8 @@ the new position low, X = high. A file opened read-only is clipped to its size.
 ### $25 stat (SYS_STAT)
 In: X, Y = `{u24 path, u24 out}`. Out: A = size low, X = size high; `out` gets 9 bytes:
 u32 size, u8 attributes (bit 4 directory, bit 0 read-only, $20 archive), u32 FAT time
-(date << 16 | time). The root `/` cannot be stat'ed (error $46).
+(date << 16 | time). The root `/` cannot be stat'ed (error $46); `/PC:` can (0.20: its time
+is the PC's clock now).
 ```asm
         ptr     sblk
         sys     SYS_STAT        ; -> A, X = size
@@ -147,7 +157,7 @@ s_dir:  .byte   "/SAVES", 0
 
 ### $29 rename (SYS_RENAME)
 In: X, Y = `{u24 old path, u24 new path}`. Renames or moves a file or folder. $48 if the
-new name exists.
+new name exists; $C9 between the card and the PC volume (0.20).
 ```asm
         ptr     rblk
         sys     SYS_RENAME

@@ -1,0 +1,20 @@
+# (0.20) The PC volume (PC link) in the text shell: emu816 --pc-folder on a fresh copy of
+# tests/pc (and HELLO.PRG as hello.prg), --pc-time 2026-03-04T05:06 (the PC's clock)
+1500 {esc}
++1500 date\n
++2000 ls /PC:\n
++3000 cd /pc:\n
++2000 pwd\n
++2000 cat notes.txt\n
++3000 cp notes.txt /n2.txt\n
++3000 cp /README.TXT /PC:\n
++3000 cp games /games2\n
++3000 mv /n2.txt /PC:/moved.txt\n
++3000 mv /games2 /pc:/Games2\n
++3000 hello.prg from the PC\n
++3000 ls\n
++3000 ls Games2\n
++3000 cd ..\n
++2000 ls /pc:/nothere\n
++3000 mv /PC:/Notes.txt /PC:/Games\n
++3000 ls /PC:/Games\n

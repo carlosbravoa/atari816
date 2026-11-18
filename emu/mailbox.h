@@ -17,6 +17,8 @@ typedef struct Mailbox {
     uint8_t  fmode[MB_FILES];       /* bit 0 readable, bit 1 writable */
     uint8_t  fdirty[MB_FILES];      /* created or written: its date is set at close (SYS_TIME) */
     char    *fhost[MB_FILES];       /* its host path */
+    uint8_t  fpc[MB_FILES];         /* on the PC volume (/PC:, --pc-folder) */
+    uint8_t  fsess[MB_FILES];       /* the PC link session it was opened in */
     const char *root;               /* --sd directory, or NULL */
     uint64_t n_req, n_keyev, n_mouseev;
     /* keyboard: what the USB side holds now (4 usages + modifier bitmap), and what the
@@ -36,6 +38,11 @@ void    mailbox_reset(void);
 extern const char *mailbox_boot_cart;   /* --boot-cart PATH (FAT path on --sd) */
 #include <time.h>
 extern time_t mailbox_card_date;        /* --card-date: STAT's date of the files this run did not write */
+/* the PC volume (PC link step 1): /PC: paths served from a host folder */
+extern const char *mailbox_pc_root;     /* --pc-folder DIR (NULL: no PC link, $87) */
+extern time_t mailbox_pc_time;          /* --pc-time: the PC's clock at power-on (0: the host clock) */
+extern double mailbox_pc_drop;          /* --pc-drop-at: emulated second the link drops (< 0 never) */
+extern double mailbox_pc_back;          /* --pc-back-at: emulated second it comes back (< 0 never) */
 void    mailbox_poll(uint64_t now);
 uint8_t mailbox_read(uint32_t a);
 void    mailbox_write(uint32_t a, uint8_t v);

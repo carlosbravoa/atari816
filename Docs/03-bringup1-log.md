@@ -439,3 +439,103 @@ No RTL change; the firmware is embedded in the bitstream, so the bitstream was r
 **Board** (loaded to SRAM first, with its `cold.bin` in flash): self test 11 lines OK (REV 0B); TIMING.BIN; BRINGUP1 LOOP $5947, READ $860F, MVN $75D3; Horizon 0.19 boots to the desktop; `date 2026-11-17 23:55` then a file copied in the Terminal shows `2026-11-17 23:55` in `ls` (files from before show the old fixed date 2024-01-21) and on Files' footer; after a Horizon restart the provisional clock is given again and a new file gets 23:55; the classic machine runs BLUE.XEX from `run` (COLOR4 = $94) and F12 comes back; PC link send (the 43 files of the card's Horizon); SYSTEST (SYNC, restart 0) and SYSTEST1 (restart 1) pass. Not tested on the board: the boot cartridge (no /ASH.CAR on the card; tested in emu816 with `--boot-cart`), the PC link's listing (it has no listing command).
 
 **Flash:** the board-tested pair is in flash (`cold.bin` at 0x500000, then the bitstream); the FPGA reloaded from flash after the write and came up to the Horizon desktop. Files: `core/impl/rev0b_fw2/` (this build: bitstream, report, timing, `cold.bin`), `core/impl/fallback_rev0b/` (step 19's bitstream with the earlier `cold.bin`).
+
+## Step 21: the PC link, step 1 (2026-11-18)
+
+The USB serial to the PC now carries a packet protocol instead of the old developer commands:
+a gateway on the PC (`tools/atari816-link`) shares one folder with the Atari816, which sees it
+as a second volume, `/PC:`, and gives it the time; the developer tools (`core/tools/atari.py`)
+use the same link. Protocol: `04-pc-link.md`. Horizon 0.20 shows the volume (a "PC" icon,
+Files, the shell, the file dialogs) and takes the PC's clock when it connects.
+
+**Hardware change (small, in the 27 MHz I/O domain):** the bridge receiver (`iosys_picorv32.v`)
+gets a programmable bit time (register $0200_00C4) and a 2048-byte FIFO in one block RAM (a read
+of $0200_00C0 takes a byte; the count and an overrun flag are in the same word); before, it was
+fixed at 115,200 baud with a 1-byte register. `simpleuart.v` gets a transmit divider of its own
+(bits 31-16 of its divider register; 0 = as before), so the keyboard (CH9350) stays at 115,200
+while the PC link sends at 1.5 Mbaud.
+
+**Speed measurements** (raw test firmware, 1 MB per direction and rate, PRNG data checked):
+
+| Rate | PC to board | Board to PC |
+|---|---|---|
+| 115,200 | 0 errors, 11.3 KB/s | 0 errors, 11.3 KB/s |
+| 230,400 | 0 errors, 22.6 KB/s | 0 errors, 22.5 KB/s |
+| 460,800 | 0 errors, 44.8 KB/s | 0 errors, 44.6 KB/s |
+| 921,600 | 0 errors, 90.6 KB/s | bytes lost after 92 KB of a continuous stream |
+| 1,000,000 | 0 errors, 97.6 KB/s | bytes lost after 52 KB of a continuous stream |
+| 1.5 / 2 / 3 M | 0 errors when paced (the test loop overflowed the FIFO when not paced: it checks only ~125 KB/s) | 0 errors in 4 KB bursts (256 x 4 KB), 83.4 KB/s at every rate |
+
+The wire is clean at every rate tried. Board to PC, the BL616 forwards at most about 83 KB/s
+whatever the rate and drops bytes when a continuous stream goes on longer than its buffer
+(about 8 KB of slack); the link's frames (at most 1,051 bytes, then a wait for the ACK) never
+reach that. **Chosen: 1.5 Mbaud**, exact on both sides (27 MHz / 18; 12 MHz / 8 in the BL616's
+FT2232 model), half the bit-time precision needed at 3 Mbaud. Above it nothing is gained: the
+PicoRV32's receive loop and the BL616 are the limits, not the wire.
+
+**Through the protocol** (final firmware, gateway on the PC, board-side timers):
+
+| Path | Speed |
+|---|---|
+| PC volume READ, 512 KB in 32 KB mailbox requests (`sw/a816/PCBENCH.BIN`) | 5.11 s, **100 KB/s** (77 KB/s with one frame at a time; the gateway now keeps two in flight) |
+| PC volume LOAD, 512 KB | 5.04 s, 102 KB/s |
+| PC volume WRITE, 512 KB | 9.23 s, **55 KB/s** (the BL616's 83 KB/s and one frame at a time) |
+| Shell `cp` of 1.5 MB, card to PC | 37 s, 41 KB/s (cp's request size and the card reads included) |
+| Developer PUT (Horizon install, 23 files, 580 KB) | 12.9 s, 45 KB/s (128 KB took 15 s at 115,200 before) |
+| Developer SINK / SOURCE (1 MB) | 77 KB/s / 33 KB/s (SOURCE is built byte by byte by cold code) |
+| Round trip of a small developer request | 6 ms |
+| Card through the mailbox, before / after (`FSBENCH.BIN`, 2 runs each) | write 5.03-5.29 / 5.29-5.32 s (the card's spread), read 3.07 / 3.07 s, load 3.05 / 3.05 s |
+
+A small RTL change would not help much now: board to PC is the BL616's limit; PC to board is the
+PicoRV32 (an SDRAM access costs it several microseconds, and the CRC is done in software). A
+hardware CRC and a 32-bit FIFO read might give 20-30 % on reads; not done.
+
+**Firmware:** `core/firmware/pclink.c` (the engine: frames, CRC tables, sessions, retries, the
+log channel, the PC volume client), `firmware.c` (the mailbox routes `/PC:` paths and the
+handles of PC files to it; the developer channel replaces the old bridge commands; the log goes
+out as datagrams). Hot (block RAM): text 20,320 + data 616 + bss 4,836 = 25,772 bytes of the
+28,672 allowed (was 21,140 + its bss before step 1: about 2.9 KB left); what runs in the idle
+loop is hot (`pl_poll`, the receive loop, the CRC, the transmit loop, the copy into 65C816
+memory); the rest of the protocol runs from SDRAM only while frames come or go. Cold image
+24,952 bytes; 2 KB of buffers in SDRAM after it.
+
+**Build** (place_option 1): logic 16,596 / 20,736 (81 %, +158), CLS 9,395 (91 %), registers
+8,325, block RAM 44 / 46 (+1, the FIFO); **clk_core 31.85 MHz** (rule 29.7), clk_pix 89.83,
+sys_clk 41.34. The netlist is the same for every firmware build, so the four builds of this
+step all placed identically.
+
+**Host test:** `core/test/pclink_host/run_tests.py` runs the firmware's `pclink.c` on the PC
+against the real gateway through a pseudo terminal: file requests (60 KB write and read back,
+stat, mkdir, rename, readdir, load, `..` and a symlink out refused), developer requests through
+the gateway's socket while the board side is busy (parking), a gateway restart; also with one
+byte in 20,000 lost in each direction. `tools/test_pclink.py`: the frame parser and the folder's
+safety rules.
+
+**Board tests** (final build, first from SRAM, then flashed):
+
+- No gateway: boots to the desktop as before, no PC icon, no `PC:` in `/`; `ls /PC:` and `cp`
+  to it answer "no PC link" at once; PCBENCH stops at once with $87. Self test A816.BIN: all
+  OK + DONE. FSBENCH as above. The developer tools open the port themselves (ping, status,
+  run816, shot816, send).
+- Gateway started with the board running: connected within a second; the PC icon appears and
+  the clock is set from the PC (the menu bar went from "up 0:00" to the PC's time; `date` in the
+  shell). Files lists `/PC:` with sizes and dates (screenshot); `PC:` is the last folder of `/`.
+  `ls /PC:` shows dates, `cat /pc:/hello.txt` works (any case), `/PC:/CALC.PRG` starts from the
+  PC.
+- 1.5 MB copied PC to card and card to PC with the shell's `cp`: the two files on the PC have
+  the same MD5.
+- Gateway stopped (SIGTERM: BYE) and killed (no BYE): the icon goes, `ls /PC:` says "no PC
+  link". Killed during a 1.5 MB copy to the PC: `cp` said "the PC link was lost" after about
+  3.5 s, no hang; the half file stays on the PC. Started again: the icon and the volume come
+  back.
+- The developer tools through the gateway while it serves the volume: ping, status, run816
+  (PCBENCH, the self test), shot816, send.
+- Classic machine: `run /BLUE.XEX` from the shell, COLOR4 = $94, F12 back.
+
+**Known limits:** keys typed while a long PC volume request runs can be lost (the I/O processor
+only looks at the keyboard between mailbox requests, as with long card requests); Atari disk
+images cannot be mounted from `/PC:` (copy them to the card); one session, one folder.
+
+**Flash:** `core/impl/pclink1/` (bitstream, report, timing, `cold.bin`) is in flash (`cold.bin`
+at 0x500000, then the bitstream); the board came up from flash to the Horizon 0.20 desktop.
+`core/impl/rev0b_fw2/` stays the fallback (it needs its own `cold.bin` flashed with it).

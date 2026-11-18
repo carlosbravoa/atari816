@@ -109,6 +109,13 @@ D15SHOTS := 6.0 8.5 11.5 14.0 16.8 18.3 20.5 24.0 27.5 31.0 35.0 38.0
 # cycle (the executable ejected, classic_boot CB_STAY: the desktop stays) (tests/desk18.keys,
 # made from tests/desk18.src; its classic-machine ops compared with tests/desk18.err)
 D18SHOTS := 10.0 14.5 17.0 19.0 26.0
+# (0.20) the PC volume (PC link): emu816 serves /PC: from a fresh copy of tests/pc, with the
+# PC's clock fixed. The Desktop session (tests/pcdesk.src): the PC icon, drops on it, Files at
+# /PC:, copy and paste both ways, a move from the card to the PC, the link dropped and back,
+# the file dialog; shot times. The shell sessions: tests/pcshell.keys (with the volume),
+# tests/pcshell2.keys (without: clean errors)
+PCFLAGS := --pc-folder build/run-pc --pc-time 2026-03-04T05:06
+PCSHOTS := 7 16 17 21 26 33.5 41.5 48.5 51.5
 # (0.17) STEST: without Lau (--rev 9 or lower) the short output and no Lau writes
 NOLAU   = $(or $(findstring --rev 9,$(EMUFLAGS)),$(findstring --rev 8,$(EMUFLAGS)),$(findstring --rev 7,$(EMUFLAGS)))
 STESTTXT = $(if $(NOLAU),stest-nolau.txt,stest.txt)
@@ -356,6 +363,7 @@ test: all $(EMU)
 	@DESK=1 sh tests/shots.sh "$(EMU) $(EMUFLAGS) $(CARDDATE)" $(SD) files 46 $(FSHOTS)
 	@if diff -u tests/pictures/$(subst edit,files,$(EMD5)) $(B)/files.md5; then echo "PASS  Files pictures"; \
 	else echo "FAIL  Files pictures (look at $(B)/files*.ppm, then make pictures)"; exit 1; fi
+	@$(MAKE) --no-print-directory test-pc
 	@rm -rf build/run-sd; cp -r $(SD) build/run-sd; touch build/run-sd/SYSTEM/NODESK; cp tests/basic.bas build/run-sd/BT.BAS
 	@$(EMU) $(EMUFLAGS) $(CARDDATE) --headless --sd build/run-sd --max-seconds $(BASSECS) \
 	    --keys "$$(python3 tests/keyscript.py tests/basic-t.keys)" \
@@ -489,12 +497,50 @@ test-games: all $(EMU)
 	then echo "FAIL  blitter rules (Calculator, Solitaire, Quabricks)"; exit 1; \
 	else echo "PASS  blitter rules: Calculator, Solitaire, Quabricks"; fi
 
+# (0.20) the PC volume: run by make test (see PCFLAGS); make pictures-pc freezes its pictures
+test-pc: all $(EMU)
+	@rm -rf build/run-sd build/run-pc; cp -r $(SD) build/run-sd; touch build/run-sd/SYSTEM/NODESK
+	@cp -r tests/pc build/run-pc; cp $(SD)/SYSTEM/TESTS/HELLO.PRG build/run-pc/hello.prg
+	@$(EMU) $(EMUFLAGS) $(CARDDATE) $(PCFLAGS) --headless --sd build/run-sd --max-seconds 50 \
+	    --keys "$$(python3 tests/keyscript.py tests/pcshell.keys)" \
+	    $(SD)/SYSTEM/HORIZON.SYS > $(B)/pcshell.out 2> $(B)/pcshell.err || true
+	@python3 -c "L = open('$(B)/pcshell.out', encoding='latin-1').read().split('\n'); i = [k for k, l in enumerate(L) if '> date' in l][0]; open('$(B)/pcshell.txt', 'w', encoding='latin-1').write('\n'.join([L[i][L[i].index('> date'):]] + L[i + 1:]))"
+	@if python3 tests/compare.py tests/pcshell.txt $(B)/pcshell.txt; then echo "PASS  PC volume, shell: the clock from the PC, ls (dates), cd /PC:, cat, cp and mv both ways (a folder too), a program run from the PC"; \
+	else echo "FAIL  PC volume, shell ($(B)/pcshell.out)"; exit 1; fi
+	@if cmp -s build/run-pc/moved.txt tests/pc/Notes.txt && cmp -s build/run-pc/README.TXT $(SD)/README.TXT && cmp -s build/run-pc/Games2/readme.txt tests/pc/Games/readme.txt \
+	  && cmp -s build/run-pc/Games/Notes.txt tests/pc/Notes.txt && ! test -e build/run-sd/n2.txt && ! test -e build/run-sd/games2; \
+	then echo "PASS  PC volume, shell: the files on the PC folder and on the card"; \
+	else echo "FAIL  PC volume, shell: the files (build/run-pc, build/run-sd)"; exit 1; fi
+	@rm -rf build/run-sd; cp -r $(SD) build/run-sd; touch build/run-sd/SYSTEM/NODESK
+	@$(EMU) $(EMUFLAGS) $(CARDDATE) --headless --sd build/run-sd --max-seconds 16 \
+	    --keys "$$(python3 tests/keyscript.py tests/pcshell2.keys)" \
+	    $(SD)/SYSTEM/HORIZON.SYS > $(B)/pcshell2.out 2> $(B)/pcshell2.err || true
+	@python3 -c "L = open('$(B)/pcshell2.out', encoding='latin-1').read().split('\n'); i = [k for k, l in enumerate(L) if '> ls /PC:' in l][0]; open('$(B)/pcshell2.txt', 'w', encoding='latin-1').write('\n'.join([L[i][L[i].index('> ls /PC:'):]] + L[i + 1:]))"
+	@if python3 tests/compare.py tests/pcshell2.txt $(B)/pcshell2.txt && cmp -s build/run-sd/README.TXT $(SD)/README.TXT; then echo "PASS  without the PC volume: \"no PC link\" at once, nothing changed"; \
+	else echo "FAIL  without the PC volume ($(B)/pcshell2.out)"; exit 1; fi
+	@rm -rf build/run-pc; cp -r tests/pc build/run-pc
+	@DESK=1 sh tests/shots.sh "$(EMU) $(EMUFLAGS) $(CARDDATE) $(PCFLAGS) --pc-drop-at 27.5 --pc-back-at 35.5" $(SD) pcdesk 54 $(PCSHOTS)
+	@if diff -u tests/pictures/$(call REV7,pcdesk) $(B)/pcdesk.md5; then echo "PASS  PC volume, Desktop: the PC icon (it goes and comes with the link), drops on it, Files at /PC:, copy and paste both ways, a move, the file dialog"; \
+	else echo "FAIL  PC volume, Desktop pictures (look at $(B)/pcdesk*.ppm, then make pictures-pc)"; exit 1; fi
+	@if cmp -s build/run-pc/BLUE.XEX $(SD)/BLUE.XEX && cmp -s "build/run-pc/docs/Read me first.txt" "$(SD)/docs/Read me first.txt" \
+	  && cmp -s build/run-pic/Notes.txt tests/pc/Notes.txt && cmp -s build/run-pc/README.TXT $(SD)/README.TXT && ! test -e build/run-pic/README.TXT \
+	  && grep -q '^2026-03-04 05:0' build/run-pic/SYSTEM/CLOCK; \
+	then echo "PASS  PC volume, Desktop: the files copied and moved, /SYSTEM/CLOCK from the PC"; \
+	else echo "FAIL  PC volume, Desktop: the files or the clock (build/run-pc, build/run-pic)"; exit 1; fi
+	@if grep -l 'emu816: blitter:' $(B)/pcshell.err $(B)/pcshell2.err $(B)/pcdesk.err; \
+	then echo "FAIL  blitter rules (the PC volume sessions)"; exit 1; \
+	else echo "PASS  blitter rules: the PC volume sessions"; fi
+
+pictures-pc:
+	cp $(B)/pcdesk.md5 tests/pictures/$(call REV7,pcdesk)
+	python3 -c "from PIL import Image; import glob; [Image.open(f).save('tests/pictures/' + f.split('/')[-1][:-4] + '.png') for f in sorted(glob.glob('$(B)/pcdesk[0-9]*.ppm'))]"
+
 pictures-games:
 	cp $(B)/calc.md5 $(B)/solitair.md5 tests/pictures/
 	cp $(B)/quabrick.md5 tests/pictures/$(call REV7,quabrick)
 	python3 -c "from PIL import Image; import glob; [Image.open(f).save('tests/pictures/' + f.split('/')[-1][:-4] + '.png') for f in sorted(glob.glob('$(B)/calc[0-9]*.ppm') + glob.glob('$(B)/solitair[0-9]*.ppm') + glob.glob('$(B)/quabrick[0-9]*.ppm'))]"
 
-.PHONY: test-games pictures-games
+.PHONY: test-games pictures-games test-pc pictures-pc
 
 clean:
 	rm -rf build

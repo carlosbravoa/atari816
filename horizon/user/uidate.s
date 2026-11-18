@@ -413,7 +413,13 @@ cd_bad: sec
 ; the clock not set yet: the value saved in /SYSTEM/CLOCK becomes its provisional start
 ; (CLK_SAVED). C set: nothing loaded (set already, no file, or not a date).
 ui_clkload:
-        sys     SYS_TGET
+        sys     SYS_TGET                ; (0.20) not set: the PC's clock, if it is there
+        cpy     #CLK_SET
+        beq     @no
+        jsr     ui_clkpc
+        bcs     :+
+        rts
+:       sys     SYS_TGET
         cpy     #CLK_NONE
         bne     @no
         ptr     cd_path
@@ -454,6 +460,77 @@ ui_clkload:
 @no:    sec
         rts
 
+; (0.20) the PC volume there (STAT /PC: works): the PC's time (FAT date and time in the
+; record) sets the clock (CLK_SET) and is saved. C set: no PC volume.
+ui_clkpc:
+        lda     #.loword(cd_pc)         ; {u24 path, u24 out}
+        sta     cd_rw
+        lda     #.loword(cd_buf)
+        sta     cd_rw+3
+        sep     #$20
+        .a8
+        lda     #^cd_pc
+        sta     cd_rw+2
+        lda     #^cd_buf
+        sta     cd_rw+5
+        rep     #$20
+        .a16
+        ptr     cd_rw
+        sys     SYS_STAT
+        bcs     @no
+        lda     cd_buf+7                ; the date: year - 1980 << 9 | month << 5 | day
+        pha
+        and     #$001F
+        sta     ui_clk + CK_DAY
+        pla
+        pha
+        lsr     a
+        lsr     a
+        lsr     a
+        lsr     a
+        lsr     a
+        and     #$000F
+        sta     ui_clk + CK_MON
+        pla
+        xba
+        lsr     a
+        and     #$007F
+        clc
+        adc     #1980
+        sta     ui_clk + CK_YEAR
+        lda     cd_buf+5                ; the time: hour << 11 | minute << 5 | second / 2
+        pha
+        and     #$001F
+        asl     a
+        sta     ui_clk + CK_SEC
+        pla
+        pha
+        lsr     a
+        lsr     a
+        lsr     a
+        lsr     a
+        lsr     a
+        and     #$003F
+        sta     ui_clk + CK_MIN
+        pla
+        xba
+        lsr     a
+        lsr     a
+        lsr     a
+        and     #$001F
+        sta     ui_clk + CK_HOUR
+        jsr     ui_clkcheck
+        bcs     @no
+        jsr     ui_clkjoin
+        ldy     #CLK_SET
+        sys     SYS_TSET
+        bcs     @no
+        jsr     ui_clksave
+        clc
+        rts
+@no:    sec
+        rts
+
 ; the clock (if it was ever set or loaded) saved to /SYSTEM/CLOCK. C set: not saved.
 ui_clksave:
         sys     SYS_TGET
@@ -489,6 +566,7 @@ ui_clksave:
         .segment "RODATA"
 cd_mtab: .byte  31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31
 cd_path: .byte  "/SYSTEM/CLOCK", 0
+cd_pc:  .byte   "/PC:", 0
 cd_wdays: .addr cd_d0, cd_d1, cd_d2, cd_d3, cd_d4, cd_d5, cd_d6
 cd_months: .addr cd_m1, cd_m2, cd_m3, cd_m4, cd_m5, cd_m6, cd_m7, cd_m8, cd_m9, cd_m10, cd_m11, cd_m12
 cd_d0:  .byte   "Sunday", 0

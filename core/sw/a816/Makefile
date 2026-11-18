@@ -15,10 +15,11 @@
 #   SCROLLDEMO.BIN REV $0B: fine scrolling demo (1024x512 wrapping playfield, split status panel, 20 s)
 #   SPLIT.BIN     REV $09: palette split at a raster line for the eye, interrupt counts in the log
 #   FSBENCH.BIN   SD card throughput through the mailbox (512 KB write, read, load)
+#   PCBENCH.BIN   the same on the PC volume (/PC:, needs the gateway)
 #   SYSTEST.BIN   firmware SYS_SYNC + SYS_RESTART 0 (Horizon comes back); SYSTEST1.BIN: SYS_RESTART 1
 #   TIMING.BIN    CPU and Ali timing by access kind and video mode (calibrates emu816's memory model)
 SCENES = sprscene1.bin sprscene2.bin sprscene3.bin sprscene4.bin sprscene5.bin sprscene6.bin sprscene7.bin sprscene8.bin sprscene9.bin sprscene10.bin
-all: TIMING.BIN SPRTEST.BIN sprtest_sim.bin $(SCENES) SPRDEMO.BIN SCROLLDEMO.BIN FSBENCH.BIN SAMPLER.BIN sampler_sim.bin PLAYDEMO.BIN BLITLIST.BIN blitlist_sim.bin SPLIT.BIN A816.BIN SYSTEST.BIN SYSTEST1.BIN BRINGUP1.BIN KBTEST.BIN NVTEST.BIN BLITTEST.BIN SNDTEST.BIN SNDTEST2.BIN SNDTEST3.BIN a816_sim.bin bringup1_sim.bin nvtest_sim.bin
+all: TIMING.BIN SPRTEST.BIN sprtest_sim.bin $(SCENES) SPRDEMO.BIN SCROLLDEMO.BIN FSBENCH.BIN PCBENCH.BIN SAMPLER.BIN sampler_sim.bin PLAYDEMO.BIN BLITLIST.BIN blitlist_sim.bin SPLIT.BIN A816.BIN SYSTEST.BIN SYSTEST1.BIN BRINGUP1.BIN KBTEST.BIN NVTEST.BIN BLITTEST.BIN SNDTEST.BIN SNDTEST2.BIN SNDTEST3.BIN a816_sim.bin bringup1_sim.bin nvtest_sim.bin
 A816.BIN a816_sim.bin: freddie2.s irqtest.inc mbtest.inc bringup1.cfg
 	ca65 -o freddie2.o freddie2.s && ld65 -C bringup1.cfg -o A816.BIN freddie2.o && cp A816.BIN a816_sim.bin
 KBTEST.BIN: kbtest.s bringup1.cfg
@@ -27,6 +28,8 @@ TIMING.BIN: timing.s bringup1.cfg
 	ca65 -o timing.o timing.s && ld65 -C bringup1.cfg -o $@ timing.o
 FSBENCH.BIN: fsbench.s bringup1.cfg
 	ca65 -o fsbench.o fsbench.s && ld65 -C bringup1.cfg -o $@ fsbench.o
+PCBENCH.BIN: pcbench.s bringup1.cfg
+	ca65 -o pcbench.o pcbench.s && ld65 -C bringup1.cfg -o $@ pcbench.o
 SYSTEST.BIN: systest.s bringup1.cfg
 	ca65 -o systest.o systest.s && ld65 -C bringup1.cfg -o $@ systest.o
 SYSTEST1.BIN: systest.s bringup1.cfg

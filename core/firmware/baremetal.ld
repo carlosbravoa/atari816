@@ -7,13 +7,14 @@
  *        SPI flash by cold_load() in firmware.c before main_app() runs. Code there runs
  *        about 4x slower, which is fine for menus, mounting, H: and the PC Link.
  *
- * To move a function into block RAM, add its name to a hot list. Functions the compiler
- * inlines into a hot function are hot with it.
+ * To move a function into block RAM, add its name to a hot list (or give it the section
+ * ".text.hot", as pclink.c does). Functions the compiler inlines into a hot function are hot
+ * with it.
  */
 MEMORY
 {
     RAM  (RWX): ORIGIN = 0x00000, LENGTH = 32K
-    COLD (RX) : ORIGIN = 0x10000, LENGTH = 64K
+    COLD (RWX): ORIGIN = 0x10000, LENGTH = 64K
 }
 ENTRY(_start)
 SECTIONS
@@ -23,6 +24,7 @@ SECTIONS
         start.o (.text)
         . = ALIGN(4);
         KEEP(*(.coldsig))
+        *(.text.hot .text.hot.*)
         firmware.o(.text.startup .text.startup.* .rodata.main .rodata.main.*)
         picorv32.o(.text .text.* .rodata .rodata.* .srodata .srodata.*)
         spi_sd.o(.text .text.* .rodata .rodata.* .srodata .srodata.*)
@@ -78,8 +80,10 @@ SECTIONS
         firmware.o(.text.a816_poll .text.a816_poll.* .rodata.a816_poll .rodata.a816_poll.*)
         firmware.o(.text.a816_mb_wanted .text.a816_mb_wanted.* .rodata.a816_mb_wanted .rodata.a816_mb_wanted.*)
         firmware.o(.text.get_fattime .text.get_fattime.* .rodata.get_fattime .rodata.get_fattime.*)
+        firmware.o(.text.pc_put816 .text.pc_put816.* .rodata.pc_put816 .rodata.pc_put816.*)
+        firmware.o(.text.pc_to816 .text.pc_to816.* .rodata.pc_to816 .rodata.pc_to816.*)
+        firmware.o(.text.fat_from2000 .text.fat_from2000.* .rodata.fat_from2000 .rodata.fat_from2000.*)
         firmware.o(.text.prn_flush .text.prn_flush.* .rodata.prn_flush .rodata.prn_flush.*)
-        firmware.o(.text.blrx_getc .text.blrx_getc.* .rodata.blrx_getc .rodata.blrx_getc.*)
         firmware.o(.text.sio_hdd .text.sio_hdd.* .rodata.sio_hdd .rodata.sio_hdd.*)
         firmware.o(.text.hdd_open .text.hdd_open.* .rodata.hdd_open .rodata.hdd_open.*)
         firmware.o(.text.hdd_read .text.hdd_read.* .rodata.hdd_read .rodata.hdd_read.*)
@@ -143,6 +147,14 @@ SECTIONS
         *(.srodata*)
         . = ALIGN(4);
         _cold_end = .;
+    } >COLD
+
+    /* big buffers that are not speed-critical (PC link): in SDRAM after the cold image,
+       not part of it (uninitialised) */
+    .sdbuf (NOLOAD) :
+    {
+        . = ALIGN(4);
+        *(.sdbuf)
     } >COLD
 }
 

@@ -1,0 +1,8 @@
+# (0.20) The text shell without the PC volume (no --pc-folder): clean errors, no wait
+1500 {esc}
++1500 ls /PC:\n
++2000 cd /PC:\n
++2000 cp /README.TXT /PC:\n
++2000 cat /PC:/x.txt\n
++2000 mv /README.TXT /PC:/R.TXT\n
++2000 ls /pc:/x\n

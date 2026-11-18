@@ -1,0 +1,107 @@
+# (0.20) The PC volume on the Desktop (DESK=1; tests/mousegen.py makes tests/pcdesk.keys from
+# this). emu816 --pc-folder on a fresh copy of tests/pc, --pc-time 2026-03-04T05:06 (the PC's
+# clock), --pc-drop-at 27.5 --pc-back-at 35.5 (the link drops, then comes back). Files is at
+# (24, 24); its rows from y 61, 12 apart. The PC icon is at (595, 160). Shots (s):
+#   1   7.0  the PC icon under the Atari; the clock set from the PC (05:06)
+#   2  16.0  BLUE.XEX and the docs folder dropped on the PC icon (copied into /PC:), then
+#            a double click on the PC icon: Files at /PC:
+#   3  17.0  Notes.txt selected in it: its date on the footer (then ctrl-C)
+#   4  21.0  the first Files window raised, ctrl-V: Notes.txt copied from the PC to the card
+#   5  26.0  README.TXT dragged from the card's window into the PC's: moved (a copy, then
+#            the card's file deleted)
+#   6  33.5  the link dropped at 27.5 s: the PC icon is gone
+#   7  41.5  the link back at 35.5 s: the PC icon again (the clock set from the PC again)
+#   8  48.5  Edit from the Programs menu, ctrl-O: the file dialog lists the card's root with
+#            the PC: folder
+#   9  51.5  "pc", Enter: the dialog in /PC:
+7500 M -100:-23:0:0
+7550 M -100:0:0:0
+7600 M -20:0:0:0
+7900 M 0:0:0:1
+8000 M 30:3:0:1
+8060 M 30:0:0:1
+8120 M 30:0:0:1
+8180 M 30:0:0:1
+8240 M 30:0:0:1
+8300 M 30:0:0:1
+8360 M 30:0:0:1
+8420 M 30:0:0:1
+8480 M 30:0:0:1
+8540 M 30:0:0:1
+8600 M 30:0:0:1
+8660 M 30:0:0:1
+8720 M 30:0:0:1
+8780 M 30:0:0:1
+8840 M 30:0:0:1
+8900 M 30:0:0:1
+8960 M 15:0:0:1
+10300 M 0:0:0:0
+10800 M -100:-51:0:0
+10850 M -100:0:0:0
+10900 M -100:0:0:0
+10950 M -100:0:0:0
+11000 M -95:0:0:0
+11200 M 0:0:0:1
+11300 M 30:30:0:1
+11360 M 30:21:0:1
+11420 M 30:0:0:1
+11480 M 30:0:0:1
+11540 M 30:0:0:1
+11600 M 30:0:0:1
+11660 M 30:0:0:1
+11720 M 30:0:0:1
+11780 M 30:0:0:1
+11840 M 30:0:0:1
+11900 M 30:0:0:1
+11960 M 30:0:0:1
+12020 M 30:0:0:1
+12080 M 30:0:0:1
+12140 M 30:0:0:1
+12200 M 30:0:0:1
+12260 M 15:0:0:1
+13000 M 0:0:0:0
+13600 M 0:0:0:1
+13680 M 0:0:0:0
+13800 M 0:0:0:1
+13880 M 0:0:0:0
+16500 M -100:-27:0:0
+16550 M -100:0:0:0
+16600 M -100:0:0:0
+16650 M -100:0:0:0
+16700 M -71:0:0:0
+16750 M 0:0:0:1
+16830 M 0:0:0:0
+17100 {dE0}c{uE0}
+18500 M -89:-100:0:0
+18550 M 0:-3:0:0
+18600 M 0:0:0:1
+18680 M 0:0:0:0
+19100 {dE0}v{uE0}
+21500 M 65:100:0:0
+21550 M 0:63:0:0
+21900 M 0:0:0:1
+22000 M 30:7:0:1
+22060 M 30:0:0:1
+22120 M 30:0:0:1
+22180 M 30:0:0:1
+22240 M 30:0:0:1
+22300 M 30:0:0:1
+22360 M 30:0:0:1
+22420 M 30:0:0:1
+22480 M 2:0:0:1
+24000 M 0:0:0:0
+24500 M 100:100:0:0
+24550 M 8:0:0:0
+42500 M -100:-100:0:0
+42550 M -100:-100:0:0
+42600 M -100:-94:0:0
+42650 M -45:0:0:0
+42700 M 0:0:0:1
+42780 M 0:0:0:0
+43500 M 15:16:0:0
+43600 M 0:0:0:1
+43680 M 0:0:0:0
+46500 {dE0}o{uE0}
+49500 pc
+50000 \n
+52500 {esc}

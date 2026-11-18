@@ -159,8 +159,17 @@ void uart_init(int clkdiv) {
    reg_uart_clkdiv = clkdiv;
 }
 
+// uart_printf output: the PC link's log channel (pclink.c), or a buffer while uart_catch is
+// set (the developer channel's INFO answer)
+void pl_log_putc(int c);
+char *uart_catch;
+int uart_catch_n, uart_catch_max;
 int uart_putchar(int c) {
-   reg_uart_data = c;
+   if (uart_catch) {
+      if (uart_catch_n < uart_catch_max) uart_catch[uart_catch_n++] = (char)c;
+      return c;
+   }
+   pl_log_putc(c);
    return c;
 }
 
@@ -170,9 +179,7 @@ int uart_print(const char *s) {
    return 0;
 }
 
-extern int bridge_quiet;   // serial-bridge transfers own the TX channel
 int uart_printf(const char *fmt,...) {
-   if (bridge_quiet) return 0;
    va_list ap;
    va_start(ap, fmt);
    _printf(fmt, ap, 1);

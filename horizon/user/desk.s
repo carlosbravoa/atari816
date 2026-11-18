@@ -20,11 +20,14 @@
 ; machine; F12 there brings the desktop back exactly as it was.
 ; Icons (pictures from /SYSTEM/ICONS, read into a bank of their own): "SD card" (opens Files
 ; at the root), "Atari" (opens the Atari panel; a green mark when something is loaded),
-; then one per entry of /Desktop (sorted ignoring case, names starting with '.' left out;
+; (0.20) "PC" while the PC volume of the PC link is there (STAT /PC: works; looked at every
+; 5 s: it comes and goes with the PC; when it comes, the PC's clock sets the clock: ui_clkpc;
+; opens Files at /PC:), then one per entry of /Desktop (sorted ignoring case, names starting with '.' left out;
 ; read again every 5 s): a folder, a file (its icon by its type: ui_ficon), or a shortcut
 ; (NAME.LNK, ui_lnkread: the icon of its target with an arrow, labelled by its title). They
 ; sit on a grid of 8 columns x 5 rows from the top right; where each one is is kept in
-; /SYSTEM/LAYOUT ("col row name" lines, the fixed icons ":SD" and ":ATARI"); icons not in it
+; /SYSTEM/LAYOUT ("col row name" lines, the fixed icons ":SD", ":ATARI" and ":PC"; the PC's
+; line is kept while the PC is away); icons not in it
 ; take the first free cell. A click selects, a click elsewhere deselects; a double click
 ; (0.5 s) opens (a /Desktop entry through ui_open: by its type; a shortcut: its target); a
 ; click on the Atari icon opens its panel. Any icon can be dragged (the drag pointer): onto
@@ -32,7 +35,9 @@
 ; gets the path, SYS_WDROP: Files moves it there), onto a folder icon (moved into it), onto
 ; the SD card (moved to the root), onto the Atari icon (an Atari file is mounted). A path
 ; dropped here from Files: on the Atari icon an Atari file is mounted; on a folder icon or
-; the SD card it is moved there; elsewhere a shortcut to it is made in /Desktop (ui_mklink)
+; the SD card it is moved there; (0.20) onto the PC icon it is copied into /PC: (and onto the
+; SD card, a path from the PC is copied: between the two volumes a volume icon copies; a
+; move between them is a copy, then the source deleted: ui_mvtree); elsewhere a shortcut to it is made in /Desktop (ui_mklink)
 ; where it was dropped, or with Shift held it is moved into /Desktop.
 ; (0.15) A right press (or the menu key with an icon selected): a pop-up menu (ui_popup):
 ; the Atari icon's (attach, run, eject, restart, settings, the panel), another icon's (Open,
@@ -62,7 +67,8 @@
         .import ui_rbtn                 ; (ui.s: the right button's state, for the panel)
 
 NICON   = 24                            ; icons at most (SD card, Atari, 22 of /Desktop)
-NFIX    = 2                             ; the fixed ones: 0 SD card, 1 Atari
+NFIX    = 2                             ; the fixed ones: 0 SD card, 1 Atari (and 2 the PC
+                                        ; while it is there: nfix = 3)
 NROWS   = 5                             ; the grid: rows in a column, columns
 NCOLS   = 8
 NCELL   = NROWS * NCOLS
@@ -81,6 +87,7 @@ K_ATARI = 0                             ; icon kinds
 K_FOLDER = 1
 K_SD    = 2
 K_FILE  = 3
+K_PC    = 4
 NPROG   = 16                            ; Programs menu entries at most
 FQW     = 240                           ; the Force quit dialog's content (outer 242 wide:
                                         ;   a 256-pixel stride, one bank with little memory left)
@@ -161,7 +168,11 @@ start:  sys     SYS_SINGLE              ; never two Desktops
         sta     blk+6
         jsr     draw
         jsr     atcheck                 ; (is something loaded: the Atari icon's mark)
+        lda     #$FFFF                  ; (0.20) the PC icon's cell: not known yet
+        sta     z:pccell
         jsr     scan                    ; the icons
+        lda     z:pcon                  ; (the clock was asked already: ui_clkload)
+        sta     z:pcwas
         jsr     namesum
         sta     z:sum
         jsr     load
@@ -611,6 +622,16 @@ scan:   lda     #K_SD                   ; the fixed icons
         lda     #K_ATARI
         sta     ic_kind+2
         lda     #NFIX
+        sta     z:nfix
+        stz     z:pcon
+        ldx     #.loword(p_pc)          ; (0.20) the PC volume there: its icon
+        jsr     statx
+        bcs     :+
+        lda     #K_PC
+        sta     ic_kind+4
+        inc     z:nfix
+        inc     z:pcon
+:       lda     z:nfix
         sta     z:nic
         stz     z:skip
 @call:  lda     #.loword(p_desk)        ; block: path, buffer, length, skip
@@ -658,7 +679,18 @@ scan:   lda     #K_SD                   ; the fixed icons
 
 ; the timer (and after a change): read /Desktop again; when it changed, every icon again
 rescan: jsr     scan
-        jsr     namesum
+        lda     z:pcon                  ; (0.20) the PC came: its clock
+        cmp     z:pcwas
+        beq     :+
+        sta     z:pcwas
+        ldx     #$FFFF                  ; (the icons after it move: no selection)
+        stx     z:sel
+        cmp     #0
+        beq     :+
+        jsr     ui_clkpc
+        bcs     :+
+        jsr     clock
+:       jsr     namesum
         cmp     z:sum
         beq     @out
         sta     z:sum
@@ -697,10 +729,12 @@ drawall:
 
 ; a checksum of the /Desktop names, their kinds and their number -> A
 namesum:
+        lda     z:nfix
+        jsr     nameof
+        tax
         lda     z:nic
         sta     z:c
-        ldx     #.loword(names + NAMEL * NFIX)
-        ldy     #NFIX
+        ldy     z:nfix
 @s:     cpy     z:nic
         bcs     @out
         phx
@@ -773,7 +807,8 @@ addname:
         lda     z:nic                   ; insertion: move it down while the one before
         sta     z:t                     ; sorts after it (the fixed ones stay)
 @ins:   lda     z:t
-        cmp     #NFIX + 1
+        dec     a
+        cmp     z:nfix
         bcc     @done
         jsr     slotname                ; q = name t, r = name t - 1
         jsr     cmpname                 ; C set: q before r
@@ -884,7 +919,17 @@ load:   lda     #ICO_SD
         tay
         ldx     #.loword(t_atari)
         jsr     ui_strcpy
-        lda     #NFIX
+        lda     z:pcon                  ; (0.20) the PC
+        beq     :+
+        lda     #ICO_PC
+        sta     ic_ico+4
+        stz     ic_lnk+4
+        lda     #2
+        jsr     labof
+        tay
+        ldx     #.loword(t_pc)
+        jsr     ui_strcpy
+:       lda     z:nfix
         sta     z:i
 :       lda     z:i
         cmp     z:nic
@@ -1269,7 +1314,17 @@ layload:
         bcs     @mo
         lda     #.loword(lbuf)
         sta     z:q
-        stz     z:i
+        lda     #.loword(k_pc)          ; (0.20) the PC's cell, kept while it is away
+        sta     z:r
+        jsr     streq
+        bcs     :+
+        lda     z:hx
+        asl     a
+        asl     a
+        adc     z:hx
+        adc     z:hy
+        sta     z:pccell
+:       stz     z:i
 @mi:    lda     z:i
         cmp     z:nic
         bcs     @mo
@@ -1312,11 +1367,21 @@ iconkey:
         bne     :+
         lda     #.loword(k_atari)
         rts
-:       jmp     nameof
+:       jsr     kindof
+        cmp     #K_PC
+        bne     :+
+        lda     #.loword(k_pc)
+        rts
+:       lda     z:i
+        jmp     nameof
 
 ; the icons' cells -> /SYSTEM/LAYOUT
 laysave:
-        lda     #.loword(lay)
+        lda     z:pcon                  ; (0.20) the PC's cell kept
+        beq     :+
+        lda     ic_cell+4
+        sta     z:pccell
+:       lda     #.loword(lay)
         sta     z:wp
         stz     z:i
 @i:     lda     z:i
@@ -1351,7 +1416,36 @@ laysave:
         sty     z:wp
 @n:     inc     z:i
         bra     @i
-@w:     ptr     p_layout
+@w:     lda     z:pcon                  ; (0.20) the PC away: its line stays (its cell free)
+        bne     @w2
+        lda     z:pccell
+        cmp     #$FFFF
+        beq     @w2
+        ldx     #$FFFF
+        stx     z:ex
+        jsr     cellfree
+        bcs     @w2
+        ldx     #NROWS
+        jsr     divmod
+        phx
+        ldy     z:wp
+        jsr     putdec
+        lda     #' '
+        jsr     wputy
+        pla
+        jsr     putdec
+        lda     #' '
+        jsr     wputy
+        sty     z:wp
+        ldx     #.loword(k_pc)
+        jsr     ui_strcpy
+        clc
+        adc     z:wp
+        tay
+        lda     #10
+        jsr     wputy
+        sty     z:wp
+@w2:    ptr     p_layout
         lda     #O_CREATE
         sys     SYS_OPEN
         bcs     @out
@@ -1627,6 +1721,12 @@ openicon:
         ldy     #.loword(a_root)
         lda     #.loword(t_files)
         jmp     ui_launch
+:       cmp     #K_PC                   ; (0.20) the PC: Files at /PC:
+        bne     :+
+        ldx     #.loword(p_files)
+        ldy     #.loword(p_pc)
+        lda     #.loword(t_files)
+        jmp     ui_launch
 :       lda     z:t
         jsr     iconpath
         ldx     #.loword(pth)
@@ -1753,7 +1853,7 @@ release:
         beq     @no
         pha
         lda     z:dragi                 ; another window: a /Desktop entry's path (Files
-        cmp     #NFIX                   ; moves it there)
+        cmp     z:nfix                  ; moves it there)
         pla
         bcc     @no
         pha
@@ -1776,7 +1876,7 @@ release:
         beq     @move
         sta     z:t
         lda     z:dragi
-        cmp     #NFIX
+        cmp     z:nfix
         bcc     @no
         lda     z:t
         jsr     kindof
@@ -1868,8 +1968,12 @@ ondrop: lda     z:back
         jmp     loop
 
 ; move dropbuf into the place of icon A ($FFFF: /Desktop; a folder: into it; the SD card:
-; the root). C set: refused (another kind, a folder into itself, the name there already)
-moveto: cmp     #$FFFF
+; the root; (0.20) the PC: /PC:). C set: refused (another kind, a folder into itself, the
+; name there already) or failed. (0.20) Onto the SD card from the PC volume, or onto the PC
+; from the card: copied (ui_cptree); else moved (ui_mvtree: between the volumes a copy, then
+; the source deleted)
+moveto: stz     z:mvcp
+        cmp     #$FFFF
         bne     :+
         ldx     #.loword(p_deskd)       ; "/Desktop/"
         ldy     #.loword(pth)
@@ -1879,9 +1983,24 @@ moveto: cmp     #$FFFF
         jsr     kindof
         cmp     #K_SD
         bne     :+
+        ldx     #.loword(dropbuf)       ; (from the PC: copied)
+        jsr     ispc
+        rol     z:mvcp
         lda     #'/'                    ; "/"
         sta     pth
         lda     #1
+        bra     @dir
+:       cmp     #K_PC
+        bne     :+
+        ldx     #.loword(dropbuf)       ; (from the card: copied)
+        jsr     ispc
+        rol     z:mvcp
+        lda     z:mvcp
+        eor     #1
+        sta     z:mvcp
+        ldx     #.loword(p_pcd)         ; "/PC:/"
+        ldy     #.loword(pth)
+        jsr     ui_strcpy
         bra     @dir
 :       cmp     #K_FOLDER
         beq     :+
@@ -1940,10 +2059,33 @@ moveto: cmp     #$FFFF
         sta     sblk+5
         jsr     stpth                   ; (there already?)
         bcc     @bad
-        ptr     sblk
-        sys     SYS_RENAME
-        rts
+        ldx     #.loword(dropbuf)
+        ldy     #.loword(pth)
+        lda     z:mvcp
+        beq     :+
+        jmp     ui_cptree
+:       jmp     ui_mvtree
 @bad:   sec
+        rts
+
+; (0.20) C set if the path X is on the PC volume ("/PC:", then the end or '/'; any case)
+ispc:   ldy     #0
+:       lda     a:0,x
+        jsr     lower
+        cmp     p_pclc,y
+        bne     @no
+        inx
+        iny
+        cpy     #4
+        bcc     :-
+        lda     a:0,x
+        and     #$00FF
+        beq     @yes
+        cmp     #'/'
+        beq     @yes
+@no:    clc
+        rts
+@yes:   sec
         rts
 
 ; ---------------------------------------------------------------- the pop-up menus (0.15)
@@ -1975,9 +2117,11 @@ ctxmenu:
         jsr     kindof
         cmp     #K_ATARI
         jeq     atmenu
+        cmp     #K_PC                   ; (0.20) the PC: as the SD card
+        beq     :+
         cmp     #K_SD
         bne     @ent
-        ldx     #.loword(pu_sd)         ; the SD card: Open
+:       ldx     #.loword(pu_sd)         ; the SD card: Open
         jsr     popup
         cmp     #0
         bne     @out
@@ -2541,7 +2685,7 @@ showorig:
 ; delete icon A (a /Desktop entry) after a question
 delicon:
         sta     z:t
-        cmp     #NFIX
+        cmp     z:nfix
         bcs     :+
         jmp     ui_beep
 :       sta     z:dl
@@ -3831,6 +3975,11 @@ p_set:  .byte   "/BIN/SETTINGS.PRG", 0
 p_desk: .byte   "/Desktop", 0
 p_deskd: .byte  "/Desktop/", 0
 k_sd:   .byte   ":SD", 0
+k_pc:   .byte   ":PC", 0
+p_pc:   .byte   "/PC:", 0
+p_pcd:  .byte   "/PC:/", 0
+p_pclc: .byte   "/pc:"
+t_pc:   .byte   "PC", 0
 k_atari: .byte  ":ATARI", 0
 a_root: .byte   "/", 0
 a_apply: .byte  "apply", 0
@@ -4185,3 +4334,8 @@ dl:     .res    2
 err:    .res    2
 dtf:    .res    2
 dtn:    .res    2
+nfix:   .res    2                       ; (0.20) the fixed icons: 2, or 3 with the PC
+pcon:   .res    2                       ; the PC volume is there (its icon shown)
+pcwas:  .res    2                       ; (at the last scan)
+pccell: .res    2                       ; the PC icon's cell ($FFFF: none yet)
+mvcp:   .res    2                       ; moveto: copy, not move
