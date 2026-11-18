@@ -13,6 +13,10 @@ sample player, next to a second POKEY (POKEY 2).
 Inside the same FPGA is a complete, cycle-exact Atari 8-bit computer (400/800/XL/XE), so
 original 8-bit software runs on its own hardware; F12 switches between it and the desktop.
 
+![The Horizon desktop, captured from the board](Docs/images/horizon-desktop.png)
+
+*The Horizon desktop, captured from a Tang Nano 20K (640 x 360, 256 colours).*
+
 ## Status
 
 Work in progress. The hardware, Horizon, the emulator and the SDK all work and are under
