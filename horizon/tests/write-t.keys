@@ -1,0 +1,6 @@
+# Write self test (text shell, NODESK): "write -t /WT.WT" runs tests/write.wt (copied to
+# /WT.WT, with tests/write-rt.md as /WRT.MD, tests/write-rt2.md as /WRT2.MD and
+# tests/write-ex.txt as /WEX.TXT): PASS or FAIL per group (see user/write_test.s). The
+# output after the command is compared with tests/write-t.txt. About 10 s of emulated time.
+1500 {esc}
++1500 write -t /WT.WT\n

@@ -1,0 +1,75 @@
+QUABRICKS TEST START
+turns: 4 8 0
+kicks: I at the left wall 0 5 1
+  T at the right wall 7 5 0
+  T on the floor 3 17 1
+  boxed in 3 10 1
+bag: OILZSJTOISZTLJPASS (10 bags of 7)
+points, level 1:
+  single: +100 PASS
+  double: +300 PASS
+  triple: +500 PASS
+  Quad: +800 PASS
+  spin double: +1200 PASS
+  spin, no lines: +400 PASS
+  mini spin: +100 PASS
+  T dropped into the slot (no turn): a double: +300 PASS
+points, level 3:
+  Quad: +2400 PASS
+back-to-back and combos (one game):
+  Quad: +800 PASS
+  Quad, back-to-back, combo 1: +1250 PASS
+  nothing cleared: +0 PASS
+  Quad, back-to-back (level 2 from here): +1200 PASS
+  single, combo 1: +300 PASS
+  single, combo 2: +400 PASS
+  Quad (no back-to-back after singles), combo 3: +1900 PASS
+  spin double, back-to-back, combo 4: +4000 PASS
+  score 9850, lines 20
+lock delay: still 30 frames, moving every frame 44 frames (15 restarts)
+time attack: 60 s
+  double: +300 PASS
+  time attack: 64 s after 2 lines
+  Quad, combo 1: +850 PASS
+  time attack: 74 s after a Quad
+levels: gravity 60
+  Quad: +800 PASS
+  Quad, back-to-back, combo 1: +1250 PASS
+  double, combo 2: +400 PASS
+  after 10 lines level 2 gravity 48
+speed by level: frames to fall 18 rows / frames on the floor until it locks
+   level 1: 1080 / 30
+   level 2: 864 / 30
+   level 3: 684 / 30
+   level 4: 540 / 30
+   level 5: 432 / 30
+   level 6: 342 / 30
+   level 7: 270 / 30
+   level 8: 216 / 30
+   level 9: 180 / 30
+  level 10: 144 / 30
+  level 11: 108 / 30
+  level 12: 90 / 30
+  level 13: 72 / 30
+  level 14: 54 / 30
+  level 15: 36 / 30
+  level 16: 18 / 30
+  level 17: 9 / 30
+  level 18: 6 / 30
+  level 19: 4 / 30
+  level 20: 2 / 30
+  level 21: 1 / 28
+  level 22: 1 / 26
+  level 23: 1 / 24
+  level 24: 1 / 22
+  level 25: 1 / 20
+  level 26: 1 / 18
+  level 27: 1 / 16
+  level 28: 1 / 14
+  level 29: 1 / 12
+  level 30: 1 / 10
+  level 31: 1 / 10
+lock above the top: 1 (over)
+robot: 26 pieces, score 546, lines 0, level 1, over 1
+QUABRICKS TEST END: 0 failed
+> 

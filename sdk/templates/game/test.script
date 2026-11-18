@@ -1,0 +1,18 @@
+# Input for `make test` (sdk/tools/inputscript.py). Time 0 = the program was started.
+# The title screen
+1000 shot
+# Space starts; hold Right: the player walks along the top corridor over two gems
++200 key space 100
++500 key right 1500
++1600 shot
+# then Down into the corridor below (the turn helper lines the player up)
++100 key down 600
++700 shot
+# a click on the playfield: the player walks towards the pointer
+# (the window's content starts at screen 160, 76)
++200 move 200 230
++100 click
++1500 shot
+# Esc: back to the title
++200 {esc}
++700 shot

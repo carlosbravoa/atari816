@@ -1,0 +1,2 @@
+stest 1: play
+  code bank, 8-bit, any voice: no Lau: ENODEV (the program falls back to POKEY 2)

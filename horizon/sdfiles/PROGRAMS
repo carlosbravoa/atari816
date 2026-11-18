@@ -1,0 +1,13 @@
+# The Desktop's Programs menu, one "Title=/path" per line, in menu order. A line whose
+# program is not on the card is left out. Read by the Desktop whenever the menu opens: no
+# rebuild or restart needed. (Settings is in the Horizon menu: a line for it is left out.)
+Edit=/BIN/EDIT.PRG
+Write=/BIN/WRITE.PRG
+Sheet=/BIN/SHEET.PRG
+Paint=/BIN/PAINT.PRG
+BASIC=/BIN/BASIC.PRG
+Calculator=/BIN/CALC.PRG
+Solitaire=/BIN/SOLITAIR.PRG
+Terminal=/BIN/TERM.PRG
+Files=/BIN/WFILES.PRG
+Quabricks=/BIN/QUABRICK.PRG

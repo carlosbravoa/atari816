@@ -1,0 +1,2550 @@
+// Simple firmware for Tang Atari 800
+// Adapted from SNESTang firmware for Atari 800 core
+// Nand2mario & Google DeepMind team, 2026
+
+#include <stdbool.h>
+#include "picorv32.h"
+#include "fatfs/ff.h"
+#include "firmware.h"
+#include "xex_loader.h"   // 6502 binary-load boot loader image (virtual D1: disk)
+
+uint32_t CORE_ID;
+
+void uart_keyboard_poll(void);
+static void bridge_poll(void);   // serial bridge servicing (defined below)
+static void bridge_putc(uint8_t c);  // raw serial TX (defined below)
+extern int bridge_quiet;         // transfers own the serial TX channel (defined below)
+
+
+#define OPTION_FILE "/atari.ini"
+#define OPTION_INVALID 2
+
+int option_arrow_joystick = 0;              // 1 = arrow keys drive Joystick 1 (Left-Alt = fire)
+int option_scanline_level = 0;              // 0=off,1=25%,2=50%,3=75% scanline brightness
+int option_h_offset = 0;                    // horizontal pan: capture-skip pixels (0..48)
+int option_stereo = 0;                      // 1 = dual-POKEY stereo (POKEY2 @ $D210 -> right); default mono
+int option_kbd_layout = 0;                  // 0 = Atari-positional keys (default), 1 = US-PC symbolic
+
+// Classic machine RAM sizes (/atari.ini "ram"). code = core RAM_SELECT; kb = the ini value.
+// The core has only these two (Atari 816: capped at 320 KB, the larger RAMBO/Compy schemes
+// were removed). No key = 128 KB; any other value = 320 KB, with a log line.
+static const struct { unsigned char code; int kb; } ram_opts[] = {
+    {1, 128}, {3, 320}
+};
+#define N_RAM_OPTS 2
+int option_ram_idx = 0;                      // index into ram_opts; 0 = 128 KB (default)
+
+int option_boot_ash = 0;                     // OSD Options "Boot: BASIC/ASH" = atari.ini boot=ash.
+                                             // 1 = /ASH.CAR is the DEFAULT CARTRIDGE: loaded at
+                                             // power-on and whenever a cold boot finds the cart
+                                             // slot empty (see load_default_cart). Default OFF =
+                                             // power-on READY, byte-for-byte as before.
+#define ASH_CART_FILE "/ASH.CAR"
+char mounted_cart_name[16] = "None";         // OSD "Cart:" line
+int mount_silent = 0;                        // boot-time/bridge automount: no interactive popups
+                                             // cleared on every cold boot (load_system_roms)
+uint32_t cart_sclust = 0;                    // FAT start cluster of the attached cart image (guard)
+
+// Push the input-related options into the hardware config register (0xA4):
+// bit 8 = USB-host-keyboard enable (permanently 0: keyboard is UART/CH9350 only),
+// bit 9 = arrow-keys-as-joystick mode.
+static inline void apply_input_options(void) {
+    reg_virt_kbd_1 = (option_arrow_joystick ? 0x200 : 0x000);
+}
+
+// Push video options into the hardware config registers.
+static inline void apply_video_options(void) {
+    reg_video_opts = (option_scanline_level & 0x3)  // 0x B4 [1:0] scanline level
+                   | ((option_stereo & 1) << 2)     //      [2]   dual-POKEY stereo enable
+                   | ((option_kbd_layout & 1) << 3); //      [3]   keyboard: PC symbolic layout
+    reg_h_offset   = option_h_offset & 0xFF;        // 0x B8 [7:0] horizontal position
+}
+
+// RAM size only takes effect when the core boots, so this is written before the
+// core is released at boot and again inside cold_boot_atari() (RAM changes in the
+// OSD cold-boot the machine). 0x BC [2:0] = core RAM_SELECT.
+static inline void apply_machine_options(void) {
+    reg_ram_select = ram_opts[option_ram_idx].code;
+}
+
+FATFS fs;
+
+// ATR Disk Emulator state
+#define ATR_DRIVES 4            // D1:-D4: (0x31-0x34); D3/D4 have no menu UI —
+                                // they are config/bridge-managed (hdd= auto-mount)
+FIL atr_file[ATR_DRIVES];
+bool atr_mounted[ATR_DRIVES] = {false, false, false, false};
+bool atr_readonly[ATR_DRIVES] = {false, false, false, false};  // write-open failed even after AM_RDO strip
+uint16_t atr_sector_size[ATR_DRIVES] = {128, 128, 128, 128};
+// Byte offset of sector 1 in the image: 16 for .atr (header), 0 for raw .xfd.
+uint16_t atr_hdr_off[ATR_DRIVES] = {16, 16, 16, 16};
+// DD images come in two layouts: standard packs boot sectors 1-3 as 128 B
+// (data area at +384); "full-boot" stores them as 256-B slots (MyDOS images in
+// the wild use this). Detected at mount; wrong guess = sectors 4+ off by 384.
+bool atr_dd_fullboot[ATR_DRIVES] = {false, false, false, false};
+
+// XEX (Atari binary executable) state — served as a virtual bootable disk on D1:
+// only. When xex_active, D1: STATUS/READ are answered from the baked-in 6502 boot
+// loader (sectors 1..XEX_BLDCNT) + the raw .xex file bytes (XEX_FIRSTSEC..).
+bool     xex_active = false;
+FIL      xex_file;
+uint32_t xex_len = 0;
+
+static uint8_t sio_sector_buf[256];
+static uint8_t sio_cmd_buf[5];
+static int     sio_cmd_idx = 0;
+static uint32_t sio_cmd_timeout = 0;   // millis timestamp of first byte in current frame
+
+// SIO Diagnostics variables
+uint8_t dbg_last_sio_cmd = 0;
+uint16_t dbg_last_sio_sector = 0;
+int dbg_last_sio_status = 0;
+uint32_t dbg_sio_err_count = 0;
+// (2026-10-13: the never-displayed SIO counters / command history / rx capture
+// buffers were removed for image size — only the four shown on the OSD triage
+// line and in bridge STATUS remain.)
+// The on-screen menu (OSD) is gone (Atari 816): what it used to show in a pop-up or on its
+// status line goes to the serial log instead. Never waits for a key.
+void status(char *msg) { uart_printf("%s\n", msg); }
+void message(char *msg, int center) { (void)center; uart_printf("msg: %s\n", msg); }
+
+// return 0: success, 1: no option file found, 2: option file corrupt,
+// -1: transient SD/FS error (card not ready / disk error) -> caller should retry.
+// The distinction matters at boot: load_option() is the FIRST real SD access (f_mount
+// is lazy), so a mid-state card (common after a warm S1 reset) makes f_open fail. A
+// genuinely-absent file (FR_NO_FILE, first run) must NOT trigger a retry storm.
+int load_option()  {
+    FIL f;
+    int r = 0;
+    char buf[1024];
+    char *line, *key, *value;
+    FRESULT fr = f_open(&f, OPTION_FILE, FA_READ);
+    if (fr != FR_OK)
+        return (fr == FR_NO_FILE || fr == FR_NO_PATH) ? 1 : -1;
+    while (f_gets(buf, 1024, &f)) {
+        line = trimwhitespace(buf);
+        if (line[0] == '\0' || line[0] == '[' || line[0] == ';' || line[0] == '#')
+            continue;
+        // find '='
+        char *s = strchr(line, '=');
+        if (!s) {
+            r = OPTION_INVALID;
+            goto load_option_close;
+        }
+        *s='\0';
+        key = trimwhitespace(line);
+        value = trimwhitespace(s+1);
+        uart_printf("key=%s, value=%s\n", key, value);
+
+        if (strcmp(key, "joystick") == 0) {
+            option_arrow_joystick = (atoi(value) != 0);
+        }
+        if (strcmp(key, "scanlines") == 0) {
+            option_scanline_level = atoi(value) & 0x3;
+        }
+        if (strcmp(key, "hpos") == 0) {
+            int v = atoi(value);
+            if (v < 0) v = 0;
+            if (v > 48) v = 48;
+            option_h_offset = v;
+        }
+        if (strcmp(key, "stereo") == 0) {
+            option_stereo = (atoi(value) != 0);
+        }
+        if (strcmp(key, "kbdlayout") == 0) {
+            option_kbd_layout = (atoi(value) != 0);
+        }
+        if (strcmp(key, "boot") == 0) {
+            option_boot_ash = (strcmp(value, "ash") == 0);   // anything else = basic
+        }
+        if (strcmp(key, "ram") == 0) {
+            int kb = atoi(value);
+            option_ram_idx = 1;   // 320 KB unless the value is exactly 128
+            if (kb == 128) option_ram_idx = 0;
+            else if (kb != 320) uart_printf("ram=%s not supported, using 320\n", value);
+        }
+    }
+
+load_option_close:
+    f_close(&f);
+    return r;
+}
+
+// ── Cartridge loading ────────────────────────────────────────────────────────
+// The Atari core's CartLogic reads cart data from SDRAM; tang_top remaps those
+// accesses into the 4 MB window at physical 0x400000-0x7FFFFF (= same address in
+// the firmware's view, banks 2-3 pass through the iosys swap unchanged), so we just
+// f_read the image straight into SDRAM there, set the mapper code in reg_cart_mode,
+// and cold-boot. BASIC/OS were relocated out of this window (to 0x1F0000/0x1F4000).
+#define CART_SDRAM_BASE 0x00400000u
+#define CART_MAX_SIZE   0x00400000u
+
+// CAR header type -> core CartLogic mode (see rtl/common/a8core/cart_logic.vhd).
+// Pairs of {CAR type, mode}; unknown types are rejected with an error message.
+// Atari 816: the core keeps only the common schemes (standard 8/16 KB, OSS, XEGS and
+// switchable XEGS, Atarimax, SIC, MegaCart); raw .rom 2/4 KB use modes 0x16 / 0x17.
+static const uint8_t car_type_map[][2] = {
+    {1,0x01},  {2,0x21},                                              // standard 8K, 16K
+    {15,0x04}, {44,0x05}, {45,0x06},                                  // OSS
+    {12,0x30}, {13,0x31}, {14,0x32}, {23,0x33}, {24,0x34}, {25,0x35}, // XEGS
+    {33,0x38}, {34,0x39}, {35,0x3A}, {36,0x3B}, {37,0x3C}, {38,0x3D}, // switchable XEGS
+    {41,0x02}, {42,0x03}, {75,0x10},                                  // Atarimax 1 / 8 Mbit
+    {54,0x24}, {55,0x25}, {56,0x26},                                  // SIC 128 / 256 / 512 KB
+    {26,0x28}, {27,0x29}, {28,0x2A}, {29,0x2B}, {30,0x2C}, {31,0x2D}, {32,0x2E},
+    {64,0x2F}, {63,0x20},                                             // MegaCart 16 KB - 4 MB
+    {57,0x16}, {58,0x17},                                             // 2 KB, 4 KB
+};
+
+// returns 0 on success (reg_cart_mode set, data in SDRAM), nonzero on error
+int load_cartridge(char *filepath) {
+    FIL f;
+    unsigned int br;
+    int r = f_open(&f, filepath, FA_READ);
+    if (r != FR_OK) {
+        uart_printf("cart: open '%s' failed %d\n", filepath, r);
+        if (!mount_silent) message("Cannot open cartridge", 1);
+        return r;                           // FatFs code (> 0); callers only test != 0
+    }
+    uint32_t fsize = f_size(&f);
+    uint32_t sclust = f.obj.sclust;         // recorded for the write guard only on success
+    uint32_t data_size = fsize;
+    uint8_t mode = 0;
+    uint32_t car_type = 0;                  // 0 = raw .rom (no header)
+
+    char *ext = strrchr(filepath, '.');
+    if (ext && strcasecmp(ext, ".car") == 0) {
+        uint8_t hdr[16];
+        if (f_read(&f, hdr, 16, &br) != FR_OK || br != 16 ||
+            hdr[0] != 'C' || hdr[1] != 'A' || hdr[2] != 'R' || hdr[3] != 'T') {
+            f_close(&f);
+            if (!mount_silent) message("Not a valid .CAR file", 1);
+            return -2;
+        }
+        car_type = ((uint32_t)hdr[4] << 24) | ((uint32_t)hdr[5] << 16) |
+                   ((uint32_t)hdr[6] << 8)  |  (uint32_t)hdr[7];
+        for (unsigned i = 0; i < sizeof(car_type_map)/2; i++)
+            if (car_type_map[i][0] == car_type) { mode = car_type_map[i][1]; break; }
+        if (mode == 0) {
+            f_close(&f);
+            uart_printf("cart: unsupported CAR type %d\n", (int)car_type);
+            char m[40];
+            strcpy(m, "Unsupported CAR type ");
+            char *e = m + strlen(m);
+            if (car_type >= 100) *e++ = '0' + (car_type / 100) % 10;
+            if (car_type >= 10)  *e++ = '0' + (car_type / 10) % 10;
+            *e++ = '0' + car_type % 10;
+            *e = '\0';
+            if (!mount_silent) message(m, 1);
+            return -3;
+        }
+        data_size = fsize - 16;
+    } else {
+        // raw .rom dump: pick the mapper from the size
+        switch (fsize) {
+            case 2048:  mode = 0x16; break;
+            case 4096:  mode = 0x17; break;
+            case 8192:  mode = 0x01; break;
+            case 16384: mode = 0x21; break;
+            default:
+                f_close(&f);
+                if (!mount_silent) message("Raw .ROM must be 2/4/8/16K\nuse a .CAR instead", 1);
+                return -4;
+        }
+    }
+    if (data_size > CART_MAX_SIZE) {
+        f_close(&f);
+        if (!mount_silent) message("Cartridge too large (>4MB)\ndoes not fit 8MB SDRAM", 1);
+        return -5;
+    }
+
+    status("Loading cartridge...");
+    r = f_read(&f, (void *)CART_SDRAM_BASE, data_size, &br);
+    f_close(&f);
+    if (r != FR_OK || br != data_size) {
+        uart_printf("cart: read failed %d (br=%d/%d)\n", r, (int)br, (int)data_size);
+        if (!mount_silent) message("Cartridge read error", 1);
+        return -6;
+    }
+    reg_cart_mode = mode;
+    cart_sclust = sclust;                   // phase 2b guard: never write the attached image
+    uart_printf("cart: '%s' loaded, %d bytes, CAR type %d, mode 0x%b\n", filepath, (int)data_size, car_type, mode);   // printf has no %u/%02x: %d + %b
+    return 0;
+}
+
+int mount_atr(char *filepath, int slot) {
+    if (atr_mounted[slot]) {
+        f_close(&atr_file[slot]);
+        atr_mounted[slot] = false;
+    }
+    if (slot == 0 && xex_active) {   // an ATR takes D1: back from a mounted XEX
+        f_close(&xex_file);
+        xex_active = false;
+    }
+
+    atr_readonly[slot] = false;
+    int r = f_open(&atr_file[slot], filepath, FA_READ | FA_WRITE);
+    if (r != FR_OK) {
+        // Most common cause: FAT read-only attribute inherited from a PC copy.
+        // Strip it and retry before giving up on write access.
+        f_chmod(filepath, 0, AM_RDO);
+        r = f_open(&atr_file[slot], filepath, FA_READ | FA_WRITE);
+    }
+    if (r != FR_OK) {
+        // Fall back to read-only, but LOUDLY: the slot is flagged, the menu shows
+        // "(RO)", STATUS reports write-protect, and writes return 'E' (error 144) —
+        // never a silent mount whose writes then fail as a bare error 139.
+        r = f_open(&atr_file[slot], filepath, FA_READ);
+        if (r != FR_OK) {
+            uart_printf("atr open %s %d\n", filepath, r);
+            return r;
+        }
+        atr_readonly[slot] = true;
+        uart_printf("atr RO\n");
+    }
+
+    // VOLUME-CORRUPTION GUARD: the same file open for WRITE on both slots is
+    // illegal in FatFs with FF_FS_LOCK=0 (two FILs with divergent cluster/size
+    // state write inconsistent FAT/dir updates -> can destroy the whole volume,
+    // HW-confirmed 2026-07: SD card FAT wiped after same-ATR-on-D1+D2 testing).
+    // Detect by start cluster and demote THIS mount to read-only.
+    if (!atr_readonly[slot]) {
+        for (int o = 0; o < ATR_DRIVES; o++) {
+            if (o == slot || !atr_mounted[o]) continue;
+            if (atr_file[slot].obj.sclust == atr_file[o].obj.sclust) {
+                f_close(&atr_file[slot]);
+                r = f_open(&atr_file[slot], filepath, FA_READ);
+                if (r != FR_OK) return r;
+                atr_readonly[slot] = true;
+                break;
+            }
+        }
+    }
+
+    char *ext = strrchr(filepath, '.');
+    if (ext && strcasecmp(ext, ".xfd") == 0) {
+        // .xfd = raw sector dump, no header. Geometry inferred from file size.
+        // SD = 92160 (720x128), ED = 133120 (1040x128), DD = 183936 (sectors 1-3 are
+        // 128 B, 4+ are 256 B — same boot-sector quirk as ATR). Any other 128-multiple
+        // is treated as a 128-B-sector image (offset math is size-independent there).
+        uint32_t fsz = f_size(&atr_file[slot]);
+        if (fsz == 183936) {
+            atr_sector_size[slot] = 256;
+        } else if (fsz >= 128 && (fsz % 128) == 0) {
+            atr_sector_size[slot] = 128;
+        } else {
+            uart_printf("bad xfd %d\n", (int)fsz);
+            if (!mount_silent) message("Unsupported .xfd size", 1);
+            f_close(&atr_file[slot]);
+            return -3;
+        }
+        atr_hdr_off[slot] = 0;
+        // 183936 = 384 + 717*256 = the packed layout; a full-boot DD dump would
+        // be 184320 and lands in the 128-B branch above (harmless: unmountable
+        // geometry either way — keep .xfd behavior unchanged).
+        atr_dd_fullboot[slot] = false;
+        uart_printf("XFD D%d %s ss %d\n", slot+1, filepath, atr_sector_size[slot]);
+        atr_mounted[slot] = true;
+        if (atr_readonly[slot] && !mount_silent)
+            message("Disk is read-only\nWrites will fail (144)", 1);
+        return 0;
+    }
+
+    // Read ATR 16-byte header
+    uint8_t header[16];
+    unsigned int br;
+    r = f_read(&atr_file[slot], header, 16, &br);
+    if (r != FR_OK || br != 16) {
+        uart_printf("atr hdr err %d\n", r);
+        f_close(&atr_file[slot]);
+        return -1;
+    }
+
+    // Verify magic
+    uint16_t magic = header[0] | (header[1] << 8);
+    if (magic != 0x0296) {
+        uart_printf("atr magic %w\n", magic);
+        f_close(&atr_file[slot]);
+        return -2;
+    }
+
+    atr_sector_size[slot] = header[4] | (header[5] << 8);
+    if (atr_sector_size[slot] != 128 && atr_sector_size[slot] != 256) {
+        uart_printf("bad ss %d\n", atr_sector_size[slot]);
+        f_close(&atr_file[slot]);
+        return -3;
+    }
+    atr_hdr_off[slot] = 16;
+    // DD layout detection (Altirra's heuristic): data bytes % 256 == 0 means the
+    // boot sectors occupy full 256-B slots; the packed layout leaves rem 128.
+    atr_dd_fullboot[slot] = (atr_sector_size[slot] == 256) &&
+                            ((f_size(&atr_file[slot]) - 16) % 256 == 0);
+
+    uart_printf("ATR D%d %s ss %d%s\n", slot+1, filepath, atr_sector_size[slot],
+                atr_dd_fullboot[slot] ? " fullboot" : "");
+    atr_mounted[slot] = true;
+    if (atr_readonly[slot] && !mount_silent)
+        message("Disk is read-only\nWrites will fail (144)", 1);
+    return 0;
+}
+
+// Sector -> file offset + wire length for the mounted image. DD boot sectors
+// 1-3 are 128 B on the wire AND stored packed in the first 384 file bytes in
+// BOTH layouts (HW-proven on a real MyDOS 4.5 image: slot-start boot reads
+// froze its loader; packed reads run it). atr_dd_fullboot only moves the
+// data-area origin: a 768-B boot area (384 used + 384 pad) vs packed 384.
+static uint32_t atr_sector_offset(int slot, uint32_t sector_num, int *len) {
+    uint32_t base = atr_hdr_off[slot];   // 16 for .atr, 0 for .xfd
+    if (atr_sector_size[slot] == 128 || sector_num <= 3) {
+        *len = 128;
+        return base + (sector_num - 1) * 128;
+    }
+    *len = 256;
+    return base + (atr_dd_fullboot[slot] ? (sector_num - 1) * 256
+                                         : 384 + (sector_num - 4) * 256);
+}
+
+int atr_read_sector(int slot, uint32_t sector_num, uint8_t *buf, int *sector_len) {
+    if (!atr_mounted[slot]) return -1;
+
+    int len;
+    uint32_t offset = atr_sector_offset(slot, sector_num, &len);
+    *sector_len = len;
+
+    // Out-of-range = error like a real drive. CRITICAL: never f_lseek past
+    // EOF — on a writable FIL FatFs ALLOCATES the gap (one stray sector
+    // number grew an ATR 92 KB -> 8.4 MB and dirtied the volume; host-proven).
+    if (sector_num == 0 || offset + len > f_size(&atr_file[slot])) return -5;
+
+    int r = f_lseek(&atr_file[slot], offset);
+    if (r != FR_OK) {
+        return r;
+    }
+    
+    unsigned int br;
+    r = f_read(&atr_file[slot], buf, len, &br);
+    if (r != FR_OK || br != len) {
+        uart_printf("rd fail %d got %d\n", sector_num, br);
+        return -2;
+    }
+
+    return 0;
+}
+
+// Mount a .xex as the virtual boot disk on D1:.  Validates the $FFFF header and
+// patches the 24-bit byte length into the baked-in loader image so it knows how
+// many bytes to pull over SIO.
+int mount_xex(char *filepath) {
+    if (xex_active) {
+        f_close(&xex_file);
+        xex_active = false;
+    }
+    int r = f_open(&xex_file, filepath, FA_READ);
+    if (r != FR_OK) {
+        uart_printf("xex open %s %d\n", filepath, r);
+        // mount_silent: a blocking popup on a BRIDGE-initiated mount parks
+        // main() in message()'s key-wait — remote control wedges until a
+        // physical Enter (HW-hit 2026-07-20). Remote callers report over
+        // serial instead; OSD attach keeps the popup.
+        if (!mount_silent) message("Cannot open XEX file", 1);
+        return r;
+    }
+    xex_len = f_size(&xex_file);
+    // Sanity: a binary-load file must begin with the $FFFF header word.
+    uint8_t h[2];
+    unsigned int br;
+    if (f_read(&xex_file, h, 2, &br) != FR_OK || br != 2 ||
+        h[0] != 0xFF || h[1] != 0xFF) {
+        f_close(&xex_file);
+        if (!mount_silent) message("Not a valid .XEX\n(missing $FFFF header)", 1);
+        return -1;
+    }
+    // Patch the 24-bit remaining-byte length into the loader's init code.
+    xex_loader_img[XEX_REMLO_OFF]  =  xex_len        & 0xFF;
+    xex_loader_img[XEX_REMMID_OFF] = (xex_len >> 8)  & 0xFF;
+    xex_loader_img[XEX_REMHI_OFF]  = (xex_len >> 16) & 0xFF;
+    // Take over D1: from any mounted ATR.
+    if (atr_mounted[0]) {
+        f_close(&atr_file[0]);
+        atr_mounted[0] = false;
+    }
+    atr_sector_size[0] = 128;   // virtual disk is single density
+    xex_active = true;
+    uart_printf("xex %s %d\n", filepath, (int)xex_len);
+    return 0;
+}
+
+// Serve one 128-byte sector of the virtual XEX disk into buf.
+int xex_read_sector(uint32_t sector_num, uint8_t *buf, int *sector_len) {
+    *sector_len = 128;
+    if (sector_num >= 1 && sector_num <= XEX_BLDCNT) {
+        // Boot loader image.
+        uint32_t base = (sector_num - 1) * 128;
+        for (int i = 0; i < 128; i++) buf[i] = xex_loader_img[base + i];
+        return 0;
+    }
+    if (sector_num >= XEX_FIRSTSEC) {
+        // Raw .xex bytes, 128 per sector; zero-pad the final partial sector.
+        uint32_t off = (sector_num - XEX_FIRSTSEC) * 128;
+        for (int i = 0; i < 128; i++) buf[i] = 0;
+        if (off < xex_len) {
+            unsigned int br;
+            uint32_t n = xex_len - off;
+            if (n > 128) n = 128;
+            if (f_lseek(&xex_file, off) != FR_OK) return -1;
+            if (f_read(&xex_file, buf, n, &br) != FR_OK) return -2;
+        }
+        return 0;
+    }
+    return -1;   // sector 0 is invalid
+}
+
+int atr_write_sector(int slot, uint32_t sector_num, const uint8_t *buf, int len) {
+    if (!atr_mounted[slot]) return -1;
+
+    int expect_len;
+    uint32_t offset = atr_sector_offset(slot, sector_num, &expect_len);
+    if (len != expect_len) return -6;    // caller/geometry disagree — never corrupt
+
+    // same out-of-range guard as atr_read_sector (see comment there)
+    if (sector_num == 0 || offset + len > f_size(&atr_file[slot])) return -5;
+
+    int r = f_lseek(&atr_file[slot], offset);
+    if (r != FR_OK) {
+        return r;
+    }
+    
+    unsigned int bw;
+    r = f_write(&atr_file[slot], buf, len, &bw);
+    if (r != FR_OK || bw != len) {
+        uart_printf("wr fail %d bw %d\n", sector_num, bw);
+        return -2;
+    }
+
+    f_sync(&atr_file[slot]);
+    return 0;
+}
+
+// SIO FORMAT: zero-fill the mounted image's whole data area (a freshly formatted
+// disk from the drive's point of view; DOS then writes its own FS structures).
+// Sequential f_write with a single f_sync — per-sector sync would take ~700x longer.
+int atr_format(int slot) {
+    if (!atr_mounted[slot] || atr_readonly[slot]) return -1;
+    uint32_t base = atr_hdr_off[slot];
+    uint32_t total = f_size(&atr_file[slot]);
+    if (total < base) return -1;
+    uint32_t remaining = total - base;
+    if (f_lseek(&atr_file[slot], base) != FR_OK) return -2;
+    uint8_t zeros[128];
+    memset(zeros, 0, sizeof(zeros));
+    while (remaining > 0) {
+        unsigned int chunk = remaining > 128 ? 128 : remaining;
+        unsigned int bw;
+        if (f_write(&atr_file[slot], zeros, chunk, &bw) != FR_OK || bw != chunk) {
+            return -3;
+        }
+        remaining -= chunk;
+    }
+    if (f_sync(&atr_file[slot]) != FR_OK) return -4;
+    return 0;
+}
+
+#define SD_PATH_MAX 160                           // parent path + a long file name (FF_LFN_BUF 128)
+
+// PC Link PUT guard: never overwrite a file the firmware holds open (a mounted ATR, the
+// virtual .xex, the attached cart image), compared by FAT START CLUSTER so every spelling
+// of a path (case, 8.3 alias) is caught. p = scratch FIL for the probe.
+// (The H: device and the ASH sd: XIOs that also used this were removed, Atari 816.)
+static int sd_guarded_p(const char *path, FIL *p) {
+    if (f_open(p, path, FA_READ)) return 0;    // missing, or a directory: nothing open on it
+    uint32_t c = p->obj.sclust;
+    f_close(p);
+    for (int s = 0; s < ATR_DRIVES; s++)
+        if (atr_mounted[s] && atr_file[s].obj.sclust == c) return 1;
+    if (xex_active && xex_file.obj.sclust == c) return 1;
+    // Only while a cart is actually mapped (an ejected cart image may be replaced).
+    if ((reg_cart_mode & 0xff) && cart_sclust == c) return 1;
+    return 0;
+}
+
+// ── Boot watchdog (INVESTIGATE #21: the "6502 never returns" cold-boot lottery) ──────
+// load_system_roms() writes a sentinel into RTCLOK ($12-$14) while the core is still held in
+// reset, then arms this check on release. A cold-starting OS overwrites RTCLOK within
+// milliseconds (RAM clear, then the VBI counts), so if the sentinel is still there 1.5 s AND
+// 2.5 s later the 6502 never ran its cold start. (COLDST/RTCLOK-frozen would misfire: a disk
+// game that takes over early leaves COLDST=1 and may own the VBI.) On a stall the same long
+// reset is re-issued with the same OPTION state the caller used (bounded), logged and counted.
+static uint32_t bootwd_t0 = 0, bootwd_kbd = 0;
+#define BOOTWD_SENTINEL 0xA5C3A5u
+static uint8_t  bootwd_state = 0, bootwd_warm = 0;
+uint8_t         boot_retries = 0;
+uint32_t        virt_key_release_at = 0;     // deferred release for bridge KEY (see joy_get)
+static inline uint32_t atari_rtclok(void) {
+    volatile uint8_t *z = (volatile uint8_t *)0x00200000;
+    return ((uint32_t)z[0x12] << 16) | ((uint32_t)z[0x13] << 8) | z[0x14];
+}
+static void bootwd_arm(void) { bootwd_t0 = time_millis(); bootwd_kbd = reg_virt_kbd_0; bootwd_state = 1; bootwd_warm = 0; }
+static void bootwd_sentinel(void) {           // call while the core is held in reset
+    volatile uint8_t *z = (volatile uint8_t *)0x00200000;
+    z[0x12] = 0xA5; z[0x13] = 0xC3; z[0x14] = 0xA5;
+}
+// Warm start (F9 / OSD Soft Reset / bridge WARM): COLDST=0 + the 20 ms reset pulse, with the
+// watchdog armed the same way as a cold boot (a warm-started OS advances RTCLOK within a
+// frame, so the sentinel test holds). A stalled warm reset is retried with the same pulse.
+void warm_reset(void) {
+    *(volatile uint8_t *)(0x00200000 + 0x0244) = 0;   // COLDST = 0
+    reg_romload_ctrl = 1;
+    delay(20);
+    bootwd_sentinel();
+    reg_romload_ctrl = 0;
+    bootwd_arm();
+    bootwd_warm = 1;
+}
+
+int load_system_roms(void) {
+    FIL f;
+    unsigned int br;
+    int r;
+    
+    // Hold Atari core in reset
+    reg_romload_ctrl = 1;
+    delay(10);
+
+    // Power-cycle the emulated cartridge. The core's CartLogic bank latch is NOT
+    // reset by the system reset (faithful: the XL cart port has no reset line,
+    // so a real cart keeps its bank/enable across RESET - Altirra F5 matches).
+    // Its only reset is a cart_mode CHANGE, so without this a cold boot with a
+    // multicart that had disabled itself (e.g. Atarimax "Turbo Oro", .car type
+    // 75) came up with no cart -> BASIC / Self Test instead of the cart menu.
+    // A real power cycle (and Altirra Shift+F5) restores bank 0 + enabled; do
+    // the same here while the core is held in reset.
+    {
+        uint32_t cart_mode = reg_cart_mode & 0xff;
+        if (cart_mode != 0) {
+            reg_cart_mode = 0;
+            delay(1);
+            reg_cart_mode = cart_mode;
+            delay(1);
+        }
+    }
+
+    // Force cold boot on next boot
+    *(volatile uint8_t *)(0x00200000 + 0x0244) = 1; // COLDST = 1
+    
+    // Load OS.ROM
+    r = f_open(&f, "/ATARIXL.ROM", FA_READ);
+    if (r != FR_OK) {
+        r = f_open(&f, "/atarixl.rom", FA_READ);
+    }
+    if (r != FR_OK) {
+        uart_printf("Failed to open OS.ROM\n");
+        status("Failed to open OS.ROM");
+        reg_romload_ctrl = 0;
+        return (1 << 8) | r;
+    }
+    
+    // Load OS.ROM into SDRAM at the address the Atari core's address_decoder expects:
+    // SDRAM_OS_ROM_ADDR (XL/XE mode, low_memory=0) = physical 0x1F4000, at the top of
+    // physical bank 0 so the RAM region below can grow to 1088 KB. Firmware addr
+    // 0x003F4000 -> physical 0x1F4000 via the iosys bank-0/1 swap. Keep in sync with
+    // address_decoder.vhdl.
+    volatile uint8_t *os_rom_ptr = (volatile uint8_t *)0x003F4000;
+    r = f_read(&f, (void *)os_rom_ptr, 16384, &br);
+    f_close(&f);
+    if (r != FR_OK || br != 16384) {
+        uart_printf("Failed to read OS.ROM\n");
+        status("Failed to read OS.ROM");
+        reg_romload_ctrl = 0;
+        return (2 << 8) | r;
+    }
+    uart_printf("os rom ok %d\n", br);
+    
+    // Load BASIC.ROM
+    r = f_open(&f, "/BASIC.ROM", FA_READ);
+    if (r != FR_OK) {
+        r = f_open(&f, "/basic.rom", FA_READ);
+    }
+    if (r != FR_OK) {
+        uart_printf("Failed to open BASIC.ROM\n");
+        status("Failed to open BASIC.ROM");
+        reg_romload_ctrl = 0;
+        return (3 << 8) | r;
+    }
+    
+    // Load BASIC.ROM into SDRAM at the address the Atari core's address_decoder expects:
+    // SDRAM_BASIC_ROM_ADDR (low_memory=0) = physical 0x1F0000, at the top of physical
+    // bank 0 (above the 1088 KB RAM region). Firmware addr 0x003F0000 -> physical
+    // 0x1F0000 via the iosys bank-0/1 swap. Keep in sync with address_decoder.vhdl.
+    volatile uint8_t *basic_rom_ptr = (volatile uint8_t *)0x003F0000;
+    r = f_read(&f, (void *)basic_rom_ptr, 8192, &br);
+    f_close(&f);
+    if (r != FR_OK || br != 8192) {
+        uart_printf("Failed to read BASIC.ROM\n");
+        status("Failed to read BASIC.ROM");
+        reg_romload_ctrl = 0;
+        return (4 << 8) | r;
+    }
+    uart_printf("basic rom ok %d\n", br);
+    
+    // Release reset (sentinel first, while the 6502 is still held)
+    bootwd_sentinel();
+    reg_romload_ctrl = 0;
+    bootwd_arm();
+    status("ROMs loaded successfully");
+    // Give the SD card SPI bus a moment to settle before ATR file operations resume.
+    sio_delay(50);
+    return 0;
+}
+
+bool sio_rx_empty(void) {
+    return (reg_sio_rx_stat & 0x100) != 0;
+}
+
+void sio_init(void) {
+    reg_sio_divisor = 0x5D; // divisor 93 — matches the Atari's measured bit period
+                            // (the WIP regressed this to 94 / 0x5E; measured rate is 93)
+    
+    // Flush RX FIFO (up to 1024 bytes maximum to prevent hangs if status is stuck)
+    for (int i = 0; i < 1024 && !sio_rx_empty(); i++) {
+        (void)reg_sio_rx;
+    }
+    
+    sio_cmd_idx = 0;
+    sio_cmd_timeout = 0;
+
+    dbg_last_sio_cmd = 0;
+    dbg_last_sio_sector = 0;
+    dbg_last_sio_status = 0;
+    dbg_sio_err_count = 0;
+}
+
+void delay_us(uint32_t us) {
+    uint32_t start = reg_cycle;
+    uint32_t cycles = us * 27; // 27 MHz clock
+    while (reg_cycle - start < cycles) {
+        // busy wait
+    }
+}
+
+void delay_ms(uint32_t ms) {
+    delay_us(ms * 1000);
+}
+
+void sio_delay(int ms) {
+    uint32_t start = time_millis();
+    while (time_millis() - start < ms) {
+        sio_poll();
+        uart_keyboard_poll();
+    }
+}
+
+static void bootwd_poll(void) {
+    uint32_t now = time_millis();
+    // A classic machine frozen by Horizon (keymod bit 9) never overwrites the sentinel:
+    // hold the timer instead of retrying a machine that is only paused.
+    if (reg_a816_keymod & 0x200) { bootwd_t0 = now; return; }
+    if (bootwd_state == 1) {
+        if (now - bootwd_t0 < 1500) return;
+        if (atari_rtclok() != BOOTWD_SENTINEL) { bootwd_state = 0; return; }   // OS ran: done
+        bootwd_t0 = now; bootwd_state = 2;
+    } else if (bootwd_state == 2) {
+        if (now - bootwd_t0 < 1000) return;
+        bootwd_state = 0;
+        if (atari_rtclok() == BOOTWD_SENTINEL && boot_retries < 6) {
+            boot_retries++;
+            uart_printf("boot: watchdog retry %d\n", boot_retries);
+            if (bootwd_warm) { warm_reset(); return; }
+            uint32_t kbd = bootwd_kbd;
+            reg_virt_kbd_0 = kbd;             // same OPTION state as the boot that stalled
+            load_system_roms();               // long clean reset + release; re-arms the check
+            if (kbd) { sio_delay(400); reg_virt_kbd_0 = 0; }
+        }
+    }
+}
+
+void sio_tx_byte(uint8_t b) {
+    while (reg_sio_tx_stat & 0x200) {
+        // Wait until TX FIFO is not full
+    }
+    reg_sio_tx = b;
+}
+
+void sio_wait_tx_empty(void) {
+    // Bounded: if the p2s ever stops draining (e.g. POKEY_ENABLE stalls), this must
+    // NOT hang the firmware forever, or the main loop can't service the menu key.
+    uint32_t start = reg_cycle;
+    while (!(reg_sio_tx_stat & 0x100)) {
+        if ((uint32_t)(reg_cycle - start) > 27u * 20000u) break; // 20 ms safety cap
+    }
+    // Wait for the last byte to finish serializing on wire (520us @ 19200)
+    delay_us(600);
+}
+
+// Wait until the Atari deasserts the SIO command line (reg_sio_diag bit13 = 1),
+// i.e. the command frame is over and the computer is turning around to receive.
+// Lets us send the ACK as early as possible without sending it too early (while
+// the Atari is still transmitting / not yet listening). Bounded so we never hang.
+void sio_wait_cmd_high(void) {
+    uint32_t start = reg_cycle;
+    while (((reg_sio_diag >> 13) & 1) == 0) {
+        if ((uint32_t)(reg_cycle - start) > 27u * 4000u) break; // 4 ms safety cap
+    }
+}
+
+// Atari SIO checksum: 8-bit sum with END-AROUND CARRY (NOT plain mod-256).
+// Every overflow out of bit 7 is added back into bit 0. A plain (sum & 0xFF)
+// is wrong whenever the running sum carries, which makes the Atari reject our
+// STATUS/READ data frames (their sums almost always carry) -> "no disk".
+static uint8_t sio_checksum(const uint8_t *buf, int len) {
+    uint8_t sum = 0;
+    for (int i = 0; i < len; i++) {
+        uint16_t t = (uint16_t)sum + buf[i];
+        sum = (uint8_t)((t & 0xFF) + (t >> 8)); // fold the carry back in
+    }
+    return sum;
+}
+
+int sio_rx_data_frame(uint8_t *buf, int len) {
+    int idx = 0;
+    uint8_t checksum = 0;
+    uint32_t start_time = time_millis();
+    
+    while (idx < len + 1) {
+        if ((time_millis() - start_time) > 1000) { // 1 second timeout
+            uart_printf("rx timeout idx %d\n", idx);
+            return -1;
+        }
+        if (!sio_rx_empty()) {
+            uint16_t rx_val = reg_sio_rx;
+            uint8_t byte = rx_val & 0xFF;
+            uint8_t cmd_count = (rx_val >> 8) & 0x7F;
+            
+            if (cmd_count != 0) {
+                uart_printf("cmd during rx idx %d\n", cmd_count);
+                return -2;
+            }
+            
+            if (idx < len) {
+                buf[idx] = byte;
+                uint16_t t = (uint16_t)checksum + byte;
+                checksum = (uint8_t)((t & 0xFF) + (t >> 8)); // end-around carry
+            } else {
+                if (checksum == byte) {
+                    return 0; // Success
+                } else {
+                    uart_printf("data cksum %b != %b\n", checksum, byte);
+                    return -3;
+                }
+            }
+            idx++;
+        }
+    }
+    return -4;
+}
+
+extern int bridge_req;
+extern char bridge_req_path[SD_PATH_MAX];
+extern char mounted_atr_name[ATR_DRIVES][16];
+
+// OSD display name (16 B) = basename of an SD path.
+static void name_from_path(char *dst, const char *path) {
+    const char *base = strrchr(path, '/');
+    strncpy(dst, base ? base + 1 : path, 16);
+    dst[15] = '\0';
+}
+
+void sio_process_command(void) {
+    // NOTE: auto-baud tuning removed (T2) — it read reg_sio_divisor, which is a
+    // *different* (measured-receive) register than the TX divisor it writes, and
+    // could silently corrupt the TX baud. TX divisor stays fixed (set in sio_init).
+
+    uint8_t device = sio_cmd_buf[0];
+    uint8_t cmd = sio_cmd_buf[1];
+    uint8_t aux1 = sio_cmd_buf[2];
+    uint8_t aux2 = sio_cmd_buf[3];
+    uint8_t checksum = sio_cmd_buf[4];
+    
+    // Verify checksum of command frame (end-around carry, same as the Atari)
+    uint8_t calc_sum = sio_checksum(sio_cmd_buf, 4);
+    if (calc_sum != checksum) {
+        uart_printf("cmd cksum %b != %b\n", checksum, calc_sum);
+        dbg_sio_err_count++;
+        return;
+    }
+    
+    // (H: 0x72 and P1: 0x40 were removed, Atari 816: like every other unknown device
+    // they now stay silent.)
+    // Respond to D1:-D4: (Device IDs 0x31-0x34; D3/D4 = config/bridge drives)
+    if (device < 0x31 || device > 0x30 + ATR_DRIVES) {
+        return;
+    }
+    int slot = device - 0x31;
+
+    // An EMPTY drive slot stays SILENT — no drive on the bus. Answering 'E' to
+    // the OS's boot probe makes it loop "BOOT ERROR" instead of falling through
+    // to BASIC (HW-hit 2026-07-18 when the sio_poll mounted-gate moved to make
+    // the printer reachable; the gate belongs per-device, not globally).
+    if (!atr_mounted[slot] && !(slot == 0 && xex_active))
+        return;
+
+    uint16_t sector = aux1 | (aux2 << 8);
+    dbg_last_sio_cmd = cmd;
+    dbg_last_sio_sector = sector;
+    dbg_last_sio_status = 0;
+
+    // Send the ACK as early as the protocol allows: wait only until the Atari
+    // releases the command line (it's then turning around to receive), instead
+    // of a fixed multi-ms delay. On this fast machine the ACK window is narrow,
+    // so minimizing response latency is what lets the ACK land inside it.
+    sio_wait_cmd_high();
+
+    switch (cmd) {
+        case 0x53: { // Status command
+            // 1. Send ACK (with command-to-ACK SIO delay)
+            delay_us(250);
+            sio_tx_byte(0x41); // 'A'
+            sio_wait_tx_empty();
+            
+            // 2. Prepare status block (4 bytes)
+            uint8_t status_block[4];
+            status_block[0] = 0x10; // Drive active (bit 4)
+            if (atr_sector_size[slot] == 256) {
+                status_block[0] |= 0x20; // Double density (bit 5)
+            }
+            if (atr_readonly[slot]) {
+                status_block[0] |= 0x08; // Write protected (bit 3)
+            }
+            
+            status_block[1] = 0xFF; // Hardware status
+            status_block[2] = 0xE0; // Timeout
+            status_block[3] = 0x00;
+            
+            // Calculate status block checksum (Atari end-around carry)
+            uint8_t sum = sio_checksum(status_block, 4);
+
+            // 3. Delay 1ms (ACK-to-Complete delay)
+            delay_us(250);
+
+            // 4. Send Complete (must precede the data frame for reads/status)
+            sio_tx_byte(0x43); // 'C'
+            sio_wait_tx_empty();
+
+            // 5. Delay 1ms (Complete-to-Data delay)
+            delay_us(250);
+
+            // 6. Send status bytes
+            for (int i = 0; i < 4; i++) {
+                sio_tx_byte(status_block[i]);
+            }
+
+            // 7. Send checksum
+            sio_tx_byte(sum);
+            sio_wait_tx_empty();
+            break;
+        }
+        
+        case 0x52: { // Read sector command
+            // NO per-sector uart_printf here: a working DOS reads hundreds of
+            // sectors and the log flood crash-loops the BL616's FT2232-emu USB
+            // stack (HW-proven 2026-07-20: first successful MyDOS boot = serial
+            // link started flapping). dbg_sio_read_count / dbg_last_sio_sector
+            // carry the same info to STATUS and the OSD debug line.
+            uint8_t *sector_buf = sio_sector_buf;
+            int sector_len = 128;
+            
+            // 1. Send ACK first to satisfy the tight 16ms command-to-ACK window
+            delay_us(250);
+            sio_tx_byte(0x41); // 'A' (ACK)
+            sio_wait_tx_empty();
+            
+            // 2. Perform the slow read from the SD card (takes several milliseconds)
+            int r = (slot == 0 && xex_active)
+                        ? xex_read_sector(sector, sector_buf, &sector_len)
+                        : atr_read_sector(slot, sector, sector_buf, &sector_len);
+            if (r == 0) {
+                // Calculate checksum of sector data (Atari end-around carry)
+                uint8_t sum = sio_checksum(sector_buf, sector_len);
+
+                // 3. Delay 1ms (ACK-to-Complete delay)
+                delay_us(250);
+
+                // 4. Send Complete (must precede the data frame for reads)
+                sio_tx_byte(0x43); // 'C' (Complete)
+                sio_wait_tx_empty();
+
+                // 5. Delay 1ms (Complete-to-Data delay)
+                delay_us(250);
+
+                // 6. Send sector data
+                for (int i = 0; i < sector_len; i++) {
+                    sio_tx_byte(sector_buf[i]);
+                }
+
+                // 7. Send checksum
+                sio_tx_byte(sum);
+                sio_wait_tx_empty();
+            } else {
+                uart_printf("rd %d fail\n", sector);
+                dbg_last_sio_status = r;
+                dbg_sio_err_count++;
+                delay_us(250);
+                sio_tx_byte(0x45); // 'E' (Error)
+            }
+            break;
+        }
+        
+        case 0x57:   // Write sector command (with verify)
+        case 0x50: { // Write sector command (without verify)
+            // no per-sector log — see READ (BL616 flood)
+            uint8_t *sector_buf = sio_sector_buf;
+            int sector_len = (atr_sector_size[slot] == 128 || sector <= 3) ? 128 : 256;
+
+            // Send ACK (with command-to-ACK SIO delay)
+            delay_us(250);
+            sio_tx_byte(0x41); // 'A'
+            sio_wait_tx_empty();
+
+            // Read data frame from computer
+            int r = sio_rx_data_frame(sector_buf, sector_len);
+            if (r == 0) {
+                // Data frame verified: ACK it IMMEDIATELY — the computer's window for
+                // this ACK is tight (sub-16 ms), and the SD write + f_sync below can
+                // take tens of ms (FAT update, card GC). Doing the write before the
+                // ACK made the OS time out and retry, leaving multi-sector operations
+                // (data+VTOC+directory) half-applied = a corrupted filesystem. The
+                // slow operation belongs between ACK and 'C'/'E', which is what the
+                // long OS timeout is for.
+                delay_us(250);
+                sio_tx_byte(0x41); // 'A'
+                sio_wait_tx_empty();
+
+                int wr = atr_readonly[slot] ? -9
+                          : atr_write_sector(slot, sector, sector_buf, sector_len);
+                delay_us(250);
+                if (wr == 0) {
+                    sio_tx_byte(0x43); // 'C'
+                } else {
+                    // Post-ACK failures report 'E' (OS error 144), like a real drive
+                    // with a write-protected/failing disk. NAK is only valid in the
+                    // ACK slot.
+                    uart_printf("wr %d fail %d\n", sector, wr);
+                    dbg_last_sio_status = wr;
+                    dbg_sio_err_count++;
+                    sio_tx_byte(0x45); // 'E'
+                }
+            } else {
+                uart_printf("rx frame sec %d err %d\n", sector, r);
+                dbg_last_sio_status = r;
+                dbg_sio_err_count++;
+                delay_us(250);
+                sio_tx_byte(0x4E); // 'N' (NAK) — asks the OS to resend the frame
+            }
+            break;
+        }
+
+        case 0x21:   // Format disk (image's own geometry)
+        case 0x22: { // Format enhanced/medium density (1050 ED only)
+            uart_printf("SIO FORMAT %b\n", cmd);
+            uint8_t *sector_buf = sio_sector_buf;
+            int sector_len = (atr_sector_size[slot] == 256) ? 256 : 128;
+            uint32_t data_size = atr_mounted[slot]
+                ? f_size(&atr_file[slot]) - atr_hdr_off[slot] : 0;
+            // NAK what we can't do: empty/read-only drive, or 0x22 on a non-ED
+            // image (DOS 2.5 probes 0x22 and falls back to 0x21 on NAK).
+            if (!atr_mounted[slot] || atr_readonly[slot] ||
+                (cmd == 0x22 && data_size != 1040u * 128u)) {
+                dbg_last_sio_status = -9;
+                dbg_sio_err_count++;
+                delay_us(250);
+                sio_tx_byte(0x4E); // 'N'
+                break;
+            }
+            delay_us(250);
+            sio_tx_byte(0x41); // 'A'
+            sio_wait_tx_empty();
+
+            // Zero-fill the image (may take seconds — the OS format timeout is long).
+            int r = atr_format(slot);
+            if (r != 0) {
+                uart_printf("Format failed (%d)\n", r);
+                dbg_last_sio_status = r;
+                dbg_sio_err_count++;
+            }
+            // 'C'/'E' + data frame: the bad-sector table, all $FF = no bad sectors.
+            // The frame is sent after 'E' too — the OS reads it either way.
+            memset(sector_buf, 0xFF, sector_len);
+            uint8_t sum = sio_checksum(sector_buf, sector_len);
+            delay_us(250);
+            sio_tx_byte(r == 0 ? 0x43 : 0x45); // 'C' / 'E'
+            sio_wait_tx_empty();
+            delay_us(250);
+            for (int i = 0; i < sector_len; i++) {
+                sio_tx_byte(sector_buf[i]);
+            }
+            sio_tx_byte(sum);
+            sio_wait_tx_empty();
+            break;
+        }
+        
+        default:
+            uart_printf("SIO? %b\n", cmd);
+            dbg_sio_err_count++;
+            delay_us(250);
+            sio_tx_byte(0x4E); // 'N' (NAK)
+            break;
+    }
+}
+
+// sio_poll() — call as frequently as possible from the main loop.
+#ifndef SIO_SW_FALLBACK
+// Phase B: hardware command-frame capture path (DEFAULT; build -DSIO_SW_FALLBACK for the
+// old software-assembly path).
+// The 5-byte command frame is assembled in the FPGA (sio_handler snoop); we poll a
+// ready flag + seq counter, read the bytes, flush the command bytes the snoop left
+// in the RX FIFO, then dispatch exactly as the software path does. The real-time SIO
+// timing lives in hardware so a busy firmware loop can no longer miss a command.
+static uint8_t sio_hw_last_seq = 0;
+static void sio_poll_hwcapture(void) {
+    // (no mounted-gate: the P: printer must answer even with no disks attached)
+
+    uint32_t b = reg_siocmd_b;
+    uint8_t status = (b >> 8) & 0xff;        // b0=ready b1=error b2=active b3=overrun
+    uint8_t seq    = (b >> 16) & 0xff;
+    if (!(status & 0x01)) return;            // no command ready
+    if (seq == sio_hw_last_seq) return;      // already serviced this frame
+    sio_hw_last_seq = seq;
+
+    uint32_t a = reg_siocmd_a;
+    sio_cmd_buf[0] = a & 0xff;               // device
+    sio_cmd_buf[1] = (a >> 8) & 0xff;        // command
+    sio_cmd_buf[2] = (a >> 16) & 0xff;       // aux1
+    sio_cmd_buf[3] = (a >> 24) & 0xff;       // aux2
+    sio_cmd_buf[4] = b & 0xff;               // checksum
+    reg_siocmd_b = 0;                        // ack / re-arm
+
+    // The snoop left the 5 command bytes in the RX FIFO. The data frame (for write
+    // commands) only arrives after we ACK, so the FIFO holds exactly those 5 now —
+    // drain them so the upcoming data phase starts clean.
+    while (!sio_rx_empty()) { (void)reg_sio_rx; }
+
+    sio_process_command();
+    sio_cmd_idx = 0;
+    while (!sio_rx_empty()) { (void)reg_sio_rx; }
+}
+#endif
+
+// Accumulates SIO command frame bytes using cmd_count from the FIFO word:
+//   cmd_count == 1..5: byte is part of a command frame (1=first, 5=checksum)
+//   cmd_count == 0:    data-phase byte (handled inside sio_process_command)
+// We reset if too much time passes without completing a frame (line glitch recovery).
+void sio_poll(void) {
+#ifndef SIO_SW_FALLBACK
+    sio_poll_hwcapture();
+    return;
+#endif
+    if (!atr_mounted[0] && !atr_mounted[1] && !xex_active) return;
+
+    // Timeout: if a partial frame sits for >200 ms, reset accumulator
+    if (sio_cmd_idx > 0 && (time_millis() - sio_cmd_timeout) > 200) {
+        uart_printf("SIO: frame timeout, resetting (had %d bytes)\n", sio_cmd_idx);
+        sio_cmd_idx = 0;
+    }
+
+    for (int i = 0; i < 256 && !sio_rx_empty(); i++) {
+        uint16_t rx_val  = reg_sio_rx;
+        uint8_t  byte      = rx_val & 0xFF;
+        uint8_t  cmd_active = (rx_val >> 8) & 1;
+
+        if (!cmd_active) {
+            // Data-phase byte — not expected here; ignore
+            continue;
+        }
+
+        // A command frame starts if we were idle (sio_cmd_idx == 0) or if a timeout occurred (>50ms gap)
+        if (sio_cmd_idx == 0 || (time_millis() - sio_cmd_timeout) > 50) {
+            sio_cmd_idx     = 0;
+            sio_cmd_timeout = time_millis();
+        } else {
+            sio_cmd_timeout = time_millis();
+        }
+
+        // Accept byte if it's the next expected one
+        if (sio_cmd_idx < 5) {
+            sio_cmd_buf[sio_cmd_idx++] = byte;
+        }
+
+        if (sio_cmd_idx == 5) {
+            sio_process_command();
+            sio_cmd_idx = 0;
+
+            // Anti-lag resync: the response above blocks for several ms, during
+            // which the Atari may fire off command retries that pile up in the RX
+            // FIFO. Those are stale — answering them puts us permanently a step
+            // behind the Atari (its ACK window has already closed). Discard them
+            // and let the NEXT sio_poll catch the Atari's current, fresh command.
+            while (!sio_rx_empty()) { (void)reg_sio_rx; }
+            break;
+        }
+    }
+}
+
+// Cold-boot the Atari. Caller flips booted/overlay.
+// Uses load_system_roms()'s LONG clean reset (core held down for the full ROM
+// reload), NOT a short reg_romload_ctrl pulse: the 20 ms pulse was an
+// intermittent-stall lottery — the 6502 sometimes never came back (black
+// screen, RTCLOK frozen, COLDST still 1; HW-autopsied 2026-07-19 after a
+// cart detach). Identical to the fix that cured xex attach-auto-boot (#2)
+// and Boot OS (#3): every cold-boot flow now shares the proven sequence.
+// Default cartridge (Options "Boot: ASH" / atari.ini boot=ash). Called from the power-on
+// path and from cold_boot_atari(): when a cold boot finds the cart slot EMPTY, /ASH.CAR
+// goes in. So power-on, Hard Reset, Cart->Detach and a bridge cold reset all come back
+// to the shell; a game cart attached from the OSD is only "borrowed" (its mode is set
+// before the cold boot, never overridden); Boot to OS / Boot to BASIC bypass this (they
+// call load_system_roms directly). Missing or bad file = silent fallback to BASIC (the
+// HDD.ATR rule): the OSD Cart line stays "None" and the uart log says why.
+static void load_default_cart(void) {
+    if (!option_boot_ash || (reg_cart_mode & 0xff) != 0) return;
+    mount_silent = 1;
+    if (load_cartridge(ASH_CART_FILE) == 0)
+        strcpy(mounted_cart_name, "ASH.CAR");
+    else
+        uart_printf("boot: no %s -> BASIC\n", ASH_CART_FILE);
+    mount_silent = 0;
+}
+
+// Take the ASH cart OUT for one boot: Boot to BASIC, and every .xex boot (an enabled
+// cartridge takes the boot before the OS ever looks at D1:, so `atari.py run` and OSD
+// Attach .xex would otherwise land in the shell). A game cart stays in, as today.
+// The next Hard Reset / Detach / bridge cold boot puts ASH back (load_default_cart).
+static void drop_default_cart(void) {
+    if (strcmp(mounted_cart_name, "ASH.CAR") != 0) return;
+    reg_cart_mode = 0;
+    strcpy(mounted_cart_name, "None");
+}
+
+static int cold_boot_atari(void) {             // returns load_system_roms() (0 = OK)
+    reg_virt_kbd_0 = 0x00000000;
+    apply_machine_options();                        // RAM_SELECT stable before core leaves reset
+    sio_init();
+    load_default_cart();                            // boot=ash and slot empty -> /ASH.CAR
+    *(volatile uint8_t *)(0x00200000 + 0x0244) = 1; // COLDST = 1 (Cold start)
+    return load_system_roms();                      // long clean reset + release
+}
+
+// Cold-boot the virtual XEX disk on D1: with OPTION held (BASIC disabled), then
+// keep servicing SIO so the boot loader's sector reads are answered during boot.
+static int cold_boot_xex(void) {               // returns load_system_roms() (0 = OK)
+    drop_default_cart();                            // the xex must get the boot, not ASH
+    reg_virt_kbd_0 = 0x00410000;                    // hold OPTION (disable BASIC)
+    sio_init();                                     // SIO ready before the core is released
+    // Use the SAME reliable sequence as the "Boot OS" menu item, which boots an attached
+    // .xex correctly. load_system_roms() holds the core in reset for the full ROM reload
+    // (a long, clean hold) and sets COLDST=1, then releases. The previous short
+    // reg_romload_ctrl pulse (delay 20) left the attach-auto-boot intermittently stuck while
+    // "Boot OS" always worked (HW-observed 2026-06-30: attach->stuck, Hard->stuck, Boot OS->loads).
+    int r = load_system_roms();
+   
+    sio_delay(600);                                 // serve boot reads while OPTION held + UNMASKED
+    reg_virt_kbd_0 = 0x00000000;                    // release OPTION
+    return r;
+}
+
+// ── BL616 USB-C serial bridge — protocol v1 (PC tool: tools/atari.py) ────────
+// Single-byte commands, PC paces all transfers; replies are raw bytes.
+// Refusal/NAK = 0x15 (NAK, was '-' before 2026-07-21 — see BRIDGE_NAK below).
+//   0x05 ENQ                        -> "A8OK\n"
+//   0x01 PUT  nlen name size32LE    -> '+' | NAK; then '+' per 256-byte chunk;
+//        finally sum16LE from PC    -> 'K' | 'E' (mismatch deletes the file)
+//   0x02 RUN  nlen name             -> '+' | NAK; mounts the .xex + cold-boots
+//   0x03 COLD                       -> '+'  (like the menu's Hard Reset)
+//   0x04 WARM                       -> '+'  (like F9)
+// RUN/COLD/WARM are queued (bridge_req) and executed by the booted background
+// loop, where main's machine state is in scope. PUT runs inline and services
+// sio_poll() between chunks so the Atari's disk I/O stays alive mid-transfer.
+
+static FIL bridge_file;
+int bridge_req = 0;                     // 1 = run xex, 2 = cold boot, 3 = warm
+char bridge_req_path[SD_PATH_MAX];      // full path, subfolders allowed (sd_resolve'd names too)
+// OSD drive/cart display names — global so the bridge keeps the menu truthful
+// when it mounts/ejects behind the menu's back (remote RUN/eject).
+char mounted_atr_name[ATR_DRIVES][16] = {"None", "None", "None", "None"};
+int bridge_boot_stage = 0;   // 0 start, 1 sd ok, 2 options, 3 roms tried, 4 running
+int bridge_rom_ok = -1;
+int bridge_quiet = 0;                   // mute uart_printf during transfers: the
+                                        // protocol acks share the TX channel
+
+static void bridge_putc(uint8_t c) { reg_uart_data = c; }
+
+// Protocol refusal byte. MUST be a control char that never appears in the
+// firmware's ASCII log text: the PC tools scan a stream that interleaves log
+// chatter with protocol replies, and the old refusal byte '-' (0x2D) collides
+// with ordinary log content (filenames like "Astro-Droid.atr", "ad_dir")
+// -> the tool misreads a log '-' as a refusal (seen live). 0x15 = ASCII NAK.
+#define BRIDGE_NAK 0x15
+
+static int blrx_getc(uint32_t timeout_ms) {
+    uint32_t start = time_millis();
+    for (;;) {
+        uint32_t v = reg_blrx;
+        if (v & 0x100) { reg_blrx = 0; return (int)(v & 0xFF); }
+        if (time_millis() - start > timeout_ms) return -1;
+    }
+}
+
+// FS half of PUT — kept protocol-free so test/fatfs_host extracts and
+// exercises them against a disk image before any hardware run.
+// Create every missing directory along "/A/B/NAME" (mkdir /A, then /A/B).
+int bridge_mkdirs(char *path) {
+    for (char *p = path + 1; *p; p++) {
+        if (*p == '/') {
+            *p = '\0';
+            FRESULT r = f_mkdir(path);
+            *p = '/';
+            if (r != FR_OK && r != FR_EXIST) return -1;
+        }
+    }
+    return 0;
+}
+int bridge_put_open(const char *path) {
+    // Never overwrite a file the firmware holds open (a mounted ATR, the virtual
+    // .xex, an H: handle, the attached cart): the same-file-open-twice case that
+    // wiped a card in 2026-07. Names (ROMs, atari.ini) are NOT guarded here — the
+    // PC link is the ROM-rescue path. The PC gets a NAK; ashterm reports it.
+    if (sd_guarded_p(path, &bridge_file)) return -1;
+    return f_open(&bridge_file, path, FA_CREATE_ALWAYS | FA_WRITE);
+}
+// 0 ok, else the FRESULT (FR_DENIED if the card took fewer bytes than asked).
+int bridge_put_chunk(const uint8_t *buf, unsigned int len) {
+    unsigned int bw;
+    FRESULT r = f_write(&bridge_file, buf, len, &bw);
+    if (r != FR_OK) return (int)r;
+    return bw != len ? (int)FR_DENIED : 0;
+}
+int bridge_put_close(void) {
+    return f_close(&bridge_file) == FR_OK ? 0 : -1;
+}
+
+// nlen + name -> "/PATH/NAME" (max 63 chars, subfolders + leading '/' ok)
+static int bridge_read_name(char *path) {
+    int nlen = blrx_getc(1000);
+    if (nlen <= 0 || nlen > 63) return -1;
+    int k = 0;
+    path[k++] = '/';
+    for (int i = 0; i < nlen; i++) {
+        int c = blrx_getc(1000);
+        if (c < 0) return -1;
+        if (i == 0 && c == '/') continue;
+        path[k++] = (char)c;
+    }
+    path[k] = '\0';
+    return 0;
+}
+
+static void bridge_cmd_put(void) {
+    char path[68];
+    uint8_t buf[256];
+    bridge_quiet = 1;
+    if (bridge_read_name(path)) { bridge_quiet = 0; bridge_putc(BRIDGE_NAK); return; }
+    uint32_t size = 0;
+    for (int i = 0; i < 4; i++) {
+        int c = blrx_getc(1000);
+        if (c < 0) { bridge_quiet = 0; bridge_putc(BRIDGE_NAK); return; }
+        size |= (uint32_t)c << (8 * i);
+    }
+    if (bridge_mkdirs(path) || bridge_put_open(path)) {
+        bridge_quiet = 0; bridge_putc(BRIDGE_NAK); return;
+    }
+    bridge_putc('+');
+    uint16_t sum = 0;
+    uint32_t left = size;
+    while (left > 0) {
+        unsigned int chunk = left > 256 ? 256 : left;
+        int r = 0;                              // -1 = RX byte lost, >0 = FRESULT
+        for (unsigned int i = 0; i < chunk; i++) {
+            int c = blrx_getc(2000);
+            if (c < 0) { r = -1; break; }
+            buf[i] = (uint8_t)c;
+            sum += (uint8_t)c;
+        }
+        if (r == 0) r = bridge_put_chunk(buf, chunk);
+        if (r) {
+            // Abort. After a card-level error (FR_DISK_ERR/FR_INT_ERR) do NOT
+            // rewrite directory + FAT sectors on top of it — leave the partial
+            // file for fsck rather than risk the volume (2026-10-12 incident).
+            bridge_put_close();
+            if (r != (int)FR_DISK_ERR && r != (int)FR_INT_ERR) f_unlink(path);
+            bridge_quiet = 0;
+            bridge_putc(BRIDGE_NAK);
+            uart_printf("put abort @%d: %s %d\n", (int)(size - left),
+                        r < 0 ? "rx lost" : "f_write", r);
+            return;
+        }
+        left -= chunk;
+        sio_poll();                 // Atari runs live behind the transfer
+        // '+' is the LAST thing before the tight getc loop: it tells the PC
+        // "stream now" — anything slow must happen BEFORE it (the RX register
+        // holds ONE byte; bytes arriving while we're busy would be lost).
+        bridge_putc('+');
+    }
+    int c0 = blrx_getc(1000), c1 = blrx_getc(1000);
+    int cr = bridge_put_close();
+    bridge_quiet = 0;
+    if (c0 < 0 || c1 < 0 || cr != 0 ||
+        (uint16_t)(c0 | (c1 << 8)) != sum) {
+        f_unlink(path);
+        bridge_putc('E');
+        return;
+    }
+    bridge_putc('K');
+    uart_printf("put %s %d\n", path, (int)size);
+}
+
+// ── KEY injection: ASCII -> (HID keycode, shift) on the ATARI layout ─────────
+// The HID->matrix table in usb_to_atari800.sv is positional by Atari matrix
+// code (letters prove it: A=63, L=0 = POKEY KBCODE), so symbols use the HID
+// code whose matrix slot is the Atari key that PRODUCES the char:
+//   Atari '-'=KBCODE 14 -> HID 0x2F('[')   '='=15 -> 0x30(']')
+//   '+'=6 -> 0x34(''')   '*'=7 -> 0x31('\')   '<'=54 -> 0x2D   '>'=55 -> 0x2E
+// Shifted chars follow the ATARI key legends (e.g. '"' = SHIFT+2, '@' = SHIFT+8).
+#define KSH 0x80                              // shift flag in the table
+static const uint8_t ascii2hid[95] = {
+    /* 0x20 ' ' */ 0x2C,        /* ! */ 0x1E|KSH, /* " */ 0x1F|KSH,
+    /* # */ 0x20|KSH, /* $ */ 0x21|KSH, /* % */ 0x22|KSH, /* & */ 0x23|KSH,
+    /* ' */ 0x24|KSH, /* ( */ 0x26|KSH, /* ) */ 0x27|KSH,
+    /* * */ 0x31,     /* + */ 0x34,     /* , */ 0x36, /* - */ 0x2F,
+    /* . */ 0x37,     /* / */ 0x38,
+    /* 0-9 */ 0x27,0x1E,0x1F,0x20,0x21,0x22,0x23,0x24,0x25,0x26,
+    /* : */ 0x33|KSH, /* ; */ 0x33,     /* < */ 0x2D, /* = */ 0x30,
+    /* > */ 0x2E,     /* ? */ 0x38|KSH, /* @ */ 0x25|KSH,
+    /* A-Z */ 0x04,0x05,0x06,0x07,0x08,0x09,0x0A,0x0B,0x0C,0x0D,0x0E,0x0F,
+              0x10,0x11,0x12,0x13,0x14,0x15,0x16,0x17,0x18,0x19,0x1A,0x1B,
+              0x1C,0x1D,
+    /* [ */ 0x36|KSH, /* \ */ 0x34|KSH, /* ] */ 0x37|KSH,
+    /* ^ */ 0x31|KSH, /* _ */ 0x2F|KSH, /* ` */ 0,
+    /* a-z (Atari default caps: same keys as A-Z) */
+              0x04,0x05,0x06,0x07,0x08,0x09,0x0A,0x0B,0x0C,0x0D,0x0E,0x0F,
+              0x10,0x11,0x12,0x13,0x14,0x15,0x16,0x17,0x18,0x19,0x1A,0x1B,
+              0x1C,0x1D,
+    /* { */ 0, /* | */ 0x30|KSH, /* } */ 0, /* ~ */ 0
+};
+
+// Same table for the OSD "Keyboard: PC" layout: the injected HID code must then be the
+// US-ANSI key that prints the char, because usb_to_atari800 remaps symbolically.
+static const uint8_t ascii2hid_pc[95] = {
+    /* 0x20 ' ' */ 0x2C,        /* ! */ 0x1E|KSH, /* " */ 0x34|KSH,
+    /* # */ 0x20|KSH, /* $ */ 0x21|KSH, /* % */ 0x22|KSH, /* & */ 0x24|KSH,
+    /* ' */ 0x34,     /* ( */ 0x26|KSH, /* ) */ 0x27|KSH,
+    /* * */ 0x25|KSH, /* + */ 0x2E|KSH, /* , */ 0x36, /* - */ 0x2D,
+    /* . */ 0x37,     /* / */ 0x38,
+    /* 0-9 */ 0x27,0x1E,0x1F,0x20,0x21,0x22,0x23,0x24,0x25,0x26,
+    /* : */ 0x33|KSH, /* ; */ 0x33,     /* < */ 0x36|KSH, /* = */ 0x2E,
+    /* > */ 0x37|KSH, /* ? */ 0x38|KSH, /* @ */ 0x1F|KSH,
+    /* A-Z */ 0x04,0x05,0x06,0x07,0x08,0x09,0x0A,0x0B,0x0C,0x0D,0x0E,0x0F,
+              0x10,0x11,0x12,0x13,0x14,0x15,0x16,0x17,0x18,0x19,0x1A,0x1B,
+              0x1C,0x1D,
+    /* [ */ 0x2F,     /* \ */ 0x31,     /* ] */ 0x30,
+    /* ^ */ 0x23|KSH, /* _ */ 0x2D|KSH, /* ` */ 0,
+    /* a-z */ 0x04,0x05,0x06,0x07,0x08,0x09,0x0A,0x0B,0x0C,0x0D,0x0E,0x0F,
+              0x10,0x11,0x12,0x13,0x14,0x15,0x16,0x17,0x18,0x19,0x1A,0x1B,
+              0x1C,0x1D,
+    /* { */ 0, /* | */ 0x31|KSH, /* } */ 0, /* ~ */ 0
+};
+
+// getc that keeps the machine alive while waiting — for open-ended typing
+// sessions where the next keystroke may be seconds away. Safe with the 1-byte
+// RX register: per-char acks mean at most one byte is ever in flight.
+static int blrx_getc_serviced(uint32_t timeout_ms) {
+    uint32_t start = time_millis();
+    for (;;) {
+        uint32_t v = reg_blrx;
+        if (v & 0x100) { reg_blrx = 0; return (int)(v & 0xFF); }
+        if (time_millis() - start > timeout_ms) return -1;
+        sio_poll();
+        uart_keyboard_poll();
+        {   // F12/S2 pressed on the REAL keyboard: the user wants the OSD —
+            // yield: end the live session so the main loop can open the menu.
+            int j1, j2;
+            joy_get(&j1, &j2);
+            if ((j1 & 0x8) || (j1 & 0x200)) return -2;
+        }
+    }
+}
+
+// Press one char on the virtual keyboard (blocking ~55 ms; SIO stays alive).
+// Typing reaches the core only while the OSD overlay is OFF (inputs are
+// masked while the menu is open) — same rule as the OPTION-hold boot inject.
+static void bridge_type_char(uint8_t c) {
+    uint8_t e;
+    if (c == '\n' || c == '\r') e = 0x28;             // RETURN
+    else if (c == 0x08 || c == 0x7F) e = 0x2A;         // Backspace
+    else if (c == 0x09) e = 0x2B;                      // Tab
+    else if (c == 0x1B) e = 0x29;                      // Esc
+    else if (c < 0x20 || c > 0x7E) return;             // unmappable -> skip
+    else { e = (option_kbd_layout ? ascii2hid_pc : ascii2hid)[c - 0x20]; if (!e) return; }
+    // OS same-key debounce (KEYDEL, ~3 jiffies): a re-press of the SAME key
+    // within ~50 ms of the previous press is ignored — doubled characters
+    // ("LL", "00") lost their second copy at our 55 ms cadence (HW-observed).
+    static uint8_t prev_e = 0;
+    if (e == prev_e)
+        sio_delay(45);
+    prev_e = e;
+    uint32_t mod = (e & KSH) ? 0x02 : 0x00;            // left shift
+    reg_virt_kbd_0 = ((uint32_t)(e & 0x7F) << 8) | mod;
+    sio_delay(30);
+    reg_virt_kbd_0 = 0;
+    sio_delay(25);
+    // After RETURN the OS/BASIC is busy processing the line (tokenizing a
+    // long BASIC line takes >55 ms) and the keyboard buffer holds ONE char —
+    // typing two chars into that window loses the first (HW-observed: pasted
+    // lines lost their first digit after long predecessors). Let it settle.
+    if (e == 0x28)
+        sio_delay(250);
+}
+
+// 0x0E KEY: mod, hid, hold(x10 ms) -> '+' after press+release. Raw HID inject for
+// everything TYPE's ASCII table can't reach: console keys (F6/F7/F8 = Start/Select/
+// Option), F-keys, Esc, arrows. mod bit0 = Ctrl, bit1 = Shift (HID modifier byte).
+static void bridge_cmd_key(void) {
+    int m = blrx_getc(1000), k = blrx_getc(1000), h = blrx_getc(1000);
+    if (m < 0 || k < 0 || h < 0) { bridge_putc(BRIDGE_NAK); return; }
+    reg_virt_kbd_0 = ((uint32_t)(k & 0xFF) << 8) | (uint32_t)(m & 0xFF);
+    // Release is DEFERRED (joy_get() clears it after the hold): the main loop must see the
+    // key down, otherwise firmware hotkeys (F12/F9/F11, OSD navigation) never notice it.
+    virt_key_release_at = time_millis() + (h ? h * 10 : 100);
+    bridge_putc('+');
+}
+
+// 0x07 TYPE: len16LE -> '+', then per char: byte in, '+' out; ends with 'K'.
+// Per-character flow control: typing (~55 ms/char) dwarfs the ack round-trip,
+// and the 1-byte RX register cannot absorb streaming ahead.
+static void bridge_cmd_type(void) {
+    bridge_quiet = 1;
+    int l0 = blrx_getc(1000), l1 = blrx_getc(1000);
+    if (l0 < 0 || l1 < 0) { bridge_quiet = 0; bridge_putc(BRIDGE_NAK); return; }
+    uint32_t len = (uint32_t)l0 | ((uint32_t)l1 << 8);
+    int live = (len == 0xFFFF);      // live session: until 0x00, SIO serviced
+    bridge_putc('+');
+    for (uint32_t i = 0; live || i < len; i++) {
+        int c = live ? blrx_getc_serviced(120000) : blrx_getc(3000);
+        if (c == -2) { bridge_quiet = 0; bridge_putc('M'); return; }  // menu
+        if (c < 0) { bridge_quiet = 0; bridge_putc(BRIDGE_NAK); return; }
+        if (live && c == 0x00) break;
+        bridge_type_char((uint8_t)c);
+        bridge_putc('+');
+    }
+    bridge_quiet = 0;
+    bridge_putc('K');
+}
+
+// 0x08 STATUS: one parseable text line — the OSD debug line, remotely.
+static void bridge_cmd_status(void) {
+    extern char _ebss[];
+    uart_printf("ST u:%d bs:%d rom:%d x:%d m:%d%d%d%d c:%b s:%d st:%d e:%d cn:%d"
+                " hd:%d%d nt:%d,%d br:%d\n",
+                (int)time_millis(), bridge_boot_stage, bridge_rom_ok,
+                xex_active ? 1 : 0,
+                atr_mounted[0] ? 1 : 0, atr_mounted[1] ? 1 : 0,
+                atr_mounted[2] ? 1 : 0, atr_mounted[3] ? 1 : 0,
+                dbg_last_sio_cmd, dbg_last_sio_sector, dbg_last_sio_status,
+                (int)dbg_sio_err_count,
+                (*(volatile uint32_t *)_ebss != 0x53544B21u) ? 1 : 0,
+                0, 0,                            // hd: H: device removed (kept for the line format)
+                0, 0, boot_retries);             // nt: network device removed (kept for the line format)
+}
+
+// 0x09 PEEK addr16 len16 -> '+', raw bytes, sum16. Reads ATARI memory through
+// the SDRAM window — screen RAM, zero page, anything (remote eyes).
+static void bridge_cmd_peek(void) {
+    bridge_quiet = 1;
+    int a0 = blrx_getc(1000), a1 = blrx_getc(1000);
+    int l0 = blrx_getc(1000), l1 = blrx_getc(1000);
+    uint32_t len = (uint32_t)l0 | ((uint32_t)l1 << 8);
+    if (a0 < 0 || a1 < 0 || l0 < 0 || l1 < 0 || len > 1024) {
+        bridge_quiet = 0; bridge_putc(BRIDGE_NAK); return;
+    }
+    uint32_t addr = (uint32_t)a0 | ((uint32_t)a1 << 8);
+    bridge_putc('+');
+    uint16_t sum = 0;
+    for (uint32_t i = 0; i < len; i++) {
+        uint8_t b = *(volatile uint8_t *)(0x00200000u + ((addr + i) & 0xFFFFu));
+        bridge_putc(b);
+        sum += b;
+    }
+    bridge_putc(sum & 0xFF);
+    bridge_putc(sum >> 8);
+    bridge_quiet = 0;
+}
+
+// 0x0D FWPEEK addr16 len16 -> '+' data sum16. Reads FIRMWARE memory (BSRAM,
+// 0x0000-0xFFFF) instead of Atari RAM — remote inspection of fw globals
+// (added for the 0xC000 clobber triage; harmless to keep: read-only).
+static void bridge_cmd_fwpeek(void) {
+    bridge_quiet = 1;
+    int a0 = blrx_getc(1000), a1 = blrx_getc(1000);
+    int l0 = blrx_getc(1000), l1 = blrx_getc(1000);
+    uint32_t len = (uint32_t)l0 | ((uint32_t)l1 << 8);
+    if (a0 < 0 || a1 < 0 || l0 < 0 || l1 < 0 || len > 1024) {
+        bridge_quiet = 0; bridge_putc(BRIDGE_NAK); return;
+    }
+    uint32_t addr = (uint32_t)a0 | ((uint32_t)a1 << 8);
+    bridge_putc('+');
+    uint16_t sum = 0;
+    for (uint32_t i = 0; i < len; i++) {
+        uint8_t b = *(volatile uint8_t *)((addr + i) & 0xFFFFu);
+        bridge_putc(b);
+        sum += b;
+    }
+    bridge_putc(sum & 0xFF);
+    bridge_putc(sum >> 8);
+    bridge_quiet = 0;
+}
+
+// 0x0A POKE addr16 len16 bytes -> '+' ... 'K'. Remote writes into Atari memory.
+static void bridge_cmd_poke(void) {
+    bridge_quiet = 1;
+    int a0 = blrx_getc(1000), a1 = blrx_getc(1000);
+    int l0 = blrx_getc(1000), l1 = blrx_getc(1000);
+    uint32_t len = (uint32_t)l0 | ((uint32_t)l1 << 8);
+    if (a0 < 0 || a1 < 0 || l0 < 0 || l1 < 0 || len > 256) {
+        bridge_quiet = 0; bridge_putc(BRIDGE_NAK); return;
+    }
+    uint32_t addr = (uint32_t)a0 | ((uint32_t)a1 << 8);
+    bridge_putc('+');                // in the tight loop from here — stream
+    for (uint32_t i = 0; i < len; i++) {
+        int c = blrx_getc(2000);
+        if (c < 0) { bridge_quiet = 0; bridge_putc(BRIDGE_NAK); return; }
+        *(volatile uint8_t *)(0x00200000u + ((addr + i) & 0xFFFFu)) = (uint8_t)c;
+    }
+    bridge_quiet = 0;
+    bridge_putc('K');
+}
+
+// ── Atari 816 bring-up 1 ─────────────────────────────────────────────────────
+// The 65C816's native $00:0000-$0F:FFFF sits at firmware address 0x100000 + native
+// (physical SDRAM 0x300000). Its cache is only flushed while RUN = 0, so every write
+// to that memory from here must happen with the CPU held.
+#define A816_MEM ((volatile uint8_t *)0x00100000)
+
+void a816_mouse(int btn, int dx, int dy, int wheel);
+static void a816_poll(void) {        // 65C816 debug bytes -> serial log, one line at a time
+    static char ln[64];
+    static uint8_t n;
+    uint32_t v;
+    while ((v = reg_a816_dbg) & 0x100) {
+        reg_a816_dbg = 0;
+        if ((v & 0xFF) == 10 || n == sizeof ln - 1) { ln[n] = 0; n = 0; uart_printf("816: %s\n", ln); }
+        else ln[n++] = (char)v;
+    }
+}
+
+static void a816_mailbox(void);
+static uint8_t mb_synced;            // 1 after SYS_SYNC ($1C): volume unmounted until a restart
+static void fs_remount(void) {       // undo SYS_SYNC: lazy mount, the card is re-initialised on use
+    if (!mb_synced) return;
+    f_mount(&fs, "", 0);
+    mb_synced = 0;
+    uart_printf("sys: card mounted again\n");
+}
+static void a816_start(int test) {   // test: /A816.BIN only (run816)
+          // load /SYSTEM/HORIZON.SYS (or /A816.BIN) to $01:0000, write the reset stub, run
+    static const uint8_t stub[] = { 0x18, 0xFB, 0x5C, 0x00, 0x00, 0x01 };   // CLC XCE JML $010000
+    FIL f;
+    UINT br = 0;
+    reg_a816_ctrl = 0;
+    reg_a816_mbi = 0;
+    a816_mailbox();                                           // closes the old run's files
+    fs_remount();                                             // after SYS_SYNC
+    if ((test || f_open(&f, "/SYSTEM/HORIZON.SYS", FA_READ)) && f_open(&f, "/A816.BIN", FA_READ)) return;
+    f_read(&f, (void *)(A816_MEM + 0x10000), 0xFF00, &br);
+    f_close(&f);
+    for (int i = 0; i < 6; i++) A816_MEM[0xFF00 + i] = stub[i];
+    A816_MEM[0xFF10] = 0xDB;                                  // STP: every other vector
+    for (int i = 0xFFE0; i < 0x10000; i += 2) { A816_MEM[i] = 0x10; A816_MEM[i + 1] = 0xFF; }
+    A816_MEM[0xFFFC] = 0x00;                                  // RESET -> $FF00
+    uart_printf("816: loaded %d bytes, run\n", (int)br);
+    reg_a816_ctrl = 1;
+}
+
+// ── Atari 816 I/O processor mailbox (register spec, "I/O processor mailbox") ──
+// Two rings of 16-byte messages in the 65C816's RAM. One request is served per call.
+// Result codes: 0 OK, 1..19 FatFs FRESULT, $80 bad handle, $81 bad address, $82 unsupported,
+// $83-$85 see ops $18-$1A, $86 refused: the card was synced (SYS_SYNC) and not mounted again.
+// Ops: $01-$0A files, $10 LOAD, $18-$1A classic machine, $1B SYS_RESTART, $1C SYS_SYNC.
+// When data reaches the card (FatFs, FF_FS_TINY, one shared 512-byte sector window): a WRITE
+// sends every whole 512-byte sector it covers straight to the card; a partial last sector and
+// the FAT changes stay in the window until FatFs needs it for another sector (any later access)
+// or the file is closed. The directory entry (size, first cluster) and FSINFO are written only
+// by CLOSE (f_close = f_sync), by MKDIR/DELETE/RENAME, and by SYS_SYNC. Each sector write waits
+// until the card has finished programming it. So a file still open for writing at power-off is
+// left with its old size and lost clusters: close files (or SYS_SYNC) before power-off.
+// Formats the spec leaves open:
+//   STAT     BUF <- { u32 size, u8 attr (bit 4 = directory), u32 time (fdate << 16 | ftime) }
+//   READDIR  ARG0 = entries to skip; BUF <- packed { u32 size, u8 attr, u8 namelen, name }
+#define MB_FILES 4
+// Mouse movement waiting to be sent to Horizon as a MOUSE event ($E1)
+static int16_t ms_dx, ms_dy, ms_wheel;
+static uint8_t ms_btn, ms_btn_sent;
+volatile uint32_t a816_dbg[4];        // debug (fwpeek): last keymod, keys, poll count, mbi
+static FIL     mb_fil[MB_FILES];
+static uint8_t mb_open;                 // bit n = mb_fil[n] in use
+
+static uint32_t rd2(volatile uint32_t *r) {         // a register clocked by the 65C816
+    uint32_t a, b = *r;
+    do { a = b; b = *r; } while (a != b);
+    return a;
+}
+
+// 65C816 address -> pointer here, and how many bytes are contiguous from it (0 = no access)
+static uint8_t *mb_ptr(uint32_t n, uint32_t *room) {
+    if (n >= 0x800000 || (n >> 16) == 0x10) { *room = 0; return 0; }
+    *room = 0x100000 - (n & 0xFFFFF);
+    return (uint8_t *)(n < 0x400000 ? n ^ 0x100000 : n ^ 0x300000);   // see a816_physical_addr in tang_top.sv
+}
+
+static int mb_get(uint32_t n, uint8_t *dst, uint32_t len) {
+    while (len) {
+        uint32_t room;
+        volatile uint8_t *p = mb_ptr(n, &room);
+        if (!room) return 0;
+        if (room > len) room = len;
+        for (uint32_t i = 0; i < room; i++) dst[i] = p[i];
+        n += room; dst += room; len -= room;
+    }
+    return 1;
+}
+
+static int mb_put(uint32_t n, const uint8_t *src, uint32_t len) {
+    while (len) {
+        uint32_t room;
+        volatile uint8_t *p = mb_ptr(n, &room);
+        if (!room) return 0;
+        if (room > len) room = len;
+        for (uint32_t i = 0; i < room; i++) p[i] = src[i];
+        n += room; src += room; len -= room;
+    }
+    return 1;
+}
+
+static int mb_path(uint32_t n, char *dst, int max) {            // zero-terminated string
+    for (int i = 0; i < max; i++) {
+        if (!mb_get(n + i, (uint8_t *)dst + i, 1)) return 0;
+        if (!dst[i]) return 1;
+    }
+    return 0;
+}
+
+// file <-> 65C816 memory, straight through FatFs. wr = 0 file -> memory.
+static uint32_t mb_xfer(FIL *f, uint32_t n, uint32_t len, int wr, uint32_t *res) {
+    uint32_t done = 0;
+    *res = 0;
+    while (len) {
+        uint32_t room;
+        UINT got = 0;
+        uint8_t *p = mb_ptr(n, &room);
+        if (!room) { *res = 0x81; break; }
+        if (room > len) room = len;
+        if (room > 0x8000) room = 0x8000;
+        *res = wr ? f_write(f, p, room, &got) : f_read(f, p, room, &got);
+        done += got; n += got; len -= got;
+        if (*res || got < room) break;
+    }
+    return done;
+}
+
+void a816_mouse(int btn, int dx, int dy, int wheel) { ms_btn = btn; ms_dx += dx; ms_dy += dy; ms_wheel += wheel; }
+
+static uint32_t mb_close_all(void) {    // close every mailbox handle; first error, or 0
+    uint32_t res = 0;
+    for (int i = 0; i < MB_FILES; i++)
+        if (mb_open & (1 << i)) { FRESULT r = f_close(&mb_fil[i]); if (r && !res) res = r; }
+    mb_open = 0;
+    return res;
+}
+
+// SYS_RESTART ($1B) runs after its reply was read (or 500 ms later): 1 = Horizon only, 2 = full
+static uint8_t  sys_restart;
+static uint32_t sys_restart_t0;
+static void sys_do_restart(int full) {
+    reg_a816_ctrl = 0;                                   // hold the 65C816 before anything else
+    mb_close_all();
+    fs_remount();
+    if (full) {
+        uart_printf("sys: full restart\n");
+        // power-on defaults, then /atari.ini (keys left out of the file go back to default)
+        option_arrow_joystick = 0; option_scanline_level = 0; option_h_offset = 0;
+        option_stereo = 0; option_kbd_layout = 0; option_ram_idx = 0; option_boot_ash = 0;
+        int r = load_option();
+        for (int a = 0; r < 0 && a < 5; a++) {
+            delay(50); f_mount(0, "", 0); delay(20);
+            if (f_mount(&fs, "", 0) == FR_OK) r = load_option();
+        }
+        apply_input_options();
+        apply_video_options();
+        apply_machine_options();
+        // classic media out, as at power-on (the default cartridge and /HDD.ATR come back below)
+        for (int i = 0; i < ATR_DRIVES; i++) {
+            if (atr_mounted[i]) { f_close(&atr_file[i]); atr_mounted[i] = false; }
+            strcpy(mounted_atr_name[i], "None");
+        }
+        if (xex_active) { f_close(&xex_file); xex_active = false; }
+        reg_cart_mode = 0;
+        strcpy(mounted_cart_name, "None");
+        int rom = cold_boot_atari();                     // boot=ash: /ASH.CAR; ROMs; long reset
+        for (int a = 0; rom && a < 3; a++) {
+            delay(50); f_mount(0, "", 0); delay(20);
+            if (f_mount(&fs, "", 0) == FR_OK) rom = cold_boot_atari();
+        }
+        bridge_rom_ok = rom;
+        if (!rom) {
+            mount_silent = 1;
+            if (mount_atr("/HDD.ATR", 3) == 0) strncpy(mounted_atr_name[3], "HDD.ATR", 16);
+            mount_silent = 0;
+        }
+        uart_printf("boot: roms %d\n", rom);
+    }
+    a816_start(0);
+}
+
+static void a816_mailbox(void) {
+    static char path[128];
+    uint32_t q = rd2(&reg_a816_mbq), r = rd2(&reg_a816_mbr), iop = reg_a816_mbi;
+    uint32_t qbase = q & 0xFFFFFF, rbase = r & 0xFFFFFF;
+    uint8_t  qhead = q >> 24, rtail = r >> 24, qtail = iop, rhead = iop >> 8;
+    uint8_t  m[16];
+    uint32_t res = 0, val = 0;
+    static uint8_t busy;                                 // FatFs waits can poll the bridge again
+    if (busy) return;
+
+    if (sys_restart) {                                   // SYS_RESTART answered: wait until the
+        if (rtail != rhead && time_millis() - sys_restart_t0 < 500) return;   // 65C816 read it
+        int full = sys_restart == 2;
+        sys_restart = 0;
+        busy = 1;
+        sys_do_restart(full);
+        busy = 0;
+        return;
+    }
+
+    if (!qbase || !rbase) {                              // 65C816 reset or not set up
+        if (iop) {
+            for (int i = 0; i < MB_FILES; i++) if (mb_open & (1 << i)) f_close(&mb_fil[i]);
+            mb_open = 0;
+            reg_a816_mbi = 0;
+        }
+        return;
+    }
+    if (!(iop & 0x10000)) { reg_a816_mbi = 0x10000; return; }   // IOP_READY, rings empty
+    if ((uint8_t)(rhead + 1) == rtail) return;           // no room for an answer or an event
+
+    // Keyboard events ($E0 KEY): one per call, from the difference between the keys held
+    // now and the keys already reported. ARG0 = HID usage ($E0-$E7 for the modifiers),
+    // ARG1 = modifiers, bit 8 set = key down.
+    {
+        static uint8_t held[4], mods;
+        uint32_t km = rd2(&reg_a816_keymod), kk = rd2(&reg_a816_keys);
+        a816_dbg[0] = km; a816_dbg[1] = kk; a816_dbg[2]++; a816_dbg[3] = iop;
+        uint8_t  now[4] = { kk, kk >> 8, kk >> 16, kk >> 24 };
+        uint8_t  nm = km, usage = 0, down = 0;
+        if (!(km & 0x100)) { now[0] = now[1] = now[2] = now[3] = 0; nm = 0; }   // not ours
+        for (int i = 0; i < 4 && !usage; i++) {          // releases first
+            int still = 0;
+            for (int j = 0; j < 4; j++) if (held[i] && held[i] == now[j]) still = 1;
+            if (held[i] && !still) { usage = held[i]; held[i] = 0; }
+        }
+        for (int i = 0; i < 8 && !usage; i++)
+            if ((mods ^ nm) & (1 << i)) { usage = 0xE0 + i; down = (nm >> i) & 1; mods ^= 1 << i; }
+        for (int i = 0; i < 4 && !usage; i++) {
+            int known = 0, slot = -1;
+            for (int j = 0; j < 4; j++) { if (held[j] == now[i]) known = 1; if (!held[j]) slot = j; }
+            if (now[i] > 3 && !known && slot >= 0) { usage = now[i]; down = 1; held[slot] = usage; }
+        }
+        if (usage) {
+            uint8_t e[16] = { 0xE0, 0, 0, 0, 0, 0, 0, 0, usage, 0, 0, 0, mods, down, 0, 0 };
+            if (mb_put(rbase + rhead * 16, e, 16))
+                reg_a816_mbi = (iop & 0x300FF) | (uint8_t)(rhead + 1) << 8;
+            return;
+        }
+        // Mouse event ($E1): ARG0 bytes = dx, dy, wheel (signed), ARG1 = buttons
+        if (!(km & 0x100)) { ms_dx = ms_dy = ms_wheel = 0; ms_btn_sent = ms_btn; }
+        else if (ms_dx || ms_dy || ms_wheel || ms_btn != ms_btn_sent) {
+            int dx = ms_dx > 127 ? 127 : ms_dx < -127 ? -127 : ms_dx;
+            int dy = ms_dy > 127 ? 127 : ms_dy < -127 ? -127 : ms_dy;
+            int dw = ms_wheel > 127 ? 127 : ms_wheel < -127 ? -127 : ms_wheel;
+            uint8_t e[16] = { 0xE1, 0, 0, 0, 0, 0, 0, 0, dx, dy, dw, 0, ms_btn, 0, 0, 0 };
+            if (mb_put(rbase + rhead * 16, e, 16)) {
+                reg_a816_mbi = (iop & 0x300FF) | (uint8_t)(rhead + 1) << 8;
+                ms_dx -= dx; ms_dy -= dy; ms_wheel -= dw; ms_btn_sent = ms_btn;
+            }
+            return;
+        }
+    }
+    if (qhead == qtail) return;                          // nothing to do
+    if (!mb_get(qbase + qtail * 16, m, 16)) { reg_a816_mbi = iop | 0x20000; return; }   // IOP_ERROR
+
+    busy = 1;
+    uint32_t len  = m[2] | m[3] << 8;
+    uint32_t buf  = m[4] | m[5] << 8 | m[6] << 16;
+    uint32_t arg0 = m[8] | m[9] << 8 | m[10] << 16 | (uint32_t)m[11] << 24;
+    uint32_t arg1 = m[12] | m[13] << 8 | m[14] << 16 | (uint32_t)m[15] << 24;
+    FIL *f = (arg0 < MB_FILES && (mb_open & (1 << arg0))) ? &mb_fil[arg0] : 0;
+
+    // after SYS_SYNC every op below $1B (files, LOAD, classic machine) is refused with $86
+    switch (mb_synced && m[0] < 0x1B ? 0x7F : m[0]) {
+    case 0x7F:
+        res = 0x86;
+        break;
+    case 0x01: {                                         // OPEN
+        static const uint8_t mode[4] = { FA_READ, FA_READ | FA_WRITE,
+                                         FA_READ | FA_WRITE | FA_CREATE_ALWAYS,
+                                         FA_WRITE | FA_OPEN_APPEND };
+        int h = 0;
+        while (h < MB_FILES && (mb_open & (1 << h))) h++;
+        if (h == MB_FILES) res = FR_TOO_MANY_OPEN_FILES;
+        else if (!mb_path(buf, path, sizeof path)) res = 0x81;
+        else if (!(res = f_open(&mb_fil[h], path, mode[m[7] & 3]))) { mb_open |= 1 << h; val = h; }
+        break;
+    }
+    case 0x02:                                           // CLOSE
+        if (!f) res = 0x80; else { res = f_close(f); mb_open &= ~(1 << arg0); }
+        break;
+    case 0x03: case 0x04:                                // READ, WRITE
+        if (!f) res = 0x80; else val = mb_xfer(f, buf, len, m[0] == 0x04, &res);
+        break;
+    case 0x05:                                           // SEEK
+        if (!f) res = 0x80; else { res = f_lseek(f, arg1); val = f_tell(f); }
+        break;
+    case 0x06: {                                         // STAT
+        FILINFO fi;
+        uint8_t o[9];
+        if (!mb_path(buf, path, sizeof path)) { res = 0x81; break; }
+        if ((res = f_stat(path, &fi))) break;
+        uint32_t t = (uint32_t)fi.fdate << 16 | fi.ftime;
+        o[0] = fi.fsize; o[1] = fi.fsize >> 8; o[2] = fi.fsize >> 16; o[3] = fi.fsize >> 24;
+        o[4] = fi.fattrib;
+        o[5] = t; o[6] = t >> 8; o[7] = t >> 16; o[8] = t >> 24;
+        if (!mb_put(buf, o, 9)) res = 0x81;
+        val = fi.fsize;
+        break;
+    }
+    case 0x07: {                                         // READDIR
+        DIR d;
+        FILINFO fi;
+        uint32_t off = 0;
+        if (!mb_path(buf, path, sizeof path)) { res = 0x81; break; }
+        if ((res = f_opendir(&d, path))) break;
+        for (;;) {
+            if ((res = f_readdir(&d, &fi)) || !fi.fname[0]) break;
+            if (arg0) { arg0--; continue; }
+            uint32_t nl = strlen(fi.fname);
+            uint8_t  h[6] = { fi.fsize, fi.fsize >> 8, fi.fsize >> 16, fi.fsize >> 24, fi.fattrib, nl };
+            if (off + 6 + nl > len) break;
+            if (!mb_put(buf + off, h, 6) || !mb_put(buf + off + 6, (uint8_t *)fi.fname, nl)) { res = 0x81; break; }
+            off += 6 + nl;
+            val++;
+        }
+        f_closedir(&d);
+        break;
+    }
+    case 0x08: case 0x09:                                // MKDIR, DELETE
+        if (!mb_path(buf, path, sizeof path)) res = 0x81;
+        else res = m[0] == 0x08 ? f_mkdir(path) : f_unlink(path);
+        break;
+    case 0x0A: {                                         // RENAME "old\0new"
+        static char to[128];
+        if (!mb_path(buf, path, sizeof path) || !mb_path(buf + strlen(path) + 1, to, sizeof to)) res = 0x81;
+        else res = f_rename(path, to);
+        break;
+    }
+    case 0x10: {                                         // LOAD whole file to ARG0
+        FIL lf;
+        if (!mb_path(buf, path, sizeof path)) { res = 0x81; break; }
+        if ((res = f_open(&lf, path, FA_READ))) break;
+        val = mb_xfer(&lf, arg0 & 0xFFFFFF, f_size(&lf), 0, &res);
+        f_close(&lf);
+        break;
+    }
+    // ── Classic machine (Atari 8-bit core) software, ops $18-$1A ──
+    // Request:
+    //   $18 CLASSIC_MOUNT  BUF   = path (zero-terminated, as OPEN/LOAD)
+    //                      FLAGS = kind: 0 by extension (.ATR/.XFD disk, .XEX/.COM/.EXE
+    //                              executable, .CAR/.ROM/.BIN cartridge), 1 disk image,
+    //                              2 executable, 3 cartridge
+    //                      ARG0  = drive slot 0..3 (D1:..D4:), disk images only; an
+    //                              executable always becomes the virtual boot disk on D1:
+    //                      Mount only, no reset. The new image replaces the slot's old
+    //                      one (also: a disk on slot 0 replaces a mounted executable and
+    //                      vice versa). A cartridge is mapped at once (reg_cart_mode), so
+    //                      a classic machine left RUNNING sees it immediately: freeze it
+    //                      or follow with CLASSIC_BOOT.
+    //   $19 CLASSIC_EJECT  FLAGS = kind: 1 disk (slot 0 also ejects the executable),
+    //                              2 executable, 3 cartridge
+    //                      ARG0  = drive slot 0..3 (disk only). Ejecting an empty slot = OK.
+    //   $1A CLASSIC_BOOT   no arguments. Cold boot with what is mounted, as the OSD menu
+    //                      does: executable mounted -> OPTION held (BASIC off), else plain
+    //                      cold boot (boot=ash puts /ASH.CAR in an empty cart slot).
+    //                      Horizon must unfreeze the machine AND route the keyboard to it
+    //                      first: the held OPTION goes through the keyboard path, which
+    //                      is masked while Horizon has the keyboard.
+    // Response: ARG0 = result, ARG1 = MOUNT: kind mounted (1..3); BOOT: 2 = executable
+    //   boot, 0 = other; EJECT: 0.
+    // Results: 0 OK, 1..19 FatFs (e.g. 4 no file), $81 bad path address, $83 bad kind,
+    //   slot or unknown extension, $84 not a valid/supported image (bad ATR header, odd
+    //   .XFD size, no $FFFF header, unsupported CAR type, cart > 4 MB, ROM files bad),
+    //   $85 refused: the OSD menu is open (try again later).
+    // Time (the reply comes when done; other requests and key events wait): MOUNT disk/xex
+    //   a few SD accesses (~10-50 ms); MOUNT cartridge reads the whole image (8-16 KB fast,
+    //   multi-MB carts take seconds); EJECT immediate; BOOT ~0.2 s (ROM reload), ~0.8 s for
+    //   an executable (OPTION held 600 ms while its boot sectors are served).
+    case 0x18: case 0x19: case 0x1A: {
+        int kind = m[7], r = 0, s = kind == 1 ? arg0 : 0;   // ($85 "OSD open" is no longer returned)
+        if (m[0] == 0x1A) {
+            val = xex_active ? 2 : 0;
+            r = xex_active ? cold_boot_xex() : cold_boot_atari();
+            res = !r ? 0 : (r & 0xFF) ? (r & 0xFF) : 0x84;
+            break;
+        }
+        if (m[0] == 0x18) {
+            if (!mb_path(buf, path, sizeof path)) { res = 0x81; break; }
+            char *e = strrchr(path, '.');
+            if (!kind && e && strlen(e) == 4)
+                for (int i = 0; i < 8; i++) {
+                    int j = 0;
+                    while (j < 3 && (e[1 + j] & 0xDF) == "ATRXFDXEXCOMEXECARROMBIN"[i * 3 + j]) j++;
+                    if (j == 3) { kind = i < 2 ? 1 : i < 5 ? 2 : 3; break; }
+                }
+        }
+        if (kind < 1 || kind > 3 || (uint32_t)s >= ATR_DRIVES) { res = 0x83; break; }
+        if (m[0] == 0x19) {                              // EJECT
+            if (kind == 3) { reg_cart_mode = 0; strcpy(mounted_cart_name, "None"); break; }
+            if (!s && xex_active) { f_close(&xex_file); xex_active = false; strcpy(mounted_atr_name[0], "None"); }
+            if (kind == 1 && atr_mounted[s]) { f_close(&atr_file[s]); atr_mounted[s] = false; strcpy(mounted_atr_name[s], "None"); }
+            break;
+        }
+        mount_silent = 1;                                // MOUNT: no OSD popups
+        r = kind == 1 ? mount_atr(path, s) : kind == 2 ? mount_xex(path) : load_cartridge(path);
+        mount_silent = 0;
+        val = kind;
+        res = !r ? 0 : r > 0 ? r : r == -6 ? FR_DISK_ERR : 0x84;
+        char *name = kind == 3 ? mounted_cart_name : mounted_atr_name[s];
+        if (!r) name_from_path(name, path);
+        else if (kind != 3 && !atr_mounted[s] && !(s == 0 && xex_active)) strcpy(name, "None");
+        break;
+    }
+    // ── System, ops $1B-$1C ──
+    //   $1B SYS_RESTART  ARG0 = 0: reload /SYSTEM/HORIZON.SYS (else /A816.BIN) and restart the
+    //                    65C816 (as the PC link's restart816). The classic machine is left as it is.
+    //                    ARG0 = 1: full restart: options back to their defaults, /atari.ini read
+    //                    again and applied, every classic image ejected, classic machine cold
+    //                    booted (ROMs reloaded, boot=ash puts /ASH.CAR back, /HDD.ATR on D4:),
+    //                    then Horizon reloaded and restarted. Allowed after SYS_SYNC (mounts the
+    //                    card again first).
+    //                    Response: ARG0 = result, ARG1 = 0. The OK reply is written BEFORE the
+    //                    restart: the 65C816 is held in reset as soon as it has advanced
+    //                    MB_RSP_TAIL past the reply (at most 500 ms after the reply if it never
+    //                    does). After sending the request Horizon should do nothing that matters:
+    //                    wait for the reply, take it, then spin (no file ops; nothing more is
+    //                    answered and no KEY/MOUSE events are sent while the restart is pending).
+    //                    An error reply means no restart happened and Horizon keeps running.
+    //                    Results: 0 OK, $83 ARG0 not 0 or 1, 1..19 FatFs (e.g. 4: neither
+    //                    /SYSTEM/HORIZON.SYS nor /A816.BIN is on the card, 3: card not ready).
+    //                    Time to Horizon's first instruction: ~0.2 s (mode 0); ~1 s (mode 1).
+    //   $1C SYS_SYNC     no arguments. Closes every mailbox file handle (pending data and the
+    //                    directory entries written), closes the classic disk images and the
+    //                    virtual executable disk (unmounted: D1:-D4: answer no drive), then
+    //                    unmounts the FAT volume. When the reply comes everything is on the card
+    //                    and the card is idle: it may be removed or the power cut.
+    //                    Response: ARG0 = first error from closing a file (0 = OK; the rest are
+    //                    closed anyway), ARG1 = number of mailbox handles that were open.
+    //                    Until the next restart (SYS_RESTART, or the PC link's restart816) every
+    //                    op below $1B (files, LOAD, CLASSIC_*) answers $86 "card synced" and does
+    //                    nothing; SYS_SYNC again answers OK. A mounted cartridge stays (it is in
+    //                    SDRAM). PC link file transfers fail (NAK) until the restart too.
+    case 0x1B: {
+        FILINFO fi;
+        if (arg0 > 1) { res = 0x83; break; }
+        fs_remount();
+        if ((res = f_stat("/SYSTEM/HORIZON.SYS", &fi)) && (res = f_stat("/A816.BIN", &fi))) break;
+        sys_restart = 1 + arg0;
+        sys_restart_t0 = time_millis();
+        uart_printf("sys: restart %d\n", (int)arg0);
+        break;
+    }
+    case 0x1C:
+        for (int i = 0; i < MB_FILES; i++) if (mb_open & (1 << i)) val++;
+        res = mb_close_all();
+        for (int i = 0; i < ATR_DRIVES; i++) {
+            if (atr_mounted[i]) { FRESULT r = f_close(&atr_file[i]); if (r && !res) res = r; atr_mounted[i] = false; }
+            strcpy(mounted_atr_name[i], "None");
+        }
+        if (xex_active) { f_close(&xex_file); xex_active = false; }
+        if (!mb_synced) f_mount(0, "", 0);
+        mb_synced = 1;
+        uart_printf("sys: sync, %d files closed, result %d\n", (int)val, (int)res);
+        break;
+    default:
+        res = 0x82;
+    }
+
+    m[0] |= 0x80;
+    m[8]  = res; m[9]  = res >> 8; m[10] = res >> 16; m[11] = res >> 24;
+    m[12] = val; m[13] = val >> 8; m[14] = val >> 16; m[15] = val >> 24;
+    busy = 0;
+    if (!mb_put(rbase + rhead * 16, m, 16)) { reg_a816_mbi = iop | 0x20000; return; }
+    reg_a816_mbi = (iop & 0x30000) | (uint8_t)(rhead + 1) << 8 | (uint8_t)(qtail + 1);
+}
+
+// 0x13 PEEK816 addr24 width16 rows16 stride24 flags8 -> '+', data, sum16LE | NAK.
+// Reads 65C816 memory as the CPU sees it (native 24-bit addresses, mb_ptr's map): `rows`
+// spans of `width` bytes, `stride` apart (one span = a plain read; rows of a framebuffer =
+// a screenshot). Bytes the I/O processor cannot reach (bank $10, $80 and up) read 0.
+// sum16 is over the raw bytes. flags bit 0 = RLE: the data is sent as packets, header h
+// 0-127 = h + 1 literal bytes follow, 128-255 = the next byte repeated h - 125 (3-130) times.
+// Bit 1 = XOR2: from the third byte of each span on, a byte is sent XORed with the byte two
+// before it (dithered desktop pattern -> zeros; applied before RLE). Bit 2 = sum only: no
+// data, just '+' and sum16 (the PC uses it to tell whether a region changed).
+// Consistency: the 65C816's cache is write-through (a816_sys S_WR) and the blitter writes
+// SDRAM directly, so SDRAM always holds what was written; this never disturbs the CPU.
+// The main loop (mailbox, keys, mouse) waits while the reply streams, so the PC keeps
+// requests to about 64 KB.
+static uint8_t pk_lit[128];
+static uint32_t pk_nl, pk_sum;
+static void pk_flush_lit(void) {
+    if (!pk_nl) return;
+    bridge_putc((uint8_t)(pk_nl - 1));
+    for (uint32_t i = 0; i < pk_nl; i++) bridge_putc(pk_lit[i]);
+    pk_nl = 0;
+}
+static void bridge_cmd_peek816(void) {
+    uint8_t h[10];
+    bridge_quiet = 1;
+    for (int i = 0; i < 10; i++) {
+        int c = blrx_getc(1000);
+        if (c < 0) { bridge_quiet = 0; bridge_putc(BRIDGE_NAK); return; }
+        h[i] = (uint8_t)c;
+    }
+    uint32_t addr   = h[0] | h[1] << 8 | (uint32_t)h[2] << 16;
+    uint32_t width  = h[3] | h[4] << 8, rows = h[5] | h[6] << 8;
+    uint32_t stride = h[7] | h[8] << 8 | (uint32_t)h[9] << 16;
+    int c = blrx_getc(1000);
+    if (c < 0 || !width || !rows || width * rows > 0x100000) {
+        bridge_quiet = 0; bridge_putc(BRIDGE_NAK); return;
+    }
+    int rle = c & 1, x2 = c & 2, quiet = c & 4;
+    bridge_putc('+');
+    uint32_t run_n = 0;
+    uint8_t run_b = 0;
+    pk_nl = 0; pk_sum = 0;
+    for (uint32_t r = 0; r < rows; r++, addr += stride) {
+        uint8_t b1 = 0, b2 = 0;                   // raw bytes x - 1, x - 2
+        uint32_t wa = 1, wv = 0;                  // the 32-bit word last read (address, value):
+        for (uint32_t x = 0; x < width; x++) {    // a firmware SDRAM read costs ~13 us
+            uint32_t n = (addr + x) & 0xFFFFFF, room;
+            if ((n & ~3u) != wa) {
+                volatile uint32_t *p = (volatile uint32_t *)mb_ptr(n & ~3u, &room);
+                wa = n & ~3u;
+                wv = room ? *p : 0;
+            }
+            uint8_t b = (uint8_t)(wv >> ((n & 3) * 8));
+            pk_sum += b;
+            if (quiet) continue;
+            uint8_t raw = b;
+            if (x2 && x >= 2) b ^= b2;
+            b2 = b1; b1 = raw;
+            if (!rle) { bridge_putc(b); continue; }
+            if (run_n && b == run_b && run_n < 130) { run_n++; continue; }
+            if (run_n >= 3) { pk_flush_lit(); bridge_putc((uint8_t)(run_n + 125)); bridge_putc(run_b); }
+            else while (run_n--) { pk_lit[pk_nl++] = run_b; if (pk_nl == 128) pk_flush_lit(); }
+            run_b = b; run_n = 1;
+        }
+    }
+    if (rle && !quiet) {
+        if (run_n >= 3) { pk_flush_lit(); bridge_putc((uint8_t)(run_n + 125)); bridge_putc(run_b); }
+        else while (run_n--) { pk_lit[pk_nl++] = run_b; if (pk_nl == 128) pk_flush_lit(); }
+        pk_flush_lit();
+    }
+    bridge_putc(pk_sum & 0xFF);
+    bridge_putc((pk_sum >> 8) & 0xFF);
+    bridge_quiet = 0;
+}
+
+static void bridge_poll(void) {
+    static int busy = 0;             // re-entry guard: bridge_poll is called from
+    uint32_t v = reg_blrx;           // many wait loops, incl. ones a command's own
+    if (busy) return;                // helpers may reach (e.g. message())
+    a816_poll();
+    if (reg_a816_mbq | reg_a816_mbi) a816_mailbox();
+    if (!(v & 0x100)) return;
+    busy = 1;
+    reg_blrx = 0;                    // ack (clears valid + overrun)
+    // Framing (v3.2.1): every command is 0xA8, cmd, ~cmd. Stray bytes on the link (a
+    // resetting BL616, line noise) used to execute as commands — 0x03 = cold boot, 0x07 =
+    // type, 0x0A = poke. The PC sends 0xA8, the dispatch beat, then cmd+check together.
+    if ((v & 0xFF) != 0xA8) { busy = 0; return; }
+    {
+        int c = blrx_getc(100), k = blrx_getc(100);
+        if (c < 0 || k < 0 || (uint8_t)(c ^ 0xFF) != (uint8_t)k) { busy = 0; return; }
+        v = (uint32_t)c;
+    }
+    switch (v & 0xFF) {
+    case 0x05: uart_printf("A8OK\n"); break;
+    case 0x10: case 0x11: a816_start((v & 0xFF) == 0x11); bridge_putc('+'); break;       // restart the 65C816 from the SD card
+    case 0x01: bridge_cmd_put(); break;
+    case 0x02:
+        if (bridge_read_name(bridge_req_path) == 0) { bridge_req = 1; bridge_putc('+'); }
+        else bridge_putc(BRIDGE_NAK);
+        break;
+    case 0x03: bridge_req = 2; bridge_putc('+'); break;
+    case 0x04: bridge_req = 3; bridge_putc('+'); break;
+    case 0x06:                       // EJECT the virtual .xex boot disk (D1:)
+        if (xex_active) {
+            f_close(&xex_file);
+            xex_active = false;
+            strncpy(mounted_atr_name[0], "None", 16);
+        }
+        bridge_putc('+');
+        break;
+    case 0x07: bridge_cmd_type(); break;
+    case 0x08: bridge_cmd_status(); break;
+    case 0x0D: bridge_cmd_fwpeek(); break;
+    case 0x0E: bridge_cmd_key(); break;
+    case 0x12: {                     // MOUSE: dx dy wheel buttons (test injection of a MOUSE event)
+        int a = blrx_getc(100), b = blrx_getc(100), c = blrx_getc(100), d = blrx_getc(100);
+        if (d < 0) { bridge_putc(BRIDGE_NAK); break; }
+        ms_dx += (int8_t)a; ms_dy += (int8_t)b; ms_wheel += (int8_t)c; ms_btn = d;
+        bridge_putc('+');
+        break;
+    }
+    case 0x09: bridge_cmd_peek(); break;
+    case 0x0A: bridge_cmd_poke(); break;
+    case 0x13: bridge_cmd_peek816(); break;
+    default: break;                  // tolerate stray bytes
+    }
+    busy = 0;
+}
+
+// Stack canary at the very bottom of the stack region (= _ebss, no heap in this
+// firmware). The linker guarantees >= 4 KB between _ebss and STACK_TOP; if the
+// stack ever reaches the canary it has (nearly) collided with the top of bss —
+// which holds the FatFs volume pointer, atr_mounted[], the OSD cursor... (=
+// exactly the "everything FS goes weird after a write" corruption pattern).
+// Checked on every main-menu paint: '!' appended to the SIO debug line.
+extern char _ebss[];
+#define STACK_CANARY_MAGIC 0x53544B21u   // "STK!"
+static inline void stack_canary_arm(void)  { *(volatile uint32_t *)_ebss = STACK_CANARY_MAGIC; }
+static inline int  stack_canary_dead(void) { return *(volatile uint32_t *)_ebss != STACK_CANARY_MAGIC; }
+
+// ── Hot/cold split (Atari 816) ───────────────────────────────────────────────
+// Only boot code and the time-critical paths (SIO, SD, FatFs read/write, UART) live in
+// the 32 KB block RAM; baremetal.ld lists them. Everything else is the "cold" image:
+// it sits in SPI flash at COLD_FLASH_ADDR and is copied to SDRAM at 0x10000 here, before
+// anything cold is called. cold_sig is patched by mkcold.py with the length and CRC-32 of
+// the cold image this hot image was linked against, so a stale flash copy is refused.
+#define COLD_FLASH_ADDR 0x500000
+#define COLD_MAGIC      0x444C4F43u            // "COLD"
+extern uint8_t _cold_start[];
+const volatile uint32_t cold_sig[2] __attribute__((section(".coldsig"), used)) = { 0, 0 };
+
+static uint32_t crc32_upd(uint32_t c, const volatile uint8_t *p, uint32_t n) {
+    while (n--) {
+        c ^= *p++;
+        for (int k = 0; k < 8; k++) c = (c >> 1) ^ (0xEDB88320u & -(c & 1));
+    }
+    return c;
+}
+
+static int cold_load(void) {
+    uint32_t hdr[3];
+    uint8_t buf[256];
+    uint32_t len = cold_sig[0];
+    spiflash_read(COLD_FLASH_ADDR, (uint8_t *)hdr, 12);
+    if (hdr[0] != COLD_MAGIC) return 1;
+    if (hdr[1] != len || hdr[2] != cold_sig[1]) return 2;
+    for (uint32_t off = 0; off < len; off += 256) {
+        uint32_t n = len - off < 256 ? len - off : 256;
+        spiflash_read(COLD_FLASH_ADDR + 12 + off, buf, n);
+        for (uint32_t i = 0; i < n; i++) _cold_start[off + i] = buf[i];
+    }
+    return (~crc32_upd(~0u, _cold_start, len) == cold_sig[1]) ? 0 : 3;
+}
+
+int main_app(void);
+
+int main() {
+    reg_uart_clkdiv = 234;                     // 27000000 / 115200
+    uart_printf("boot: hot\n");
+    for (;;) {
+        int r = cold_load();
+        if (r == 0) break;
+        uart_printf("boot: cold image error %d (flash cold.bin at 0x500000)\n", r);
+        delay(1000);
+    }
+    uart_printf("boot: cold ok\n");
+    return main_app();
+}
+
+int main_app() {
+    stack_canary_arm();
+    delay(200); // Give SD card time to stabilize power on startup
+    CORE_ID = reg_core_id;
+
+    // Initialize UART
+    reg_uart_clkdiv = 234; // 27000000 / 115200;
+
+    // Initialize SD Card
+    int mounted = 0;
+    while(!mounted) {
+        for (int attempts = 0; attempts < 255; attempts++) {
+            if (f_mount(&fs, "", 0) == FR_OK) {
+                mounted = 1;
+                break;
+            }
+            bridge_poll();           // stay reachable while waiting for the card
+        }
+        if (!mounted)
+{ message("Insert SD card", 1); delay(1000); }
+    }
+
+    bridge_boot_stage = 1;
+    uart_printf("boot: sd ok\n");
+   
+
+    // load_option() is the first real SD access (f_mount above is lazy). On a warm
+    // reset the card is mid-state and this first read can fail transiently — retry with
+    // a full remount, exactly like the ROM loader below. Without this, a glitched first
+    // read silently reverts ALL options to defaults while the ROM loader still recovers,
+    // i.e. "settings saved fine but boot comes up with defaults". (-1 = transient.)
+    int opt_r = load_option();
+    for (int attempt = 0; opt_r < 0 && attempt < 5; attempt++) {
+        uart_printf("load_option failed (transient), remount+retry %d\n", attempt + 1);
+        delay(50);
+        f_mount(0, "", 0);                       // unmount (deinit volume)
+        delay(20);
+        if (f_mount(&fs, "", 0) != FR_OK) { delay(80); continue; }
+        opt_r = load_option();
+    }
+    // Initialize USB Host enable state based on loaded option (0 = UART, 1 = USB)
+   
+    apply_input_options();
+    apply_video_options();
+    apply_machine_options();   // set RAM_SELECT before the core is released below
+    sio_init();
+   
+
+    bridge_boot_stage = 2;
+
+    // Auto-load system ROMs on boot. On a warm reset (S1) the SD card is left
+    // mid-state and FatFs reads can fail transiently (e.g. FR_INT_ERR on the 2nd
+    // file). Retry with a full unmount/re-mount (resets FatFs state + forces a
+    // fresh SD re-init on the next access) before giving up.
+    load_default_cart();          // boot=ash: /ASH.CAR into the slot before the ROMs go in
+    int rom_ok = load_system_roms();
+    for (int attempt = 0; rom_ok != 0 && attempt < 5; attempt++) {
+        uart_printf("ROM load failed (0x%x), remount+retry %d\n", rom_ok, attempt + 1);
+        delay(50);
+        f_mount(0, "", 0);                       // unmount (deinit volume)
+        delay(20);
+        if (f_mount(&fs, "", 0) != FR_OK) { delay(80); continue; }
+        rom_ok = load_system_roms();
+    }
+    bridge_boot_stage = 3;
+    bridge_rom_ok = rom_ok;
+    a816_start(0);                // Atari 816 bring-up: no-op without /A816.BIN
+    uart_printf("boot: roms %d\n", rom_ok);
+   
+    if (rom_ok != 0) {
+        // No on-screen menu any more: report on the serial log and stay reachable over the
+        // PC Link (files can still be sent; COLD/WARM/RUN leave this loop and are executed
+        // by the main loop below). S1 resets the whole firmware.
+        uart_printf("ROM load error 0x%x (op %d: 1=OpOS 2=RdOS 3=OpBas 4=RdBas, FatFs %d)\n",
+                    rom_ok, rom_ok >> 8, rom_ok & 0xFF);
+        uart_printf("Check /ATARIXL.ROM and /BASIC.ROM on the SD card, then press S1\n");
+        for (;;) {
+            bridge_poll();
+            uart_keyboard_poll();
+            if (bridge_req) break;
+        }
+    }
+
+    // Rung-1 "hard drive": if /HDD.ATR exists it auto-mounts on D4: at every
+    // boot (convention over configuration — no menu, no ini key). Create one
+    // with the OSD's New-blank-disk + rename, or copy any big MyDOS ATR.
+    if (rom_ok == 0) {
+        mount_silent = 1;
+        if (mount_atr("/HDD.ATR", 3) == 0) {
+            strncpy(mounted_atr_name[3], "HDD.ATR", 16);
+            uart_printf("boot: hdd mounted on D4\n");
+        }
+        mount_silent = 0;
+    }
+   
+    if (rom_ok == 0) {
+        bridge_boot_stage = 4;
+        uart_printf("boot: running\n");
+    }
+    int f9_prev = 0;             // F9 soft-reset hotkey edge detector
+    int f11_prev = 0;            // F11 arrows<->joystick live-toggle edge detector
+
+    for (;;) {
+        {
+            bootwd_poll();               // cold-boot watchdog (no-op once the OS is running)
+            int joy1, joy2;
+            joy_get(&joy1, &joy2);
+            // F9 = soft reset hotkey (same warm start as the menu's Soft Reset)
+            int f9 = (joy1 & 0x4);
+            if (f9 && !f9_prev) {
+                reg_virt_kbd_0 = 0x00000000;
+                warm_reset();
+                delay(300);
+            }
+            f9_prev = f9;
+
+            // F11 = quick LIVE toggle: arrow keys drive Joystick 1 <-> normal
+            // typing (the same option_arrow_joystick the OSD "Arrow keys" item
+            // sets, applied live via reg_virt_kbd_1). Live-only: it is NOT written
+            // to atari.ini, so it reverts to the saved default on the next reboot
+            // (use OSD Options -> Save changes to make a preference permanent).
+            int f11 = (joy1 & 0x400);            // rv_joy1 bit 10 = F11
+            if (f11 && !f11_prev) {
+                option_arrow_joystick = !option_arrow_joystick;
+                apply_input_options();
+                delay(200);                      // debounce the keypress
+            }
+            f11_prev = f11;
+
+            // Background polling loop — service SIO (bounded per call).
+            sio_poll();
+            sio_poll();
+            sio_poll();
+            // (frame_rate_sample() retired 2026-09-20: its result was never displayed; image size)
+            uart_keyboard_poll();
+            bridge_poll();
+            if (bridge_req) {        // deferred bridge actions (RUN/COLD/WARM)
+                int r = bridge_req;
+                bridge_req = 0;
+                if (r == 1) {
+                    // Remote mount: never popup (mount_silent), and retry once —
+                    // a fresh f_open right after the PUT's f_close failed
+                    // transiently on HW (same FatFs mid-state family as
+                    // load_option's documented remount-retry).
+                    mount_silent = 1;
+                    int mr = mount_xex(bridge_req_path);
+                    if (mr != 0) {
+                        delay(100);
+                        mr = mount_xex(bridge_req_path);
+                    }
+                    mount_silent = 0;
+                    if (mr == 0) {
+                        name_from_path(mounted_atr_name[0], bridge_req_path);
+                        cold_boot_xex();
+                    } else {
+                        uart_printf("run: mount failed %d\n", mr);
+                    }
+                } else if (r == 2) {
+                    cold_boot_atari();
+                } else if (r == 3) {
+                    reg_virt_kbd_0 = 0x00000000;
+                    warm_reset();
+                }
+            }
+        }
+    }
+}
+
+#define CH9350_STATE_IDLE 0
+#define CH9350_STATE_AB   1
+#define CH9350_STATE_CMD  2
+#define CH9350_STATE_LEN  3
+#define CH9350_STATE_DATA 4
+
+static int ch_state = CH9350_STATE_IDLE;
+static uint8_t ch_cmd = 0;
+static uint8_t ch_len = 0;
+static uint8_t ch_buf[16];
+static uint8_t ch_idx = 0;
+static uint32_t last_kbd_time = 0;
+uint8_t ch_raw[64];          // last raw bytes from the CH9350 (diagnosis, read with fwpeek)
+uint8_t ch_raw_i;
+
+void uart_keyboard_poll(void) {
+    // Process pending bytes in the UART receiver, but BOUNDED: a continuous RX
+    // stream (e.g. noise on a repurposed/floating UART pin) must not spin here
+    // forever, or the main loop never reaches the S2/F12 menu-key check and the
+    // menu becomes unreachable. 64 bytes/call drains real CH9350 packets fine;
+    // the state machine (ch_state) persists across calls.
+    for (int _n = 0; _n < 64; _n++) {
+        uint32_t val = reg_uart_data;
+        if (val == 0xFFFFFFFF) {
+            break;
+        }
+        uint8_t b = val & 0xFF;
+        ch_raw[ch_raw_i++ & 63] = b;
+        
+        switch (ch_state) {
+            case CH9350_STATE_IDLE:
+                if (b == 0x57) {
+                    ch_state = CH9350_STATE_AB;
+                }
+                break;
+            case CH9350_STATE_AB:
+                if (b == 0xAB) {
+                    ch_state = CH9350_STATE_CMD;
+                } else if (b != 0x57) {
+                    ch_state = CH9350_STATE_IDLE;
+                }
+                break;
+            case CH9350_STATE_CMD:
+                ch_cmd = b;
+                ch_state = CH9350_STATE_LEN;
+                break;
+            case CH9350_STATE_LEN:
+                ch_len = b;
+                ch_idx = 0;
+                if (ch_len > 0 && ch_len <= 16) {
+                    ch_state = CH9350_STATE_DATA;
+                } else {
+                    ch_state = CH9350_STATE_IDLE;
+                }
+                break;
+            case CH9350_STATE_DATA:
+                ch_buf[ch_idx++] = b;
+                if (ch_idx >= ch_len) {
+                    // Packet fully received! Verify checksum.
+                    uint8_t sum = 0;
+                    // the sum covers the report and the serial byte, not the type byte
+                    // (measured: 57 AB 88 07 20 00 F3 03 00 14 0A)
+                    for (int i = 1; i < ch_len - 1; i++) {
+                        sum += ch_buf[i];
+                    }
+                    if (sum == ch_buf[ch_len - 1]) {
+                        // Checksum ok. Extract keyboard reports.
+                        if ((ch_cmd == 0x88 || ch_cmd == 0x83) && ch_buf[0] == 0x10) {
+                            uint8_t modifier = ch_buf[1];
+                            uint8_t key1 = ch_buf[3]; // ch_buf[2] is reserved
+                            uint8_t key2 = ch_buf[4];
+                            uint8_t key3 = ch_buf[5];
+                            uint8_t key4 = ch_buf[6];
+                            
+                            reg_virt_kbd_0 = modifier | (key1 << 8) | (key2 << 16) | (key3 << 24);
+                            reg_virt_kbd_1 = (option_arrow_joystick ? 0x200 : 0x000) | key4;
+                            last_kbd_time = time_millis();
+                        } else if ((ch_cmd == 0x88 || ch_cmd == 0x83) && (ch_buf[0] & 0xF0) == 0x20 && ch_len >= 5) {
+                            // relative mouse report: buttons, dx, dy, wheel (57 AB 88 07 2x btn dx dy wheel serial sum)
+                            a816_mouse(ch_buf[1], (int8_t)ch_buf[2], (int8_t)ch_buf[3], ch_len >= 7 ? (int8_t)ch_buf[4] : 0);
+                        }
+                    }
+                    ch_state = CH9350_STATE_IDLE;
+                }
+                break;
+        }
+    }
+
+    // Safety timeout: if no keyboard packet received for 1 second, clear keys
+    if (last_kbd_time != 0 && (time_millis() - last_kbd_time) > 1000) {
+        reg_virt_kbd_0 = 0;
+        apply_input_options();
+        last_kbd_time = 0;
+    }
+}
+
+void backup_process(void) {
+    // Stub to satisfy picorv32 dependency
+}

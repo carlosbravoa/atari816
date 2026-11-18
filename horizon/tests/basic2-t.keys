@@ -1,0 +1,5 @@
+# BASIC 2.0 test run (text shell, NODESK): "basic -t /B2.BAS" runs tests/basic2.bas as a script
+# (the games statements); the console is mirrored into the log (build/basic2-t.out), the part
+# after the command compared with tests/basic2.txt (basic2-r10.txt, -r9, -r8 on older boards).
+1500 {esc}
++1500 basic -t /B2.BAS\n

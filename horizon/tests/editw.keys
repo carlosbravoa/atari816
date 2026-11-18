@@ -1,0 +1,67 @@
+# Edit, second session (text shell): typing, undo / redo, word wrap with both fonts, Find,
+# Replace (dialog), Go to line, a word selected by a double click, Word count, Save. The
+# saved file is compared with tests/editw.txt. Shot times: see the Makefile (EWSHOTS).
+1500 {esc}
++1500 edit E2.TXT\n
+# three lines (the last one without a line end); then undo the last word and the one
+# before, redo one, a correction with Backspace
+5000 The quick brown fox jumps over the lazy dog. Pack my box with five dozen liquor jugs.\n
+9500 Sphinx of black quartz, judge my vow. How vexingly quick daft zebras jump!\n
+13500 the end
+14200 {dE0}z{uE0}
+14500 {dE0}z{uE0}
+14800 {dE0}y{uE0}
+15100 finx\b
+# View > Word wrap (fixed font): shot 2
+16200 M -100:-100:0:0
+16250 M -100:-74:0:0
+16300 M -15:0:0:0
+16450 M 0:0:0:1
+16550 M 0:0:0:0
+16850 M 0:54:0:0
+17000 M 0:0:0:1
+17100 M 0:0:0:0
+# ctrl-Home, End: the end of the first row (before the space it wraps at); a mark there
+17500 {dE0}{home}{uE0}{end}#
+# View > Proportional font: shot 3
+18000 M 0:-54:0:0
+18150 M 0:0:0:1
+18250 M 0:0:0:0
+18550 M 0:32:0:0
+18700 M 0:0:0:1
+18800 M 0:0:0:0
+# Find (ctrl-F) 'quick': the dialog (shot 4), Enter: the first one selected
+20000 {dE0}f{uE0}
+20500 quick
+21300 \n
+# Replace (ctrl-H): Tab, 'slow', Replace all (shot 5 before the click); the alert (shot 6), Enter
+21900 {dE0}h{uE0}
+22400 {d2B}{u2B}slow
+23300 M 100:100:0:0
+23350 M 73:83:0:0
+23500 M 0:0:0:1
+23600 M 0:0:0:0
+24400 \n
+# undo the Replace all, redo it
+24800 {dE0}z{uE0}
+25100 {dE0}y{uE0}
+# Go to line (ctrl-L) 2, a double click on its third word (shot 7), typed over;
+# ctrl-Right to the next word, a mark there
+25500 {dE0}l{uE0}
+26000 2\n
+26500 M -100:-100:0:0
+26550 M -60:-33:0:0
+26700 M 0:0:0:1
+26800 M 0:0:0:0
+26900 M 0:0:0:1
+27000 M 0:0:0:0
+27500 white{dE0}{right}{uE0}*
+# View > Word count: the alert (shot 8), Enter; ctrl-S saves (it has a name)
+28200 M -13:-82:0:0
+28350 M 0:0:0:1
+28450 M 0:0:0:0
+28750 M 0:87:0:0
+28900 M 0:0:0:1
+29000 M 0:0:0:0
+29900 \n
+30300 {dE0}s{uE0}

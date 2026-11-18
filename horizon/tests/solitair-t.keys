@@ -1,0 +1,6 @@
+# Solitaire self test (text shell, NODESK): "solitair -t" replays the scripts of
+# user/sol_tscript.inc (tests/solitair_gen.py: won games, refused moves, undo, score and
+# checksums) and plays thousands of random moves; about 50 s of emulated time. The output
+# after the command is compared with tests/solitair-t.txt.
+1500 {esc}
++1500 solitair -t\n

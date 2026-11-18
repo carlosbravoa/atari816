@@ -1,0 +1,74 @@
+gtest 1: frame
+  frame and vsync agree, one frame later: ok
+gtest 2: palette
+  alloc 4 (any): 76
+  set 76-79: ok
+  alloc at 77: error 06
+  set 212-256 (too many): error 01
+  child: set 77: error 06
+  child: alloc 2 (any): 80
+  after the child, alloc 2 (any): 80
+  give all back: ok
+  alloc at 76 again: 76
+gtest 3: sprites
+  alloc 0: error 01
+  alloc 17: error 01
+  a window not ours: error 01
+  alloc 4: 0
+  alloc 16: error 06
+  image in the kernel's bank: error 04
+  in the framebuffer: error 04
+  in a bank nobody owns: error 04
+  past the window: error 04
+  out of an own bank: error 04
+  unaligned: error 01
+  sprite 5 (not ours): error 01
+  two (window, own bank): ok
+  show sprite 3 (no image): error 01
+  move, hide, show: ok
+  its image's bank freed, show 1: error 01
+  free 4 of another's: error 01
+  child: alloc 4: 4
+  after a child's exit, alloc 12: 4
+  child: alloc 4: 4
+  after a child's kill, alloc 12: 4
+  free all: ok
+gtest 4: full screen
+  a window not ours: error 01
+  mode 3: error 01
+  stride 328: error 01
+  stride 304: error 01
+  rows 170: error 01
+  base not aligned: error 01
+  in the kernel's bank: error 04
+  running out of its bank: error 04
+  enter: ok
+  child: enter: error 06
+  scroll past the rows: error 01
+  vheight above the rows: error 01
+  split at line 0: error 01
+  wrap, x at the stride: error 01
+  x past the row, no wrap: error 01
+  wrap at 180, split at 320: ok
+  raster, lines not in order: error 01
+  raster, line 360: error 01
+  raster, before the split: error 01
+  raster: ok
+  its bank freed, scroll: error 01
+  enter again, leave: ok
+  leave again: error 01
+gtest 5: draw lists
+  count 0: error 01
+  op 6: error 01
+  source in the kernel's bank: error 04
+  source in a bank nobody owns: error 04
+  a window not ours: error 01
+  over two screens (13 fills of the content): error 01
+  100 keyed blits: 100
+  list_wait: ok
+  asked: 0
+  a fill, a move, an expand: 3
+gtest 6: WE_VBL
+  three WE_VBL: ok
+gtest 7: the sound volume (setting 4): 8
+gtest: done

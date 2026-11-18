@@ -1,0 +1,48 @@
+gtest 1: frame
+  frame and vsync agree, one frame later: ok
+gtest 2: palette
+  alloc 4 (any): 76
+  set 76-79: ok
+  alloc at 77: error 06
+  set 212-256 (too many): error 01
+  child: set 77: error 06
+  child: alloc 2 (any): 80
+  after the child, alloc 2 (any): 80
+  give all back: ok
+  alloc at 76 again: 76
+gtest 3: sprites
+  no sprites before REV $0B: ENODEV
+gtest 4: full screen
+  a window not ours: error 01
+  mode 3: error 01
+  stride 328: error 01
+  stride 304: error 01
+  rows 170: error 01
+  base not aligned: error 01
+  in the kernel's bank: error 04
+  running out of its bank: error 04
+  enter: ok
+  child: enter: error 06
+  scroll: error 09
+  raster, lines not in order: error 01
+  raster, line 360: error 01
+  raster, before the split: ok
+  raster: ok
+  its bank freed, scroll: error 09
+  enter again, leave: ok
+  leave again: error 01
+gtest 5: draw lists
+  count 0: error 01
+  op 6: error 01
+  source in the kernel's bank: error 04
+  source in a bank nobody owns: error 04
+  a window not ours: error 01
+  over two screens (13 fills of the content): error 01
+  100 keyed blits: 100
+  list_wait: ok
+  asked: 0
+  a fill, a move, an expand: 3
+gtest 6: WE_VBL
+  three WE_VBL: ok
+gtest 7: the sound volume (setting 4): 8
+gtest: done

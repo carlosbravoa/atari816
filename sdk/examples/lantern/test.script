@@ -1,0 +1,20 @@
+# Input for `make test` (sdk/tools/inputscript.py). Time 0 = the program was started.
+# The window's content starts at screen (160, 72); the paddle's row is at screen y 272.
+# 1. the title
+1000 shot
+# 2. Space: a new night, the ball on the paddle; Space again launches it
++200 key space 80
++600 key space 80
++1200 shot
+# 3. the paddle follows the mouse (WF_HOVER: no button needed)
++100 move 260 250
++600 move 330 250
++800 shot
+# 4. a few seconds of play with the keys: lanterns lit, maybe the moth
++100 key left 600
++800 key right 900
++3000 shot
++3000 shot
+# 5. Esc: back to the title
++200 {esc}
++800 shot

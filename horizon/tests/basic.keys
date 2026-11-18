@@ -1,0 +1,35 @@
+# BASIC (BASIC.PRG) session on the text shell (NODESK): sh tests/shots.sh EMU SD basic 40 T1 ...
+# Good shot times (s): see BSHOTS in the Makefile
+#   1  a program typed in lower case, then LIST: keywords and names in capitals
+#   2  RUN: its output, then an error with its line ("Division by zero in 70")
+#   3  the function plotter (/programs/PLOT.BAS) in its graphics window, over the console
+#   4  SCREEN 0, LIST 10-90 of the plotter
+#   5  the Program menu held open
+# The pointer starts at (320, 180); moves of at most 100.
+# the pointer out of the way: (40, 340), on the desktop below the console
+500 M -100:100:0:0
++50 M -100:60:0:0
++50 M -80:0:0:0
+1500 {esc}
++1500 basic\n
++2500 10 rem squares and their sum\n
++1700 20 s=0:n=0\n
++1000 30 for i=1 to 8\n
++1000 40 s=s+i*i:print i;"^2 = ";i*i\n
++2000 50 next i\n
++1000 60 print "sum ";s\n
++1200 70 print "average ";s/n\n
++1300 list\n
++2000 run\n
++2500 load "/programs/plot"\n
++1700 run\n
++11000 x
++1000 screen 0\n
++1000 list 10-90\n
+# the Program menu (title at about 77, 6): pressed and released on the title, it stays open
++2500 M 0:-100:0:0
++50 M 0:-100:0:0
++50 M 0:-100:0:0
++50 M 37:-34:0:0
++300 M 0:0:0:1
++100 M 0:0:0:0

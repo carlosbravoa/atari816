@@ -1,0 +1,158 @@
+#ifndef H_PICO32
+#define H_PICO32
+
+#include <stdint.h>
+#include <stddef.h> // for size_t if provided by compiler, otherwise we define it
+
+// Standard string functions implemented in picorv32.c
+void* memcpy(void *dst, void const *src, size_t len);
+void* memset(void *s, int c, size_t n);
+int memcmp(const void *s1, const void *s2, size_t n);
+int strcmp(const char *s1, const char *s2);
+int strcasecmp(const char *s1, const char *s2);
+char *strstr(const char *haystack, const char *needle);
+char *strcasestr(char *haystack, char *needle);
+char *strcat(char *dest, const char *src);
+char *strncat(char *dest, const char *src, size_t num);
+char *strcpy(char *dest, const char *src);
+char *strncpy(char *dest, const char *src, size_t n);
+char *strchr(const char *s, int c);
+char *strrchr(const char *s, int c);
+size_t strlen(const char *s);
+int atoi(const char *str);
+// #define DEBUG(...) uart_printf(__VA_ARGS__)   // verbose dir-listing chatter: OFF (image size)
+#define DEBUG(...) do {} while(0)
+
+#define reg_textdisp       (*(volatile uint32_t*)0x02000000)
+#define reg_uart_clkdiv    (*(volatile uint32_t*)0x02000010)
+#define reg_uart_data      (*(volatile uint32_t*)0x02000014)
+#define reg_blrx           (*(volatile uint32_t*)0x020000c0)  // BL616 bridge RX: {seq,overrun,valid,data}; write = ack
+#define reg_spimaster_byte (*(volatile uint32_t*)0x02000020)
+#define reg_spimaster_word (*(volatile uint32_t*)0x02000024)
+#define reg_spimaster_cs   (*(volatile uint32_t*)0x02000028)
+#define reg_spimaster_clkdiv (*(volatile uint32_t*)0x0200002c)
+#define reg_romload_ctrl   (*(volatile uint32_t*)0x02000030)
+#define reg_romload_data   (*(volatile uint32_t*)0x02000034)
+#define reg_joystick       (*(volatile uint32_t*)0x02000040)
+#define reg_time           (*(volatile uint32_t*)0x02000050)
+#define reg_cycle          (*(volatile uint32_t*)0x02000054)
+#define reg_core_id        (*(volatile uint32_t*)0x02000060)
+#define reg_spiflash_byte  (*(volatile uint32_t*)0x02000070)
+#define reg_spiflash_word  (*(volatile uint32_t*)0x02000074)
+#define reg_spiflash_ctrl  (*(volatile uint32_t*)0x02000078)
+#define reg_sio_tx         (*(volatile uint32_t*)0x02000080)
+#define reg_sio_tx_stat    (*(volatile uint32_t*)0x02000084)
+#define reg_sio_rx         (*(volatile uint32_t*)0x02000088)
+#define reg_sio_rx_stat    (*(volatile uint32_t*)0x0200008c)
+#define reg_sio_divisor    (*(volatile uint32_t*)0x02000090)
+#define reg_sio_diag       (*(volatile uint32_t*)0x02000098)
+#define reg_sio_txdiag     (*(volatile uint32_t*)0x0200009c)
+// Phase B: hardware SIO command-frame capture
+#define reg_siocmd_a       (*(volatile uint32_t*)0x020000ac)  // R: {aux2,aux1,cmd,device}
+#define reg_siocmd_b       (*(volatile uint32_t*)0x020000b0)  // R: [7:0]=checksum [15:8]=status [23:16]=seq; W: ack
+#define reg_video_opts     (*(volatile uint32_t*)0x020000b4)  // [1:0] = scanline level (0=off,1=25,2=50,3=75%), [2] = stereo (dual POKEY)
+#define reg_h_offset       (*(volatile uint32_t*)0x020000b8)  // [7:0] = horizontal position (0..80)
+#define reg_ram_select     (*(volatile uint32_t*)0x020000bc)  // [2:0] = core RAM_SELECT (1=128K,3=320K,5=576K,6=1088K)
+// Atari 816 bring-up: 65C816 run control and debug byte port
+#define reg_a816_ctrl      (*(volatile uint32_t*)0x020000d0)  // bit 0 = RUN (release the 65C816)
+#define reg_a816_mbq       (*(volatile uint32_t*)0x020000d8)  // R: {REQ_HEAD, REQ_BASE} (other clock: read twice)
+#define reg_a816_mbr       (*(volatile uint32_t*)0x020000dc)  // R: {RSP_TAIL, RSP_BASE}
+#define reg_a816_mbi       (*(volatile uint32_t*)0x020000e0)  // RW: {status[1:0], RSP_HEAD, REQ_TAIL}
+#define reg_a816_keys      (*(volatile uint32_t*)0x020000e4)  // R: 4 HID usages held (other clock: read twice)
+#define reg_a816_keymod    (*(volatile uint32_t*)0x020000e8)  // R: bit 8 = keys go to Horizon, [7:0] modifiers
+#define reg_a816_dbg       (*(volatile uint32_t*)0x020000d4)  // R: bit 8 = byte pending, [7:0] = byte; W: consume
+#define reg_video_diag     (*(volatile uint32_t*)0x02000064)  // [31:16]=lines/frame [15:0]=frame counter
+#define reg_sio_cap_idx    (*(volatile uint32_t*)0x02000068)  // write: select SIO capture word 0..3
+#define reg_sio_cap_data   (*(volatile uint32_t*)0x0200006c)  // read: selected SIO capture word
+#define reg_virt_kbd_0     (*(volatile uint32_t*)0x020000a0)
+#define reg_virt_kbd_1     (*(volatile uint32_t*)0x020000a4)
+#define reg_cart_mode      (*(volatile uint32_t*)0x020000a8)
+
+// Standard library for PicoRV32 RV32I softcore
+
+// osd printing
+extern void cursor(int x, int y);
+extern int  printf(const char *fmt,...); /* supports %s, %d, %x */
+extern int  getchar();
+extern int  putchar(int c);
+extern void print_hex(uint32_t v);
+extern void print_hex_digits(uint32_t v, int n);
+extern void print_dec(int v);
+extern int  print(const char *s);
+extern void clear();
+extern void hilite(int row);      // OSD selection bar row (31 = none)
+extern int  print_inv;            // 1 = print with the inverse attribute (bars)
+extern void overlay(int on);
+extern char *trimwhitespace(char *str);
+extern void delay(int ms);
+
+// uart
+extern void uart_init(int clkdiv);    // baudrate = clock_frequency / clkdiv. clock_frequency = 21505400
+extern int uart_putchar(int c);
+extern void uart_print_hex(uint32_t v);
+extern void uart_print_hex_digits(uint32_t v, int n);
+extern void uart_print_dec(int v);
+extern int uart_print(const char *s);
+extern int uart_printf(const char *fmt,...);
+
+// joystick input
+extern void joy_get(int *joy1, int *joy2);
+
+// display cursor and let user choose using joystick. 
+// this returns immediately
+// 0: no choice from user, 1: user chose *active, 2: next page, 3: previous page
+extern int joy_choice(int start_line, int len, int *active);
+
+// SD card access
+extern int sd_init();   /* Return 0 on success, non-zero on failure */
+extern uint8_t sd_send_command(uint8_t cmd, uint32_t arg);
+extern int sd_readsector(uint32_t sector, uint8_t* buffer, uint32_t sector_count); /* 1:success, 0:failure*/
+extern int sd_writesector(uint32_t sector, const uint8_t* buffer, uint32_t sector_count); /* 1:success, 0:failure*/
+
+// communication with snes
+extern void snes_ctrl(uint32_t ctrl);   // 1: start loading, 0: end loading
+extern void snes_data(uint32_t data);   // 3 word (12-byte) header, followed by 4-byte data words
+                                        // header #0: map_ctrl, rom_size, ram_size
+                                        // header #1: rom_mask
+                                        // header #2: ram_mask
+
+// SPI flash
+extern void spiflash_read(uint32_t addr, uint8_t *buf, int length); // read from SPI flash
+extern void spiflash_write_enable();
+extern void spiflash_write_disable();                               
+extern void spiflash_sector_erase(uint32_t addr);                   // erase a 4KB sector
+extern void spiflash_page_program(uint32_t addr, uint8_t *buf);     // program 256 bytes
+extern uint8_t spiflash_read_status1();                             // [1]: write enable, [0]: busy
+extern void spiflash_ready();                                       // wait until flash is not busy
+
+static inline int max(int x, int y) {
+    if (x > y) return x;
+    else       return y;
+}
+
+static inline int min(int x, int y) {
+    if (x < y) return x;
+    else       return y;
+}
+
+static inline int tolower(int c) {
+    if (c >= 'A' && c <= 'Z')
+        return c + ('a' - 'A');
+    else
+        return c;
+}
+
+static inline uint32_t time_millis() {
+    return reg_time;
+}
+
+static inline uint32_t cycle_counter() {
+    return reg_cycle;
+}
+
+// string functions
+// #ifndef strstr
+// char *strstr(char *haystack, char *needle);
+// #endif
+
+#endif

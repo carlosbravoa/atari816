@@ -1,0 +1,6 @@
+emu816: CLASSIC_MOUNT kind 2 slot 0 /BLUE.XEX -> 00
+emu816: CLASSIC_EJECT kind 2 slot 0 - -> 00
+emu816: CLASSIC_MOUNT kind 3 slot 0 /carts/Star Raiders + Manual.car -> 00
+emu816: CLASSIC_BOOT kind 0 slot 0 - -> 00
+emu816: CLASSIC_EJECT kind 3 slot 0 - -> 00
+emu816: CLASSIC_BOOT kind 0 slot 0 - -> 00

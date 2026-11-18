@@ -1,0 +1,27 @@
+ktest 1: joystick 00 00 81 02 00 00 
+ktest 2: vsync 30 in 500 ms: ok
+ktest 3: chimes
+ktest 4: sound owners
+ktest 5: windows
+ev 14 A 0000 0000 0000
+ev 1 A 0004 0100 0000
+ev 1 A 0012 0100 0000
+ev 1 A 0004 0000 0000
+ev 1 A 0012 0000 0000
+ev 15 A 0000 0000 0000
+ev 14 B 0000 0000 0000
+ev 1 B 0005 0100 0000
+ev 1 B 0005 0000 0000
+ev 1 B 0006 0100 0000
+ev 14 A 0000 0000 0000
+ev 7 A 0000 0001 0000
+ev 9 A 0000
+ev 2 A 0063 002C 0002
+popup 0001
+ev 10 A 0000 0000 0000
+ev 2 A 0077 0043 0002
+popup FFFF
+ev 1 A 0065 0100 0000
+popup 0001
+ev 1 A 0014 0100 0000
+ktest: done

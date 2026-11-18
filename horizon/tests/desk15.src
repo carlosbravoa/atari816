@@ -1,0 +1,67 @@
+# (0.15) Pop-up menus on the Desktop and in Files (DESK=1; tests/mousegen.py makes
+# tests/desk15.keys from this; the card gets /GAME.ATR). Files is at (24, 24); its rows:
+# GAME.ATR y 158, README.TXT 182. Shots (s):
+#   1   6.0  a right click on the Atari icon: its menu (nothing loaded: Eject all dimmed)
+#   2   8.5  Attach disk...: the file dialog lists only folders and disk images; "g" typed:
+#            GAME.ATR selected (type-ahead), its name in the field
+#   3  11.5  Enter: GAME.ATR on D1: (the icon's mark); the Atari menu again: "Eject D1: GAME.ATR"
+#   4  14.0  that Eject chosen; a right click on README.TXT in Files: Open, Open with Edit,
+#            Open with Write, -, Copy, Add to desktop, -, Rename..., Delete
+#   5  16.8  Esc; GAME.ATR's menu: Load into Atari: D1: in Files' footer
+#   6  18.3  a right click below the rows: New folder..., Paste (dimmed), -, Parent folder
+#            (dimmed at the root)
+#   7  20.5  New folder...: the name dialog; a right click in its field: Cut, Copy, Paste
+#            (dimmed), -, Select all
+#   8  24.0  Esc, Esc; the desktop's menu (above the pointer): New folder..., Tidy up, -,
+#            Settings...
+#   9  27.5  New folder..., Enter: the folder "New folder" in /Desktop (its icon); its menu
+#  10  31.0  Rename...: "Games" typed, Enter: the icon renamed
+#  11  35.0  README.TXT > Open with Edit; a right click in its text: Undo, Redo, -, Cut,
+#            Copy, Paste, Select all
+#  12  38.0  Esc; the menu key in Edit: the same menu at the top left of the text (from the
+#            keyboard: its first item highlighted)
+5000 move 596 100
+5100 rclick
+6500 move 560 110
+6600 click
+8000 key g
+9000 key \n
+10400 move 596 100
+10500 rclick
+12000 move 560 166
+12100 click
+13000 move 100 182
+13100 rclick
+14500 key {esc}
+15000 move 100 158
+15100 rclick
+15800 move 130 182
+15900 click
+17500 move 100 215
+17600 rclick
+19000 move 130 224
+19100 click
+20000 move 300 170
+20100 rclick
+21500 key {esc}
+22000 key {esc}
+23000 move 300 300
+23100 rclick
+24500 move 330 249
+24600 click
+26000 key \n
+27000 move 596 160
+27100 rclick
+28500 move 560 199
+28600 click
+29500 key Games\n
+32000 move 100 182
+32100 rclick
+32800 move 130 206
+32900 click
+34500 move 300 150
+34600 rclick
+36500 key {esc}
+37600 key {d65}
+37700 key {u65}
+39000 key {esc}

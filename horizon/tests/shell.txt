@@ -1,0 +1,268 @@
+
+~ Horizon *
+init: starting /SYSTEM/SH.PRG
+Horizon shell. Type help.
+fY  p Files: /  (10 entries) KqY! p BIN                                                                   <DIR> KqY"  carts                                                                 <DIR> KY#  disks                                                                 <DIR> KY$  docs                                                                  <DIR> KY%  many                                                                  <DIR> KY&  programs                                                              <DIR> KY'  SYSTEM                                                                <DIR> KY(  BLUE.XEX                                                                 20 KY)  LONG.TXT                                                               9635 KY*  README.TXT                                                              110 KY+ KY, KY- KY. KY/ KY0 KY1 KY2 KY3 KY4 KY5 KY6 KY7 KY8 KY9 KY: KY;  D1: -  XEX: -  Cart: -KY< p Enter open  Bksp up  Esc shell  arrows PgUp PgDn Home End  type to findKqe> help
+built-ins: help, ls [path] (or dir), cat file, cd [path], pwd, ps, date [set],
+  mem, kill id, cls, atari, exit, files (the file browser), restart [full], shutdown
+files: rm path..., mkdir path, mv from to, cp from to (to: a folder too)
+Atari: mount file [1-4], eject d1-d4|cart|xex, boot, run file
+other words run <WORD>.PRG from /BIN, /SYSTEM or /SYSTEM/TESTS (or a .PRG path);
+  the rest of the line is its argument; a trailing & runs it in the background
+names with spaces: "in quotes"; ctrl-C stops the foreground job
+> dir
+  BIN                                                                    <DIR>
+  BLUE.XEX                                                                  20
+  LONG.TXT                                                                9635
+  README.TXT                                                               110
+  SYSTEM                                                                 <DIR>
+  carts                                                                  <DIR>
+  disks                                                                  <DIR>
+  docs                                                                   <DIR>
+  many                                                                   <DIR>
+  programs                                                               <DIR>
+> cat readme.txt
+This is /README.TXT on the Horizon SD card.
+CAT reads it through open, read and close,
+in chunks of 40 bytes.
+> hello
+Hello from task 4, Horizon user mode
+> count A &
+[bg] 5
+> count A 1
+count A 2
+count A 3
+count A 4
+count A 5
+ps
+[done] 5 exit 0000
+ ID STATE  PRI BANKS PARENT NAME
+  1 BLOCK   1     2      0 INIT
+  2 RUN     1     2      1 SH
+> mem
+84 of 92 banks free (5376 KB)
+> crash 1
+crash 1
+[kill] task 6 CRASH cause 03 addr 009000 pc 070154
+exit FF03
+> crash 9
+crash 9
+exit FF80
+> hellp o world
+Hello from task 8, Horizon user mode, args "world"
+> nosuch
+sh: nosuch: not found
+> kill 99
+kill: no such task
+> ^C
+> hlloellollo there
+Hello from task 10, Horizon user mode, args "there"
+> hello there
+Hello from task 11, Horizon user mode, args "there"
+> hello there           hello there           kill 99       hello there
+Hello from task 12, Horizon user mode, args "there"
+> 
+> hello there
+Hello from task 13, Horizon user mode, args "there"
+> atari
+F12 returns to Horizon
+> hello back
+Hello from task 14, Horizon user mode, args "back"
+> crash 13
+crash 13
+[kill] task 15 CRASH cause 23 addr 000000 pc 070254
+exit FF23
+> cls
+> exit
+init: starting /SYSTEM/SH.PRG
+Horizon shell. Type help.
+fY  p Files: /  (10 entries) KqY! p BIN                                                                   <DIR> KqY"  carts                                                                 <DIR> KY#  disks                                                                 <DIR> KY$  docs                                                                  <DIR> KY%  many                                                                  <DIR> KY&  programs                                                              <DIR> KY'  SYSTEM                                                                <DIR> KY(  BLUE.XEX                                                                 20 KY)  LONG.TXT                                                               9635 KY*  README.TXT                                                              110 KY+ KY, KY- KY. KY/ KY0 KY1 KY2 KY3 KY4 KY5 KY6 KY7 KY8 KY9 KY: KY;  D1: -  XEX: -  Cart: -KY< p Enter open  Bksp up  Esc shell  arrows PgUp PgDn Home End  type to findKqe> ps
+ ID STATE  PRI BANKS PARENT NAME
+  1 BLOCK   1     2      0 INIT
+ 16 RUN     1     2      1 SH
+> mouse
+mouse: move it; any key ends
+mouse x 360 y 150 buttons 0
+mouse x 360 y 150 buttons 1
+mouse x 350 y 155 buttons 1
+mouse x 350 y 155 buttons 0
+wheel 2
+wheel -1
+> mount
+usage: mount file [1-4]
+> mount game.atr 9
+mount: the drive must be 1-4
+> mount readme.txt 2
+mount: unknown file type (.atr .xfd .xex .com .exe .car .rom .bin)
+> mount nosuch.atr
+mount: file not found
+> mount blue.xex
+blue.xex is the executable (it boots from D1:)
+> eject d7
+usage: eject d1-d4|cart|xex
+> eject xex
+> eject cart
+> boot
+booting the Atari: F12 returns to Horizon
+> run long.txt
+booting the Atari: F12 returns to Horizon
+run: unknown file type (.atr .xfd .xex .com .exe .car .rom .bin)
+> run blue.xex
+booting the Atari: F12 returns to Horizon
+> run
+usage: run file
+> pwd
+/
+> cd many
+> ls
+  A very long name that goes on and on beyond the width of the name>        20
+  Alpha delta 000 (Demo) [!].xex                                            20
+  Alpha delta 016 (Demo) [!].xex                                            20
+  Alpha delta 032 (Demo) [!].xex                                            20
+  Alpha delta 048 (Demo) [!].xex                                            20
+  Alpha delta 064 (Demo) [!].xex                                            20
+  Alpha delta 080 (Demo) [!].xex                                            20
+  Alpha delta 096 (Demo) [!].xex                                            20
+  Alpha delta 112 (Demo) [!].xex                                            20
+  Alpha delta 128 (Demo) [!].xex                                            20
+  Alpha delta 144 (Demo) [!].xex                                            20
+  Alpha delta 160 (Demo) [!].xex                                            20
+  Alpha delta 176 (Demo) [!].xex                                            20
+  Alpha delta 192 (Demo) [!].xex                                            20
+  Alpha delta 208 (Demo) [!].xex                                            20
+  Alpha delta 224 (Demo) [!].xex                                            20
+  Charlie november 014 (Demo) [!].xex                                       20
+  Charlie november 030 (Demo) [!].xex                                       20
+  Charlie november 046 (Demo) [!].xex                                       20
+  Charlie november 062 (Demo) [!].xex                                       20
+  Charlie november 078 (Demo) [!].xex                                       20
+  Charlie november 094 (Demo) [!].xex                                       20
+  Charlie november 110 (Demo) [!].xex                                       20
+  Charlie november 126 (Demo) [!].xex                                       20
+  Charlie november 142 (Demo) [!].xex                                       20
+  Charlie november 158 (Demo) [!].xex                                       20
+  Charlie november 174 (Demo) [!].xex                                       20
+  Charlie november 190 (Demo) [!].xex                                       20
+-- more: any key, q to stop --
+K  Charlie november 206 (Demo) [!].xex                                       20
+  Charlie november 222 (Demo) [!].xex                                       20
+  Charlie november 238 (Demo) [!].xex                                       20
+  Echo hotel 012 (Demo) [!].xex                                             20
+  Echo hotel 028 (Demo) [!].xex                                             20
+  Echo hotel 044 (Demo) [!].xex                                             20
+  Echo hotel 060 (Demo) [!].xex                                             20
+  Echo hotel 076 (Demo) [!].xex                                             20
+  Echo hotel 092 (Demo) [!].xex                                             20
+  Echo hotel 108 (Demo) [!].xex                                             20
+  Echo hotel 124 (Demo) [!].xex                                             20
+  Echo hotel 140 (Demo) [!].xex                                             20
+  Echo hotel 156 (Demo) [!].xex                                             20
+  Echo hotel 172 (Demo) [!].xex                                             20
+  Echo hotel 188 (Demo) [!].xex                                             20
+  Echo hotel 204 (Demo) [!].xex                                             20
+  Echo hotel 220 (Demo) [!].xex                                             20
+  Echo hotel 236 (Demo) [!].xex                                             20
+  Folder 00                                                              <DIR>
+  Folder 01                                                              <DIR>
+  Folder 02                                                              <DIR>
+  Folder 03                                                              <DIR>
+  Folder 04                                                              <DIR>
+  Folder 05                                                              <DIR>
+  Folder 06                                                              <DIR>
+  Folder 07                                                              <DIR>
+  Folder 08                                                              <DIR>
+  Folder 09                                                              <DIR>
+-- more: any key, q to stop --
+K> cd "../disks/xex/R - Z"
+> pwd
+/disks/xex/R - Z
+> dir
+  River Raid (Title Version).xex                                            20
+  Star Raiders II (1986)(Atari)[!].xex                                      20
+> run "River Raid (Title Version).xex"
+booting the Atari: F12 returns to Horizon
+> cd /
+> "programs/Hello Program.prg" with args
+Hello from task 19, Horizon user mode, args "with args"
+> cd nosuch
+cd: not found
+> cd README.TXT
+cd: not a directory (or too long)
+> cat "docs/Read me first.txt"
+Line  1 of the read-me: long names, spaces and (brackets) work.
+Line  2 of the read-me: long names, spaces and (brackets) work.
+Line  3 of the read-me: long names, spaces and (brackets) work.
+Line  4 of the read-me: long names, spaces and (brackets) work.
+Line  5 of the read-me: long names, spaces and (brackets) work.
+Line  6 of the read-me: long names, spaces and (brackets) work.
+Line  7 of the read-me: long names, spaces and (brackets) work.
+Line  8 of the read-me: long names, spaces and (brackets) work.
+Line  9 of the read-me: long names, spaces and (brackets) work.
+Line 10 of the read-me: long names, spaces and (brackets) work.
+Line 11 of the read-me: long names, spaces and (brackets) work.
+Line 12 of the read-me: long names, spaces and (brackets) work.
+Line 13 of the read-me: long names, spaces and (brackets) work.
+Line 14 of the read-me: long names, spaces and (brackets) work.
+Line 15 of the read-me: long names, spaces and (brackets) work.
+Line 16 of the read-me: long names, spaces and (brackets) work.
+Line 17 of the read-me: long names, spaces and (brackets) work.
+Line 18 of the read-me: long names, spaces and (brackets) work.
+Line 19 of the read-me: long names, spaces and (brackets) work.
+Line 20 of the read-me: long names, spaces and (brackets) work.
+Line 21 of the read-me: long names, spaces and (brackets) work.
+Line 22 of the read-me: long names, spaces and (brackets) work.
+Line 23 of the read-me: long names, spaces and (brackets) work.
+Line 24 of the read-me: long names, spaces and (brackets) work.
+Line 25 of the read-me: long names, spaces and (brackets) work.
+Line 26 of the read-me: long names, spaces and (brackets) work.
+Line 27 of the read-me: long names, spaces and (brackets) work.
+Line 28 of the read-me: long names, spaces and (brackets) work.
+Line 29 of the read-me: long names, spaces and (brackets) work.
+Line 30 of the read-me: long names, spaces and (brackets) work.
+Line 31 of the read-me: long names, spaces and (brackets) work.
+Line 32 of the read-me: long names, spaces and (brackets) work.
+Line 33 of the read-me: long names, spaces and (brackets) work.
+Line 34 of the read-me: long names, spaces and (brackets) work.
+Line 35 of the read-me: long names, spaces and (brackets) work.
+Line 36 of the read-me: long names, spaces and (brackets) work.
+Line 37 of the read-me: long names, spaces and (brackets) work.
+Line 38 of the read-me: long names, spaces and (brackets) work.
+Line 39 of the read-me: long names, spaces and (brackets) work.
+Line 40 of the read-me: long names, spaces and (brackets) work.
+Line 41 of the read-me: long names, spaces and (brackets) work.
+Line 42 of the read-me: long names, spaces and (brackets) work.
+Line 43 of the read-me: long names, spaces and (brackets) work.
+Line 44 of the read-me: long names, spaces and (brackets) work.
+Line 45 of the read-me: long names, spaces and (brackets) work.
+Line 46 of the read-me: long names, spaces and (brackets) work.
+Line 47 of the read-me: long names, spaces and (brackets) work.
+Line 48 of the read-me: long names, spaces and (brackets) work.
+Line 49 of the read-me: long names, spaces and (brackets) work.
+Line 50 of the read-me: long names, spaces and (brackets) work.
+Line 51 of the read-me: long names, spaces and (brackets) work.
+Line 52 of the read-me: long names, spaces and (brackets) work.
+Line 53 of the read-me: long names, spaces and (brackets) work.
+Line 54 of the read-me: long names, spaces and (brackets) work.
+Line 55 of the read-me: long names, spaces and (brackets) work.
+Line 56 of the read-me: long names, spaces and (brackets) work.
+Line 57 of the read-me: long names, spaces and (brackets) work.
+Line 58 of the read-me: long names, spaces and (brackets) work.
+Line 59 of the read-me: long names, spaces and (brackets) work.
+Line 60 of the read-me: long names, spaces and (brackets) work.
+> mkdir tmp
+> cp README.TXT tmp
+> mv tmp/README.TXT "tmp/read me.txt"
+> cp LONG.TXT tmp/long2.txt
+> ls tmp
+  long2.txt                                                               9635
+  read me.txt                                                              110
+> cat "tmp/read me.txt"
+This is /README.TXT on the Horizon SD card.
+CAT reads it through open, read and close,
+in chunks of 40 bytes.
+> rm "tmp/read me.txt" tmp/long2.txt nothere
+rm: nothere: not found
+> rm tmp
+> mv
+usage: mv from to
+> emu816 exit 3

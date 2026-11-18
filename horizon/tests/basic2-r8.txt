@@ -1,0 +1,251 @@
+REM tests/basic2.bas: BASIC 2.0, the games statements, run by make test as "basic -t" (as
+REM tests/basic.bas). The card gets the sound files of tests/mkwav.py. The output is
+REM compared with tests/basic2.txt (basic2-r10.txt, -r9, -r8 on the older boards: there
+REM the missing hardware says "Not available on this machine"), the writes to Lau with
+REM tests/basic2.err.
+PRINT "-- the new words: LIST and SAVE keep them"
+-- the new words: LIST and SAVE keep them
+LIST
+10 SPRITE 3,1,2,1,5:SPRITE 3 OFF:SPRITE OFF:SHAPE 2,0,"12",".A":GET 1,0,0,8,8:PUT 1,2,3,0
+20 COPY 0,0,4,4 TO 8,8:WAVE 1,"/T8.WAV":WAVE 2,0,100,20:PLAY 2,"C#4",8,-3,1:PLAY OFF:PLAY OFF 1
+30 SCREEN 1,640,360:SCROLL 1,-2:PANEL -8:RASTER 20,1,2,3,4:RASTER OFF:VSYNC
+40 PRINT FRAME;HIT(1);HIT(1,2);HIT(1,0,0,8,8);NOTE("A4"):SPRITE 0,1,2:PLAY OFF
+SAVE "/T2X.BAS"
+NEW
+LOAD "/T2X"
+LIST 40
+40 PRINT FRAME;HIT(1);HIT(1,2);HIT(1,0,0,8,8);NOTE("A4"):SPRITE 0,1,2:PLAY OFF
+NEW
+PRINT "-- reserved: SPRITE SHAPE GET PUT COPY WAVE PLAY SCROLL PANEL RASTER OFF HIT FRAME NOTE"
+-- reserved: SPRITE SHAPE GET PUT COPY WAVE PLAY SCROLL PANEL RASTER OFF HIT FRAME NOTE
+FRAME=1
+Syntax error
+PRINT HIT
+Syntax error
+OFF=2
+Syntax error
+SPRITES=1:FRAMES=2:NOTES=3:PRINT SPRITES+FRAMES+NOTES
+6
+PRINT "-- a 1.x program loads and runs"
+-- a 1.x program loads and runs
+LOAD "/programs/SOUND.BAS"
+LIST 10-20
+10 REM SOUND.BAS - POKEY 2 from BASIC: a scale, a chord, a tune, a siren
+20 REM SOUND voice, Hz, volume (voices 0-3, volume 0-15); SOUND alone: all quiet
+NEW
+PRINT "-- pictures: SHAPE, PUT, GET, COPY in a window"
+-- pictures: SHAPE, PUT, GET, COPY in a window
+SHAPE 0,0,"1.2","B","CCC"
+SCREEN 64,32
+PUT 0,10,10
+PRINT POINT(10,10);POINT(11,10);POINT(12,10);POINT(10,11);POINT(11,11);POINT(12,12)
+10211012
+GCLS 5:PUT 0,10,10,0:PRINT POINT(11,10);POINT(11,11);POINT(13,10)
+555
+GET 1,9,9,5,5:PUT 1,30,0:PRINT POINT(31,1);POINT(32,1);POINT(33,3);POINT(30,0)
+15125
+GET 2,60,30,8,8:PUT 2,0,24:PRINT POINT(3,24);POINT(4,26);POINT(0,31)
+500
+COPY 9,9,5,5 TO 40,20:PRINT POINT(41,21);POINT(43,23)
+112
+COPY 10,10,3,3 TO 11,10:PRINT POINT(11,10);POINT(12,10);POINT(13,10);POINT(14,10)
+1525
+COPY 11,10,3,3 TO 10,10:PRINT POINT(10,10);POINT(11,10);POINT(12,10)
+152
+COPY 10,10,3,3 TO 10,11:PRINT POINT(10,11);POINT(10,12);POINT(10,13)
+11112
+COPY -5,-5,20,20 TO 50,20:PRINT POINT(50,20);POINT(55,25)
+55
+PUT 0,-1,-1:PUT 0,62,31:PUT 0,999,999:PRINT POINT(0,0);POINT(62,31);POINT(63,31)
+010
+SHAPE 0,1,"BBBB":PRINT "shape grown"
+shape grown
+SHAPE 64,0,"1"
+Bad argument
+SHAPE 0,64,"1"
+Bad argument
+SHAPE 0,0,"1G"
+Bad argument
+SHAPE 0,0,"0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEFX"
+Bad argument
+PUT 9,0,0
+Undefined picture
+GET 3,0,0,0,5
+Bad argument
+GET 3,0,0,65,1
+Bad argument
+PUT 1,0,0,256
+Bad argument
+COPY 0,0,4,4,8,8
+Syntax error
+PRINT "-- sprites"
+-- sprites
+SHAPE 4,0,"CCCC","C11C","CCCC"
+SPRITE 0,10,10,4
+Not available on this machine
+SPRITE 1,12,11,4
+Not available on this machine
+SPRITE 2,40,10,4,4
+Not available on this machine
+PRINT HIT(0);HIT(0,1);HIT(0,2);HIT(1);HIT(2);HIT(0,13,12,1,1);HIT(0,14,12,1,1)
+-100-1-100
+SPRITE 2,38,8:PRINT HIT(2);HIT(2,0):SPRITE 2,32,8:PRINT HIT(2,0);HIT(1,2)
+Not available on this machine
+SPRITE 1 OFF:PRINT HIT(0);HIT(0,1);HIT(1,0)
+-100
+SPRITE 1,12,11:PRINT HIT(1,0)
+Not available on this machine
+SPRITE 3,10,10,4,1:SPRITE 4,0,0,4,2:PRINT HIT(3,26,10,1,1);HIT(3,25,10,1,1);HIT(4,0,13,1,1);HIT(4,0,12,1,1)
+Not available on this machine
+SPRITE OFF:PRINT HIT(0);HIT(1);HIT(2)
+-1-1-1
+SPRITE 16,0,0,4
+Bad argument
+SPRITE 5,0,0
+Not available on this machine
+SPRITE 0,0,0,7
+Not available on this machine
+GET 5,0,0,40,4:SPRITE 6,0,0,5
+Not available on this machine
+GCLS 0:COLOR 17:FRECT 0,0,20,4:COLOR 30:PLOT 3,1:GET 6,0,0,20,4:SPRITE 6,0,0,6:PRINT "one bank: 4 bpp"
+Not available on this machine
+COLOR 40:PLOT 4,1:GET 6,0,0,20,4
+SPRITE 6,0,0,6,256
+Not available on this machine
+SPRITE OFF
+PRINT "-- full screen only"
+-- full screen only
+SCROLL 0,0
+Full screen only
+PANEL 4
+Full screen only
+RASTER 10,1,2,3,4
+Full screen only
+PRINT "-- full screen: SCREEN 1 and 2"
+-- full screen: SCREEN 1 and 2
+SCREEN 1,100,100
+Bad argument
+SCREEN 1,2049,400
+Bad argument
+SCREEN 2,640,961
+Bad argument
+SCREEN 3,10
+Bad argument
+SCREEN 1,336,208
+GCLS 3:COLOR 7:FRECT 300,190,36,18:PLOT 335,207:PRINT POINT(0,0);POINT(300,190);POINT(335,207);POINT(299,190);POINT(336,0)
+3773-1
+PUT 0,330,200:PUT 1,-2,-2,5:COPY 300,190,10,10 TO 0,10:PRINT POINT(330,200);POINT(332,200);POINT(0,10);POINT(1,0)
+7773
+GET 7,328,198,8,8:PRINT "got":TEXT 0,180,"PANEL":PRINT POINT(2,182)
+got
+7
+PALETTE 3,10,20,30:PALETTE 0,1,2,3:PRINT "full-screen palette"
+full-screen palette
+SCROLL 335,207:SCROLL -1,-1:SCROLL 100000,-100000:PANEL 16:PANEL -16:PANEL 0:PRINT "scrolled"
+Not available on this machine
+PANEL 65
+Bad argument
+PANEL -65
+Bad argument
+RASTER 0,1,2,3,4
+Bad argument
+RASTER 180,1,2,3,4
+Bad argument
+RASTER 10,256,2,3,4
+Bad argument
+FOR I=1 TO 16:RASTER I*10,5,I,I,I:NEXT:RASTER 10,5,9,9,9:PRINT "16 bands"
+Not available on this machine
+RASTER 175,6,0,0,0
+Not available on this machine
+RASTER OFF:PANEL 20:RASTER 10,5,1,1,1
+Not available on this machine
+RASTER 170,5,1,1,1:PANEL 5
+Not available on this machine
+PANEL 0:RASTER OFF
+Not available on this machine
+SPRITE 0,150,80,4,4:PRINT HIT(0,151,81,1,1):VSYNC:SPRITE 0 OFF
+Not available on this machine
+SCREEN 2,1024,720:GCLS 9:PRINT POINT(1023,783);POINT(1023,784):SCROLL 1000,700:VSYNC
+9-1
+Not available on this machine
+RUN
+3712131121
+121
+1212
+in full screen? typed
+typed
+Not available on this machine in 50
+NEW
+SCREEN 0:PRINT "closed"
+closed
+PRINT "-- samples: WAVE, PLAY, NOTE"
+-- samples: WAVE, PLAY, NOTE
+PRINT NOTE("C");NOTE("c5");NOTE("Bb3");NOTE("F#2");NOTE("b");NOTE("BB0");NOTE("G8")
+012-2-1811-3855
+PRINT NOTE("H4")
+Bad argument
+PRINT NOTE("C9")
+Bad argument
+PRINT NOTE("C#")
+1
+PRINT NOTE("")
+Bad argument
+WAVE 0,0,100,20:WAVE 1,1,50:WAVE 2,2,0:WAVE 3,3,10:WAVE 4,4,30,5
+WAVE 5,"/T8.WAV":WAVE 6,"/T16.WAV":WAVE 7,"/TRAW.SND":WAVE 0,0,40:PRINT "made"
+made
+WAVE 8,"/TST.WAV"
+Bad argument
+WAVE 8,"/NOSUCH.WAV"
+File not found
+WAVE 32,0
+Bad argument
+WAVE 0,5
+Bad argument
+WAVE 0,0,4001
+Bad argument
+WAVE 0,0,10,4001
+Bad argument
+PLAY 0:PLAY 1,12:PLAY 2,"A4",10,-15:PLAY 3,-12,15,15,5:PLAY 4,0,5,0,6:PLAY 5:PLAY 6,0,8:PLAY 7,"C5"
+Not available on this machine
+PLAY OFF 5:PLAY OFF:PAUSE 50:PLAY 2,0,15,0,3:PAUSE 50:PLAY OFF 3:PRINT "played"
+Not available on this machine
+PLAY 9
+Undefined sample
+PLAY 0,97
+Bad argument
+PLAY 0,"H4"
+Bad argument
+PLAY 0,0,16
+Bad argument
+PLAY 0,0,15,16
+Bad argument
+PLAY 0,0,15,0,8
+Bad argument
+PLAY 0,48:PRINT "high"
+Bad argument
+PLAY 0,60
+Bad argument
+PLAY OFF 8
+Bad argument
+PRINT "-- cleanup: END, an error, STOP and CONT, RUN"
+-- cleanup: END, an error, STOP and CONT, RUN
+RUN
+Not available on this machine in 10
+CONT
+Cannot continue
+PRINT HIT(0,21,21,1,1):PLAY OFF:SPRITE 1,0,0,0:PRINT "after the error"
+0
+Not available on this machine
+RUN
+Not available on this machine in 10
+NEW
+PRINT HIT(0,21,21,1,1)
+0
+SPRITE 0,0,0,0
+Not available on this machine
+PLAY 0
+Undefined sample
+PRINT "-- the end"
+-- the end
+exit 0001
+> 

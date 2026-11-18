@@ -1,0 +1,5 @@
+# Sheet self test (text shell, NODESK): "sheet -t /ST.SHT" runs tests/sheet.sht (copied to
+# /ST.SHT): PASS or FAIL per group (see user/sht_test.s), then the benchmark. The output
+# after the command is compared with tests/sheet-t.txt. About 20 s of emulated time.
+1500 {esc}
++1500 sheet -t /ST.SHT\n

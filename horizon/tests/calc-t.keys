@@ -1,0 +1,5 @@
+# Calculator self test (text shell, NODESK): "calc -t" types the key sequences of its table
+# (user/calc_data.s, ttab) and checks the display: PASS or FAIL per case. The output after
+# the command is compared with tests/calc-t.txt.
+1500 {esc}
++1500 calc -t\n

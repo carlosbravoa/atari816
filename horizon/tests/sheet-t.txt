@@ -1,0 +1,28 @@
+SHEET TEST START
+PASS numbers: input and rounding to four decimals
+PASS arithmetic: exact products and quotients, rounded half away from zero
+PASS operators and precedence
+PASS overflow
+PASS functions over lists
+PASS functions on numbers
+PASS PMT: a loan's payment, computed at high precision
+PASS logic
+PASS error values
+PASS cycles
+PASS long chains (one computed through a 998-deep stack)
+PASS copy and paste: relative and absolute references
+PASS fill down and fill right
+PASS insert and delete rows and columns: references follow
+PASS ranges at the edges of a deleted block
+PASS files: .SHT round trip
+PASS files: CSV round trip
+PASS formats
+PASS bad input: files that are no sheets, deep and long formulas
+memfill: 3840 cells of 250 characters, then out of memory (reported)
+PASS out of memory: reported, the cells before it kept
+~ bench: 2000 formulas, a full recalculation * ms (emulated)
+~ bench: after an edit of A500 (504 formulas change) * ms (emulated)
+~ bench: after an edit of A999 (4 formulas change) * ms (emulated)
+PASS speed
+SHEET TEST END: 21 groups, 0 failed
+> 

@@ -1,0 +1,7 @@
+# BASIC test run (text shell, NODESK): "basic -t /BT.BAS" runs tests/basic.bas as a script.
+# It runs /programs/TESTS.BAS (PASS / FAIL per group), then the error, LIST, INPUT, CONT,
+# SAVE / LOAD cases, then the benchmarks. The console is mirrored into the log
+# (build/basic-t.out); the part after the command is compared with tests/basic.txt.
+# About 110 s of emulated time.
+1500 {esc}
++1500 basic -t /BT.BAS\n

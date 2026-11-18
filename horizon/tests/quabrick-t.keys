@@ -1,0 +1,3 @@
+# Quabricks self test (text shell): "quabrick -t"
+1500 {esc}
++1500 quabrick -t\n

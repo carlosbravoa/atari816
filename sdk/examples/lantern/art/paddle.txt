@@ -1,0 +1,16 @@
+; The paddle, 32 x 8.
+. = key
+k = 0
+c = cube 0 3 5
+C = cube 3 5 5
+d = cube 0 1 3
+w = 1
+
+.kkkkkkkkkkkkkkkkkkkkkkkkkkkkkk.
+kCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCk
+kCwwccccccccccccccccccccccccccck
+kccccccccccccccccccccccccccccc.k
+kccccccccccccccccccccccccccccc.k
+kdddddddddddddddddddddddddddddk.
+.kkkkkkkkkkkkkkkkkkkkkkkkkkkkkk.
+................................

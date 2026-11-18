@@ -1,0 +1,16 @@
+# (0.18) The Desktop (DESK=1): the Terminal from the Programs menu (Alt+P, T, Enter), "gtest f &"
+# in it (a full-screen program), Alt+Esc back to the desktop, "kill" of it in the Terminal: the
+# desktop is as it was (tests/pictures/gtestk*.png: the full screen, the desktop after Alt+Esc,
+# after the kill).
+5000 {dE2}
++100 p
++100 {uE2}
++500 t
++300 \n
++3000 gtest f &\n
++3000 {dE2}
++100 {esc}
++100 {uE2}
++1500 ps\n
++2000 kill 8\n
++1500 ps\n

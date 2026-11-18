@@ -1,0 +1,36 @@
+Atari816 - licence map
+=======================
+
+This repository is not under a single licence. Each directory has its own
+licence, stated in a LICENSE file in that directory. The full licence texts
+are in LICENSES/ (and, for third-party components of the hardware, in
+core/LICENSES/).
+
+  horizon/        GPL-3.0-or-later              horizon/LICENSE
+  emu/            GPL-3.0-or-later              emu/LICENSE
+  sdk/            MIT                           sdk/LICENSE
+  Docs/           CC-BY-SA-4.0                  Docs/LICENSE
+  core/           original work: CC-BY-NC-SA-4.0 OR GPL-3.0-or-later,
+                  at your option                core/LICENSE-PORT
+                  third-party components: their own licences
+                                                core/LICENSE
+
+Bitstreams built from core/ are for NON-COMMERCIAL use only, because the
+Atari 8-bit core they contain (Mark Watson's atari800core) is offered by its
+author for non-commercial use only. core/LICENSE, section 1 and section 3,
+explains this, including its tension with the GPL of some components.
+
+Full texts:
+  LICENSES/GPL-3.0.txt           GNU General Public License v3.0
+  LICENSES/MIT.txt               MIT License
+  LICENSES/CC-BY-SA-4.0.txt      Creative Commons Attribution-ShareAlike 4.0
+  LICENSES/CC-BY-NC-SA-4.0.txt   Creative Commons Attribution-NonCommercial-
+                                 ShareAlike 4.0
+  core/LICENSES/                 the texts and notices of the hardware's
+                                 third-party components (Apache-2.0, LGPL-2.1,
+                                 BSD-3-Clause, MIT, Mark Watson's notice)
+
+Every source file's own header notice is authoritative for that file.
+
+Atari and related names are trademarks of their respective owners. This
+project is not affiliated with or endorsed by Atari.

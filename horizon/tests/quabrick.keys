@@ -1,0 +1,100 @@
+# Quabricks (QUABRICK.PRG) session on the text shell: sh tests/shots.sh EMU SD quabrick 46 T1 ...
+# Shot times (s), the same pictures with and without the blitter:
+#   5     the title                         6.5   the setup, starting level 2
+#   10.25 two rows cleared (the flash)      11.1  a T turned twice, its ghost
+#   16.4  a Quad (flash, message)           17.2  paused (the colours dimmed)
+#   22.5  the new record, its name empty    24    the name typed
+#   24.8  game over: the Marathon table     26.5  the title with the best score
+#   31.5  Time Attack in play               33    the right button's menu
+#   37    How to play (over the pause)      41    the high scores: Time Attack (none)
+#   42    the high scores: Marathon
+# "quabrick -s 1 -q OOOOOTOOOOOOOOII": the pieces from seed 1 after that list.
+# the pointer out of the window first (to the screen's bottom right corner)
+1000 M 127:127:0:0
++20 M 127:127:0:0
++20 M 127:127:0:0
+1500 {esc}
++1500 quabrick -s 1 -q OOOOOTOOOOOOOOII\n
+# the title; Enter: the setup; Right (level 2) and back
+5500 \n
+6000 {right}
+7000 {left}
+7500 \n
+# Marathon, level 1: five O pieces side by side, the last one clears two rows
+8000 {left}{left}{left}{left}
+8300  
+8600 {left}{left}
+8800  
+9100  
+9400 {right}{right}
+9600  
+9900 {right}{right}{right}{right}
+10200  
+# a T: turned twice (its ghost below), then held
+10600 x
+10700 x
+11300 c
+# eight O pieces: four rows but the last two columns
+11600 {left}{left}{left}{left}
+11900  
+12200 {left}{left}
+12400  
+12700  
+13000 {right}{right}
+13200  
+13500 {left}{left}{left}{left}
+13800  
+14100 {left}{left}
+14300  
+14600  
+14900 {right}{right}
+15100  
+# two long pieces: the second one makes a Quad
+15400 {right}{right}{right}{right}
+15700  
+16000 {right}{right}{right}{right}{right}
+16300  
+# pause, resume
+16800 \n
+17500 \n
+# hard drops until the well is full: the sweep, then the name of the new record
++300 {up}
++300 {up}
++300 {up}
++300 {up}
++300 {up}
++300 {up}
++300 {up}
++300 {up}
++300 {up}
++300 {up}
+23000 tester
+24500 \n
+# the table; Enter: the title (with the best score); the setup: Time Attack
+26000 \n
+27000 \n
+27500 {down}
+28000 \n
+28500 {left}{left}
+29000 x
+29500  
+30000 {right}{right}{right}
+30300  
+# the right button's menu over the well, Esc; Esc: the pause
+32500 M -120:-120:0:0
++20 M -120:-30:0:0
++100 M 0:0:0:2
++100 M 0:0:0:0
+34000 {esc}
+34500 {esc}
+# Help > How to play (Alt+H, Enter) over the pause; a key: back to the pause; Esc: the title
+35500 {dE2}h{uE2}
+36000 \n
+37500 x
+38500 {esc}
+# Game > High scores (Alt+G, Down, Down, Enter); Right: Time Attack's table
+39500 {dE2}g{uE2}
+40000 {down}{down}\n
+41500 {right}
+42500 {esc}
+43500 {esc}

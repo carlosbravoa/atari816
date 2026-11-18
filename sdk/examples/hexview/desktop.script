@@ -1,0 +1,33 @@
+# Input for the second part of `make test` (desktop mode: the Desktop starts Hex View
+# from its Programs menu, without an argument). Time 0 = the program was started.
+# 1. no file yet: an empty box and a hint in the status line (View's items are dimmed)
+1000 shot
+# 2. File > Open... (ctrl+O): the file dialog, centred, shows the card's root
++200 ^O
++1500 shot
+# a double click on LONG.TXT (its row is at screen 170, 225) opens it (the pointer
+# then moves out of the way, for screenshot.png)
++200 move 170 225
++300 dclick
++300 move 560 346
++900 shot
+# 3. PgDn, then End (LONG.TXT ends inside its last line: the rest of that line is blank)
++200 {pgdn}
++500 shot
++200 {end}
++500 shot
+# 4. drag and drop: Programs > Files opens a Files window over ours; drag README.TXT
+# (its row at screen 100, 205) and release it on Hex View's box (at 520, 200)
++300 move 110 6
++200 click
++400 move 100 149
++200 click
++2000 move 100 205
++200 press
++100 drag 520 200
++800 release
++1000 shot
+# a click on Hex View's title bar brings it to the front: README.TXT, 110 bytes
++200 move 480 34
++200 click
++800 shot

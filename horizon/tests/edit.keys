@@ -1,0 +1,55 @@
+# Edit (EDIT.PRG) session on the text shell (NODESK): sh tests/shots.sh EMU SD edit 22 T1 ...
+# Good shot times (s): 8.9 9.9 12.0 14.2 16.4 19.6
+#   8.9  fixed font: an edited line, a new line, a 3-line selection (Shift + arrows)
+#   9.9  the selection copied (ctrl-C) and pasted at the end (ctrl-End, ctrl-V)
+#   12.0 View > Proportional font
+#   14.2 File > Save as...: the file dialog (the name field holds LONG.TXT, selected)
+#   16.4 the dialog inside "docs" (double click), the name typed after Tab
+#   19.6 saved as docs/edited.txt, one more key, File > Close: the Save / Discard / Cancel alert
+# Then Esc (Cancel): Edit stays open. The pointer starts at (320, 180); moves of at most 100.
+1500 {esc}
++1500 edit LONG.TXT\n
+# line 5: append, a new line after it
+6000 {down}{down}{down}{down}{end} -- edited\nA new line.
+# select 3 lines from the start of line 3 (Shift held), copy
+8000 {up}{up}{up}{home}{dE1}{down}{down}{down}{uE1}{dE0}c{uE0}
+# paste at the end of the text
+9200 {dE0}{end}{uE0}{dE0}v{uE0}
+# View (105, 6) > Proportional font (second item, y 38)
+10500 M -100:-100:0:0
++50 M -100:-74:0:0
++50 M -15:0:0:0
++300 M 0:0:0:1
++100 M 0:0:0:0
++300 M 0:32:0:0
++200 M 0:0:0:1
++100 M 0:0:0:0
+# File (25, 6) > Save as... (fourth item, y 66)
+12500 M -80:-32:0:0
++300 M 0:0:0:1
++100 M 0:0:0:0
++300 M 0:60:0:0
++200 M 0:0:0:1
++100 M 0:0:0:0
+# the dialog's content is at (130, 53): double click "docs" (row 4, y 127)
+14400 M 100:61:0:0
++50 M 65:0:0:0
++300 M 0:0:0:1
++80 M 0:0:0:0
++120 M 0:0:0:1
++80 M 0:0:0:0
+# Tab to the name field, a new name
+15300 {d2B}{u2B}edited.txt
+# shot at 16.4; Enter saves
+16700 \n
+# a change, then File > Close: the alert
+17800 x
+18300 M -100:-100:0:0
++50 M -65:-21:0:0
++300 M 0:0:0:1
++100 M 0:0:0:0
++300 M 0:88:0:0
++200 M 0:0:0:1
++100 M 0:0:0:0
+# shot at 19.6; Esc = Cancel
+20500 {esc}

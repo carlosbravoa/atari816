@@ -1,0 +1,8 @@
+# (0.14) win_draw's 1 bpp expand (WD_EXPAND: opaque, transparent, from a bit offset, cut at
+# the edges) and keyed blit with a source stride (WD_KSBLIT), then SYS_WGEOM: "wdemo draw" on
+# the text shell (NODESK):  sh tests/shots.sh EMU SD wdraw 9 5.5 7.5
+# Two pictures: the ops, then the window moved and resized by the program ("g") and drawn
+# again. The same with the blitter and without it (tests/pictures/wdraw.md5 serves both).
+1500 {esc}
++1500 wdemo draw\n
++3000 g

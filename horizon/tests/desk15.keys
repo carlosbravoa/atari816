@@ -1,0 +1,99 @@
+# (0.15) Pop-up menus on the Desktop and in Files (DESK=1; tests/mousegen.py makes
+# tests/desk15.keys from this; the card gets /GAME.ATR). Files is at (24, 24); its rows:
+# GAME.ATR y 158, README.TXT 182. Shots (s):
+#   1   6.0  a right click on the Atari icon: its menu (nothing loaded: Eject all dimmed)
+#   2   8.5  Attach disk...: the file dialog lists only folders and disk images; "g" typed:
+#            GAME.ATR selected (type-ahead), its name in the field
+#   3  11.5  Enter: GAME.ATR on D1: (the icon's mark); the Atari menu again: "Eject D1: GAME.ATR"
+#   4  14.0  that Eject chosen; a right click on README.TXT in Files: Open, Open with Edit,
+#            Open with Write, -, Copy, Add to desktop, -, Rename..., Delete
+#   5  16.8  Esc; GAME.ATR's menu: Load into Atari: D1: in Files' footer
+#   6  18.3  a right click below the rows: New folder..., Paste (dimmed), -, Parent folder
+#            (dimmed at the root)
+#   7  20.5  New folder...: the name dialog; a right click in its field: Cut, Copy, Paste
+#            (dimmed), -, Select all
+#   8  24.0  Esc, Esc; the desktop's menu (above the pointer): New folder..., Tidy up, -,
+#            Settings...
+#   9  27.5  New folder..., Enter: the folder "New folder" in /Desktop (its icon); its menu
+#  10  31.0  Rename...: "Games" typed, Enter: the icon renamed
+#  11  35.0  README.TXT > Open with Edit; a right click in its text: Undo, Redo, -, Cut,
+#            Copy, Paste, Select all
+#  12  38.0  Esc; the menu key in Edit: the same menu at the top left of the text (from the
+#            keyboard: its first item highlighted)
+5000 M 100:-80:0:0
+5050 M 100:0:0:0
+5100 M 76:0:0:0
+5150 M 0:0:0:2
+5230 M 0:0:0:0
+6500 M -36:10:0:0
+6600 M 0:0:0:1
+6680 M 0:0:0:0
+8000 g
+9000 \n
+10400 M 36:-10:0:0
+10500 M 0:0:0:2
+10580 M 0:0:0:0
+12000 M -36:66:0:0
+12100 M 0:0:0:1
+12180 M 0:0:0:0
+13000 M -100:16:0:0
+13050 M -100:0:0:0
+13100 M -100:0:0:0
+13150 M -100:0:0:0
+13200 M -60:0:0:0
+13250 M 0:0:0:2
+13330 M 0:0:0:0
+14500 {esc}
+15000 M 0:-24:0:0
+15100 M 0:0:0:2
+15180 M 0:0:0:0
+15800 M 30:24:0:0
+15900 M 0:0:0:1
+15980 M 0:0:0:0
+17500 M -30:33:0:0
+17600 M 0:0:0:2
+17680 M 0:0:0:0
+19000 M 30:9:0:0
+19100 M 0:0:0:1
+19180 M 0:0:0:0
+20000 M 100:-54:0:0
+20050 M 70:0:0:0
+20100 M 0:0:0:2
+20180 M 0:0:0:0
+21500 {esc}
+22000 {esc}
+23000 M 0:100:0:0
+23050 M 0:30:0:0
+23100 M 0:0:0:2
+23180 M 0:0:0:0
+24500 M 30:-51:0:0
+24600 M 0:0:0:1
+24680 M 0:0:0:0
+26000 \n
+27000 M 100:-89:0:0
+27050 M 100:0:0:0
+27100 M 66:0:0:0
+27150 M 0:0:0:2
+27230 M 0:0:0:0
+28500 M -36:39:0:0
+28600 M 0:0:0:1
+28680 M 0:0:0:0
+29500 Games\n
+32000 M -100:-17:0:0
+32050 M -100:0:0:0
+32100 M -100:0:0:0
+32150 M -100:0:0:0
+32200 M -60:0:0:0
+32250 M 0:0:0:2
+32330 M 0:0:0:0
+32800 M 30:24:0:0
+32900 M 0:0:0:1
+32980 M 0:0:0:0
+34500 M 100:-56:0:0
+34550 M 70:0:0:0
+34600 M 0:0:0:2
+34680 M 0:0:0:0
+36500 {esc}
+37600 {d65}
+37700 {u65}
+39000 {esc}

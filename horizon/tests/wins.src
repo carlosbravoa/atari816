@@ -1,0 +1,30 @@
+# (0.14) Window buttons, the Windows menu and Alt+Tab on the Desktop (DESK=1; tests/mousegen.py
+# makes tests/wins.keys from this). Files opens at start at (24, 24), outer 306 x 246: its
+# maximize box at (320, 32), minimize box at (307, 32), the title at (150, 31). Shots (s):
+#   1  6.5   Files maximized by its button (the whole screen below the bar; the restore button)
+#   2  8.5   restored by the button, then a double click on the title: maximized again
+#   3  10.5  a double click on the maximized title: restored
+#   4  14.5  Programs > Terminal; the Terminal minimized by its button (Files in front)
+#   5  16.0  the Windows menu: Files checked, [Terminal] in brackets
+#   6  17.5  Terminal chosen in the Windows menu: restored, in front
+#   7  20.0  Terminal minimized again, then Alt+Tab: it comes back
+5000 move 320 32
+5300 click
+6500 move 630 24
+6900 click
+7300 move 150 31
+7700 dclick
+9300 dclick
+11000 move 105 8
+11400 click
+11600 move 105 66
+12000 click
+13300 move 597 48
+13700 click
+15000 move 170 8
+15400 click
+16500 move 170 38
+16900 click
+18000 move 597 48
+18400 click
+19000 key {dE2}{d2B}{u2B}{uE2}

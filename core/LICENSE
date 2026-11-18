@@ -1,0 +1,205 @@
+Atari816 hardware (core/) for the Sipeed Tang Nano 20K
+=======================================================
+LICENSING OVERVIEW
+
+This directory (core/ of the Atari816 repository) is NOT under a single
+licence. It combines an upstream Atari 8-bit core, a 65C816 CPU core, several
+third-party FPGA and firmware components, and original work written for the
+Tang Nano 20K port and the Atari816. Each part keeps the licence its author
+gave it. This file is the map; the full texts are in LICENSES/ (this
+directory) and in ../LICENSES/ (the repository root). The licences of the rest
+of the repository (horizon/, emu/, sdk/, Docs/) are listed in ../LICENSE.
+
+Every source file's own header notice is authoritative for that file. Do not
+remove or alter those headers. All paths below are relative to core/.
+
+
+-----------------------------------------------------------------------------
+1. EFFECTIVE TERMS OF THE COMBINED WORK — NON-COMMERCIAL
+-----------------------------------------------------------------------------
+
+The Atari machine implementation this project is built on (Mark Watson's
+atari800core, as distributed in Atari800_MiSTer) is offered for NON-COMMERCIAL
+USE ONLY, in source and binary form and for derived works.
+
+Therefore the hardware as a whole — this directory, and any bitstream built
+from it, including the .fs files published on a Releases page — may be used
+and redistributed for NON-COMMERCIAL PURPOSES ONLY.
+
+Selling this core, selling boards preloaded with it, or otherwise using it
+commercially requires explicit permission from Mark Watson (scrameta@gmail.com),
+and additionally from the other copyright holders listed below whose licences do
+not already permit it.
+
+Note that this is stricter than the licences of several individual components:
+a permissively licensed file (Apache-2.0, MIT, ISC, BSD) may of course still be
+taken from this tree and used commercially under its own terms, on its own.
+
+
+-----------------------------------------------------------------------------
+2. COMPONENTS AND THEIR LICENCES
+-----------------------------------------------------------------------------
+
+  Atari 8-bit core — Mark Watson, (c) 2013-2018
+    rtl/common/a8core/*, rtl/common/components/*,
+    rtl/common/sioemu/sio_handler.vhdl, plus src/address_decoder.vhdl (a
+    modified copy of the upstream address decoder)
+    (antic*, gtia*, pokey*, pia, cpu, atari800core*, the shared components and
+    the SIO emulation), except the files listed under other headings below.
+    Custom non-commercial permission notice — LICENSES/Mark-Watson-NonCommercial.txt
+    Upstream: https://github.com/MiSTer-devel/Atari800_MiSTer
+
+    src/fifo_receive.vhd and src/fifo_transmit.vhd carry no header. They are
+    portable replacements for the Altera FIFO wizard files that the upstream
+    SIO handler instantiates (same entity names and ports) and are kept with
+    the upstream core's terms.
+
+    Several of these files were changed for the Atari816 (classic RAM capped
+    at 320 KB in src/address_decoder.vhdl, the paddle simulators and the VBXE
+    hook removed, and others); the changes are in the git history and stay
+    under the upstream terms.
+
+  Atari palette tables — the NTSC and PAL colour tables in
+    rtl/common/a8core/gtia_palette.vhdl are the default palettes of the Altirra
+    emulator by Avery Lee (marked "altirra_ntsc_default.pal" /
+    "altirra_pal_default.pal" in the file). src/nvc_palette.hex (and its copy
+    ../emu/nvc_palette.h) is the same NTSC table. Credit: Avery Lee, Altirra,
+    https://www.virtualdub.org/altirra.html
+
+  Upstream Atari800_MiSTer files with NO licence statement
+    rtl/common/a8core/internalromram.vhd — no header
+    rtl/common/components/mult_infer.vhdl — no header
+    These reach us as part of the upstream Atari800_MiSTer tree. No grant
+    beyond that tree's terms is claimed for them.
+
+  6502/6510 CPU core — Peter Wendrich (FPGA 64), (c) 2005-2011
+    rtl/common/a8core/cpu_65xx.vhd
+    Header reads "Copyright 2005-2011 by Peter Wendrich ... All Rights Reserved"
+    and carries no licence grant; the file reaches us as part of the upstream
+    core above, unchanged. http://www.syntiac.com/fpga64.html
+
+  Cartridge, freezer and PBI logic — Matthias Reichl, (c) 2011-2014,
+  and Wojciech Mostowski, (c) 2025
+    rtl/common/a8core/cart_logic.vhd, rtl/common/a8core/freezer_logic.vhd,
+    rtl/common/a8core/pbi_rom.vhdl
+    GNU Lesser General Public License, version 2 or later — LICENSES/LGPL-2.1.txt
+    cart_logic.vhd is modified here (reduced to the common bank-switching
+    schemes for the Atari816; the notice is in the file) and stays LGPL.
+
+  IO subsystem (PicoRV32 host, SPI peripherals) — nand2mario
+    src/iosys_picorv32.v, src/simplespimaster.v, src/spiflash.v
+    Adapted from nand2mario's NESTang/SNESTang — GNU General Public License v3.0
+    LICENSES/GPL-3.0.txt
+    Upstream: https://github.com/nand2mario/nestang (COPYING = GPL-3.0)
+
+  Simple UART — Claire Xenia Wolf, (c) 2017 (PicoSoC)
+    src/simpleuart.v — ISC licence, in the file header.
+    Upstream: https://github.com/YosysHQ/picorv32
+
+  SPI master (byte-level, i_TX_DV / o_TX_Ready interface)
+    src/spi_master.v — no copyright or licence header. Its description and
+    port names match the nandland SPI master (Russell Merrick, MIT licence,
+    https://github.com/nandland/spi-master). This attribution is UNVERIFIED.
+
+  PicoRV32 CPU core — Claire Xenia Wolf, (c) 2015
+    src/picorv32.v — ISC licence, in the file header.
+    Upstream: https://github.com/YosysHQ/picorv32
+
+  SD-card firmware base (firmware/) — nand2mario
+    firmware/firmware.c, firmware.h, picorv32.c, picorv32.h,
+    spiflash.c, start.S, baremetal.ld, Makefile, build.bat, clean.bat
+    Derived from https://github.com/nand2mario/firmware-picorv32, which carries
+    no licence file of its own; the same code is distributed inside NESTang and
+    SNESTang under GPL-3.0, and this port treats it as GPL-3.0-or-later.
+    Substantially extended here (SIO disk emulation, cartridges, PC link, .xex
+    loader, the Atari816 mailbox) — those additions are
+    derivative works and stay under the same terms.
+
+  SD-card SPI driver — Bruno Levy, (c) 2020, changes by nand2mario
+    firmware/spi_sd.c
+    From https://github.com/BrunoLevy/learn-fpga (FemtoRV/FIRMWARE/LIBFEMTORV32)
+    BSD 3-Clause licence — LICENSES/BSD-3-Clause-learn-fpga.txt (the
+    copyright notice and licence of the learn-fpga repository)
+
+  FatFs — ChaN, (c) 2022
+    firmware/fatfs/* — 1-clause BSD licence, in the file headers.
+
+  65C816 CPU core — Sergiy Dvodnenko (srg320), gyurco, nand2mario
+    src/a816/P65C816.v, ALU.v, AddrGen.v, AddSubBCD.v, BCDAdder.v, adder4.v,
+    bit_adder.v, common.sv, mcode.sv, and mcode_packed.sv (generated from
+    mcode.sv by src/a816/mcode_pack.py; a derived work of mcode.sv)
+    The files carry only a provenance comment (added here). Provenance:
+    srg320's SNES core (SNES_FPGA), as
+    carried by the MiSTer SNES core and nand2mario's SNESTang, which is
+    distributed under the GNU General Public License v3.0.
+    LICENSES/GPL-3.0.txt
+    Upstream: https://github.com/nand2mario/snestang
+    Modified here: P65C816.v (a synthesis attribute keeping the decode tables
+    out of block RAM, ABORT support and other changes for FREDDIE II) and
+    AddrGen.v. The changes are recorded in the git history and are under the
+    same GPL-3.0 terms.
+
+  Low-latency SDRAM controller — nand2mario
+    src/sdram_nestang.v (32-bit masked writes and half-rate BL2 burst reads
+    added here)
+    Apache License 2.0 — LICENSES/Apache-2.0.txt
+    Upstream: https://github.com/nand2mario/sdram-tang-nano-20k
+
+  HDMI transmitter library — Sameer Puri, (c) 2019
+    src/hdmi2/*
+    Dual licensed MIT OR Apache-2.0 — LICENSES/MIT-hdl-util-hdmi.txt,
+    LICENSES/Apache-2.0.txt
+    Upstream: https://github.com/hdl-util/hdmi
+
+  Gowin IP / toolchain output
+    The rPLL instantiations (src/rpll_*.v) are Gowin IDE generated; they are
+    subject to Gowin's own IP terms.
+
+  Everything else — original to this port and to the Atari816,
+  (c) 2026 Carlos Bravo
+    Dual licensed: CC-BY-NC-SA-4.0 OR GPL-3.0-or-later, at your option.
+    See LICENSE-PORT for the grant and the covered-file list.
+    LICENSES/CC-BY-NC-SA-4.0.txt, LICENSES/GPL-3.0.txt
+
+
+-----------------------------------------------------------------------------
+3. COMPATIBILITY NOTE — READ THIS BEFORE REDISTRIBUTING
+-----------------------------------------------------------------------------
+
+The upstream Atari core's non-commercial condition and the GPL of the NESTang
+IO subsystem and of the 65C816 CPU core are not strictly compatible: the GPL
+forbids imposing further restrictions on GPL-covered code, and
+"non-commercial" is such a restriction. This tension is inherited from the
+upstream projects that this port combines — it is not created by the port
+itself, and it exists identically in Atari800_MiSTer-derived cores built on
+nand2mario's Tang IO subsystem. Adding the 65C816 core (GPL-3.0, from
+SNESTang) next to the Atari core in the same bitstream is a further instance
+of the same tension.
+
+This project's response is to be maximally transparent rather than to paper
+over it:
+
+  * every upstream copyright and licence notice is preserved in place;
+  * complete corresponding source for every component is in this public
+    repository, satisfying the GPL's source-availability obligations;
+  * the whole is distributed free of charge, for non-commercial use;
+  * no additional restriction is asserted over any individual third-party file
+    beyond what its own licence already says;
+  * the port's own original files are dual licensed CC-BY-NC-SA-4.0 OR
+    GPL-3.0-or-later, so that they add no new incompatibility of their own —
+    anyone who needs GPL-compatible terms for this port's work can simply take
+    the GPL option (LICENSE-PORT).
+
+If you are a copyright holder of any component here and want your code handled
+differently, please open an issue — it will be honoured.
+
+
+-----------------------------------------------------------------------------
+4. FOR CONTRIBUTORS
+-----------------------------------------------------------------------------
+
+Contributions to files original to this port are accepted under BOTH options of
+LICENSE-PORT (CC-BY-NC-SA-4.0 OR GPL-3.0-or-later); by submitting a change you
+licence it under both. Contributions to third-party files stay under that file's own
+licence. Keep every existing header notice intact, and add the upstream licence
+to the table above whenever a new third-party file enters the tree.

@@ -1,0 +1,37 @@
+# (0.15) KTEST on the text shell (NODESK): the kernel additions of 0.15 (user/ktest.s).
+# tests/mousegen.py makes tests/ktest.keys from this. Its console must match
+# tests/ktest.txt, and the sound writes (emu816 --log-sound) tests/ktest.err.
+1500 key {esc}
+3000 key ktest\n
+# parts 1-4 (joystick, vsync, chimes, sound owners) end at about 6.5 s; then window A
+# a (held) and o (held): o opens window B; A gets both releases, then WE_UNFOCUS; B gets
+# WE_FOCUS; the real releases reach nobody
+8000 key {d04}
+8300 key {d12}
+8800 key {u12}
+9000 key {u04}
+# b to B; c (held) closes B: A gets WE_FOCUS
+9400 key b
+9800 key {d06}
+10100 key {u06}
+# A's menu (its title at the left of the bar): "Second" (WE_MENU 0, 1)
+10600 move 20 8
+10700 click
+11100 move 30 38
+11200 click
+# the pointer over A: motion with no button held: c = 0000 (no phantom bit after a menu)
+11800 move 200 160
+# a right press in A: the pop-up menu below and right of the pointer; dragged to "Two",
+# released there: popup 0001
+12500 rpress
+12600 rdrag 220 183
+13000 rrelease
+# a right click: the menu stays open; Esc: popup ffff
+13600 rclick
+14100 key {esc}
+# the menu key: the menu at 10, 10 of A, its first item highlighted; Down, Enter: 0001
+14800 key {d65}
+14900 key {u65}
+15400 key {down}
+15700 key \n
+16500 key q

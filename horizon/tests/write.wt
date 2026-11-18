@@ -1,0 +1,451 @@
+# Write self test: "write -t /WT.WT" (see user/write_test.s for the commands).
+# Styles: . text, p block marker, m inline marker, b bold, i italic, x bold italic, c code
+= blocks: headings, lists, quotes, rules, blank lines
+? H1 pp.....|# Title
+? H2 ppp.....|## Title
+? H3 pppp.....|### Title
+? P .........|#### Four
+? P ......|#Title
+? H1 p|#
+? UL pp....|- item
+? UL pp....|* item
+? UL pp....|+ item
+? UL1 pppppp....|    - item
+? UL2 pppppppppp....|        - item
+? OL ppp....|1. item
+? OL pppp....|12) item
+? P ..........|1.no space
+? OL1 ppppppp....|    3. item
+? Q pp.....|> quote
+? Q p.....|>quote
+? HR ppp|---
+? HR ppppp|* * *
+? HR pppp|____
+? P ..|--
+? BL |
+? BL ...|   
+? P ........|    text
+= inline: bold, italic, code, escapes
+? P ..mmbbbbmm..|a **bold** b
+? P ..miiiim..|a *ital* b
+? P mmmxxxxmmm|***both***
+? P mmbbmxxxxxxmbbmm|**b *nested* b**
+? P mccccm|`code`
+? P mmcccmm|``a`b``
+? P mcm.|`*`.
+? P mccm|`**`
+? P m..|\*.
+? P .mim.|a*b*c
+? P .....|2 * 3
+? P ....|** a
+? P ....|a**b
+? P ....|`**c
+? UL ppmiiiiiim|- *xxxxxx*
+? H2 pppmiiiiim..|## *Title* x
+? P mmbmbmbbmm|**a\*\*b**
+= format: bold, italic, code on a selection and on a word
+n
+d The quick brown fox
+s 0 4 0 9
+c bold
+e The **quick** brown fox
+x
+c bold
+e The quick brown fox
+x
+s 0 4 0 9
+c ital
+e The *quick* brown fox
+x
+c bold
+e The ***quick*** brown fox
+x
+s 0 18 0 18
+c code
+e The ***quick*** `brown` fox
+x
+s 0 23 0 23
+c ital
+c type x
+e The ***quick*** `brown`*x* fox
+x
+n
+d one two
+d three
+s 0 4 1 5
+c bold
+e one **two**
+e **three**
+x
+c bold
+e one two
+e three
+x
+n
+d - item one 
+s 0 0 0 11
+c ital
+e - *item one* 
+x
+= format: headings, lists, quotes
+n
+d Title
+d text
+s 0 2 0 2
+c h1
+e # Title
+e text
+x
+c h2
+e ## Title
+e text
+x
+c h2
+e Title
+e text
+x
+s 0 0 1 2
+c bul
+e - Title
+e - text
+x
+c bul
+e Title
+e text
+x
+c num
+e 1. Title
+e 2. text
+x
+c quote
+e > Title
+e > text
+x
+c h3
+e ### Title
+e ### text
+x
+c norm
+e Title
+e text
+x
+n
+d 1. a
+d 
+d b
+s 2 0 2 0
+c num
+e 1. a
+e 
+e 2. b
+x
+= Enter, Tab and Backspace in lists
+n
+d - one
+s 0 5 0 5
+c enter
+c type two
+e - one
+e - two
+x
+c enter
+c enter
+c type end
+e - one
+e - two
+e 
+e end
+x
+n
+d 1. a
+d 2. b
+d 3. c
+s 0 4 0 4
+c enter
+c type x
+e 1. a
+e 2. x
+e 3. b
+e 4. c
+x
+n
+d     * deep
+s 0 10 0 10
+c enter
+e     * deep
+e     * 
+x
+c enter
+e     * deep
+e * 
+x
+c type x
+e     * deep
+e * x
+x
+n
+d - a
+d - b
+s 1 3 1 3
+c tab
+e - a
+e     - b
+x
+c stab
+e - a
+e - b
+x
+c stab
+e - a
+e - b
+x
+n
+d plain
+s 0 2 0 2
+c tab
+e pl	ain
+x
+n
+d ## Head
+s 0 3 0 3
+c bs
+e Head
+x
+n
+d > quoted
+s 0 2 0 2
+c bs
+e quoted
+x
+= undo and redo of formatting
+n
+d word
+s 0 0 0 4
+c bold
+e **word**
+x
+c undo
+e word
+x
+c redo
+e **word**
+x
+n
+d a
+d b
+s 0 0 1 1
+c num
+c undo
+e a
+e b
+x
+= styles armed: Bold with no word at the cursor, typing, leaving it empty
+n
+d a 
+s 0 2 0 2
+c bold
+e a ****
+x
+y bold norm
+c type x
+e a **x**
+x
+y bold norm
+c type yz
+e a **xyz**
+x
+n
+d a 
+s 0 2 0 2
+c bold
+c left
+e a 
+x
+y norm
+c undo
+e 
+x
+n
+d a 
+s 0 2 0 2
+c bold
+c ital
+e a ******
+x
+y bold ital norm
+c bold
+e a **
+x
+y ital norm
+c type x
+e a *x*
+x
+n
+d a 
+s 0 2 0 2
+c code
+c bs
+e a 
+x
+n
+d a 
+s 0 2 0 2
+c bold
+c enter
+e a 
+e 
+x
+= styles: at a span's end the command steps out of it; the toolbar's state
+n
+d **bold** x
+s 0 6 0 6
+y bold norm
+c bold
+y norm
+c type Y
+e **bold**Y x
+x
+n
+d # Head *it* `c`
+y h1
+s 0 8 0 8
+y ital h1
+s 0 13 0 13
+y code h1
+s 0 2 0 6
+y h1
+n
+d - **a b** c
+s 0 4 0 7
+y bold bul
+s 0 4 0 11
+y bul
+n
+d > q
+y quote
+n
+d 1. n
+y num
+n
+d ---
+y rule
+= Rule, Indent list, Outdent list
+n
+d text
+s 0 4 0 4
+c rule
+e text
+e 
+e ---
+e 
+x
+n
+d one
+d 
+d x
+s 2 0 2 1
+c del
+c rule
+e one
+e 
+e ---
+e 
+x
+c undo
+c undo
+e one
+e 
+e x
+x
+n
+d ---
+c rule
+e 
+x
+n
+d - a
+d - b
+s 1 3 1 3
+c indent
+e - a
+e     - b
+x
+c outdent
+e - a
+e - b
+x
+n
+d plain
+s 0 2 0 2
+c indent
+e plain
+x
+= the word count as the text is edited
+n
+d one two three
+v 3
+s 0 3 0 3
+c type x
+e onex two three
+x
+v 3
+c type  y
+v 4
+s 0 0 0 0
+c type 12. 
+e 12. onex y two three
+x
+v 4
+s 0 4 0 9
+c del
+e 12. y two three
+x
+v 3
+s 0 8 0 8
+c bs
+c bs
+v 3
+c type -
+e 12. y -o three
+x
+v 3
+s 0 9 0 9
+c type ** 
+v 3
+n
+d a
+d b c
+s 0 1 1 1
+c del
+e a c
+x
+v 2
+= files: a new document saved as Markdown (Save as: .md added)
+n
+c h1
+c type Notes
+c enter
+c enter
+c type Some 
+c bold
+c type bold
+c bold
+c type  text.
+c enter
+c bul
+c type one
+a /WNEW
+k /WNEW.md /WNEWX.MD
+= files: round trip, byte for byte
+r /docs/Welcome.md
+r /WRT.MD
+= files: edited, saved, exported
+o /docs/Welcome.md
+v 250
+t /WT.TXT
+k /WT.TXT /WEX.TXT
+o /WRT.MD
+s 0 0 0 0
+c type Edited: 
+w /WT2.MD
+k /WT2.MD /WRT2.MD

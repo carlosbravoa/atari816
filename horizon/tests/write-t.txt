@@ -1,0 +1,16 @@
+WRITE TEST START
+PASS blocks: headings, lists, quotes, rules, blank lines
+PASS inline: bold, italic, code, escapes
+PASS format: bold, italic, code on a selection and on a word
+PASS format: headings, lists, quotes
+PASS Enter, Tab and Backspace in lists
+PASS undo and redo of formatting
+PASS styles armed: Bold with no word at the cursor, typing, leaving it empty
+PASS styles: at a span's end the command steps out of it; the toolbar's state
+PASS Rule, Indent list, Outdent list
+PASS the word count as the text is edited
+PASS files: a new document saved as Markdown (Save as: .md added)
+PASS files: round trip, byte for byte
+PASS files: edited, saved, exported
+WRITE TEST END: 13 groups, 0 failed
+> 

@@ -1,0 +1,68 @@
+# (0.14) The Desktop's new functions (DESK=1; tests/mousegen.py makes tests/desk14.keys from
+# this; the card gets /GAME.ATR, a copy of a disk image of the test tree). Files is at
+# (24, 24); its rows: BLUE.XEX y 146, GAME.ATR 158, LONG.TXT 170, README.TXT 182. Shots (s):
+#   1  16.0  File > Add to desktop on LONG.TXT, README.TXT dragged from Files onto the
+#            desktop: two shortcuts (the arrow), README.TXT's where it was dropped
+#   2  21.5  BLUE.XEX and GAME.ATR dragged from Files onto the Atari icon: mounted (the green
+#            mark; the disk on D2: as the executable is D1:); the Atari icon clicked: the panel
+#   3  23.0  the panel's Eject for the program (Files' footer follows)
+#   4  24.5  Eject all: nothing loaded
+#   5  28.0  the clock clicked: "Date and time", 2026-11-17 14:05 typed
+#   6  29.5  Enter: the bar shows 14:05
+#   7  33.0  the SD card icon dragged to the left of the desktop (snapped to the grid)
+#   8  34.5  a right click on the desktop: its pop-up menu (0.15: New folder..., Tidy up, -,
+#            Settings...; above the pointer: no room below)
+#   9  36.0  Tidy up: every icon back in order
+#  10  38.0  a right click on the README.TXT shortcut: Open, Show original, -, Rename...,
+#            Delete (0.15; left of the pointer: no room at the right)
+#  11  39.5  Delete: the confirmation
+#  12  41.0  Enter: the shortcut is gone
+#  13  45.0  Horizon > About Horizon: the date
+9000 move 100 170
+9400 click
+9800 move 270 8
+10200 click
+10500 move 290 94
+10900 click
+11500 move 100 182
+11900 press
+12000 drag 450 300
+12900 release
+13500 key {right}
+16200 move 100 146
+16600 press
+16700 drag 596 100
+17900 release
+18000 move 100 158
+18400 press
+18500 drag 596 100
+19700 release
+20000 move 596 100
+20400 click
+22000 move 509 200
+22400 click
+23500 move 217 284
+23900 click
+25000 move 178 78
+25400 click
+25500 move 560 8
+25900 click
+27000 key 202611171405
+28500 key \n
+30500 move 596 40
+30900 press
+31000 drag 100 300
+32200 release
+33500 move 400 320
+33900 rclick
+35000 move 420 283
+35400 click
+37000 move 596 220
+37400 rclick
+38500 move 560 286
+38900 click
+40000 key \n
+42000 move 40 8
+42400 click
+42800 move 40 24
+43200 click

@@ -1,0 +1,8 @@
+# build output (make clean removes it)
+build/
+run-*/
+*.PRG
+*.o
+# generated from art/*.txt by the Makefiles (tools/img2inc.py, tools/font2inc.py)
+art/*.inc
+__pycache__/

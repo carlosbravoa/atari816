@@ -1,0 +1,64 @@
+SHEET 1
+W A 112
+W B 80
+W C 88
+W D 64
+F B 2T
+F C 2T
+F D 2P
+A1 Household budget, per month and per year
+A3 Item
+B3 Month
+C3 Year
+D3 Share
+A4 Rent
+B4 950
+C4 =B4*12
+D4 =B4/B$14
+A5 Electricity
+B5 64.5
+C5 =B5*12
+D5 =B5/B$14
+A6 Water
+B6 28.75
+C6 =B6*12
+D6 =B6/B$14
+A7 Internet
+B7 39.9
+C7 =B7*12
+D7 =B7/B$14
+A8 Groceries
+B8 420
+C8 =B8*12
+D8 =B8/B$14
+A9 Transport
+B9 115
+C9 =B9*12
+D9 =B9/B$14
+A10 Insurance
+B10 86.4
+C10 =B10*12
+D10 =B10/B$14
+A11 Leisure
+B11 150
+C11 =B11*12
+D11 =B11/B$14
+A12 Savings
+B12 200
+C12 =B12*12
+D12 =B12/B$14
+A14 Total
+B14 =SUM(B4:B12)
+C14 =SUM(C4:C12)
+D14 =SUM(D4:D12)
+A16 Income
+B16 2400
+C16 =B16*12
+A17 Left over
+B17 =B16-B14
+C17 =C16-C14
+D17 =B17/B16
+A18 Largest item
+B18 =MAX(B4:B12)
+A19 Average item
+B19 =AVERAGE(B4:B12)

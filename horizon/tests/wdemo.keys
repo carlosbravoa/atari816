@@ -1,0 +1,25 @@
+# Window system demo (make test). The shell starts with the browser: Esc, then wdemo.
+1500 {esc}
++1500 wdemo\n
+# windows: Shapes (16,24) 262x197, Text (200,110) 302x187, Palette (360,20) 258x145 on top
+# the pointer starts at (320,180); to Text's title bar (300,116), click: Text comes up
++2500 M -20:-64:0:0
++300 M 0:0:0:1
++100 M 0:0:0:0
+# shot 1 at 6.5 s: Text on top
++1000 M 0:0:0:1
++100 M -40:30:0:1
++100 M -40:30:0:1
++100 M -40:40:0:1
++100 M 0:0:0:0
+# shot 2 at 7.8 s: Text dragged down-left (stops at the bottom edge: (80, 173))
++1000 M -140:-60:0:1
++100 M 0:0:0:0
+# shot 3 at 9.0 s: Shapes raised by a click in it
++1000 M -15:-125:0:1
++100 M 0:0:0:0
+# the close box of Shapes (25, 30): shot 4 at 10.5 s, Shapes gone
++1500 x
++1000 y
+# a key closes the top window (Text): shot 5 at 11.5 s; the next one closes Palette, the
+# window system stops and the console is back: shot 6 at 13.0 s

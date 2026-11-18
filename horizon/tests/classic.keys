@@ -1,0 +1,41 @@
+# Settings, Classic Atari page (Desktop session: DESK=1; the card has the sample /atari.ini,
+# sdfiles/atari.ini). Two values changed, Save, the restart alert, Later; then
+# build/run-pic/atari.ini must be tests/atari-ini.txt.
+#   DESK=1 sh tests/shots.sh EMU SD classic 16 7 9.8 12 14.5
+# The pointer starts at (320, 180); moves of at most 100. The panel's content is at
+# (140, 40) on the screen. (A key event: the emulator needs one.)
+1000 {de1}{ue1}
+# Horizon menu (40, 8) > Settings... (0.14: its second item, y 38)
+3000 M -100:-100:0:0
++50 M -100:-72:0:0
++50 M -80:0:0:0
++300 M 0:0:0:1
++100 M 0:0:0:0
++500 M 0:30:0:0
++300 M 0:0:0:1
++100 M 0:0:0:0
+# the "Classic Atari" page button (312, 58)
+6000 M 100:20:0:0
++50 M 100:0:0:0
++50 M 72:0:0:0
++300 M 0:0:0:1
++100 M 0:0:0:0
+# Memory 320 KB (430, 90; 0.16: two buttons, 128 and 320)
+8000 M 100:32:0:0
++50 M 18:0:0:0
++300 M 0:0:0:1
++100 M 0:0:0:0
+# Scanlines 50% (400, 186)
+8800 M -30:96:0:0
++300 M 0:0:0:1
++100 M 0:0:0:0
+# Save (456, 310; 0.18: the panel is a row taller)
+10500 M 56:96:0:0
++50 M 0:28:0:0
++300 M 0:0:0:1
++100 M 0:0:0:0
+# the alert: Later (298, 209)
+13000 M -100:-100:0:0
++50 M -58:-1:0:0
++300 M 0:0:0:1
++100 M 0:0:0:0

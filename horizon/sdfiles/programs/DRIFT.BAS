@@ -1,0 +1,71 @@
+10 REM DRIFT.BAS - a small game for Horizon BASIC 2.0, full screen. Steer the boat on the night
+20 REM river, pick up the floating lanterns, keep clear of the logs. Arrow keys or
+30 REM joystick 1 move, Space or the trigger starts; Esc stops. Sprites move the boat
+40 REM and everything in the water, so the program only does the rules: 60 frames a second.
+50 SCREEN 1:RANDOMIZE:HI=0:DIM OX(6),OY(6),OK(6),OV(6)
+60 READ P:IF P>=0 THEN READ H:FOR R=0 TO H-1:READ A$:SHAPE P,R,A$:NEXT:GOTO 60
+70 WAVE 0,0,250,60:WAVE 1,4,350,90:WAVE 2,2,160:WAVE 3,1,700,250
+100 REM ---- the title, then a new game
+110 GOSUB 500:COLOR 16:FRECT 0,0,320,14:COLOR 12:TEXT 124,70,"D R I F T"
+120 COLOR 1:TEXT 20,96,"Pick up the lanterns, miss the logs"
+130 TEXT 32,112,"Arrows or joystick, Space: start"
+140 IF HI>0 THEN TEXT 124,136,"Best "+STR$(HI)
+150 GOSUB 950
+160 GOSUB 500:SC=0:LV=3:LL=0:BX=40:BY=100:T=0:GOSUB 800
+165 FOR I=1 TO 6:OX(I)=-99:NEXT
+170 FOR N=0 TO 12 STEP 4:PLAY 2,N,12:PAUSE 110:NEXT
+200 REM ---- one frame: the boat, the river, the rules
+210 S=STICK(0)
+220 IF (S AND 1)=0 AND BY>16 THEN BY=BY-2
+230 IF (S AND 2)=0 AND BY<168 THEN BY=BY+2
+240 IF (S AND 4)=0 AND BX>0 THEN BX=BX-2
+250 IF (S AND 8)=0 AND BX<220 THEN BX=BX+2
+260 SPRITE 0,BX,BY-(T AND 16)\16,0
+270 F=(T AND 8)\8
+280 FOR I=1 TO 6
+290 X=OX(I)-OV(I):OX(I)=X
+300 IF X>-24 THEN SPRITE I,X,OY(I),OK(I)+F:GOTO 320
+310 SPRITE I OFF:IF RND(50)=0 THEN GOSUB 600
+320 NEXT I
+330 H=HIT(0):IF H>0 THEN GOSUB 700
+340 T=T+1:IF LV=0 THEN 900
+350 VSYNC:GOTO 210
+500 REM ---- the river: the sky line, ripples, the status bar
+510 SPRITE OFF:GCLS 17:COLOR 18
+520 FOR I=1 TO 40:X=RND(300):Y=16+RND(164):LINE X,Y,X+8+RND(12),Y:NEXT
+530 COLOR 16:FRECT 0,0,320,14:COLOR 1:TEXT 4,1,"SCORE":TEXT 240,1,"BOATS":RETURN
+600 REM ---- a lantern (two in three) or a log comes down the river in slot I
+610 OX(I)=320:OY(I)=18+RND(8)*20:OK(I)=2-2*(RND(3)=0):OV(I)=1+RND(2)+LL
+620 RETURN
+700 REM ---- the boat touched thing H
+710 OX(H)=-99:SPRITE H OFF
+720 IF OK(H)=2 THEN SC=SC+10:PLAY 0,12+RND(4)*2,12,(BX-150)\20:LL=SC\150:GOSUB 800:RETURN
+730 LV=LV-1:PLAY 1,0,15:GOSUB 800:RETURN
+800 REM ---- the numbers in the status bar (drawn only when they change: TEXT takes time)
+810 COLOR 16:FRECT 52,0,48,14:FRECT 288,0,16,14:COLOR 1:TEXT 52,1,STR$(SC):TEXT 288,1,STR$(LV)
+820 RETURN
+900 REM ---- the end
+910 SPRITE OFF:PLAY 3,-5,12:IF SC>HI THEN HI=SC
+920 COLOR 12:TEXT 124,80,"GAME OVER":COLOR 1:TEXT 100,100,"Score "+STR$(SC)+"  best "+STR$(HI)
+930 PAUSE 800:GOSUB 950:GOTO 160
+950 REM ---- wait for Space or the trigger (released first)
+960 IF INKEY$<>"" THEN 960
+970 VSYNC:IF STRIG(0)=0 THEN 970
+980 VSYNC:IF STRIG(0)=1 THEN 980
+990 RETURN
+1000 REM the pictures: a number, a height, then rows of text art. Hex digits are the UI colours
+1010 REM (1 white, 7 dark grey, 9 light grey, B red, C yellow, E orange, F shadow), . is clear
+1020 DATA 0,10,"......1.........","......1C........","......1CC.......","......1CCC......"
+1030 DATA "......1CCCC.....","......1CCCCC....","......1.........","EEEEEEEEEEEEEEEE"
+1040 DATA ".EEEEEEEEEEEEEE.","..FFFFFFFFFFFF.."
+1060 DATA 2,11,"...77...","..7777..",".7CCCC7.",".CCEECC.",".CEEEEC.",".CEEEEC.",".CCEECC."
+1070 DATA ".7CCCC7.","..7777..","...99...","...99..."
+1080 DATA 3,11,"...77...","..7777..",".7CCCC7.",".CC11CC.",".C1CC1C.",".C1CC1C.",".CC11CC."
+1090 DATA ".7CCCC7.","..7777..","...99...","...99..."
+1100 DATA 4,8,"...EEEEEEEEEEEEEEEEEE...","..EFEEEEEEFEEEEEEEEFEEE.",".EEFEEEEEEFEEEEEEEEFEEEE"
+1110 DATA "EEEEEEEEEEEEEEEEEEEEEEE7","EEEEEEEEEEEEEEEEEEEEEEE7",".EEFEEEEEEEEEEFEEEEEEEE."
+1120 DATA "..EEEEFEEEEEEEEEEFEEEE..","...FFFFFFFFFFFFFFFFFF..."
+1130 DATA 5,8,"...EEEEEEEEEEEEEEEEEE...","..EFEEEEEEFEEEEEEEEFEEE.",".EEFEEEEEEFEEEEEEEEFEEEE"
+1140 DATA "EEEEEEEEEEEEEEEEEEEEEEE7","EEEEEEEEEEEEEEEEEEEEEEE7",".EEFEEEEEEEEEEFEEEEEEEE."
+1150 DATA "..EEEEFEEEEEEEEEEFEEEE..","...FFFFFFFFFFFFFFFFFF..."
+1160 DATA -1

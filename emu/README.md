@@ -1,0 +1,408 @@
+# emu816: Atari816 native-side emulator
+
+emu816 is a fast C model of the Atari816 native machine: a 65C816, FREDDIE II (memory map,
+bank 0 window, user/supervisor modes, protection, ABORT), the system block, the I/O
+processor mailbox, Marga, the video chip (first called the NVC, with sprites and fine scrolling
+from REV $0B), Ali, the blitter, and Lau, the sample player, next to POKEY 2. Use it to develop Horizon on
+a PC. The reference for FREDDIE II and the system block is `core/src/a816/a816_sys.sv`.
+The reference for the mailbox is `a816_mailbox()` in `core/firmware/firmware.c`. The reference for Marga is
+`core/src/a816/a816_nvc.sv`. The rest follows `Docs/02-register-spec.md`.
+
+## Build and run
+
+```
+make                 # emu816, C11 + libc (+ libm)
+make SDL=1           # adds a 1280x720 window, keyboard and mouse (needs SDL2)
+make test            # acceptance tests (see "Tests")
+make sst             # downloads the SingleStepTests sample that make test uses (~40 MB)
+```
+
+```
+emu816 [--sd DIR] [--load FILE@ADDR]... [--max-seconds N] [--trace]
+       [--keys LIST] [--mouse LIST] [--shot FILE.ppm] [--shot-at SECONDS] [--stats] [--headless] [--fast]
+       PROGRAM.BIN
+```
+
+| Option | Meaning |
+| --- | --- |
+| `--sd DIR` | Host directory served as the SD card through the mailbox |
+| `--load FILE@ADDR` | Extra file at a 24-bit hex address (`02:0000`, `$020000` and `0x20000` all work) |
+| `--max-seconds N` | Stop after N seconds of emulated time |
+| `--trace` | One line per instruction on stderr: cycle, PBR:PC, bytes, disassembly, A X Y S D DB, flags, E/N, U/S. IRQ, NMI and ABORT entries are marked `***` |
+| `--shot FILE.ppm` | Write the 1280x720 output frame (scaled, as on screen) as a PPM. It is written at the first VBLANK (trigger 360) at or after the following `--shot-at` seconds, or at exit. Repeatable |
+| `--keys LIST` | Key changes `t_ms:usage:down,...` (usage in hex) at emulated milliseconds |
+| `--mouse LIST` | Mouse input `t_ms:dx:dy:wheel:buttons,...` at emulated milliseconds: decimal motion in desktop pixels (dy > 0 = down), buttons bit 0 left, 1 right, 2 middle (`0x` allowed). Example: `--mouse 100:5:-3:0:1,200:0:0:0:0` |
+| `--console-us N` | Slow console: after each DBG_OUT byte, DBG_STAT bit 7 reads 1 for N emulated microseconds, and bytes written meanwhile are dropped, as on the hardware. The board takes about 90 us per byte while its log is read and can stall for milliseconds. Default 0: never busy |
+| `--stats` | At exit, print the emulated time, host time, emulated MHz and counters (and the dropped console bytes with `--console-us`) |
+| `--rev N` | SYS_REV to report: 6 (no sound page, no blitter), 7 (sound page), 8 (sound and blitter), 9 (+ blitter command lists, raster events at the beam, NV_FRAME), 10 = $0A (+ Lau, the sample player, the default hardware build of bring-up step 17), 11 = $0B (default: + Marga's sprites and fine scrolling, bring-up step 19). Below 11 Marga's registers $D930-$D9FF read 0 and ignore writes; below 10 the sample player reads 0 and ignores writes; below 9 the list registers do, and the raster events come at the fetch trigger; below 8 the blitter registers read 0 and ignore writes; below 7 the sound page ignores writes |
+| `--wav FILE.wav` | Write Lau's output (48 kHz, 16-bit stereo, without the POKEY sound) |
+| `--log-sound` | Print every accepted write to the sound page ($00:DB00-$DB13) on stderr |
+| `--log-lau` | Print every write to Lau, the sample player ($00:DB20-$DBFF, REV $0A), on stderr as `lau $DBxx = $yy` (Horizon's sample-call test compares it) |
+| `--headless` | SDL builds open a window by default; this flag suppresses it (accepted and ignored in plain builds) |
+| `--fast` | SDL: keep the window but do not throttle to real time |
+
+Exit codes: 0 when the program executes STP, 3 at the `--max-seconds` limit, 1 on a usage
+or file error. Output written to DBG_OUT ($00:DEF0) goes to stdout.
+
+### Boot
+
+Boot follows the I/O processor and the RTL testbench:
+
+1. Every RAM byte is filled with `$EA ^ (address & $FF)`, junk rather than zeros.
+2. The program is loaded at $01:0000: at most 65,280 ($FF00) bytes, as the firmware reads. `--load` files have no limit.
+3. The reset stub `18 FB 5C 00 00 01` (CLC XCE JML $010000) goes to $00:FF00, and STP to $00:FF10.
+4. Every vector $00:FFE0-$FFFF points to $FF10, except RESET, which points to $FF00.
+5. The CPU is reset in emulation mode.
+
+## What is modelled
+
+### 65C816 (`cpu65816.c`)
+
+- All 256 opcodes, in native and emulation mode, including decimal ADC/SBC in 8 and 16 bits.
+- Emulation-mode direct page and stack wrapping: the "new" instructions (PEA, PEI, PER,
+  PHD, PLD, PLB, JSL, RTL, JSR (a,X), [dp]) use the 16-bit stack and direct page, then
+  force S back into page 1.
+- MVN/MVP move one byte per execution and fetch the opcode again, so a block move takes
+  7 cycles per byte and is interruptible.
+- WAI, STP, and IRQ/NMI/RESET/COP/BRK/ABORT entry.
+- Every bus access is one call to `read(addr, flags)` or `write(addr, val, flags)`. The
+  flags mark an opcode fetch (SYNC), an operand fetch, a data access, a vector pull and
+  "inside an entry sequence". Internal cycles are counted but make no access.
+- Cycle counts follow the data sheet. They were checked against the SingleStepTests/65816
+  suite: 508,400 tests (1,000 per opcode and mode) pass, including the exact sequence of
+  valid bus cycles. `make test` runs a 200-per-file sample.
+- Known difference from the suite: WAI and STP take 3 cycles, as in the data sheet; the
+  suite counts 4.
+- ABORT follows the RTL. A refused access sets `cpu->abort`, and the refused read returns
+  $EA. The instruction runs to its end. Then every register (A X Y S D DBR PBR P E PC) is
+  restored to its value at the opcode fetch, and the ABORT vector is taken
+  ($00:FFE8 native, $00:FFF8 emulation). ABORT has priority and a pending NMI waits.
+  Refusals during an entry sequence are ignored.
+- Interrupt sampling follows the RTL:
+  - After any entry sequence (IRQ, NMI, ABORT, reset), one instruction always runs before
+    the next interrupt is taken.
+  - IRQ is polled at the end of an instruction. CLI, SEI, PLP, REP and SEP are polled with
+    the I flag they started with, the usual 65xx one-instruction delay.
+  - NMI is edge-triggered.
+- In emulation mode, IRQ/NMI/ABORT push P with B=0 and BRK pushes B=1, as on a WDC part
+  and in the fixed RTL.
+
+### FREDDIE II (`freddie.c`)
+
+This is a line-by-line model of the FREDDIE II part of `a816_sys.sv`:
+
+- **Memory map:** 8 MB of flat RAM. RAM_BANKS reads $7F. Reads above $7F:FFFF return $00
+  and writes there are dropped. The I/O page is $00:D000-$DFFF.
+- **Bank 0 window:** only bits 6-0 of B0WIN are used, as in `eff_bank[AW-17:0]`.
+- **Mode stack:** 8 deep.
+  - A vector pull pushes the current mode and enters supervisor mode. Only the first of
+    the two pull cycles pushes.
+  - Exception: the vector pull of a BRK/COP that already had a refused access (wr_block
+    set, outside an entry sequence) does neither. It is checked like any user-mode read,
+    as in a816_sys.sv `vpull`.
+  - An RTI whose opcode was fetched in supervisor mode, outside an entry sequence, pops
+    the stack at the next opcode fetch. That fetch may be the first cycle of an interrupt
+    entry.
+  - FR_CTRL bit 1 is the top of the stack; FR_CTRL bit 7 is the current mode.
+- **NMI hold:** the first cycle of a counted vector pull out of user mode sets `nmi_hold`;
+  any FR_CTRL write and reset clear it. While it is set the NMI line is not presented
+  (`nmi_n = ~(|nmi_status && !nmi_hold)`). NMI_STATUS still latches, and the CPU sees the
+  edge when the hold is released, so the first kernel instructions after an entry from
+  user mode, still on the task's S, are never preempted by an NMI.
+- An RTI opcode fetch that was refused does not arm the mode-stack pop (`!refuse`).
+- **Protection check:** `user_eff` is applied per access. Reads inside an entry sequence
+  are not checked; pushes are.
+- **WP_VEC** works independently of PROT_EN.
+- **ABORT_ADDR / ABORT_CAUSE** record the first refused access of each instruction.
+  A read-only refusal sets only the WRITE cause bit.
+- **Write block:** after a refusal, writes are blocked until the next opcode fetch, so
+  the ABORT sequence's own pushes go through.
+- **Protection table:** like block RAM, it is not cleared at reset.
+- **CACHE_FLUSH** ($00:D80A) accepts writes and does nothing, because there is no cache.
+
+### System block (`sysblock.c`)
+
+- SYS_ID reads $81, SYS_REV reads $0B (or `--rev`), and SYS_SPEED reads 0.
+- **Sound (REV $07):** writes to $00:DB00-$DB13 (POKEY 2, the four DACs) are kept and
+  counted only while SV_CTRL FREEZE_REQ is set, as on the hardware; otherwise they are
+  counted as ignored. No audio is produced. `--stats` prints both counts.
+- **SV_CTRL** ($00:DC00): bit 2 FREEZE_REQ is stored, bit 0 reads 1. **SV_STATUS**
+  ($00:DC01) bit 0 FROZEN follows FREEZE_REQ at once. The rest of the supervisor page
+  reads 0 (the classic machine is not modelled).
+- **IRQ_STATUS** latches bits 0 VBLANK, 1 LINE, 2 TIMER0, 3 TIMER1 and 4 BLITTER; they are
+  W1C. Bit 6 (IOP) is the live level MB_RSP_HEAD != MB_RSP_TAIL: it cannot be cleared by
+  W1C and reads back as part of IRQ_STATUS, as in the RTL's `irq_now`.
+- **UPTIME** follows the RTL accumulator exactly: UPTIME = floor(32 x cycles / 459), which
+  is microseconds at 14.34375 MHz. Reading $DE18 latches $DE19-$DE1B.
+- **Timers:** count at microsecond ticks. A count <= 1 at a tick fires, then reloads or
+  stops.
+- **Watchdog:** $5A arms it for 2,000,000 us and $A5 restarts it. Expiry sets NMI_STATUS
+  bit 1.
+- **NMI** is held while NMI_STATUS != 0. The CPU sees the 0 to non-zero edge.
+- **DBG_OUT** ($DEF0) prints to stdout. DBG_STAT reads 0 unless `--console-us` is given.
+- **KB_ROUTE** ($DE20, bit 0) resets to 1, as in the RTL; the spec says 0. While it is 1
+  the keyboard belongs to the classic machine, which is not modelled, so no KEY events are
+  produced. JOY_PORT ($DE21) and JOY_TRIG ($DE22) read 0.
+- **F12** sets NMI_STATUS bit 0 (SYSTEM_KEY).
+
+### Mailbox (`mailbox.c`)
+
+The I/O processor polls every 512 CPU cycles (about 36 us) and serves at most one request
+per poll, as the firmware does. Software cannot depend on synchronous answers.
+
+- **IOP_READY:** MB_STATUS bit 0 is set on the first poll after both MB_REQ_BASE and
+  MB_RSP_BASE are non-zero. MB_REQ_TAIL and MB_RSP_HEAD restart at 0.
+- **Reset:** clearing a base closes every file and resets the state.
+- **Errors:** an unreadable ring sets IOP_ERROR (bit 1). The emulator publishes MB_RSP_HEAD
+  at once; the RTL's cache sweep before the head becomes visible, about 18 us with the CPU
+  paused, is not modelled.
+
+Responses copy the request, set OP | $80, and put the result in ARG0 and the value in ARG1.
+Result codes in ARG0 are:
+
+| Code | Meaning |
+| --- | --- |
+| 0 | OK |
+| 1-19 | FatFs FRESULT (4 NO_FILE, 5 NO_PATH, 6 INVALID_NAME, 7 DENIED, 8 EXIST, 18 TOO_MANY_OPEN_FILES, ...). Host errno values are mapped to the FRESULT FatFs would return |
+| $80 | Bad handle |
+| $81 | Bad address: >= $80:0000, or anywhere in bank $10, which the firmware cannot reach |
+| $82 | Unsupported operation (TIME, MOUNT, UNMOUNT and anything unknown, as in the current firmware) |
+
+The open formats match the firmware:
+
+| Op | Format |
+| --- | --- |
+| OPEN | FLAGS 0 = read, 1 = read+write (file must exist), 2 = create/truncate read+write, 3 = append (write only). At most 4 files; handles 0-3, the lowest free one is used |
+| READ / WRITE | Through 1 MB-contiguous chunks, as `mb_xfer` does. A short count means end of file. A handle opened without that direction answers FR_DENIED |
+| SEEK | ARG1 = offset. The answer is the new position. A read-only file is clipped to its size, like `f_lseek` |
+| STAT | Writes 9 bytes into BUF: `u32 size, u8 attr, u32 time`. attr bit 4 = directory, $20 = archive (files), bit 0 = read-only. time is `fdate << 16 \| ftime`, FAT format, local time. ARG1 = size. STAT of the root answers FR_INVALID_NAME, as FatFs does |
+| READDIR | ARG0 = entries to skip, for continuation. Writes packed `{u32 size, u8 attr, u8 namelen, name}` entries, with no terminator, into BUF, which first holds the path. It stops when the next entry would not fit in LEN. ARG1 = entries returned. Entries are sorted by name; "." and ".." are left out |
+| RENAME | BUF = `"old\0new"`. Answers FR_EXIST if the target exists |
+| LOAD | Whole file to ARG0. ARG1 = bytes loaded |
+
+Mapping FAT paths to the `--sd` directory:
+
+- A leading `/` or `0:` is optional.
+- Each path component is matched case-insensitively, as on FAT.
+- `..` components answer FR_INVALID_NAME.
+- Any existing path that resolves outside the directory, for example through a symlink,
+  answers FR_DENIED.
+
+**Keyboard events** follow the firmware's "Keyboard events" block:
+
+- **Source:** keys come from SDL (scancodes are HID usages) or from `--keys`. The host
+  state is 4 held usages plus a modifier bitmap; a fifth key is dropped.
+- **When:** a poll produces at most one event, before serving a request. Events are only
+  produced while IOP_READY is set, KB_ROUTE = 0 and the response ring has a free slot.
+  While KB_ROUTE = 1 the keys count as not held.
+- **Order:** releases first, then modifier changes (reported as usages $E0-$E7), then
+  presses.
+- **Format:** OP=$E0, TAG=0, byte 8 = usage, byte 12 = current modifier bitmap,
+  byte 13 = 1 down / 0 up, every other byte 0.
+- **F12** produces a KEY event and the SYSTEM_KEY NMI, as on the hardware.
+- **Testing without SDL:** `--keys "t_ms:usage:down,..."` injects key changes at given
+  emulated times, with the usage in hex: `--keys 100:04:1,150:04:0` presses and releases
+  A.
+
+**Mouse events** follow the firmware's "Mouse event ($E1)" block:
+
+- **Source:** the host side adds motion and wheel into int16 accumulators and records the
+  current button byte, as `a816_mouse()` does.
+- **When:** in a poll with no key event to send, an event is produced while IOP_READY is
+  set, KB_ROUTE = 0, and there is motion, wheel or a button change. It needs a free
+  response slot, and at most one event per poll is sent. While KB_ROUTE = 1 the
+  accumulators are cleared and the buttons count as reported.
+- **Format:** OP=$E1, TAG=0, byte 8 = dx, 9 = dy, 10 = wheel, each clamped to -127..127
+  with the remainder kept for the next event, and byte 12 = buttons (bit 0 left, 1 right,
+  2 middle). Every other byte is 0.
+- **SDL:** relative motion is scaled so that one desktop pixel is one count: window
+  pixels / 2, or / 4 in mode 2, with the remainder kept. Buttons and the wheel come from
+  the window, and there is no grab.
+- **Testing without SDL:** `--mouse "t_ms:dx:dy:wheel:buttons,..."`, next to `--keys`.
+
+### Marga (video) — $D900 (`nvc.c`)
+
+This is a model of `core/src/a816/a816_nvc.sv`, which is the definition.
+
+Modes:
+
+- Mode 0 is 640x360x8. Mode 1 is 640x360x4: 320 bytes per line, high nibble = left pixel,
+  palette entries 0-15. Mode 2 is 320x180x8. The line buffer holds one palette index per
+  picture pixel in every mode (as the RTL does from REV $0B), with the pointer and the
+  sprites already merged.
+- The output is 1280x720: the picture is shown 2x (mode 2: 4x). With ENABLE clear at
+  display time the line is black.
+- NV_STRIDE resets to 640. The RTL requires a multiple of 8.
+- A line is fetched as 80 bursts of 8 bytes, or 40 in modes 1 and 2.
+
+Timing (the CPU cycle is 2 clk_core; the pixel clock is 71.71875 MHz = 2.5 clk_core, so
+5 pixel clocks per CPU cycle):
+
+- The raster is 1572 x 760 pixel clocks, one output picture of 1280x720 for everything.
+  An output line is 314.4 CPU cycles and a frame exactly 238,944 CPU cycles (60.03 Hz).
+- Positions are counted in pixel clocks, so the fraction is exact. An event is seen at
+  the first CPU cycle at or after its pixel clock. The frame phase is 0 at reset.
+- Trigger n (n = 0-365) fires at the start of output line 28 + 2n, every 628.8 CPU
+  cycles. Output lines 0-27 have no trigger. The first active output line is 30.
+- At trigger n:
+  - NV_LINE = n. It is not latched, and resets to 360.
+  - At n == 360, a VBLANK pulse sets IRQ_STATUS bit 0. At n == NV_LINE_CMP (reset 511 =
+    never), a LINE pulse sets bit 1. IN_VBLANK = NV_LINE >= 360.
+  - At n == 0, NV_BASE is taken, BASE_PENDING clears, the scroll registers (and
+    NV_LINE_CMP, for the split) are taken, and the row address restarts at
+    NV_BASE + NV_SCROLLY x NV_STRIDE. With SPLIT, at n == the split line it restarts at
+    NV_BASE + NV_SCROLLY2 x NV_STRIDE. Otherwise it advances by NV_STRIDE (mode 2: every
+    second trigger), or goes back to NV_BASE when the row number reaches NV_VHEIGHT.
+  - From trigger 360 to trigger 0 (vertical blank) a pending NV_SPR_COMMIT is done: the 128
+    record bytes as written are copied to the set in use (a COMMIT written in that window is
+    done at once).
+  - If ENABLE and n < 360, the line (640 or 320 pixels, from NV_SCROLLX on, HWRAP: modulo
+    NV_STRIDE bytes) is fetched from RAM into half n&1 of the two-line buffer. The sprites
+    and the pointer are merged in at that moment, using their registers, records and images
+    as they are then. Writes to the framebuffer, the pointer or sprite images after a line's
+    fetch show up a frame later.
+  - Sprites follow the register spec exactly (choice in index order within the 640-pixel
+    width budget, OVERFLOW, drawing from 15 down to 0, BEHIND, flips, MAG, 4 bpp PAL). The
+    choice runs (and sets OVERFLOW) even when no picture is wanted.
+- Line n is on screen from trigger n+1 on (output lines 30+2n and 31+2n). It is converted
+  to RGB with NV_CTRL as it was then and with the palette of that moment.
+  - The conversion is lazy: lines are converted before the next palette write, or when a
+    picture is needed.
+  - When no picture is wanted (no SDL window, no pending `--shot`), fetch and display are
+    skipped altogether, because nothing can observe them.
+- The fetcher's SDRAM addresses are 23 bits, so they wrap within 8 MB.
+
+Registers:
+
+- NV_BASE: the low byte ($D901) is ignored. Writing $D902 or $D903 sets BASE_PENDING.
+- NV_LATE ($D90B) reads 0, because the emulator is never late; writes are ignored.
+- PAL_R and PAL_G read back the last value written; PAL_B reads 0.
+- PTR_X is 10 bits (0-639), PTR_Y 9 bits and NV_LINE_CMP 9 bits.
+- REV $0B: the scroll registers read back the value written; NV_SPR_COMMIT reads PENDING;
+  NV_SPR_STATUS bit 1 (LATE) is always 0, because the emulator is never late; the records
+  ($D980-$D9FF) read 0, and NV_SPR_PEEKD returns the byte selected by the last NV_SPR_PEEK
+  write (taken at that write).
+- All of Marga's registers reset with the machine, the sprite records (both sets) included.
+
+Reset palette:
+
+- It is `core/src/nvc_palette.hex`, the GTIA NTSC palette, copied into `nvc_palette.h`.
+  Regenerate that header if the hex file changes.
+
+Pointer:
+
+- PTR_IMG is 8-byte aligned. Each of the 32 rows is 8 bytes, 2 bpp, with the leftmost
+  pixel in bits 7-6.
+- The top-left corner is at (PTR_X - 2 x PTR_HOT[3:0], PTR_Y - 2 x PTR_HOT[7:4]).
+- In mode 2 the pointer pixels are framebuffer pixels (4x).
+- PTR_C1-C3 reset to $00, $0F and $08. In 4 bpp mode the low nibble of PTR_Cn is used.
+
+### Ali (blitter) — $DA00 (`blitter.c`)
+
+Ali:
+
+- REV $08 and up (`--rev`). The pixels are written when START is written; then BUSY reads
+  1 for the RTL's measured time: clk_core cycles per pixel FILL 2.0, EXPAND 2.2, COPY
+  2.9 with the classic machine frozen or 3.5 running, plus 0.8 with the video on (a CPU
+  cycle is 2 clk_core), plus 8 + 2 per line CPU cycles. IRQ_EN raises BLITTER when BUSY
+  drops. The CPU is not slowed.
+- The RTL's rules are enforced by counting (and printed on stderr, the first 10 of each):
+  START while BUSY is ignored; a write to $DA00-$DA12 while BUSY is illegal; a CPU read
+  of an 8-byte line the blitter wrote since the last cache sweep is a stale read. A
+  sweep is a CACHE_FLUSH write ($00:D80A) or the one the RTL makes before a new
+  MB_RSP_HEAD becomes visible. `--stats` prints the counts.
+- Addresses are physical, with no window and no protection.
+- BACKWARDS walks lines bottom to top and pixels right to left. The addresses still name
+  the first (top-left) byte of each rectangle.
+- EXPAND source lines start at BL_SRC + y x BL_SRC_STRIDE, at bit SRC_BIT (7 = leftmost),
+  and the bit position carries on into the following bytes.
+- A width or height of 0 draws nothing.
+
+Command lists (REV $09):
+
+- LIST reads the record at BL_LIST 30 CPU cycles after the previous blit has finished
+  (BL_LIST + 24, BL_COUNT - 1, bytes 0-18 into $DA00-$DA12), then starts it at once or,
+  with WAIT_VBL, at the next VBLANK event. Its pixels are written when it starts; it is
+  BUSY for the same modelled time as a single blit. One interrupt at the end of the list.
+- ABORT stops the list and drops BUSY at once; unlike the hardware, the blit that was
+  running has already written all its pixels. DONE / ABORTED / WAITING as in the spec.
+- From REV $09 register writes while BUSY are ignored (still counted and reported).
+
+### Raster events (Marga, `nvc.c`, REV $09)
+
+NV_LINE, LINE, VBLANK and NV_FRAME come 2852 pixel clocks (1572 + 1280) after fetch
+trigger n: at the horizontal blank before line n is drawn. Below REV $09 they come at the
+trigger. Reading $D906 / $D90C latches $D907 / $D90D.
+
+### Lau (sample player) — $DB20 (`audio.c`, REV $0A, `--rev 10`)
+
+A bit-exact model of `a816_snd.sv`: output sample k at CPU cycle floor(k x 11953 / 40)
+(48 kHz from the pixel clock), the same position, loop, volume and saturation arithmetic, and the per-voice 8-byte block (a voice plays the bytes of its
+block as they were when it read them). Differences: the hardware computes up to four
+samples ahead into a FIFO, so its positions and KEYON lead the emulator's by up to 4
+samples (83 us); AU_LATE is always 0. Steps run only while a voice plays (or with
+`--wav`).
+
+### Not modelled
+
+- **Memory timing:** the cache, SDRAM latency and write-through stalls are not modelled.
+  Every CPU cycle is ideal, so timings measured by programs are the pure cycle counts.
+  Horizon's window bench ran about 2.3x slower on the board (stage 1, CPU drawing: full
+  repaint 434 ms there, 189 ms here). Most of the gap is likely writes (every write goes
+  through to SDRAM; the bring-up simulation saw MVN at about half speed) and the 8 bpp
+  video fetch sharing the bus. A first correction: a few stall cycles per RAM write and
+  per cache-line read miss, and bus time taken by Marga's line fetch, calibrated against
+  the board's bench figures.
+- **Audio:** the sound page is write only and makes no sound.
+- **Classic side:** the supervisor ($00:DC00) and the chipset window ($00:D000-$D7FF) read
+  0, and the classic map ($00:D810-) is not implemented.
+- **Inputs:** joysticks read 0, and turbo mode is not modelled.
+- **4 bpp mode in the blitter:** the spec leaves this open, and the blitter is 8 bpp only.
+
+## Tests
+
+`make test` runs `tests/run_tests.sh`. Every check passes. `EMUFLAGS="--rev 10" ./tests/run_tests.sh` (or 9, 8, 7) runs them on an older board; checks of hardware it lacks are skipped:
+
+| Test | Checks |
+| --- | --- |
+| A816.BIN | The self test (FREDDIE II, timers, preemption, watchdog, mailbox), run with `--sd` pointing at a copy of itself. Uses `core/sw/a816/A816.BIN` when it exists |
+| BRINGUP1.BIN | RAM test, LOOP (exact), READ and MVN (within 1 % of the ideal values) |
+| tests/asm/mbdemo | Mailbox: open/read/close, LOAD, READDIR (and with skip), create/write/STAT/DELETE, error codes $80/$81/$82/6/5. Waits with WAI on the IOP interrupt |
+| tests/asm/cpuirq | COP and BRK frames, an MVN interrupted 88 times by a 50 us timer, WAI with I clear, the NMI edge rule |
+| tests/asm/nvcdemo | Palette writes, every blitter operation, the pointer, 3 VBLANKs = 49,975 us (60.03 Hz). Picture checked by md5 |
+| tests/asm/nvcmode1/2 | 4 bpp and 320x180 modes, the LINE interrupt, BASE_PENDING. Picture checked by md5 |
+| NVTEST.BIN | `core/sw/a816/nvtest.s`, the hardware test of Marga, with shots at 1.5 s (mode 0 with the pointer), 24 s (mode 1) and 29 s (mode 2). Pictures are checked by md5; the PNGs are in `tests/pictures/` |
+| tests/asm/copabort, eirq | The two fixed RTL issues (below) |
+| tests/asm/nmihold | A user task with S at $00:9000 takes TIMER0; the watchdog NMI fires 3 us later. The NMI must stay latched but untaken until the handler writes FR_CTRL, and the canary at the task's S must be intact |
+| A816.BIN, slow console | The self test again with `--console-us 90`: same output |
+| tests/asm/mousetest | MOUSE events from a `--mouse` script: clamping with the remainder carried, a key event taking priority, motion discarded while KB_ROUTE = 1 |
+| tests/asm/kbtest | `core/sw/a816/kbtest.s`, unchanged, run with a `--keys` script: modifiers, the 4-key limit, F12 (KEY event + NMI), a key held before KB_ROUTE = 0 |
+| BLITTEST.BIN | `core/sw/a816/blittest.s`: every blitter op against a 65C816 reference (REV $08 and up) |
+| BLITLIST.BIN | `core/sw/a816/blitlist.s`: command lists against single blits, ABORT, WAIT_VBL, raster events, 60 frames = 999,504 us (REV $09 and up) |
+| SAMPLER.BIN | `core/sw/a816/sampler.s`: Lau's rate, end interrupt, loop, mix values, AU_LATE (REV $0A and up) |
+| SPRTEST.BIN | `core/sw/a816/sprtest.s`: Marga's REV $0B registers, NV_SPR_PEEK, COMMIT latching, the line limit (OVERFLOW), the load test (REV $0B and up) |
+| tests/sprsceneN.bin | `core/sw/a816/sprscene.s` with SEED 1-10: a random scene each (9 and 10 crowded, so the line limit drops sprites) (all modes, scrolling, wrap, split, pointer, 16 sprites with every option). The pictures must be identical to the frames the RTL simulation gave (`expected/sprsceneN.ppm.md5`), REV $0B and up |
+| SingleStepTests | 102,000 tests, with `tests/fetch_sst.py` / `make sst` to download them |
+
+LOOP prints `00005943`, while the hardware and the RTL testbench print `00005948`. The
+emulator's cycle count for that window is the RTL's own: both have 327,771 CPU cycles
+between the two UPTIME latches, compared instruction by instruction against a Verilator
+trace. The remaining 4-5 us are the 8 SDRAM write-through stalls inside the measured window
+(stores to t0, the JSR and PHX pushes). The emulator does not model these stalls.
+
+## RTL issues found (now fixed in the RTL, and in emu816)
+
+1. **A refused BRK/COP push broke protection.** A user task with S in kernel memory
+   executed COP. The first push was refused, but COP's vector pull still pushed the mode
+   stack and entered supervisor mode. The ABORT entry then wrote PBR, PC and P (all chosen
+   by the task) into kernel memory, and the handler saw USER_ARM = 0.
+   - Fixed in a816_sys.sv: `vpull = ~cpu_vpb && !(wr_block && !cpu_int_seq)`. emu816 does
+     the same.
+   - `tests/asm/copabort.s` now prints `FR_CTRL 07 CAUSE 03 KERNEL $8FFD-$9000 55555555`.
+2. **Emulation-mode IRQ/NMI/ABORT pushed B=1.** Fixed in P65C816.v: the pushed bit 4 is now
+   `EF ? ~GotInterrupt : P[4]`. emu816 now always pushes B=0 for hardware interrupts, as a
+   WDC part does. `tests/asm/eirq.s` prints P=$20.
+3. **Bank $10 is unreachable for the I/O processor.** The firmware's `mb_ptr` refuses it, so
+   transfers there answer $81. This is mirrored. Also, for addresses below $40:0000 `mb_ptr`
+   XORs bit 20; it is worth checking that this matches the CPU's own SDRAM mapping for
+   banks $11-$3F.

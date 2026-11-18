@@ -1,0 +1,138 @@
+
+~ Horizon *
+selftest: start
+Hello from task 3, Horizon user mode
+selftest: task 3 exit 0000
+@@ any order
+count A 1
+count B 1
+count A 2
+count B 2
+count A 3
+count B 3
+count A 4
+count B 4
+count A 5
+count B 5
+selftest: task 4 exit 0000
+selftest: task 5 exit 0000
+@@ end
+@@ any order
+spin: start
+tick 1
+regs: start
+tick 2
+tick 3
+tick: uptime agrees
+selftest: task 7 exit 0000
+selftest: TICK finished while SPIN still ran
+spin: done
+selftest: task 6 exit 0000
+regs: context preserved
+selftest: task 8 exit 0000
+@@ end
+@@ any order
+crash 1
+~ [kill] task 9 CRASH cause 03 addr 009000 pc ??0154
+crash 2
+~ [kill] task 10 CRASH cause 02 addr 030100 pc ??015B
+crash 3
+~ [kill] task 11 CRASH cause 09 addr 00DEF0 pc ??0166
+crash 4
+[kill] task 12 CRASH cause 03 addr 009000 pc ??????
+crash 5
+~ [kill] task 13 CRASH cause 20 addr ??0176 pc ??0178
+crash 6
+[kill] task 14 CRASH cause 22 addr 000000 pc 00017D
+crash 7
+[kill] task 15 CRASH cause 04 addr 7B0000 pc 7B0000
+crash 8
+crash 8: EFAULT, still alive
+crash 9
+crash 10
+crash 11
+[kill] task 19 CRASH cause 21 addr 009000 pc ??????
+crash 10: holding 4 files, a port, 5 banks
+~ [kill] task 18 CRASH cause 20 addr ??0245 pc ??0247
+crash 12
+[kill] task 20 CRASH cause 21 addr 000002 pc ??????
+selftest: task 9 exit FF03
+selftest: task 10 exit FF02
+selftest: task 11 exit FF09
+selftest: task 12 exit FF03
+selftest: task 13 exit FF20
+selftest: task 14 exit FF22
+selftest: task 15 exit FF04
+selftest: task 16 exit 0000
+selftest: task 17 exit FF80
+selftest: task 18 exit FF20
+selftest: task 19 exit FF21
+selftest: task 20 exit FF21
+@@ end
+crash 13
+~ [kill] task 21 CRASH cause 23 addr 000000 pc ??0254
+selftest: task 21 exit FF23
+This is /README.TXT on the Horizon SD card.
+CAT reads it through open, read and close,
+in chunks of 40 bytes.
+cat: /NOPE.TXT error $44
+selftest: task 22 exit 0000
+@@ any order
+This is /README.TXT on the Horizon SD card.
+CAT reads it through open, read and close,
+in chunks of 40 bytes.
+This is /README.TXT on the Horizon SD card.
+cat: /NOPE.TXT error $44
+selftest: task 23 exit 0000
+CAT reads it through open, read and close,
+in chunks of 40 bytes.
+cat: /NOPE.TXT error $44
+selftest: task 24 exit 0000
+@@ end
+files: wrote 11
+files: read back "file"
+files: size 11 attr $20
+files: dir attr $10
+files: after delete, stat error $44
+selftest: task 25 exit 0000
+dir /
+  BIN <DIR>
+  BLUE.XEX 20
+  LONG.TXT 9635
+  README.TXT 110
+  SYSTEM <DIR>
+  carts <DIR>
+  disks <DIR>
+  docs <DIR>
+  many <DIR>
+  programs <DIR>
+selftest: task 26 exit 0000
+mem: got 82 banks, then error 2
+mem: bank $09 is writable
+mem: all freed, bank_free($01) refused
+selftest: task 27 exit 0000
+selftest: mem_info 84 free of 92
+ping: pong is on port 1
+ping: sent 1, reply 2
+ping: sent 2, reply 4
+ping: sent 3, reply 6
+ping: pong exit 0000
+selftest: task 28 exit 0000
+selftest: spawn error 44
+keys: press 3 keys
+keys: usage $04 mods $00 down
+keys: usage $FF mods $00 down
+keys: usage $04 mods $00 up
+selftest: task 31 exit 0000
+mtest: buttons 0 at 0,0
+mtest: buttons 0 at 100,40
+mtest: buttons 1 at 100,40
+mtest: buttons 1 at 110,50
+mtest: buttons 0 at 110,50
+mtest: wheel 5
+mtest: buttons 0 at 639,359
+mtest: ws_mouse 639,359 content 639,359 buttons 2 = 2, window 255, window 3: error 1
+selftest: task 32 exit 0000
+selftest: done
+tinit: selftest exit 0000
+[halt] no tasks

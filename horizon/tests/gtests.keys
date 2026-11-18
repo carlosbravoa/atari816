@@ -1,0 +1,9 @@
+# (0.18) "gtest s" on the text shell: three sprites over a window (one magnified and mirrored,
+# one BEHIND the window's pixels), a second window over it (they are hidden), closed again
+# (they come back, one moved, one moved past the content's right edge: hidden). Pictures
+# tests/pictures/gtests*.png.
+1500 {esc}
++1500 gtest s\n
++3000 x
++2000 x
++2000 x

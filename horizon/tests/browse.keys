@@ -1,0 +1,52 @@
+# File browser session (make test): keyboard and mouse, pictures at the marked times.
+# The browser starts by itself (INIT runs "SH files").
+1500 {down}{down}{down}{down}
+# shot 8 at 1.9 s: four single steps within the page: only "many" is inverse
++500 \n
+# /many: 250 entries
++3000 {pgdn}{pgdn}
++1000 is
+# shot 1 at 7.0 s: "Isn't it_odd + strange!.xex" selected on page 2
++2000 {end}
++1000 {home}
+# the wheel scrolls (down 2 steps = 6 lines), a double click on the line under the
+# pointer (y 180 = list row 14) runs it: the Atari, then F12 back
++1000 M 0:0:-2:0
++500 M 0:0:0:1
++100 M 0:0:0:0
++100 M 0:0:0:1
++100 M 0:0:0:0
++2000 {F12}
+# shot 2 at 14.0 s: back in /many, the status line shows the executable
++2000 \b
+# back in /, "many" selected again; type-ahead finds the rest
++1500 docs
++1500 \n
++1500 read
++1000 \n
+# the pager: "Read me first.txt", its first page
+# shot 3 at 22.0 s
++3000 q
++1000 \b
++1500 carts
++1000 \n
++1500 don
++1000 \n
++2000 {F12}
+# Donkey Kong (a cartridge) ran: the status line has only the cartridge
+# shot 4 at 32.5 s
++2000 \b
++1500 disks
++1000 \n
++1500 cav
++1000 \n
++2000 {F12}
+# Caverns of Mars (a disk) ran: the cartridge is ejected, D1: has the disk
+# shot 5 at 41.5 s
++2500 {esc}
+# shot 6 at 44.0 s: the shell
+# the shell: a paged ls of the 250-entry folder
++1500 cd many\n
++1500 ls\n
+# shot 7 at 47.5 s: the first page and the "more" prompt
++2500 q

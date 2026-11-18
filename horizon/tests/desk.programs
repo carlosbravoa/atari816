@@ -1,0 +1,9 @@
+# The Programs menu of the Desktop test sessions (tests/shots.sh puts it on their card), so
+# their pictures do not change when programs are added to sdfiles/PROGRAMS: the order of 0.12.
+Edit=/BIN/EDIT.PRG
+Paint=/BIN/PAINT.PRG
+BASIC=/BIN/BASIC.PRG
+Terminal=/BIN/TERM.PRG
+Files=/BIN/WFILES.PRG
+Settings=/BIN/SETTINGS.PRG
+Sheet=/BIN/SHEET.PRG

@@ -1,0 +1,8 @@
+SOLITAIRE TEST START
+PASS FreeCell deal 1: won: 108 moves, 26 refused, 14 undone
+PASS Klondike deal 1, draw 1: won: 138 moves, 28 refused, 16 undone
+PASS Klondike deal 77, draw 3: stock, score, undo: 120 moves, 0 refused, 120 undone
+PASS FreeCell deal 5: moves of runs, free cells, refusals: 22 moves, 23 refused, 0 undone
+PASS random play: 15 deals, 5672 moves, 5672 undone, every card once, rules kept
+SOLITAIRE TEST END: 0 failed
+> 

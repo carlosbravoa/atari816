@@ -1,0 +1,5 @@
+# (0.17) STEST on the text shell (NODESK): the sample syscalls (user/stest.s). Its console
+# must match tests/stest.txt (tests/stest-nolau.txt on REV < $0A), its Lau writes (emu816
+# --log-lau) tests/stest.err.
+1500 {esc}
++1500 stest\n

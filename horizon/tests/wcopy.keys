@@ -1,0 +1,8 @@
+# win_draw's copy (WD_COPY): "wdemo copy" on the text shell (NODESK):
+#   sh tests/shots.sh EMU SD wcopy 6 5.5
+# One picture at 5.5 s: the pattern after seven moves (overlapping in every direction, one
+# with its source and one with its destination partly outside the content). It must be
+# the same with the blitter and without it (tests/pictures/wcopy.md5 serves both); it
+# was checked against a model of the moves.
+1500 {esc}
++1500 wdemo copy\n

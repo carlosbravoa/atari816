@@ -1,0 +1,43 @@
+# Keyboard menus and window keys (0.13), on the Desktop (DESK=1). No mouse: the pointer
+# stays where it starts. Raw keys: E2 left Alt, E0 left ctrl, 43 F10, 2B Tab, 3D F4, 1A W, 13 P,
+# 12 O.
+# (Files, opened by DESK at start, sets its menus while it starts: that closes an open menu, so wait)
+# F10: the bar's first menu (Horizon) opens, its first item highlighted; Right: Programs
+9000 {d43}{u43}
++500 {right}
++500 {down}
+# shot 1 at 10.5 s: Programs open by the keyboard, its second item highlighted
++1000 {left}
++500 \n
+# Left: back to Horizon (first item); Enter: About Horizon. shot 2 at 13.0 s: About
++2000 {dE0}{d1A}{u1A}{uE0}
+# ctrl+W closes About (the focused window). shot 3 at 14.5 s: About gone
++1500 {dE2}{d13}{u13}{uE2}
+# Alt+P: Programs open, Edit highlighted. shot 4 at 15.5 s
++1000 \n
+# Enter: Edit starts. shot 5 at 18.0 s: Edit on top
++2500 {dE2}{d13}{u13}{uE2}
++500 t\n
+# Alt+P, t (the next item starting with T: Terminal), Enter: the Terminal
++3000 wdemo menu\n
+# shot 6 at 24.7 s: Alt+O in wdemo's window: Options with a check mark (Grid), a
+# separator, a dimmed item (Print) and shortcuts
++2000 {dE2}{d12}{u12}{uE2}
++1000 {down}{down}
+# Down, Down: Snap, then Quit (the separator and the dimmed Print skipped). shot 7 at 25.5 s
++800 {home}\n
+# Home, Enter: Grid unchecked; Alt+W, Enter: Print enabled; Alt+O again. shot 8 at 27.9 s
++500 {dE2}{d1A}{u1A}{uE2}
++500 \n
++500 {dE2}{d12}{u12}{uE2}
++1000 {esc}
+# Esc closes it. Alt alone: the first menu (Horizon) opens. shot 9 at 29.1 s
++500 {dE2}{uE2}
++600 {esc}
+# Esc. Alt+Tab twice: the bottom-most normal window comes up each time
++500 {dE2}{d2B}{u2B}{uE2}
+# shot 10 at 30.5 s
++1000 {dE2}{d2B}{u2B}{uE2}
+# shot 11 at 31.5 s
++1000 {dE2}{d3D}{u3D}{uE2}
+# Alt+F4 closes the focused window. shot 12 at 32.5 s

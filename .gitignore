@@ -1,0 +1,12 @@
+# local only, never committed
+CLAUDE.md
+.claude/
+/.core.git.bak/
+__pycache__/
+# build outputs
+/emu/emu816
+/emu/*.o
+/emu/tests/sst/
+/emu/tests/cputest/cputest
+/horizon/build/
+/Docs/00-START-HERE.md

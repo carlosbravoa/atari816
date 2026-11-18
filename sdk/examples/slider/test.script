@@ -1,0 +1,19 @@
+# Input for `make test` (sdk/tools/inputscript.py), run as "slider -e" in shell mode.
+# Time 0 = the program was started. The easy shuffle moved the gap left, then up:
+# the gap is at row 2, column 2, tile 11 below it, tile 15 at the bottom right.
+# The window opens at (212, 56): its content starts at screen (213, 72).
+1000 shot
+# a click on tile 11 (cell 14: content 130, 178): it is in the gap's column, it slides up
++200 move 343 250
++100 click
++600 shot
+# Left: the tile right of the gap (15) moves left: solved, "Solved!", the fanfare
++200 {left}
++300 shot
+# the fanfare is over (4 notes, 120 ms apart); a click now does nothing
++1000 move 295 250
++100 click
++500 shot
+# Esc quits (the shell is back)
++200 {esc}
++1000 shot

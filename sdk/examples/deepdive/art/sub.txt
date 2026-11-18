@@ -1,0 +1,43 @@
+; The player's submarine, 16 x 16, facing right (SPR_HFLIP turns it), two frames: the
+; propeller turns. Entry 0 ('.') is transparent in a sprite.
+. = 0
+k = 14                ; outline
+y = 11                ; hull, shade, highlight
+o = 12
+Y = 15
+c = 13                ; porthole glass
+p = 20                ; propeller
+
+................
+................
+..........kk....
+..........kyk...
+........kkkykk..
+......kkyyyyyykk
+..k..kYYyyyyyyyk
+.kpk.kyyykkkyyyk
+.kpkkyyykcckyyyk
+.kpkkyyykcYkyyyk
+.kpk.kyyykkkyyyk
+..k..koyyyyyyyok
+......kooooooook
+.......kkkkkkkk.
+................
+................
+
+................
+................
+..........kk....
+..........kyk...
+........kkkykk..
+.k....kkyyyyyykk
+kpk..kYYyyyyyyyk
+.k...kyyykkkyyyk
+....kyyykcckyyyk
+....kyyykcYkyyyk
+.k...kyyykkkyyyk
+kpk..koyyyyyyyok
+.k....kooooooook
+.......kkkkkkkk.
+................
+................

@@ -1,0 +1,58 @@
+# (0.18) The Atari panel's attach buttons and menu; attaching or ejecting a cartridge is a
+# power cycle (DESK=1; tests/mousegen.py makes tests/desk18.keys from this). Files is at
+# (24, 24); its rows: BLUE.XEX y 146. The panel's content is at (171, 86). Shots (s):
+#   1  10.0  BLUE.XEX dragged from Files onto the Atari icon (the executable), the icon
+#            clicked: the panel, with Attach disk..., Attach cartridge..., Run program...
+#            above Eject all, Restart Atari, Switch to Atari
+#   2  14.5  the panel's Attach cartridge...: the dialog lists only folders and cartridges;
+#            "c", Enter: into carts; "s": Star Raiders + Manual.car selected
+#   3  17.0  Enter: the cartridge attached: the executable ejected, the cartridge mounted,
+#            the classic machine cold booted and not shown (CB_STAY): the desktop stays
+#   4  19.0  a right click in the panel: the Atari icon's menu ("Eject cartridge: ...";
+#            no Open panel)
+#   5  26.0  Esc; the cartridge's Eject in the panel: ejected, cold booted again (not shown;
+#            late enough for the bar's free memory to have been updated)
+# tests/desk18.err: the classic-machine ops of emu816's log, in order
+6000 M -100:-34:0:0
+6050 M -100:0:0:0
+6100 M -20:0:0:0
+6400 M 0:0:0:1
+6500 M 30:-30:0:1
+6560 M 30:-16:0:1
+6620 M 30:0:0:1
+6680 M 30:0:0:1
+6740 M 30:0:0:1
+6800 M 30:0:0:1
+6860 M 30:0:0:1
+6920 M 30:0:0:1
+6980 M 30:0:0:1
+7040 M 30:0:0:1
+7100 M 30:0:0:1
+7160 M 30:0:0:1
+7220 M 30:0:0:1
+7280 M 30:0:0:1
+7340 M 30:0:0:1
+7400 M 30:0:0:1
+7460 M 16:0:0:1
+7700 M 0:0:0:0
+8600 M 0:0:0:1
+8680 M 0:0:0:0
+10500 M -100:100:0:0
+10550 M -100:58:0:0
+10600 M -46:0:0:0
+10650 M 0:0:0:1
+10730 M 0:0:0:0
+11500 c
+12500 \n
+13500 s
+15000 \n
+17500 M -50:-100:0:0
+17550 M 0:-28:0:0
+17600 M 0:0:0:2
+17680 M 0:0:0:0
+19500 {esc}
+20000 M 100:94:0:0
+20050 M 100:0:0:0
+20100 M 9:0:0:0
+20150 M 0:0:0:1
+20230 M 0:0:0:0

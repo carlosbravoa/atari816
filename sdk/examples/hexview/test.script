@@ -1,0 +1,44 @@
+# Input for the first part of `make test` (shell mode: "HEXVIEW.PRG /BIG.BIN").
+# Time 0 = the program was started. The window opens at (8, 28): its content starts at
+# screen (9, 44); the box's inside at (10, 45); the scroll bar at screen x 610-623.
+# 1. the start of BIG.BIN: the 256 byte values, then text
+1200 shot
+# 2. PgDn twice (two pages), then Up three times (the lines move down: a copy back)
++200 {pgdn}{pgdn}
++300 {up}{up}{up}
++500 shot
+# 3. End: the last page, "-- 64 KB here --" on the last line (offset 00FFF0)
++200 {end}
++500 shot
+# 4. View > Go to offset... (ctrl+G): the dialog suggests the offset shown (selected)
++300 ^G
++800 shot
+# typing replaces it: 1F0 and Enter (line 1F hex = 31 at the top)
++200 1f0\n
++600 shot
+# 5. the mouse wheel over the box (3 lines a notch; -2 = two notches down), then the
+# scroll bar's down arrow twice (screen 610-623, 285-298): 8 lines on, top 000270
++200 move 300 200
++200 wheel -2
++300 move 616 292
++200 click
++200 click
++500 shot
+# 6. resize: drag the size grip (bottom right of the window, screen 630, 332) up and left;
+# the box gets fewer lines and columns, the scroll bar and the status line move
++300 move 630 332
++200 press
++100 drag 480 240
++1000 release
++800 shot
+# 7. and bigger again: more lines than at the start
++300 move 476 236
++200 press
++100 drag 634 352
++1000 release
++800 shot
+# 8. Home, then close with ctrl+W (the kernel sends WE_CLOSE): the program ends
++200 {home}
++400 shot
++300 ^W
++800 shot

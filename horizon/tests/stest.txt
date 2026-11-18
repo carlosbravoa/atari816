@@ -1,0 +1,44 @@
+stest 1: play
+  code bank, 8-bit, any voice: voice 0
+  mine 01, all 01
+  window, 16-bit, voice 2: voice 2
+  mine 05, all 05
+stest 2: refused
+  kernel bank: error 04
+  framebuffer: error 04
+  bank nobody owns: error 04
+  past the window: error 04
+  odd 16-bit address: error 01
+  no samples: error 01
+  loop of 3: error 01
+  voice 8: error 01
+stest 3: a bank freed
+  running out of the bank: error 04
+  in the bank, voice 3: voice 3
+  mine 0D, all 0D
+  freed: mine 05, all 05
+stest 4: eight voices
+  voice 1
+  voice 3
+  voice 4
+  voice 5
+  voice 6
+  voice 7
+  mine FF, all FF
+  a ninth: voice 0
+  stop 3: ok
+  mine F7, all F7
+  stop 3 again: error 01
+  stop all: ok
+  mine 00, all 00
+stest 5: sample_set
+  not ours: error 01
+  voice 0
+  ours: ok
+stest 6: children
+  after its exit: mine 00, all 00
+  while it plays: mine 00, all 20
+  its voice 5: error 06
+  after the kill: mine 00, all 00
+stest 7: volume
+stest: done

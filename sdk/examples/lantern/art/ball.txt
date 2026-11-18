@@ -1,0 +1,15 @@
+; The ball, 8 x 8: a little sun.
+. = key
+k = 0
+w = 1
+y = cube 5 5 2
+o = cube 5 3 0
+
+..kkkk..
+.kwyyyk.
+kwyyyyok
+kyyyyyok
+kyyyyook
+kyyyoook
+.kooook.
+..kkkk..

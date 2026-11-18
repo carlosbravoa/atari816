@@ -1,0 +1,5 @@
+# (0.18) GTEST on the text shell (NODESK): the games round's syscalls (user/gtest.s). Its
+# console must match tests/gtest.txt (tests/gtest-r10.txt on REV $09-$0A, tests/gtest-r8.txt
+# below).
+1500 {esc}
++1500 gtest\n

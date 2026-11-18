@@ -1,0 +1,19 @@
+# Screen console pictures (make test): text, then a scrolled screen, then atari / F12.
+# INIT starts the shell with the browser: Esc leaves it
+1500 {esc}
++1500 hello The quick brown fox jumps over the lazy dog: 0123456789 []()<>?!@#$%^&*_+-=|~`'";:,./\\\n
++5000 dir\n
++2000 ps\n
++2000 hllo{left}{left}{left}e
+# shot 1 at 13.5 s
++3000 \n
++500 cat long.txt\n
+# shot 2 at 20 s
+# the pointer: move it over the text (hardware pointer, drawn by Marga)
++2000 M 100:-80:0:0
++300 M 60:-40:0:0
++2700 atari\n
+# shot 3 at 22 s (classic machine: the desktop is off)
++2000 {F12}
++1000 mem\n
+# shot 4 at 26.5 s

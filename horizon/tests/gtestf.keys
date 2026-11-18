@@ -1,0 +1,14 @@
+# (0.18) "gtest f" on the text shell: a full-screen picture (320x180: a status panel by the
+# split, a scrolled playfield wrapping at row 180, three sprites, two raster colours), then
+# Alt+Esc: the full-screen window is minimized and the desktop is back as it was; Alt+Tab
+# brings it back (the full screen again), q ends it (the text shell again).
+1500 {esc}
++1500 gtest f\n
++3000 {dE2}
++100 {esc}
++100 {uE2}
++2000 {dE2}
++100 {d2B}
++100 {u2B}
++100 {uE2}
++2000 q

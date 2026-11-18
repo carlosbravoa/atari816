@@ -1,0 +1,47 @@
+# Write editing session (text shell): sh tests/shots.sh EMU SD writee 45 T1 ...
+# A new document W1.MD typed with the format keys: a heading (ctrl-1), bold on a
+# selection (ctrl-B), a numbered list (Enter continues it, Enter on an empty item ends
+# it), italic on the word at the cursor (ctrl-I), a quote, a nested bullet (Tab), code
+# (ctrl-E), undo and redo; ctrl-S saves it (it has a name). The file must equal
+# tests/write-w1.md. Then File > New (ctrl-N: "Untitled.md"), the toolbar clicked with the
+# mouse: Heading 1, Bold armed and "milk" typed bold, Bold again (out of it); ctrl-S: Save
+# as suggests "Untitled.md", "NOTES" typed: saved as NOTES.md, which must equal
+# tests/write-notes.md. Shot times (s): 18.0 34.0 39.5 41.0 43.0
+#   18.0 a numbered list being typed
+#   34.0 the document after it was saved
+#   39.5 the new document typed with the toolbar (the pointer on Bold: its name below)
+#   41.0 Save as: the name suggested
+#   43.0 saved as NOTES.md (the title)
+1500 {esc}
++1500 write W1.MD\n
+5000 Notes{dE0}1{uE0}{end}\n\nWrite is a word processor for the Atari816.
+# "Atari816" selected (Shift + Left) and made bold
+8500 {left}{dE1}{left}{left}{left}{left}{left}{left}{left}{left}{uE1}
+9400 {dE0}b{uE0}
+10000 {end}\n\nThree things:\n1. First\nSecond\nThird
+# Enter on the empty item ends the list; ctrl-I on the word at the cursor
+18500 \n\nDone.{left}{left}{left}
+19500 {dE0}i{uE0}
+20000 {dE0}{end}{uE0}
+20500 \n\n> Quoted text\nmore\n\nA list:\n- one\n{d2B}{u2B}two\nthree
+# ctrl-E: "three" as code; undo it, redo it; ctrl-S
+31000 {dE0}e{uE0}
+31500 {dE0}z{uE0}
+32000 {dE0}y{uE0}
+32500 {dE0}s{uE0}
+# a new document; the pointer to Heading 1 (170, 47), a click, text; Bold (90, 47) twice
+34500 {dE0}n{uE0}
+35000 M -100:-100:0:0
++50 M -50:-33:0:0
++300 M 0:0:0:1
++100 M 0:0:0:0
+36000 Plan\n\nBuy 
+37000 M -80:0:0:0
++300 M 0:0:0:1
++100 M 0:0:0:0
+37600 milk
+38100 M 0:0:0:1
++100 M 0:0:0:0
+38500  today.
+40000 {dE0}s{uE0}
+41500 NOTES\n

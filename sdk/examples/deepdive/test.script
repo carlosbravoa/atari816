@@ -1,0 +1,20 @@
+# Input for `make test` (sdk/tools/inputscript.py). Time 0 = the program was started.
+# 1. the start: the full screen, the panel, the submarine at the entrance, a pearl
+1500 shot
+# 2. along the upper gallery to the right: the camera scrolls, two pearls are found
++100 key right 2200
++2300 shot
+# 3. down the shaft: vertical scrolling (the ring wraps), the water darker below
++100 key down 1300
++1400 shot
+# 4. Alt+Esc: the desktop comes back as it was; the game waits in its window (paused)
++300 {alt-esc}
++800 shot
+# 5. Alt+Tab: the game's screen again, exactly as it was
++300 {alt-tab}
++800 shot
+# 6. a little to the left, then Esc: back to the desktop, the program ends
++100 key left 600
++700 shot
++300 {esc}
++1000 shot

@@ -1,0 +1,5 @@
+# LEAK (text shell): 200 programs that take windows, a menu, a timer, the pointer shape,
+# the screen hold, the clipboard, files, banks and a port, and never give them back
+# (half of them exit, half are killed): everything must be free again afterwards.
+2000 {esc}
++1000 leak 200\n

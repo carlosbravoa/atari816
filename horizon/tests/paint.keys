@@ -1,0 +1,181 @@
+# Paint (PAINT.PRG) session on the text shell (NODESK): sh tests/shots.sh EMU SD paint 26 T1 ...
+# Good shot times (s): 12.1 13.2 15.4 16.4 17.9 21.9 24.5 25.9   (total 27 s)
+#   12.1 every tool used: a pencil wave, a red line, a blue frame flood-filled yellow, a green
+#        filled rectangle, the white background flood-filled pale blue; the eyedropper picked
+#        the line's red (the foreground swatch)
+#   13.2 a red rectangle being dragged: the live preview, the crosshair pointer
+#   15.4 right click on a palette colour (background light grey), Edit > Clear to background
+#   16.4 ctrl-Z: the clear undone
+#   17.9 ctrl-S on a new picture: the Save as dialog, PICTURE.PIC suggested
+#   21.9 File > Save as BMP...: the dialog, PICTURE.BMP suggested
+#   24.5 both saved: the title "Paint: PICTURE.PIC" (/PICTURE.PIC 64,012 bytes, /PICTURE.BMP 65,078)
+#   25.9 a rectangle drawn with the right button: in the background colour (light grey); the
+#        crosshair over the canvas without a button
+# The window's content is at (61, 56) on the screen, the canvas at content (40, 8), the
+# palette's cube cell (r, g, b) at content (44 + 8 (6 r + b), 232 + 8 g). The pointer starts at
+# (320, 180); moves of at most 100. Generated with a small script (absolute times, ms).
+1500 {esc}
+3000 paint\n
+# pencil: a wave
+5500 M -100:-86:0:0
+5530 M -99:0:0:0
+5560 M 0:0:0:1
+5640 M 7:-7:0:1
+5670 M 7:-7:0:1
+5700 M 6:-6:0:1
+5730 M 7:7:0:1
+5760 M 7:7:0:1
+5790 M 6:7:0:1
+5820 M 0:7:0:1
+5850 M 0:2:0:1
+5880 M 7:-7:0:1
+5910 M 7:-7:0:1
+5940 M 6:-7:0:1
+5970 M 0:-4:0:1
+6000 M 7:7:0:1
+6030 M 7:7:0:1
+6060 M 6:7:0:1
+6090 M 0:7:0:1
+6120 M 0:2:0:1
+6150 M 7:-7:0:1
+6180 M 7:-7:0:1
+6210 M 6:-7:0:1
+6240 M 0:-4:0:1
+6270 M 0:0:0:0
+# red, line tool (key l)
+6470 M 100:100:0:0
+6500 M 24:100:0:0
+6530 M 0:4:0:0
+6560 M 0:0:0:1
+6640 M 0:0:0:0
+6790 l
+6990 M -100:-44:0:0
+7020 M -100:0:0:0
+7050 M -24:0:0:0
+7080 M 0:0:0:1
+7160 M 12:-12:0:1
+7190 M 12:-12:0:1
+7220 M 12:-12:0:1
+7250 M 12:-12:0:1
+7280 M 12:-12:0:1
+7310 M 12:-12:0:1
+7340 M 12:-12:0:1
+7370 M 12:-12:0:1
+7400 M 12:-12:0:1
+7430 M 12:-12:0:1
+7460 M 10:0:0:1
+7490 M 0:0:0:0
+# blue, rectangle (r)
+7690 M -100:100:0:0
+7720 M -6:64:0:0
+7750 M 0:0:0:1
+7830 M 0:0:0:0
+7980 r
+8180 M 100:-100:0:0
+8210 M 26:-100:0:0
+8240 M 0:-4:0:0
+8270 M 0:0:0:1
+8350 M 12:12:0:1
+8380 M 12:12:0:1
+8410 M 12:12:0:1
+8440 M 12:12:0:1
+8470 M 12:12:0:1
+8500 M 12:12:0:1
+8530 M 12:12:0:1
+8560 M 12:6:0:1
+8590 M 12:0:0:1
+8620 M 12:0:0:1
+8650 M 10:0:0:1
+8680 M 0:0:0:0
+# green, filled rectangle (f)
+8880 M -100:100:0:0
+8910 M -100:46:0:0
+8940 M -96:0:0:0
+8970 M 0:0:0:1
+9050 M 0:0:0:0
+9200 f
+9400 M 100:-100:0:0
+9430 M 86:-26:0:0
+9460 M 0:0:0:1
+9540 M 12:12:0:1
+9570 M 12:12:0:1
+9600 M 12:12:0:1
+9630 M 12:12:0:1
+9660 M 12:7:0:1
+9690 M 12:0:0:1
+9720 M 12:0:0:1
+9750 M 12:0:0:1
+9780 M 4:0:0:1
+9810 M 0:0:0:0
+# yellow, flood fill (b) inside the blue frame
+10010 M -46:79:0:0
+10040 M 0:0:0:1
+10120 M 0:0:0:0
+10270 b
+10470 M -14:-100:0:0
+10500 M 0:-100:0:0
+10530 M 0:-4:0:0
+10560 M 0:0:0:1
+10640 M 0:0:0:0
+# pale blue, flood fill the white background
+10790 M -42:100:0:0
+10820 M 0:96:0:0
+10850 M 0:0:0:1
+10930 M 0:0:0:0
+11080 M -100:-100:0:0
+11110 M -78:-56:0:0
+11140 M 0:0:0:1
+11220 M 0:0:0:0
+# eyedropper (i): pick the red of the line
+11370 i
+11570 M 75:20:0:0
+11600 M 0:0:0:1
+11680 M 0:0:0:0
+# a rectangle in red, shot during the drag (preview)
+12130 r
+12330 M -55:20:0:0
+12360 M 0:0:0:1
+12440 M 10:10:0:1
+12470 M 10:10:0:1
+12500 M 10:10:0:1
+12530 M 10:10:0:1
+12560 M 10:10:0:1
+12590 M 10:0:0:1
+12620 M 10:0:0:1
+12650 M 10:0:0:1
+12680 M 10:0:0:1
+13510 M 0:0:0:0
+# right click: background C_LIGHT; Edit > Clear to background; ctrl-Z undoes it
+13810 M 70:24:0:0
+13840 M 0:0:0:2
+13920 M 0:0:0:0
+14070 M -100:-100:0:0
+14100 M -100:-100:0:0
+14130 M -26:-72:0:0
+14160 M 0:0:0:1
+14240 M 0:0:0:0
+14390 M 25:32:0:0
+14420 M 0:0:0:1
+14500 M 0:0:0:0
+15650 {dE0}z{uE0}
+# ctrl-S: Save as (PICTURE.PIC suggested), Enter
+16650 {dE0}s{uE0}
+18150 \n
+# File > Save as BMP..., Enter
+20150 M -65:-32:0:0
+20180 M 0:0:0:1
+20260 M 0:0:0:0
+20410 M 35:74:0:0
+20440 M 0:0:0:1
+20520 M 0:0:0:0
+22170 \n
+# the right button draws in the background colour: a light grey rectangle (the crosshair
+# shows over the canvas without a button too)
+24800 M 100:100:0:0
+24830 M 100:42:0:0
+24860 M 38:0:0:0
+25000 M 0:0:0:2
+25100 M 40:10:0:2
+25200 M 40:10:0:2
+25300 M 0:0:0:0
+25500 M -20:-30:0:0

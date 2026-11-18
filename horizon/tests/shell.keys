@@ -1,0 +1,93 @@
+# Shell session for "make test" (tests/keyscript.py turns it into --keys).
+# Commands are 3 s apart: longer than the slowest one takes at 2000 us per console byte.
+# INIT starts the shell with the file browser: Esc leaves it
+1500 {esc}
++1500 help\n
++3000 dir\n
++3000 cat readme.txt\n
++3000 hello\n
++3000 count A &\n
++3000 ps\n
++3000 mem\n
++3000 crash 1\n
++3000 crash 9\n
+# ctrl-C while CRASH 9 sleeps in the foreground: the break key kills it
++1500 ^C
++1500 hellp\bo world\n
++3000 nosuch\n
++3000 kill 99\n
++3000 ^C
+# line editing: "hllo", three times left, insert "e", back to the end; then history
++1000 hllo{left}{left}{left}e{right}{right}{right} there\n
++3000 {up}\n
++3000 {up}{up}{up}{down}\n
+# an empty line must not enter the history: up still recalls the last command
++3000 \n
++1000 {up}\n
+# the classic machine: keys typed meanwhile go to the Atari; 'q' is held across F12 and
+# released after the return: it must not reach the shell
++3000 atari\n
++2000 xyz
++1000 {d14}
++300 {F12}
++300 {u14}
++1500 hello back\n
++3000 crash 13\n
+# the watchdog needs 2 s to catch the SEI loop
++5000 cls\n
++2000 exit\n
+# the new shell starts with the browser again: Esc
++2000 {esc}
++3000 ps\n
+# the mouse demo: the I/O processor's MOUSE events (500 ms apart, so even a slow console
+# reads each one before the next), then a key ends it
++3000 mouse\n
++1500 M 40:-30:0:0
++500 M 0:0:0:1
++500 M -10:5:0:1
++500 M 0:0:0:0
++500 M 0:0:2:0
++500 M 0:0:-1:0
++1000 q
+# Atari software (emu816 stubs the I/O processor ops $18-$1A: same checks and result
+# codes, any existing file with a known extension mounts, BOOT succeeds)
++2000 mount\n
++2000 mount game.atr 9\n
++2000 mount readme.txt 2\n
++2000 mount nosuch.atr\n
++2000 mount blue.xex\n
++2000 eject d7\n
++2000 eject xex\n
++2000 eject cart\n
++2000 boot\n
++2000 {F12}
++1500 run long.txt\n
++2000 run blue.xex\n
++2000 {F12}
++1500 run\n
+# current directory, quoted names, paged ls of a 250-entry folder, programs by path
++2000 pwd\n
++2000 cd many\n
++2000 ls\n
++2000 x
++2000 q
++2000 cd "../disks/xex/R - Z"\n
++2000 pwd\n
++2000 dir\n
++2000 run "River Raid (Title Version).xex"\n
++2000 {F12}
++1500 cd /\n
++2000 "programs/Hello Program.prg" with args\n
++2000 cd nosuch\n
++2000 cd README.TXT\n
++2000 cat "docs/Read me first.txt"\n
+# files: mkdir, cp (into a folder and to a name), mv (a name with a space), ls, cat, rm
++5000 mkdir tmp\n
++3000 cp README.TXT tmp\n
++3000 mv tmp/README.TXT "tmp/read me.txt"\n
++3000 cp LONG.TXT tmp/long2.txt\n
++3000 ls tmp\n
++3000 cat "tmp/read me.txt"\n
++3000 rm "tmp/read me.txt" tmp/long2.txt nothere\n
++3000 rm tmp\n
++3000 mv\n

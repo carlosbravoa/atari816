@@ -1,0 +1,40 @@
+# Sheet (SHEET.PRG) session on the text shell: sh tests/shots.sh EMU SD sheet 21 T1 ...
+# Shot times (s): 7.0 11.0 13.8 15.6 17.0 18.6
+#   7.0  /programs/BUDGET.SHT: texts, numbers in their columns' formats, totals, shares
+#   11.0 a formula being typed in E16: "=B17/" and a click on B16 puts its name in
+#   13.8 the range B4:C8 selected with Shift + arrows (E16 now shows the result)
+#   15.6 the Format menu
+#   17.0 Format > 0 decimals for the selected columns B and C
+#   18.6 column A made wider by dragging its header's right line
+# The pointer starts at (320, 180); moves of at most 100.
+1500 {esc}
++1500 sheet /programs/BUDGET.SHT\n
+# to E16 (15 down, 4 right), then "=B17/"
+8000 {down}{down}{down}{down}{down}{down}{down}{down}{down}{down}{down}{down}{down}{down}{down}{right}{right}{right}{right}
+9300 =B17/
+# a click on B16 (screen 202, 294) inserts B16
+10000 M -100:100:0:0
++50 M -18:14:0:0
++200 M 0:0:0:1
++100 M 0:0:0:0
+# shot at 11.0; Enter takes it (the cursor goes to E17)
+11500 \n
+# to B4, then Shift + 4 down, 1 right: B4:C8
+12000 {up}{up}{up}{up}{up}{up}{up}{up}{up}{up}{up}{up}{up}{left}{left}{left}
+12900 {dE1}{down}{down}{down}{down}{right}{uE1}
+# Format (113, 6): press and release on the title, the menu stays open
+14500 M -89:-100:0:0
++50 M 0:-100:0:0
++50 M 0:-88:0:0
++300 M 0:0:0:1
++100 M 0:0:0:0
+# shot at 15.6; "0 decimals" (second item, y 38)
+16000 M 0:32:0:0
++200 M 0:0:0:1
++100 M 0:0:0:0
+# shot at 17.0; drag the line between the headers A and B (screen 161, 70) 40 to the right
+17400 M 48:32:0:0
++200 M 0:0:0:1
++100 M 20:0:0:1
++100 M 20:0:0:1
++100 M 0:0:0:0

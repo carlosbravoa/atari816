@@ -1,0 +1,107 @@
+Licence for the original work in this Tang Nano 20K port and the Atari816
+==========================================================================
+
+Copyright (c) 2026 Carlos Bravo
+
+The files listed under "WHAT IS COVERED" below are DUAL LICENSED. You may use
+them under EITHER of the following, at your option:
+
+    (a) Creative Commons Attribution-NonCommercial-ShareAlike 4.0 International
+        (CC BY-NC-SA 4.0)
+        Full text: LICENSES/CC-BY-NC-SA-4.0.txt
+        Summary:   https://creativecommons.org/licenses/by-nc-sa/4.0/
+
+    (b) GNU General Public License, version 3 or (at your option) any later
+        version
+        Full text: LICENSES/GPL-3.0.txt
+
+SPDX-License-Identifier: CC-BY-NC-SA-4.0 OR GPL-3.0-or-later
+
+Option (a) is the plain-language default: use, share and adapt this work freely
+for non-commercial purposes, credit the source, and share your adaptations of it
+under those same terms.
+
+Option (b) exists so that these files stay compatible with the GPL-licensed
+components this port is built on (the NESTang IO subsystem, the PicoRV32
+firmware base and the 65C816 CPU core, see LICENSE section 2). Anyone combining this port's original
+work with GPL code can take option (b) and has no licence conflict to resolve.
+
+Choosing option (b) does NOT unlock commercial use of the project as a whole:
+the upstream Atari core is non-commercial regardless of what these files say
+(LICENSE section 1). Option (b) frees these files, not the machine.
+
+This grant covers ONLY the files below. It does not, and cannot, change the
+terms of any third-party component in this repository — see LICENSE for the
+component map, and note in particular that the upstream Atari core, the NESTang
+IO subsystem and the PicoRV32 firmware base are NOT covered by this file.
+
+
+WHAT IS COVERED
+---------------
+
+RTL and board integration (src/)
+    tang_top.sv, tang_top_blink.sv
+    scandoubler_480p.sv, test_pattern_720p.sv
+    hdmi_audio_out.sv
+    sigma_delta_dac.sv
+    gw2ar_sdram.sv
+    fw_bram.v
+    usb_to_atari800.sv, uart_kbd_ch9350.sv
+    bram.vhd, sdram_statemachine.vhdl (the Tang stub)
+
+Atari816 hardware (src/a816/)
+    a816_sys.sv, a816_nvc.sv, a816_blit.sv, a816_snd.sv, mcode_pack.py
+    NOTE: the 65C816 CPU core files in the same directory (P65C816.v, ALU.v,
+    AddrGen.v, AddSubBCD.v, BCDAdder.v, adder4.v, bit_adder.v, common.sv,
+    mcode.sv, mcode_packed.sv) are NOT covered here: they are GPL-3.0
+    (LICENSE section 2). mcode_pack.py is covered; its output
+    mcode_packed.sv is a derived work of mcode.sv and stays GPL-3.0.
+
+Atari816 test programs and simulation
+    sw/a816/* (the 65C816 test programs, their Makefile and linker config),
+    sim_a816/*.sv, sim_a816/*.sh (Verilator testbenches and run scripts)
+
+Build system and constraints
+    build.tcl, build_blink.tcl, build_minimal.tcl, Makefile,
+    flash_it.sh, constraints/*
+
+Firmware additions (firmware/)
+    bin2bram.py, mkcold.py, xex_loader.h, xex_loader.py, xex_loader_test.py,
+    math.h, stdlib.h, string.h
+    NOTE: firmware/firmware.c and the other files derived from
+    nand2mario/firmware-picorv32 are NOT covered here — the SIO disk emulation,
+    cartridge support, PC link, .xex loader and the Atari816 mailbox
+    written for this port live inside those files and are therefore derivative
+    works governed by the upstream terms (see LICENSE section 2).
+
+Host-side tools (tools/) and tests (test/)
+    atari.py, atari_gui.py, atari_link.py, atari_net.py, dotmatrix_pdf.py,
+    hdd_handler.py, r_handler.py, make_modem_disk.py, the test_*.py files,
+    a816_screen.py, ashlog.py, ashterm.py, tools/README.md,
+    tools/fujinet_850/*, test/fatfs_host/*
+
+Documentation
+    README.md, KNOWN_ISSUES.md, docs/*, and the other Markdown design notes in
+    core/
+
+
+WHAT IS NOT COVERED
+-------------------
+
+Everything under rtl/, the third-party files in src/, src/a816/ and firmware/
+that are listed in LICENSE section 2. Their own headers and licences apply.
+
+
+A NOTE ON USING A CC LICENCE FOR CODE
+-------------------------------------
+
+Creative Commons advises against CC licences for software: they contain no
+patent grant and no source-code ("preferred form for making modifications")
+provisions, and ShareAlike was not drafted with linking or hardware description
+languages in mind. CC BY-NC-SA 4.0 is offered here as a deliberate, plain-language
+statement of intent — this is a hobby project that must stay non-commercial
+because the Atari core it builds on requires that — and not as a claim that it
+is the ideal software licence. The GPL-3.0-or-later option above is there for
+anyone who needs a licence written for code.
+
+If you need these files under different terms, ask.

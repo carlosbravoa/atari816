@@ -1,0 +1,97 @@
+SHEET 1
+W A 136
+W B 84
+W C 12
+W D 36
+W E 76
+W F 68
+W G 68
+W H 76
+F B GT
+F E 2T
+F F 2T
+F G 2T
+F H 2T
+A1 Loan and savings
+A3 Loan amount
+B3 20000
+A4 Interest % per year
+B4 6
+A5 Years
+B5 5
+A6 Payments per year
+B6 12
+A7 Payments
+B7 =B5*B6
+A8 Payment
+B8 =ROUND(PMT(B4/100/B6,B7,B3),2)
+A9 Total paid
+B9 =B8*B7
+A10 Interest paid
+B10 =B9-B3
+A13 Savings per year
+B13 1000
+A14 Interest % per year
+B14 5
+A15 Saved after 10 years
+B15 =H13
+A16 Interest earned
+B16 =B15-SUM(G4:G13)
+A18 Numbers have four decimals:
+A19 rates per payment are exact
+A20 when they fit (6% / 12 = 0.005).
+D3 Year
+E3 Start
+F3 Interest
+G3 Deposit
+H3 End
+D4 1
+E4 0
+F4 =E4*$B$14/100
+G4 =$B$13
+H4 =E4+F4+G4
+D5 =D4+1
+E5 =H4
+F5 =E5*$B$14/100
+G5 =$B$13
+H5 =E5+F5+G5
+D6 =D5+1
+E6 =H5
+F6 =E6*$B$14/100
+G6 =$B$13
+H6 =E6+F6+G6
+D7 =D6+1
+E7 =H6
+F7 =E7*$B$14/100
+G7 =$B$13
+H7 =E7+F7+G7
+D8 =D7+1
+E8 =H7
+F8 =E8*$B$14/100
+G8 =$B$13
+H8 =E8+F8+G8
+D9 =D8+1
+E9 =H8
+F9 =E9*$B$14/100
+G9 =$B$13
+H9 =E9+F9+G9
+D10 =D9+1
+E10 =H9
+F10 =E10*$B$14/100
+G10 =$B$13
+H10 =E10+F10+G10
+D11 =D10+1
+E11 =H10
+F11 =E11*$B$14/100
+G11 =$B$13
+H11 =E11+F11+G11
+D12 =D11+1
+E12 =H11
+F12 =E12*$B$14/100
+G12 =$B$13
+H12 =E12+F12+G12
+D13 =D12+1
+E13 =H12
+F13 =E13*$B$14/100
+G13 =$B$13
+H13 =E13+F13+G13

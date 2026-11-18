@@ -1,0 +1,3 @@
+# Write timings (text shell): "write -b /docs/Welcome.md" prints them on the console
+1500 {esc}
++1500 write -b /docs/Welcome.md\n

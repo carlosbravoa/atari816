@@ -1,0 +1,103 @@
+#
+# The xPack GNU RISC-V Embedded GCC
+# https://github.com/xpack-dev-tools/riscv-none-elf-gcc-xpack
+#
+TARGET_ELF = firmware.elf
+TARGET_BIN = firmware.bin
+RISCV = riscv64-unknown-elf
+CC = $(RISCV)-gcc
+OBJCOPY = $(RISCV)-objcopy
+OBJDUMP = $(RISCV)-objdump
+# EXTRA_CFLAGS: append build-time options, e.g. `make EXTRA_CFLAGS=-DSIO_HW_CAPTURE`
+# to enable the Phase B hardware SIO command-capture path (default = software path).
+# -flto (+ -Os at link): link-time optimisation — the compiler sees the whole program
+# at the link step (cross-file inlining, dead code, shared constants). Pure code-size
+# lever, no RTL change. Needs the firmware's own memcpy/memset/memcmp/strlen marked
+# __attribute__((used)) in picorv32.c (GCC emits calls to them after optimisation).
+# -msave-restore: function prologues/epilogues call the libgcc __riscv_save/restore
+# stubs instead of inlining the register pushes. Pure code-size lever (text 51356 ->
+# ~46.5 KB, headroom 556 B -> ~5.3 KB on 2026-10-14), no RTL change, so bitstream
+# placement is untouched. Safe: every firmware timing path reads reg_cycle (hardware
+# counter), SIO/SPI are hardware blocks — nothing depends on instruction count.
+EXTRA_CFLAGS ?=
+CFLAGS  = -Wall -Os -g -ffunction-sections -fdata-sections -mabi=ilp32 -march=rv32i -msave-restore -ffreestanding -I. $(EXTRA_CFLAGS)
+LFLAGS = -mabi=ilp32 -march=rv32i -msave-restore -Os -Wl,-Map=firmware.map,--build-id=none,-Bstatic,-T,baremetal.ld,--gc-sections -nostdlib
+LIBS = -lgcc
+
+SRCS := start.S firmware.c picorv32.c spi_sd.c spiflash.c \
+	fatfs/diskio.c fatfs/ff.c fatfs/ffunicode.c
+OBJS := $(SRCS:.c=.o)
+OBJS := $(OBJS:.S=.o)
+HDRS := $(wildcard *.h) $(wildcard fatfs/*.h)
+
+ifeq ($(VERBOSE),1)
+  Q =
+else
+  Q = @
+endif
+
+# BSRAM boot-RAM depth in 32-bit words (32 KB = 8192 words = 16 BSRAM blocks).
+BRAM_DEPTH = 8192
+BRAM_DIR   = ../src
+BRAM_HEX   = $(BRAM_DIR)/fw_lane0.hex
+
+default: $(TARGET_BIN) $(BRAM_HEX)
+all: default
+
+# Regenerate the 6502 XEX boot-loader image from its assembler source.
+xex_loader.h: xex_loader.py
+ifneq ($(VERBOSE),1)
+	@echo GEN xex_loader.h
+endif
+	$(Q)python3 xex_loader.py
+firmware.o: xex_loader.h
+
+%.o: %.c $(HDRS)
+ifneq ($(VERBOSE),1)
+	@echo CC $@
+endif
+	$(Q)$(CC) $(CFLAGS) -c $< -o $@
+
+%.o: %.S $(HDRS)
+ifneq ($(VERBOSE),1)
+	@echo CC $@
+endif
+	$(Q)$(CC) $(CFLAGS) -c $< -o $@
+
+.PRECIOUS: $(TARGET_BIN) $(TARGET_ELF) $(OBJS)
+
+$(TARGET_ELF): $(OBJS) baremetal.ld
+ifneq ($(VERBOSE),1)
+	@echo CC $@
+endif
+	$(Q)$(CC) $(LFLAGS) $(OBJS) $(LIBS) -o $@
+
+$(TARGET_BIN): $(TARGET_ELF)
+ifneq ($(VERBOSE),1)
+	@echo OBJCOPY $@
+endif
+	$(Q)$(OBJCOPY) -R .cold $(TARGET_ELF) $(TARGET_BIN) -O binary
+	$(Q)$(OBJCOPY) -j .cold $(TARGET_ELF) cold_raw.bin -O binary
+	$(Q)python3 mkcold.py $(TARGET_BIN) cold_raw.bin `$(RISCV)-nm $(TARGET_ELF) | grep ' cold_sig$$' | cut -d' ' -f1` cold.bin
+	$(Q)$(RISCV)-size -A $(TARGET_ELF) | grep -E '^\.(text|data|bss|cold) '
+	$(Q)$(OBJDUMP) -d $(TARGET_ELF) > disasm.txt
+
+# Generate BSRAM init hex (4 byte lanes) from the firmware binary.
+# The RTL-consistency grep guards against the AWORDS init hole (INVESTIGATE.md
+# #10): fw_bram's DECLARED depth caps how far $readmemh initialises — if the
+# instantiation parameter lags BRAM_DEPTH, every init byte above it silently
+# powers up ZERO on silicon (image crossing 48 KB cost a day of debugging).
+$(BRAM_HEX): $(TARGET_BIN) bin2bram.py
+ifneq ($(VERBOSE),1)
+	@echo BIN2BRAM "->" $(BRAM_DIR)/fw_lane{0..3}.hex
+endif
+	$(Q)grep -q "AWORDS($(BRAM_DEPTH))" ../src/iosys_picorv32.v || \
+		{ echo "ERROR: fw_bram .AWORDS in src/iosys_picorv32.v != BRAM_DEPTH=$(BRAM_DEPTH) — init hole!"; exit 1; }
+	$(Q)python3 bin2bram.py $(TARGET_BIN) $(BRAM_DIR) $(BRAM_DEPTH)
+
+clean:
+	$(Q)rm -f $(OBJS) $(TARGET_ELF) $(TARGET_BIN) cold_raw.bin cold.bin firmware.map \
+		$(BRAM_DIR)/fw_lane0.hex $(BRAM_DIR)/fw_lane1.hex \
+		$(BRAM_DIR)/fw_lane2.hex $(BRAM_DIR)/fw_lane3.hex
+
+.PHONY: default all clean

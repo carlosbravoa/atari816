@@ -1,0 +1,43 @@
+# Calculator (CALC.PRG) session on the text shell: sh tests/shots.sh EMU SD calc 21 T1 ...
+# Shot times (s): 7.8 10.0 11.8 17.5 19.5 (the same pictures with and without the blitter)
+#   7.8  Standard: 1234.5 + 67.25 typed, the pointer holding = down (drawn pressed)
+#   10.0 M+ clicked (the M), then 2 / 0 =: the error
+#   11.8 Esc, 2 and the root key clicked: 1.4142135623731
+#   17.5 View > Programmer: 255 * 1000 =, F5 (hex), And, ff typed: "3E418 AND", FF
+#   19.5 a click on the BIN line: binary input (2-9, A-F greyed)
+# The pointer starts at (320, 180); the window's content is at (201, 80).
+1500 {esc}
++1500 calc\n
+5000 1234.5+67.25
+7000 M 59:100:0:0
++20 M 0:10:0:0
++200 M 0:0:0:1
+8000 M 0:0:0:0
+8600 M -72:-100:0:0
++20 M 0:-38:0:0
++200 M 0:0:0:1
++100 M 0:0:0:0
+9000 2/0=
+10500 {esc}2
+11000 M 40:28:0:0
++200 M 0:0:0:1
++100 M 0:0:0:0
+# View (title at 67, 6), Programmer (second item, y 38)
+12200 M -100:-100:0:0
++20 M -100:-74:0:0
++20 M -80:0:0:0
++100 M 0:0:0:1
++100 M 0:0:0:0
++300 M 13:32:0:0
++100 M 0:0:0:1
++100 M 0:0:0:0
+13500 255*1000=
+15500 {d3e}{u3e}
+16000 &ff
+18500 M 100:100:0:0
++20 M 61:19:0:0
++200 M 0:0:0:1
++100 M 0:0:0:0
++300 M 100:-47:0:0
++20 M 100:0:0:0
++20 M 79:0:0:0

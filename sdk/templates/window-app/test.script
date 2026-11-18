@@ -1,0 +1,25 @@
+# Input for `make test` (sdk/tools/inputscript.py). Time 0 = the program was started.
+# The window opens with the focus in the name field.
+800 Ada\n
+# Enter = the default button (Greet): "Hello, Ada!"
++700 shot
+# Help > About... from the keyboard: Alt+H opens the Help menu, Enter picks About...
++200 {alt-h}
++500 \n
++800 shot
++300 {esc}
+# File > Save as... (ctrl+S): the dialog suggests NAME.TXT; Enter saves it
++600 ^S
++1200 shot
++200 \n
+# Clear the field with the mouse: the Clear button is at content (224..288, 40..60);
+# the window's content starts at screen (121, 76)
++800 move 376 126
++300 click
++600 shot
+# File > Open... (ctrl+O); the list has the focus (typing a name there does nothing):
+# a double click on NAME.TXT (its row is at screen y 239) opens it: the field gets "Ada"
++300 ^O
++1200 move 180 239
++300 dclick
++1000 shot

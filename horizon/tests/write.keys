@@ -1,0 +1,89 @@
+# Write (WRITE.PRG) picture session on the text shell: sh tests/shots.sh EMU SD write 38 T1 ...
+# Shot times (s): 6.0 8.0 10.5 13.0 21.0 24.0 31.0 33.2 35.5
+#   6.0  /docs/Welcome.md formatted: headings, bold, italic, code, lists, quote, rule; the
+#        toolbar (Heading 1 pressed in: the cursor's line)
+#   8.0  the cursor inside a bold span: the markers of its line shown (grey); Bold and
+#        Normal text pressed in
+#   10.5 View > Show markup: the markup everywhere
+#   13.0 the Format menu open (with its shortcuts and check marks where the kernel keeps
+#        menus of more than 254 bytes; the short menu otherwise)
+#   21.0 a list being typed at the end (a nested item, Tab), its markers on the cursor's line
+#   24.0 View > Page width: a centred column
+#   31.0 a paragraph in bold with italic inside, across the ends of its rows (soft wraps)
+#   33.2 the pointer on the toolbar's Bold button: raised, named on the status line
+#   35.5 Bold clicked with no word at the cursor (armed), "bold" typed: bold, Bold pressed
+# The pointer starts at (320, 180); moves of at most 100. Between the menus it waits at
+# (632, 200), on the desktop right of the window. Menu titles: View (105, 6), Format
+# (154, 6); items 14 lines apart from y 23.
+1000 M 100:20:0:0
++50 M 100:0:0:0
++50 M 100:0:0:0
++50 M 12:0:0:0
+1500 {esc}
++1500 write /docs/Welcome.md\n
+# into "**Atari816**" on line 3 (shot at 8.0)
+7000 {down}{down}{right}{right}{right}{right}{right}{right}
+# View > Show markup (shot at 10.5), then View > Hide markup
+8500 M -100:-100:0:0
++50 M -100:-94:0:0
++50 M -100:0:0:0
++50 M -100:0:0:0
++50 M -100:0:0:0
++50 M -27:0:0:0
++200 M 0:0:0:1
++100 M 0:0:0:0
++300 M 0:17:0:0
++200 M 0:0:0:1
++100 M 0:0:0:0
+11000 M 0:-17:0:0
++200 M 0:0:0:1
++100 M 0:0:0:0
++300 M 0:17:0:0
++200 M 0:0:0:1
++100 M 0:0:0:0
+# the Format menu (shot at 13.0), then its "Normal" (a paragraph stays one)
+12200 M 49:-17:0:0
++200 M 0:0:0:1
++100 M 0:0:0:0
+13500 M 0:115:0:0
++200 M 0:0:0:1
++100 M 0:0:0:0
++200 M 100:79:0:0
++50 M 100:0:0:0
++50 M 100:0:0:0
++50 M 100:0:0:0
++50 M 78:0:0:0
+# ctrl-End, a heading and a list typed (shot at 21.0)
+14500 {dE0}{end}{uE0}## Shopping\nTo buy: **bread**, *fruit*:\n- Apples\nPears\n{d2B}{u2B}Green pears\nRed
+# View > Page width (shot at 24.0)
+22000 M -100:-100:0:0
++50 M -100:-94:0:0
++50 M -100:0:0:0
++50 M -100:0:0:0
++50 M -100:0:0:0
++50 M -27:0:0:0
++200 M 0:0:0:1
++100 M 0:0:0:0
++300 M 0:31:0:0
++200 M 0:0:0:1
++100 M 0:0:0:0
++200 M 100:100:0:0
++50 M 100:63:0:0
++50 M 100:0:0:0
++50 M 100:0:0:0
++50 M 100:0:0:0
++50 M 27:0:0:0
+# three Enters end the list; a bold paragraph with italic inside, wrapped on 3 rows; Enter
+# (the cursor leaves it: its markers hidden; shot at 31.0)
+24500 \n\n\n**Bold text runs on across the end of a row, with *italic words* inside it, and stays bold.**
+30200 \nArmed: 
+# the pointer to the Bold button (90, 47) (shot at 33.2), a click, "bold" typed (35.5)
+32000 M -100:-100:0:0
++50 M -100:-53:0:0
++50 M -100:0:0:0
++50 M -100:0:0:0
++50 M -100:0:0:0
++50 M -42:0:0:0
+33600 M 0:0:0:1
++100 M 0:0:0:0
+34000 bold

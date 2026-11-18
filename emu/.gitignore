@@ -1,0 +1,4 @@
+emu816
+tests/cputest
+tests/sst/
+tests/asm/*.o

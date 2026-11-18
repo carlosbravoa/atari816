@@ -1,0 +1,109 @@
+# Solitaire (SOLITAIR.PRG) session on the text shell: sh tests/shots.sh EMU SD solitair 60 T1 ...
+# Shot times (s): 5.5 6.8 11.0 14.5 17.4 20.4 58 (the same pictures with and without the blitter)
+#   5.5  Klondike deal 3 as dealt (solitair -d 3)
+#   6.8  the 6 of hearts dragged towards the 7 of spades (the button held)
+#   11.0 dropped there; the ace of hearts sent home by a double click; three cards drawn;
+#        the Options menu open (draw one marked)
+#   14.5 Draw three cards (the deal again), red backs, three draws and an undo: two fans
+#   17.4 Game > FreeCell, then Game > Choose deal...: 1 typed
+#   20.4 FreeCell deal 1: the 4 of hearts dragged to a free cell; the queen of clubs and the
+#        jack of hearts carried (it flies back when let go: no place takes them); Game > Close
+#   58   "solitair -s": FreeCell deal 1 replayed to the end, the win (the cards in a ring)
+# The pointer starts at (320, 180); the window's content is at (124, 38).
+1500 {esc}
++1500 solitair -d 3\n
+6000 M -51:-58:0:0
++100 M 0:0:0:1
++100 M -7:1:0:1
++100 M -10:1:0:1
++100 M -7:2:0:1
+7000 M -26:4:0:1
++200 M 0:0:0:0
+7800 M 100:9:0:0
++20 M 100:0:0:0
++100 M 0:0:0:1
++80 M 0:0:0:0
++80 M 0:0:0:1
++80 M 0:0:0:0
+8800 M -100:-69:0:0
++20 M -100:0:0:0
++20 M -50:0:0:0
++100 M 0:0:0:1
++100 M 0:0:0:0
++300 M 0:0:0:1
++100 M 0:0:0:0
++300 M 0:0:0:1
++100 M 0:0:0:0
+# Options (title at 120, 6): the menu stays open
+10500 M -49:-64:0:0
++100 M 0:0:0:1
++100 M 0:0:0:0
+# Draw three cards (second item)
+11300 M 20:32:0:0
++100 M 0:0:0:1
++100 M 0:0:0:0
+12000 M 29:32:0:0
++100 M 0:0:0:1
++100 M 0:0:0:0
++300 M 0:0:0:1
++100 M 0:0:0:0
++300 M 0:0:0:1
++100 M 0:0:0:0
+# Options > Red back
+13000 M -49:-64:0:0
++100 M 0:0:0:1
++100 M 0:0:0:0
++300 M 20:74:0:0
++100 M 0:0:0:1
++100 M 0:0:0:0
+# ctrl-Z: the last draw undone
+13900 {dE0}z{uE0}
+# Game > FreeCell
+15000 M -100:-74:0:0
++100 M 0:0:0:1
++100 M 0:0:0:0
++300 M 20:88:0:0
++100 M 0:0:0:1
++100 M 0:0:0:0
+# Game > Choose deal..., 1
+16200 M -20:-88:0:0
++100 M 0:0:0:1
++100 M 0:0:0:0
++300 M 20:46:0:0
++100 M 0:0:0:1
++100 M 0:0:0:0
+16900 1
+17700 \n
+# the 4 of hearts (column 1, top) to the first free cell
+18500 M 100:100:0:0
++20 M 2:48:0:0
++100 M 0:0:0:1
++100 M 0:-40:0:1
++100 M 0:-40:0:1
++100 M 0:-40:0:1
++200 M 0:0:0:0
+# the run queen of clubs, jack of hearts (column 3) carried over the table (held)...
+19400 M 90:95:0:0
++100 M 0:0:0:1
++100 M 28:25:0:1
++100 M 30:30:0:1
++100 M 20:20:0:1
+# ...and let go where it may not go: it flies back
+20700 M 0:0:0:0
+# Game > Close, then the replay
+21500 M -100:-100:0:0
++20 M -100:-100:0:0
++20 M -90:-44:0:0
++100 M 0:0:0:1
++100 M 0:0:0:0
++300 M 20:100:0:0
++20 M 0:16:0:0
++100 M 0:0:0:1
++100 M 0:0:0:0
+22700 solitair -s\n
+24700 M 100:100:0:0
++20 M 100:100:0:0
++20 M 100:18:0:0
++20 M 100:0:0:0
++20 M 100:0:0:0
++20 M 40:0:0:0

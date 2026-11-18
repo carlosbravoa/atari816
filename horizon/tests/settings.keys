@@ -1,0 +1,51 @@
+# Settings (SETTINGS.PRG) on the Desktop (DESK=1: no NODESK), opened from the Terminal:
+#   DESK=1 sh tests/shots.sh EMU SD settings 22 8.8 10.4 12.4 17.2 20.5
+# Good shot times (s), total 22 s:
+#   8.8  the panel as it opens (default teal, mouse 1, delay 0.4 s, medium rate, volume 8)
+#   10.4 "forest" clicked: the desktop is green at once
+#   12.4 "wine" clicked: the desktop is wine red
+#   17.2 delay 0.6 s, rate Fast, volume 10 (two clicks on the scroll bar's right arrow),
+#        an "x" held for 1.2 s in the "Try here" field (it repeats)
+#   20.5 after Save: the panel is closed, the desktop stays wine; /SYSTEM/CONFIG written
+# The pointer starts at (320, 180); moves of at most 100. The panel's content is at
+# (140, 72) on the screen.
+# Programs menu (100, 8) > Terminal (fourth item, y 66)
+3000 M -100:-100:0:0
++50 M -100:-72:0:0
++50 M -20:0:0:0
++300 M 0:0:0:1
++100 M 0:0:0:0
++500 M 0:58:0:0
++300 M 0:0:0:1
++100 M 0:0:0:0
+6000 settings\n
+# the fourth swatch (forest) at (334, 94)
+9000 M 40:28:0:0
++50 M 100:0:0:0
++50 M 94:0:0:0
++300 M 0:0:0:1
++100 M 0:0:0:0
+# the seventh (wine) at (406, 94)
+11000 M 72:0:0:0
++300 M 0:0:0:1
++100 M 0:0:0:0
+# Repeat delay 0.6 s (460, 154), Repeat rate Fast (450, 182)
+13000 M 54:60:0:0
++300 M 0:0:0:1
++100 M 0:0:0:0
++500 M -10:28:0:0
++300 M 0:0:0:1
++100 M 0:0:0:0
+# Beep volume: the scroll bar's right arrow (393, 238), twice
++500 M -57:56:0:0
++300 M 0:0:0:1
++100 M 0:0:0:0
++300 M 0:0:0:1
++100 M 0:0:0:0
+# hold "x" in the Try here field (it has the focus) for 1.2 s
+15500 {d1b}
++1200 {u1b}
+# Save (456, 310; 0.18: below the new Sound volume row)
+18000 M 63:72:0:0
++300 M 0:0:0:1
++100 M 0:0:0:0

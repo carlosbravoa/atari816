@@ -1,0 +1,32 @@
+# Welcome to the Atari816
+
+The **Atari816** is a new 16-bit Atari, re-imagined around the *65C816* processor, with a desktop of its own. It is also compatible with the original 8-bit Atari. This page was written in **Write**, the word processor of *Horizon*, the 816's own operating system.
+
+## The desktop
+
+When the machine starts, Horizon shows the *desktop*: a menu bar at the top, the folders of the SD card as icons, and a **Files** window. Everything is drawn in 256 colours at 640 x 360.
+
+- **Files** shows the card's folders; a double click opens a file in the program that reads it.
+- The **Programs** menu starts *Edit*, *Write*, *Paint*, *BASIC*, *Sheet* and the `Terminal`.
+- Windows move by their title bar and grow by the grip at their bottom right.
+    - Several programs run at once, each in windows of its own.
+    - The **blitter** does the copying, so a window moves smoothly.
+
+### The 8-bit Atari
+
+Press `F12` to switch to the 8-bit Atari; press it again to come back to the desktop exactly as you left it.
+
+## Writing here
+
+Write keeps the document as **Markdown**, plain text that any computer can read:
+
+1. Select some words and press `ctrl-B` for **bold** or `ctrl-I` for *italic*.
+2. Use the toolbar (or *Format*) for headings and lists.
+3. Save with `ctrl-S`: the file stays readable in Edit and on a PC.
+
+> Markup characters stay hidden, except on the line where the cursor is. *View > Show markup* shows them everywhere.
+
+---
+
+Have fun with your ***Atari816***!  
+*The Horizon team*

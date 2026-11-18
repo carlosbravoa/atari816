@@ -1,0 +1,80 @@
+# The Desktop's system functions (DESK=1; tests/mousegen.py makes tests/system.keys from this).
+# The card gets its own /SYSTEM/PROGRAMS (PREP in the Makefile): Terminal, Paint, Edit, a
+# missing program (left out of the menu) and HELLO. Shots (s), total 57 s:
+#   6.3   the Programs menu read from /SYSTEM/PROGRAMS (no "Missing": its program is not there)
+#   11    the Terminal: "hog 1 &" holds all memory but a bank; "hello": the shell's message
+#   13    Programs > Paint: "Not enough memory to start Paint. Close a program and try again."
+#   15.5  Horizon > Force quit...: the running programs, End: HOG selected
+#   18.5  Enter: HOG killed (memory back in the status); About Horizon
+#   21.5  the Terminal clicked (over About), About again: the same About raised (one instance)
+#   28.5  Edit with "hello" typed; Horizon > Shut down...: the confirmation
+#   31    Enter: Files and the Terminal closed; Edit asks to save
+#   34    Esc (Cancel): "Edit did not close. Nothing was stopped."
+#   37.5  OK; Shut down again: Edit asks again
+#   42    Discard: "It is now safe to switch off the Atari816." (SYS_SYNC)
+#   46    Restart clicked (SYS_RESTART 1): Horizon starts again (the pointer then goes to the
+#         top left corner: the new kernel starts it at the centre)
+#   49    README.TXT dragged from Files onto the desktop with Shift: moved into /Desktop, its
+#         icon (0.14: without Shift a shortcut)
+#   52    the SD card icon double clicked: Files at the root
+#   56    the README.TXT icon (where it was dropped) double clicked: Edit with it
+5600 move 105 8
+5700 click
+6600 move 105 24
+6700 click
+8500 key hog 1 &\n
+9800 key hello\n
+11000 move 105 8
+11100 click
+11600 move 105 38
+11700 click
+13500 key \n
+14000 move 40 8
+14100 click
+14500 move 40 66
+14600 click
+15200 key {end}
+16000 key \n
+17000 move 40 8
+17100 click
+17500 move 40 24
+17600 click
+19500 move 400 300
+19600 click
+20100 move 40 8
+20200 click
+20600 move 40 24
+20700 click
+22000 key {esc}
+23000 move 105 8
+23100 click
+23500 move 105 52
+23600 click
+26000 key hello
+27000 move 40 8
+27100 click
+27500 move 40 136
+27600 click
+29000 key \n
+32000 key {esc}
+34500 key \n
+35500 move 40 8
+35600 click
+36000 move 40 136
+36100 click
+37000 key \n
+38500 move 318 209
+38600 click
+43000 move 320 206
+43100 click
+46500 move 0 0
+47000 move 80 169
+47100 press
+47200 drag 450 250
+48000 key {dE1}
+48200 release
+48500 key {uE1}
+49500 move 596 40
+49600 dclick
+52500 move 468 220
+52600 dclick

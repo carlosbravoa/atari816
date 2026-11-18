@@ -1,0 +1,137 @@
+# The Desktop's system functions (DESK=1; tests/mousegen.py makes tests/system.keys from this).
+# The card gets its own /SYSTEM/PROGRAMS (PREP in the Makefile): Terminal, Paint, Edit, a
+# missing program (left out of the menu) and HELLO. Shots (s), total 57 s:
+#   6.3   the Programs menu read from /SYSTEM/PROGRAMS (no "Missing": its program is not there)
+#   11    the Terminal: "hog 1 &" holds all memory but a bank; "hello": the shell's message
+#   13    Programs > Paint: "Not enough memory to start Paint. Close a program and try again."
+#   15.5  Horizon > Force quit...: the running programs, End: HOG selected
+#   18.5  Enter: HOG killed (memory back in the status); About Horizon
+#   21.5  the Terminal clicked (over About), About again: the same About raised (one instance)
+#   28.5  Edit with "hello" typed; Horizon > Shut down...: the confirmation
+#   31    Enter: Files and the Terminal closed; Edit asks to save
+#   34    Esc (Cancel): "Edit did not close. Nothing was stopped."
+#   37.5  OK; Shut down again: Edit asks again
+#   42    Discard: "It is now safe to switch off the Atari816." (SYS_SYNC)
+#   46    Restart clicked (SYS_RESTART 1): Horizon starts again (the pointer then goes to the
+#         top left corner: the new kernel starts it at the centre)
+#   49    README.TXT dragged from Files onto the desktop with Shift: moved into /Desktop, its
+#         icon (0.14: without Shift a shortcut)
+#   52    the SD card icon double clicked: Files at the root
+#   56    the README.TXT icon (where it was dropped) double clicked: Edit with it
+5600 M -100:-100:0:0
+5650 M -100:-72:0:0
+5700 M -15:0:0:0
+5750 M 0:0:0:1
+5830 M 0:0:0:0
+6600 M 0:16:0:0
+6700 M 0:0:0:1
+6780 M 0:0:0:0
+8500 hog 1 &\n
+9800 hello\n
+11000 M 0:-16:0:0
+11100 M 0:0:0:1
+11180 M 0:0:0:0
+11600 M 0:30:0:0
+11700 M 0:0:0:1
+11780 M 0:0:0:0
+13500 \n
+14000 M -65:-30:0:0
+14100 M 0:0:0:1
+14180 M 0:0:0:0
+14500 M 0:58:0:0
+14600 M 0:0:0:1
+14680 M 0:0:0:0
+15200 {end}
+16000 \n
+17000 M 0:-58:0:0
+17100 M 0:0:0:1
+17180 M 0:0:0:0
+17500 M 0:16:0:0
+17600 M 0:0:0:1
+17680 M 0:0:0:0
+19500 M 100:100:0:0
+19550 M 100:100:0:0
+19600 M 100:76:0:0
+19650 M 60:0:0:0
+19700 M 0:0:0:1
+19780 M 0:0:0:0
+20100 M -100:-100:0:0
+20150 M -100:-100:0:0
+20200 M -100:-92:0:0
+20250 M -60:0:0:0
+20300 M 0:0:0:1
+20380 M 0:0:0:0
+20600 M 0:16:0:0
+20700 M 0:0:0:1
+20780 M 0:0:0:0
+22000 {esc}
+23000 M 65:-16:0:0
+23100 M 0:0:0:1
+23180 M 0:0:0:0
+23500 M 0:44:0:0
+23600 M 0:0:0:1
+23680 M 0:0:0:0
+26000 hello
+27000 M -65:-44:0:0
+27100 M 0:0:0:1
+27180 M 0:0:0:0
+27500 M 0:100:0:0
+27550 M 0:28:0:0
+27600 M 0:0:0:1
+27680 M 0:0:0:0
+29000 \n
+32000 {esc}
+34500 \n
+35500 M 0:-100:0:0
+35550 M 0:-28:0:0
+35600 M 0:0:0:1
+35680 M 0:0:0:0
+36000 M 0:100:0:0
+36050 M 0:28:0:0
+36100 M 0:0:0:1
+36180 M 0:0:0:0
+37000 \n
+38500 M 100:73:0:0
+38550 M 100:0:0:0
+38600 M 78:0:0:0
+38650 M 0:0:0:1
+38730 M 0:0:0:0
+43000 M 2:-3:0:0
+43100 M 0:0:0:1
+43180 M 0:0:0:0
+46500 M -100:-100:0:0
+46550 M -100:-100:0:0
+46600 M -100:-6:0:0
+46650 M -20:0:0:0
+47000 M 80:100:0:0
+47050 M 0:69:0:0
+47100 M 0:0:0:1
+47200 M 30:30:0:1
+47260 M 30:30:0:1
+47320 M 30:21:0:1
+47380 M 30:0:0:1
+47440 M 30:0:0:1
+47500 M 30:0:0:1
+47560 M 30:0:0:1
+47620 M 30:0:0:1
+47680 M 30:0:0:1
+47740 M 30:0:0:1
+47800 M 30:0:0:1
+47860 M 30:0:0:1
+47920 M 10:0:0:1
+48000 {dE1}
+48200 M 0:0:0:0
+48500 {uE1}
+49500 M 100:-100:0:0
+49550 M 46:-100:0:0
+49600 M 0:-10:0:0
+49650 M 0:0:0:1
+49730 M 0:0:0:0
+49850 M 0:0:0:1
+49930 M 0:0:0:0
+52500 M -100:100:0:0
+52550 M -28:80:0:0
+52600 M 0:0:0:1
+52680 M 0:0:0:0
+52800 M 0:0:0:1
+52880 M 0:0:0:0

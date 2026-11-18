@@ -1,0 +1,116 @@
+# Files (DESK=1: the Desktop): DESK=1 sh tests/shots.sh EMU SD files 46 T1 ... (16 shots)
+# The SD card is modified (a move, a copy, a rename, a new folder, a delete): use a scratch copy.
+# It needs: /docs holding only "Read me first.txt"; no other entry of / starting "sy" or
+# "docs"; /SYSTEM/INIT.PRG; no /BIN/WRITE.PRG gives the "not found" alert at shot 8.
+# Good shot times (s), total 46 s:
+#   5.4   the Desktop, Files 1 in / (the Up button dimmed, no "..", /SYSTEM hidden)
+#   10.6  ctrl-N, "docs", Enter: Files 2 in /docs: "..", "Read me first.txt" selected
+#   11.2  Read me first.txt dragged from Files 2 to Files 1's header (the drag pointer)
+#   15.8  dropped: moved to / (Files 1, 10 entries); Files 1 clicked, ctrl-C ("Copied ..."
+#         in its footer); Files 2 clicked, ctrl-V: copied back into /docs (selected)
+#   17.6  File > Rename...: the ui_ask dialog, the name all selected
+#   19.0  "NOTES.MD" typed, Tab: Cancel has the focus (a dotted frame)
+#   19.8  Tab again: OK has it (Space then activates it: renamed)
+#   22    Enter on NOTES.MD: Write's alert ("Write was not found on the card." without it)
+#   26.6  Esc; File > New folder...: Tab, Shift+Tab (back to the field), "Work" typed
+#   29.5  Enter: Work made; "no", Delete: the warning alert "Delete NOTES.MD?"
+#   32.5  Enter: deleted; ".." double clicked: Files 2 in / with docs selected
+#   35.5  View > Show system files: SYSTEM listed
+#   39.5  "sy", Enter: in /SYSTEM; "init", Enter: the alert "INIT.PRG is a system program."
+#   42.2  Esc; the Up button clicked: / with SYSTEM selected
+#   43.9  the View menu open: Show system files checked
+#   45.5  chosen: off, SYSTEM hidden again
+# The pointer starts at (320, 180); moves of at most 100 (drags 30), generated from
+# absolute points. Files 1: outer (24, 24), content (25, 40); Files 2: content (49, 64);
+# rows at content y 16 + 12 n; the Up button at content (2, 1) 18 x 12. Menu bar (0.14): File at
+# (272, 6), View (352, 6) (after the system menus and "Files"); items from y 23, 14 apart.
+6000 rea
+7000 {dE0}n{uE0}
+9000 docs
+9800 \n
+# drag Files 2's row 1 to Files 1's header strip (above Files 2)
+10500 M -100:-82:0:0
+10550 M -71:0:0:0
+10700 M 0:0:0:1
+10800 M 30:-30:0:1
+10860 M 21:-24:0:1
+11500 M 0:0:0:0
+# Files 1: click its header strip, ctrl-C; Files 2: click its footer, ctrl-V
+13000 M 50:0:0:0
+13100 M 0:0:0:1
+13180 M 0:0:0:0
+13600 {dE0}c{uE0}
+14200 M -50:100:0:0
+14250 M 0:100:0:0
+14300 M 0:28:0:0
+14400 M 0:0:0:1
+14480 M 0:0:0:0
+15000 {dE0}v{uE0}
+# File > Rename...
+16000 M 72:-100:0:0
+16050 M 0:-100:0:0
+16100 M 0:-66:0:0
+16200 M 0:0:0:1
+16280 M 0:0:0:0
+16800 M 18:59:0:0
+17000 M 0:0:0:1
+17080 M 0:0:0:0
+17800 NOTES.MD
+18500 {d2B}{u2B}
+19300 {d2B}{u2B}
+20000  
+21000 \n
+23000 {esc}
+# File > New folder...
+24000 M -18:-59:0:0
+24200 M 0:0:0:1
+24280 M 0:0:0:0
+24600 M 18:45:0:0
+24800 M 0:0:0:1
+24880 M 0:0:0:0
+25300 {d2B}{u2B}
+25700 {dE1}{d2B}{u2B}{uE1}
+26000 Work
+27000 \n
+28000 no
+28700 {d4C}{u4C}
+30000 \n
+# ".." (row 0 of Files 2)
+31000 M -100:35:0:0
+31050 M -81:0:0:0
+31300 M 0:0:0:1
+31380 M 0:0:0:0
+31500 M 0:0:0:1
+31580 M 0:0:0:0
+# View > Show system files
+33500 M 100:-80:0:0
+33550 M 100:0:0:0
+33600 M 43:0:0:0
+33700 M 0:0:0:1
+33780 M 0:0:0:0
+34100 M 28:17:0:0
+34300 M 0:0:0:1
+34380 M 0:0:0:0
+36500 sy
+37100 \n
+38000 init
+38700 \n
+40000 {esc}
+# the Up button of Files 2
+41000 M -100:47:0:0
+41050 M -100:0:0:0
+41100 M -100:0:0:0
+41150 M -21:0:0:0
+41300 M 0:0:0:1
+41380 M 0:0:0:0
+41700 M 100:100:0:0
+41750 M 100:30:0:0
+41800 M 41:0:0:0
+# View > Show system files (off)
+43000 M 52:-100:0:0
+43050 M 0:-94:0:0
+43200 M 0:0:0:1
+43280 M 0:0:0:0
+43600 M 28:17:0:0
+44000 M 0:0:0:1
+44080 M 0:0:0:0
