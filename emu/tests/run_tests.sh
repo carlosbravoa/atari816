@@ -183,6 +183,34 @@ if [ "$out" = "$(cat $T/expected/slowtest.txt)" ] && [ "$(cat "$TMP/spc/Old.txt"
    && [ "$(ls "$TMP/spc")" = "$(printf 'New.bin\nOld.txt')" ]; then
     ok "slowtest (slow card and PC, events during a request, mode 2 files: at CLOSE, none after a drop)"; else bad "slowtest" "$out"; fi
 
+# ── the internet (PC link step 2): URL paths, stream handles 4-7, requests put aside (TAG),
+# $E4 NET, link drops. Loopback only: tests/netserver.py runs an echo server on 127.0.0.1 at a
+# free port (and names a closed one); the connection URLs are loaded at $0D:6000 / $0D:6080 ──
+rm -rf "$TMP/w" "$TMP/nfix"; mkdir -p "$TMP/w/example.test/docs/sub"; cp -r $T/sdfix "$TMP/nfix"
+printf 'Hello from the net root.\n' > "$TMP/w/example.test/hello.txt"
+echo a > "$TMP/w/example.test/docs/a.txt"; echo b > "$TMP/w/example.test/docs/b.txt"
+echo h > "$TMP/w/example.test/docs/.hidden"
+head -c 8192 /dev/zero > "$TMP/w/example.test/big.bin"
+out=$($EMU --sd "$TMP/nfix" --net-root "$TMP/w" --pc-kbps 16:16 --max-seconds 10 $T/asm/nettest1.bin 2>/dev/null)
+[ "$out" = "$(cat $T/expected/nettest1.txt)" ] && ok "nettest 1 (Fetch: STAT then OPEN, READ to the end, 404, listing, \$8A/\$8B/\$87, a READ put aside, 18)" || bad "nettest 1" "$out"
+if command -v python3 >/dev/null 2>&1; then
+    python3 $T/netserver.py "$TMP/ports" </dev/null >/dev/null 2>&1 &
+    SRV=$!
+    trap 'kill $SRV 2>/dev/null; rm -rf "$TMP"' EXIT
+    i=0; while [ ! -s "$TMP/ports" ] && [ $i -lt 50 ]; do sleep 0.1; i=$((i + 1)); done
+    read PORT CLOSED < "$TMP/ports"
+    { printf 'tcp://127.0.0.1:%s' "$PORT"; head -c $((128 - ${#PORT} - 16)) /dev/zero
+      printf 'tcp://127.0.0.1:%s' "$CLOSED"; head -c $((128 - ${#CLOSED} - 16)) /dev/zero; } > "$TMP/urls.bin"
+    out=$($EMU --sd "$TMP/nfix" --net --max-seconds 10 --load "$TMP/urls.bin@0D:6000" $T/asm/nettest2.bin 2>/dev/null)
+    [ "$out" = "$(cat $T/expected/nettest2.txt)" ] && ok "nettest 2 (Net: echo, \$E4, refused \$8D, TLS \$91, the end \$90)" || bad "nettest 2" "$out"
+    out=$($EMU --sd "$TMP/nfix" --net --net-root "$TMP/w" --pc-kbps 1:1 --pc-drop-at 1.5 --max-seconds 10 \
+          --load "$TMP/urls.bin@0D:6000" $T/asm/nettest3.bin 2>/dev/null)
+    [ "$out" = "$(cat $T/expected/nettest3.txt)" ] && ok "nettest 3 (a link drop: \$E4, \$88 on streams and a READ put aside, \$87 after)" || bad "nettest 3" "$out"
+    kill $SRV 2>/dev/null
+else
+    skip "nettest 2 and 3 (no python3 for the loopback server)"
+fi
+
 # ── 4. CPU: SingleStepTests/65816 sample (tests/fetch_sst.py downloads it) ──
 if ls $T/sst/*.txt >/dev/null 2>&1; then
     res=$($T/cputest $T/sst/*.txt | tail -1)

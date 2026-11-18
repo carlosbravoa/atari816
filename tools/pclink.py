@@ -10,6 +10,8 @@ The protocol is described in Docs/04-pc-link.md. This module has:
   - FileServer: the PC volume (one shared folder, never anything outside it),
   - DevClient: requests on the developer channel, either through a running gateway
     (a Unix socket in the user's runtime directory) or straight over the serial port,
+  - NetServer: the internet for the Atari816 (TCP connections on channel 4, URLs fetched
+    over HTTP, HTTPS and FTP on channel 5),
   - Gateway: what `atari816-link` runs.
 
 Only the Python standard library and pyserial are needed.
@@ -17,16 +19,21 @@ Only the Python standard library and pyserial are needed.
 import binascii
 import calendar
 import errno
+import ftplib
+import http.client
 import itertools
 import os
 import queue
+import select
 import shutil
 import socket
+import ssl
 import stat as statmod
 import struct
 import sys
 import threading
 import time
+import urllib.parse
 
 BAUD = 1_500_000
 MAXPAY = 1040            # largest payload of a frame
@@ -34,11 +41,11 @@ CHUNK = 1024             # file data per frame
 PROTO = 1
 
 CH_CTL, CH_LOG, CH_FILES, CH_DEV = 0, 1, 2, 3
-CH_NET, CH_FETCH, CH_PRINT, CH_CLASSIC = 4, 5, 6, 7       # reserved (steps 2 and 3)
+CH_NET, CH_FETCH, CH_PRINT, CH_CLASSIC = 4, 5, 6, 7       # (6 and 7: reserved for step 3)
 NCH = 16
 F_DATA, F_ACK = 0x01, 0x02
 MORE = 0x01
-SV_FILES, SV_DEV = 0x01, 0x02
+SV_FILES, SV_DEV, SV_NET, SV_FETCH = 0x01, 0x02, 0x04, 0x08
 
 C_HELLO, C_HELLO_ACK, C_PING, C_PONG, C_BYE, C_NOSESSION, C_BOOT = 1, 2, 3, 4, 5, 6, 7
 
@@ -1069,11 +1076,698 @@ class DevClient:
 
 
 # ======================================================================================
+# The internet: channels 4 (Net) and 5 (Fetch)
+# ======================================================================================
+
+# stream ops: board -> PC, PC -> board
+N_OPEN, N_SEND, N_CREDIT, N_CLOSE = 0x01, 0x02, 0x03, 0x04
+N_OPENED, N_DATA, N_SCREDIT, N_END = 0x81, 0x82, 0x83, 0x84
+
+# results of OPENED and END
+R_NOSERVICE, R_BADADDR, R_NONAME, R_REFUSED, R_TIMEOUT = 0x8A, 0x8B, 0x8C, 0x8D, 0x8E
+R_HTTP, R_CLOSED, R_TLS, R_TOOMANY, R_NETERR = 0x8F, 0x90, 0x91, 0x92, 0x93
+
+RESULT_NAMES = {
+    0: "ok", R_NOSERVICE: "no such service", R_BADADDR: "bad address",
+    R_NONAME: "name not found", R_REFUSED: "refused or unreachable", R_TIMEOUT: "timeout",
+    R_HTTP: "HTTP error", R_CLOSED: "closed", R_TLS: "TLS failed",
+    R_TOOMANY: "too many streams", R_NETERR: "network error",
+}
+
+UNKNOWN_SIZE = 0xFFFFFFFF
+REDIRECTS = (301, 302, 303, 307, 308)
+USER_AGENT = "Atari816-link/1"
+
+
+class NetError(Exception):
+    """A stream failed with a result code (and, for HTTP, the status)."""
+
+    def __init__(self, code, why="", status=0, size=UNKNOWN_SIZE):
+        super().__init__(why or RESULT_NAMES.get(code, ""))
+        self.code = code
+        self.status = status
+        self.size = size
+
+
+class _Gone(Exception):
+    """The stream was closed (CLOSE from the board, the session ended): say nothing more."""
+
+
+def net_result(e):
+    """The result code for an exception raised while making or using a connection."""
+    if isinstance(e, NetError):
+        return e.code
+    if isinstance(e, (ssl.SSLError, ssl.CertificateError)):    # (before ValueError)
+        return R_TLS
+    if isinstance(e, socket.gaierror):
+        if e.errno in (getattr(socket, "EAI_SERVICE", None), getattr(socket, "EAI_BADFLAGS", None)):
+            return R_BADADDR
+        return R_NONAME
+    if isinstance(e, http.client.InvalidURL):
+        return R_BADADDR
+    if isinstance(e, (UnicodeError, ValueError)):
+        return R_BADADDR
+    if isinstance(e, TimeoutError):
+        return R_TIMEOUT
+    if isinstance(e, (ftplib.error_perm, ftplib.error_temp, ConnectionRefusedError)):
+        return R_REFUSED
+    if isinstance(e, OSError) and e.errno in (errno.ECONNREFUSED, errno.EHOSTUNREACH,
+                                              errno.ENETUNREACH, errno.EHOSTDOWN,
+                                              errno.EADDRNOTAVAIL, errno.ENETDOWN):
+        return R_REFUSED
+    return R_NETERR
+
+
+def safe_url(url):
+    """The URL as the gateway may print it: a password is replaced by ***. Careful rather
+    than exact: a password with '/' or '@' in it (not percent-encoded) must not show either,
+    so everything from a ':' before the first '/' to the last '@' before '?' or '#' goes."""
+    scheme, sep, rest = url.partition("://")
+    if not sep:
+        return url
+    slash = rest.find("/")
+    slash = len(rest) if slash < 0 else slash
+    query = min([i for i in (rest.find("?"), rest.find("#")) if i >= 0] or [len(rest)])
+    colon = rest.find(":")
+    at = rest.rfind("@", 0, query)
+    if 0 <= colon < slash and at > colon:
+        rest = rest[:colon] + ":***" + rest[at:]
+    return scheme + sep + rest
+
+
+def _unq(text):
+    """Percent-decode a URL part to the exact bytes, as a latin-1 string (for ftplib)."""
+    return urllib.parse.unquote_to_bytes(text or "").decode("latin-1")
+
+
+class _Stream:
+    """One stream (a SID on channel 4 or 5)."""
+
+    def __init__(self, ch, sid, window):
+        self.ch, self.sid = ch, sid
+        self.credit = window              # bytes the board can still take
+        self.cv = threading.Condition()
+        self.closed = False               # closed: nothing more is sent for it
+        self.socks = []                   # sockets to shut down at close
+        self.sendq = queue.Queue()        # Net: SEND data for the socket
+        self.wake_r = self.wake_w = None  # Net: wakes the stream's thread
+        self.secret = None                # FTP password: never printed
+        self.opened = False
+        self.sent = 0
+        self.timed_out = False            # the watchdog stopped it
+        self.watch = None
+        self.what = ""
+
+    def wake(self):
+        with self.cv:
+            self.cv.notify_all()
+        w = self.wake_w
+        if w is not None:
+            try:
+                w.send(b"x")
+            except OSError:
+                pass
+
+    def add_sock(self, s):
+        with self.cv:
+            if self.closed:
+                s.close()
+                raise _Gone
+            self.socks.append(s)
+
+    def close(self):
+        """Close at once: shut down every socket (a thread blocked on one wakes up)."""
+        with self.cv:
+            self.closed = True
+            socks, self.socks = self.socks, []
+            if self.watch:
+                self.watch.cancel()
+            self.cv.notify_all()
+        for s in socks:
+            try:
+                s.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+            try:
+                s.close()
+            except OSError:
+                pass
+        self.wake()
+
+    def close_socks(self):
+        """Close the sockets but keep the stream (an HTTP redirect)."""
+        with self.cv:
+            socks, self.socks = self.socks, []
+        for s in socks:
+            try:
+                s.close()
+            except OSError:
+                pass
+
+
+class NetServer:
+    """The internet for the Atari816: channel 4 (Net, outgoing TCP, TLS on the PC if asked)
+    and channel 5 (Fetch: a URL over HTTP, HTTPS or FTP, streamed). Docs/04-pc-link.md,
+    "Channels 4 and 5".
+
+    send(ch, payload): send one DATA frame to the board (blocks until it is acknowledged;
+    LinkError when it cannot be sent). frame(ch, payload) takes every DATA frame the board
+    sends on channels 4 and 5; it never blocks (it may be called from the link's reader
+    thread). Each stream has a thread of its own. reset() (the session ended) closes every
+    stream at once. The gateway never listens: it only connects outwards."""
+
+    MAXSTREAMS = 8
+
+    def __init__(self, send, log=None):
+        self.send = send
+        self.log = log or (lambda s: None)
+        self.t_net_connect = 15.0       # Net: lookup + connect + TLS
+        self.t_fetch_head = 20.0        # Fetch: lookup + connect + TLS + the answer's headers
+        self.t_fetch_body = 30.0        # Fetch: longest pause in the body
+        self.max_redirects = 5
+        self.send_credit = 4096         # Net: the send credit in OPENED
+        self.ssl_context = None         # (default: ssl.create_default_context())
+        self.lock = threading.Lock()
+        self.streams = {CH_NET: {}, CH_FETCH: {}}
+        self.emit_locks = {CH_NET: threading.Lock(), CH_FETCH: threading.Lock()}
+
+    # ---- frames from the board (never block) ----
+    def frame(self, ch, p):
+        if ch not in self.streams or len(p) < 4:
+            return
+        op, sid = p[0], p[1]
+        if op == N_OPEN:
+            self._open(ch, sid, p[4:])
+            return
+        with self.lock:
+            st = self.streams[ch].get(sid)
+        if st is None:
+            return                                    # (it may have crossed our END)
+        if op == N_CREDIT and len(p) >= 6:
+            with st.cv:
+                st.credit += struct.unpack_from("<H", p, 4)[0]
+                st.cv.notify_all()
+            st.wake()
+        elif op == N_SEND and ch == CH_NET and len(p) > 4:
+            st.sendq.put(bytes(p[4:]))
+            st.wake()
+        elif op == N_CLOSE:
+            self._forget(st)
+            st.close()
+            self.log(f"{self._name(st)}: closed by the Atari816 ({st.sent} bytes sent)")
+
+    def reset(self):
+        """The session is over: every stream ends at once, nothing more is sent."""
+        with self.lock:
+            sts = [st for t in self.streams.values() for st in t.values()]
+            for t in self.streams.values():
+                t.clear()
+        for st in sts:
+            st.close()
+        if sts:
+            self.log(f"internet: {len(sts)} stream(s) closed (the session ended)")
+
+    def _name(self, st):
+        return f"{'net' if st.ch == CH_NET else 'fetch'} {st.sid}"
+
+    def _forget(self, st):
+        with self.lock:
+            t = self.streams[st.ch]
+            if t.get(st.sid) is st:
+                del t[st.sid]
+
+    def _open(self, ch, sid, a):
+        if len(a) < 4:
+            return
+        window = struct.unpack_from("<H", a, 0)[0]
+        st = _Stream(ch, sid, window)
+        with self.lock:
+            old = self.streams[ch].pop(sid, None)
+            full = len(self.streams[ch]) >= self.MAXSTREAMS
+            if not full:
+                self.streams[ch][sid] = st
+        if old:
+            old.close()
+        if full:
+            self.log(f"{self._name(st)}: refused, too many streams")
+            target, args = self._refuse, (st,)
+        elif ch == CH_NET:
+            st.wake_r, st.wake_w = socket.socketpair()
+            st.wake_r.setblocking(False)
+            st.wake_w.setblocking(False)
+            target, args = self._net, (st, a)
+        else:
+            target, args = self._fetch, (st, a)
+        threading.Thread(target=target, args=args, daemon=True).start()
+
+    # ---- frames to the board ----
+    def _emit(self, st, op, res=0, data=b"", last=False):
+        """Send one frame of the stream (from the stream's own thread). last: the stream
+        ends with it (END, or OPENED with an error). _Gone if it is closed."""
+        with self.emit_locks[st.ch]:
+            if st.closed:
+                raise _Gone
+            if last:
+                self._forget(st)
+                st.close()
+            try:
+                self.send(st.ch, bytes([op, st.sid, 0, res]) + data)
+            except Exception:
+                self._forget(st)
+                st.close()
+                raise _Gone
+
+    def _opened(self, st, res=0, size=UNKNOWN_SIZE, status=0, credit=0):
+        self._emit(st, N_OPENED, res, struct.pack("<IHH", min(size, UNKNOWN_SIZE), status & 0xFFFF,
+                                                  credit), last=res != 0)
+        st.opened = res == 0
+
+    def _data(self, st, data):
+        with st.cv:
+            st.credit -= len(data)
+            st.sent += len(data)
+        self._emit(st, N_DATA, 0, data)
+
+    def _wait_credit(self, st):
+        """Wait until the board can take bytes; how many may go in one frame."""
+        with st.cv:
+            while not st.closed and st.credit <= 0:
+                st.cv.wait()
+            if st.closed:
+                raise _Gone
+            return min(CHUNK, st.credit)
+
+    def _fail(self, st, e):
+        """End a stream with the error e (OPENED if it was not opened yet, else END)."""
+        code = R_TIMEOUT if st.timed_out else net_result(e)
+        status = getattr(e, "status", 0)
+        size = getattr(e, "size", UNKNOWN_SIZE)
+        why = str(e)
+        if st.secret:
+            why = why.replace(st.secret, "***")
+        self.log(f"{self._name(st)}: {RESULT_NAMES.get(code, hex(code))} (${code:02X})"
+                 + (f", HTTP {status}" if status else "") + (f": {why[:100]}" if why else ""))
+        try:
+            if st.opened:
+                self._emit(st, N_END, code, last=True)
+            else:
+                self._opened(st, code, size, status)
+        except _Gone:
+            pass
+
+    def _refuse(self, st):
+        try:
+            self._emit(st, N_OPENED, R_TOOMANY, struct.pack("<IHH", UNKNOWN_SIZE, 0, 0), last=True)
+        except _Gone:
+            pass
+
+    def _run(self, st, fn, *args):
+        try:
+            fn(st, *args)
+        except _Gone:
+            pass
+        except Exception as e:
+            if st.closed:
+                return
+            self._fail(st, e)
+        finally:
+            self._forget(st)
+            st.close()
+            for s in (st.wake_r, st.wake_w):
+                if s is not None:
+                    s.close()
+
+    # ---- the watchdog of a deadline ----
+    def _watch(self, st, deadline):
+        def fire():
+            with st.cv:
+                if st.watch is not t:
+                    return
+                st.timed_out = True
+                socks = list(st.socks)
+            for s in socks:
+                try:
+                    s.shutdown(socket.SHUT_RDWR)
+                except OSError:
+                    pass
+        t = threading.Timer(max(0.0, deadline - time.monotonic()), fire)
+        t.daemon = True
+        with st.cv:
+            st.watch = t
+        t.start()
+
+    def _unwatch(self, st):
+        with st.cv:
+            t, st.watch = st.watch, None
+            if st.timed_out:
+                raise TimeoutError("too slow")
+        if t:
+            t.cancel()
+
+    # ---- connecting ----
+    def _left(self, deadline):
+        left = deadline - time.monotonic()
+        if left <= 0:
+            raise TimeoutError("too slow")
+        return left
+
+    def _resolve(self, st, host, port, deadline):
+        """getaddrinfo in a thread of its own, so a slow lookup has a time limit too."""
+        box = {}
+        ev = threading.Event()
+
+        def run():
+            try:
+                box["r"] = socket.getaddrinfo(host, port, 0, socket.SOCK_STREAM)
+            except Exception as e:
+                box["e"] = e
+            ev.set()
+        threading.Thread(target=run, daemon=True).start()
+        while not ev.wait(0.1):
+            if st.closed:
+                raise _Gone
+            self._left(deadline)
+        if "e" in box:
+            raise box["e"]
+        return box["r"]
+
+    def _connect(self, st, host, port, deadline, tls=False):
+        infos = self._resolve(st, host, port, deadline)
+        s, last = None, NetError(R_REFUSED, "no address")
+        for af, typ, proto, _, addr in infos:         # each address in turn, as curl does
+            s = socket.socket(af, typ, proto)
+            st.add_sock(s)
+            try:
+                self._connect_one(st, s, addr, deadline)
+                break
+            except OSError as e:
+                if st.closed:
+                    raise _Gone
+                with st.cv:
+                    if s in st.socks:
+                        st.socks.remove(s)
+                s.close()
+                s, last = None, e
+                if isinstance(e, TimeoutError):
+                    break
+        if s is None:
+            raise last
+        if tls:
+            s.settimeout(self._left(deadline))
+            if self.ssl_context is None:
+                self.ssl_context = ssl.create_default_context()
+            with st.cv:
+                if s in st.socks:
+                    st.socks.remove(s)
+            try:
+                ss = self.ssl_context.wrap_socket(s, server_hostname=host)
+            except Exception:
+                s.close()
+                raise
+            st.add_sock(ss)
+            s = ss
+        return s
+
+    def _connect_one(self, st, s, addr, deadline):
+        """A connect that the deadline and close() can stop."""
+        s.setblocking(False)
+        err = s.connect_ex(addr)
+        if err not in (0, errno.EINPROGRESS, errno.EWOULDBLOCK, errno.EALREADY):
+            raise OSError(err, os.strerror(err))
+        while err:
+            if st.closed:
+                raise _Gone
+            left = self._left(deadline)
+            _, w, x = select.select([], [s], [s], min(left, 0.2))
+            if w or x:
+                err = s.getsockopt(socket.SOL_SOCKET, socket.SO_ERROR)
+                if err:
+                    raise OSError(err, os.strerror(err))
+                break
+        s.setblocking(True)
+
+    # ---- channel 4: Net ----
+    def _net(self, st, a):
+        self._run(st, self._net_run, a)
+
+    def _net_run(self, st, a):
+        if len(a) < 6:
+            raise NetError(R_BADADDR, "short OPEN")
+        port, flags = struct.unpack_from("<HB", a, 2)
+        raw = a[5:].split(b"\0", 1)[0]
+        tls = bool(flags & 1)
+        try:
+            host = raw.decode("ascii")
+        except UnicodeError:
+            raise NetError(R_BADADDR, "the host name is not ASCII")
+        st.what = f"{'tls' if tls else 'tcp'}://{host}:{port}"
+        self.log(f"{self._name(st)}: open {st.what}")
+        if (not host or len(raw) > 100 or port == 0
+                or any(c.isspace() or ord(c) < 33 or c in "/@?#" for c in host)):
+            raise NetError(R_BADADDR, "bad host or port")
+        if host.startswith("[") and host.endswith("]"):
+            host = host[1:-1]
+        s = self._connect(st, host, port, time.monotonic() + self.t_net_connect, tls)
+        s.settimeout(None)
+        try:
+            s.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+        except OSError:
+            pass
+        self._opened(st, 0, UNKNOWN_SIZE, 0, self.send_credit)
+        self.log(f"{self._name(st)}: connected")
+        rd = st.wake_r
+        while True:
+            n = 0                                         # the board's bytes to the socket
+            while True:
+                try:
+                    d = st.sendq.get_nowait()
+                except queue.Empty:
+                    break
+                s.sendall(d)
+                n += len(d)
+            while n:
+                k = min(n, 0xFFFF)
+                self._emit(st, N_SCREDIT, 0, struct.pack("<H", k))
+                n -= k
+            with st.cv:
+                if st.closed:
+                    raise _Gone
+                credit = st.credit
+            ready = credit > 0 and isinstance(s, ssl.SSLSocket) and s.pending()
+            if not ready:
+                r, _, _ = select.select([s, rd] if credit > 0 else [rd], [], [])
+                ready = s in r
+            try:
+                while rd.recv(256):
+                    pass
+            except OSError:
+                pass
+            if not ready:
+                continue
+            try:
+                data = s.recv(min(CHUNK, credit))
+            except ssl.SSLEOFError:
+                data = b""                                # (closed without a TLS goodbye)
+            if not data:
+                self.log(f"{self._name(st)}: the other end closed ({st.sent} bytes)")
+                self._emit(st, N_END, 0, last=True)
+                return
+            self._data(st, data)
+
+    # ---- channel 5: Fetch ----
+    def _fetch(self, st, a):
+        self._run(st, self._fetch_run, a)
+
+    def _fetch_run(self, st, a):
+        raw = a[4:].split(b"\0", 1)[0]
+        try:
+            url = raw.decode("utf-8")
+        except UnicodeError:
+            url = raw.decode("latin-1")
+        st.what = safe_url(url)
+        self.log(f"{self._name(st)}: get {st.what}")
+        if len(raw) > 255:
+            raise NetError(R_BADADDR, "the URL is too long")
+        deadline = time.monotonic() + self.t_fetch_head
+        self._watch(st, deadline)
+        u = self._split(url)
+        if u.scheme == "ftp":
+            self._ftp(st, u, deadline)
+            return
+        status = 0
+        for hop in range(self.max_redirects + 1):
+            sock, resp = self._http_get(st, u, deadline)
+            status = resp.status
+            loc = resp.getheader("Location")
+            if status not in REDIRECTS or not loc:
+                break
+            url = urllib.parse.urljoin(url, loc.strip())
+            st.close_socks()
+            self.log(f"{self._name(st)}: {status} to {safe_url(url)}")
+            u = self._split(url)
+            if u.scheme not in ("http", "https"):
+                raise NetError(R_BADADDR, "redirected to a scheme other than HTTP", status)
+        else:
+            raise NetError(R_NETERR, "too many redirects", status)
+        self._unwatch(st)
+        size = UNKNOWN_SIZE
+        cl = resp.getheader("Content-Length")
+        if cl and cl.strip().isdigit():
+            size = min(int(cl.strip()), UNKNOWN_SIZE)
+        if status >= 400:
+            raise NetError(R_HTTP, f"HTTP {status} {resp.reason}", status, size)
+        sock.settimeout(self.t_fetch_body)            # (http.client may have let go of it)
+        self._opened(st, 0, size, status)
+        self.log(f"{self._name(st)}: HTTP {status}, "
+                 + ("size unknown" if size == UNKNOWN_SIZE else f"{size} bytes"))
+        self._pump(st, resp.read1)
+
+    def _split(self, url):
+        try:
+            u = urllib.parse.urlsplit(url)
+            u.port                                        # (ValueError: a bad port)
+        except ValueError as e:
+            raise NetError(R_BADADDR, str(e))
+        if u.scheme.lower() not in ("http", "https", "ftp") or not u.hostname or u.port == 0:
+            raise NetError(R_BADADDR, "unknown scheme, no host or port 0")
+        if any(c.isspace() or ord(c) < 32 for c in url):
+            raise NetError(R_BADADDR, "spaces or control characters in the URL")
+        return u._replace(scheme=u.scheme.lower())
+
+    def _http_get(self, st, u, deadline):
+        tls = u.scheme == "https"
+        port = u.port or (443 if tls else 80)
+        host = u.hostname
+        s = self._connect(st, host, port, deadline, tls)
+        s.settimeout(self._left(deadline))
+        conn = http.client.HTTPConnection(host, port)
+        conn.sock = s
+        path = u.path or "/"
+        if u.query:
+            path += "?" + u.query
+        path = urllib.parse.quote(path, safe="/%:@!$&'()*+,;=-._~?")
+        hostport = f"[{host}]" if ":" in host else host
+        if port != (443 if tls else 80):
+            hostport += f":{port}"
+        conn.putrequest("GET", path, skip_host=True, skip_accept_encoding=True)
+        conn.putheader("Host", hostport.encode("idna").decode("ascii"))
+        conn.putheader("User-Agent", USER_AGENT)
+        conn.putheader("Accept", "*/*")
+        conn.putheader("Accept-Encoding", "identity")
+        conn.putheader("Connection", "close")
+        conn.endheaders()
+        return s, conn.getresponse()
+
+    def _pump(self, st, read):
+        """Send the body: as much as the credit allows, a frame at a time; END at its end."""
+        while True:
+            n = self._wait_credit(st)
+            data = read(n)
+            if not data:
+                break
+            self._data(st, data[:n])
+        self.log(f"{self._name(st)}: done ({st.sent} bytes)")
+        self._emit(st, N_END, 0, last=True)
+
+    def _ftp(self, st, u, deadline):
+        port = u.port or 21
+        user = _unq(u.username) if u.username is not None else None
+        password = _unq(u.password) if u.password is not None else ""
+        if password:
+            st.secret = password
+        path = _unq(u.path)
+        if path.startswith("/"):
+            path = path[1:]
+        if any(c in path for c in "\r\n\0"):
+            raise NetError(R_BADADDR, "bad path")
+        addr = self._resolve(st, u.hostname, port, deadline)[0][4]
+        ftp = ftplib.FTP()
+        ftp.encoding = "latin-1"
+        try:
+            ftp.connect(addr[0], port, timeout=self._left(deadline))
+            st.add_sock(ftp.sock)
+            if user:
+                ftp.login(user, password)
+            else:
+                ftp.login()
+            ftp.set_pasv(True)
+            if not path or path.endswith("/"):
+                text = self._ftp_list(ftp, path.rstrip("/") if path != "/" else "/")
+                self._unwatch(st)
+                body = text.encode("latin-1")
+                self._opened(st, 0, len(body))
+                self.log(f"{self._name(st)}: listing, {len(body)} bytes")
+                view = memoryview(body)
+                pos = [0]
+
+                def read(n):
+                    d = bytes(view[pos[0]:pos[0] + n])
+                    pos[0] += len(d)
+                    return d
+                self._pump(st, read)
+                return
+            ftp.voidcmd("TYPE I")
+            size = UNKNOWN_SIZE
+            try:
+                size = min(ftp.size(path), UNKNOWN_SIZE)
+            except (ftplib.error_perm, ftplib.error_temp, ftplib.error_reply, ValueError, TypeError):
+                pass
+            conn = ftp.transfercmd("RETR " + path)
+            st.add_sock(conn)
+            self._unwatch(st)
+            conn.settimeout(self.t_fetch_body)
+            ftp.sock.settimeout(self.t_fetch_body)
+            self._opened(st, 0, size)
+            self.log(f"{self._name(st)}: " + ("size unknown" if size == UNKNOWN_SIZE else f"{size} bytes"))
+            while True:
+                n = self._wait_credit(st)
+                data = conn.recv(n)
+                if not data:
+                    break
+                self._data(st, data)
+            conn.close()
+            ftp.voidresp()
+            self.log(f"{self._name(st)}: done ({st.sent} bytes)")
+            self._emit(st, N_END, 0, last=True)
+        finally:
+            try:
+                ftp.close()
+            except Exception:
+                pass
+
+    def _ftp_list(self, ftp, path):
+        """A folder's listing: MLSD (name, size, time) when the server has it, else NLST."""
+        lines = []
+        try:
+            for name, facts in ftp.mlsd(path):
+                kind = facts.get("type", "").lower()
+                if kind in ("cdir", "pdir") or name in (".", ".."):
+                    continue
+                isdir = kind == "dir"
+                size = facts.get("size", "0") if not isdir else "0"
+                mod = facts.get("modify", "")
+                when = ""
+                if len(mod) >= 12 and mod[:12].isdigit():
+                    t = calendar.timegm((int(mod[0:4]), int(mod[4:6]), int(mod[6:8]),
+                                         int(mod[8:10]), int(mod[10:12]), 0, 0, 0, 0))
+                    when = time.strftime("%Y-%m-%d %H:%M", time.localtime(t))
+                lines.append(f"{name}{'/' if isdir else ''}\t{size if size.isdigit() else 0}\t{when}")
+        except ftplib.error_perm as e:
+            if not str(e)[:3] in ("500", "502", "504"):
+                raise
+            # (some servers answer NLST of a folder with paths: keep the last part)
+            lines = [n.rstrip("/").rsplit("/", 1)[-1] for n in ftp.nlst(*([path] if path else []))]
+        return "".join(line + "\n" for line in lines)
+
+
+# ======================================================================================
 # The gateway
 # ======================================================================================
 
 class Gateway:
-    def __init__(self, folder, port=None, readonly=False, verbose=0, logfile=None):
+    """net=False (--no-net): no internet for the Atari816 (HELLO without NET and FETCH)."""
+
+    def __init__(self, folder, port=None, readonly=False, verbose=0, logfile=None, net=True):
         self.verbose = verbose
         self.logfile = logfile
         self.clients = set()
@@ -1081,12 +1775,15 @@ class Gateway:
         self.dev_owner = None
         self.dev_lock = threading.Lock()
         self.files_q = queue.Queue()
-        self.link = Link(port=port, services=SV_FILES | SV_DEV, name="atari816-link",
+        services = SV_FILES | SV_DEV | (SV_NET | SV_FETCH if net else 0)
+        self.link = Link(port=port, services=services, name="atari816-link",
                          on_frame=self._on_frame, on_log=self._on_log,
                          on_state=self._on_state, verbose=verbose)
         self.fs = FileServer(folder, lambda p: self.link.send(CH_FILES, p),
                              log=self._say if verbose > 1 else None, readonly=readonly,
                              send_many=lambda ps: self.link.send_many(CH_FILES, ps))
+        self.net = (NetServer(lambda ch, p: self.link.send(ch, p),
+                              log=self._say if verbose > 1 else None) if net else None)
         self.sock = None
 
     def _say(self, text):
@@ -1095,6 +1792,8 @@ class Gateway:
 
     def _on_state(self, up, info):
         self.files_q.put(("reset", None))
+        if self.net:
+            self.net.reset()                              # (never blocks)
         if up:
             self._say(f"connected: {info} (port {self.link.port})")
         else:
@@ -1128,6 +1827,9 @@ class Gateway:
                     pass
                 if len(payload) >= 4 and not payload[2] & MORE:
                     self._release(owner)
+        elif ch in (CH_NET, CH_FETCH):
+            if self.net:
+                self.net.frame(ch, payload)               # (never blocks)
         # other channels: reserved for later steps (acknowledged, dropped)
 
     def _release(self, owner):
@@ -1211,7 +1913,7 @@ class Gateway:
         threading.Thread(target=self._files_worker, daemon=True).start()
         self.link.start()
         self._say(f"sharing {self.fs.root}" + (" (read only)" if self.fs.readonly else "") +
-                  f"; tools socket {self.sock_file}")
+                  f"; internet {'on' if self.net else 'off'}; tools socket {self.sock_file}")
         try:
             while True:
                 c, _ = self.sock.accept()
@@ -1226,6 +1928,8 @@ class Gateway:
         except Exception:
             pass
         self.fs.reset()                                   # unfinished files are deleted
+        if self.net:
+            self.net.reset()
         if self.sock:
             try:
                 self.sock.close()

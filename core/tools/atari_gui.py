@@ -8,7 +8,7 @@ Tkinter (stdlib) + pyserial + atari_link.py. Runs on Linux and Windows.
     python3 tools/atari_gui.py
 
 Layout: port bar on top; action buttons + destination folder on the left;
-tabs for Log / Type / Live Keys on the right; progress + status at the bottom.
+tabs for Log / Printer on the right; progress + status at the bottom.
 
 Threading: one worker thread owns the serial connection and consumes a job
 queue; when idle it drains firmware log bytes. The Tk main loop never touches
@@ -48,7 +48,7 @@ import tkinter as tk
 from tkinter import ttk, filedialog, messagebox, scrolledtext
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from atari_link import AtariLink, LinkError, MenuTakeover, usb_ports, sd_name
+from atari_link import AtariLink, LinkError, usb_ports, sd_name
 
 
 APP_TITLE = "Atari PC Link — Tang Nano 20K"
@@ -62,7 +62,6 @@ class Worker(threading.Thread):
         self.ui_q = ui_q
         self.jobs = queue.Queue()
         self.link = None
-        self.sess = None                 # live KbdSession (owned by this thread)
         self._lbuf = ""                  # partial-line assembly for PRN routing
         self._ltime = 0.0
         self.want_port = None
@@ -125,15 +124,7 @@ class Worker(threading.Thread):
                 try:
                     d = self.link.read_log()
                     if d:
-                        # logs are muted during a live session, so any 'M' is
-                        # the F12/S2 takeover marker — not log text
-                        if self.sess and b"M" in d:
-                            self.sess.open = False
-                            self.sess = None
-                            self._emit("kbd_takeover")
-                            d = d.replace(b"M", b"", 1)
-                        if d:
-                            self._route_log(d.decode("ascii", "replace"))
+                        self._route_log(d.decode("ascii", "replace"))
                     elif self._lbuf and time.time() - self._ltime > 0.5:
                         self._emit("log", self._lbuf)   # flush stale partial
                         self._lbuf = ""
@@ -148,8 +139,6 @@ class Worker(threading.Thread):
             try:
                 fn(self.link)
                 self._emit("done", name)
-            except MenuTakeover:
-                self._emit("done", f"{name} — Atari took the keyboard (F12)")
             except LinkError as e:
                 self._emit("error", f"{name}: {e}")
             except Exception as e:
@@ -228,20 +217,6 @@ class App:
         ttk.Button(lb, text="Clear", command=self._log_clear).pack(side="left")
         ttk.Button(lb, text="Save…", command=self._log_save).pack(side="left")
 
-        typef = ttk.Frame(tabs)
-        tabs.add(typef, text="Type")
-        self.type_box = scrolledtext.ScrolledText(typef, height=10,
-                                                  font=("monospace", 10))
-        self.type_box.pack(fill="both", expand=True)
-        tb = ttk.Frame(typef)
-        tb.pack(fill="x")
-        ttk.Button(tb, text="Type it on the Atari",
-                   command=self._type_text).pack(side="left")
-        ttk.Button(tb, text="Load file…",
-                   command=self._type_load).pack(side="left")
-        ttk.Label(tb, text="(~18 chars/s; OSD must be closed)").pack(side="left",
-                                                                     padx=6)
-
         prnf = ttk.Frame(tabs)
         tabs.add(prnf, text="Printer")
         self.prn = scrolledtext.ScrolledText(prnf, height=12, state="disabled",
@@ -257,20 +232,6 @@ class App:
         ttk.Button(pb, text="Clear", command=self._prn_clear).pack(side="left")
         ttk.Label(pb, text="LPRINT / AtariWriter output lands here").pack(
             side="left", padx=8)
-
-        kbdf = ttk.Frame(tabs)
-        tabs.add(kbdf, text="Live Keys")
-        ttk.Label(kbdf, text="Click the box, then type — every key lands on "
-                             "the Atari.\nBackspace/Esc/Tab/Enter work. "
-                             "Click elsewhere to stop.").pack(pady=6)
-        self.kbd_zone = tk.Label(kbdf, text="⌨  click here to type on the Atari",
-                                 relief="groove", padx=20, pady=30,
-                                 background="#f0f0f0", takefocus=1)
-        self.kbd_zone.pack(padx=20, pady=10, fill="x")
-        self.kbd_zone.bind("<Button-1>", lambda e: self.kbd_zone.focus_set())
-        self.kbd_zone.bind("<FocusIn>", self._kbd_focus)
-        self.kbd_zone.bind("<FocusOut>", self._kbd_blur)
-        self.kbd_zone.bind("<KeyPress>", self._kbd_key)
 
         bottom = ttk.Frame(self.root, padding=6)
         bottom.pack(fill="x")
@@ -343,72 +304,6 @@ class App:
 
     def _run_xex(self):
         self._send_file(run=True)
-
-    def _type_text(self):
-        text = self.type_box.get("1.0", "end-1c")
-        if not text.strip():
-            return
-        prog = self._progress_cb()
-        # type_lines = line-wise sessions with drop-recovery (the BL616's USB
-        # link flaps under sustained per-char typing; whole-line retypes are
-        # idempotent for numbered BASIC lines)
-        self.worker.submit("type", lambda l: l.type_lines(text, prog))
-
-    def _type_load(self):
-        path = filedialog.askopenfilename(title="Load text/BASIC listing")
-        if path:
-            self.type_box.delete("1.0", "end")
-            self.type_box.insert("1.0", open(path, "r", errors="replace").read())
-
-    # live keys: focus opens a session; each KeyPress is queued as one key
-    def _kbd_focus(self, _):
-        if not self.connected:
-            return
-        self.kbd_zone.configure(background="#d0f0d0",
-                                text="⌨  LIVE — keys go to the Atari")
-
-        w = self.worker
-
-        def fn(link):
-            w.sess = link.kbd_session()
-        w.submit("live keyboard on", fn)
-
-    def _kbd_blur(self, _):
-        self.kbd_zone.configure(background="#f0f0f0",
-                                text="⌨  click here to type on the Atari")
-
-        w = self.worker
-
-        def fn(link):
-            if w.sess:
-                w.sess.end()
-                w.sess = None
-        w.submit("live keyboard off", fn)
-
-    def _kbd_key(self, ev):
-        ch = ev.char
-        if ev.keysym == "Return":
-            ch = "\n"
-        elif ev.keysym == "BackSpace":
-            ch = "\x08"
-        elif ev.keysym == "Escape":
-            ch = "\x1b"
-        elif ev.keysym == "Tab":
-            ch = "\t"
-        if not ch:
-            return "break"
-
-        w = self.worker
-
-        def fn(link):
-            if w.sess:
-                try:
-                    w.sess.send_key(ch)
-                except MenuTakeover:
-                    w.sess = None
-                    self.ui_q.put(("kbd_takeover", ()))
-        w.submit("key", fn)
-        return "break"
 
     def _log_append(self, text):
         self.log.configure(state="normal")
@@ -505,10 +400,6 @@ class App:
                 elif kind == "progress":
                     done, total = payload
                     self.prog["value"] = done * 100 / max(total, 1)
-                elif kind == "kbd_takeover":
-                    self.root.focus_set()          # blur the capture zone
-                    self._kbd_blur(None)
-                    self._log_append("\n[app] Atari took the keyboard (F12)\n")
                 elif kind == "error":
                     self.busy_lbl.configure(text="")
                     self.prog["value"] = 0

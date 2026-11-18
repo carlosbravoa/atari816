@@ -1,0 +1,10 @@
+> get http://files.test/hello.txt
+get: http://files.test/hello.txt: no such service: the gateway has no internet (or --no-net)
+> cat tcp://127.0.0.1:23
+cat: no such service: the gateway has no internet (or --no-net)
+> cp ftp://files.test/pub/readme.txt /
+cp: ftp://files.test/pub/readme.txt: no such service: the gateway has no internet (or --no-net)
+> ls /PC:
+  Games                                                <DIR>  2026-11-01 12:00
+  Notes.txt                                               64  2026-11-01 12:00
+> 

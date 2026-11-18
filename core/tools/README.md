@@ -6,12 +6,15 @@ channel: through the gateway (`../../tools/atari816-link`) when it runs, so the 
 stays served meanwhile, or straight over the port when it does not.
 
 - **`atari_link.py`**: the developer side (class `AtariLink`), on top of `../../tools/pclink.py`.
-- **`atari.py`**: CLI: `ports` `ping` `log` `send` `run` `type` `kbd` `eject` `key` `reset`
+- **`atari.py`**: CLI: `ports` `ping` `log` `send` `run` `eject` `key` `reset`
   `status` `screen` `peek` `poke` `fwpeek`, and for the 65C816 `run816` `shot816` `peek816`.
-- **`atari_gui.py`**: desktop app (Linux/Windows): send/run, paste, keyboard, reset, log.
+- **`atari_gui.py`**: desktop app (Linux/Windows): send and run files, reset, log, printer output.
 - **`a816_screen.py`**: the screenshot decoder that `shot816` uses.
-- `ashterm.py`, `atari_net.py`, `hdd_handler.py`, `r_handler.py`: tools for firmware features
-  that were removed (H:, the network, the modem). They do not work with the PC link.
+- **`dotmatrix_pdf.py`**: turns printer output into a PDF (used by the app's Printer tab).
+- **`intest.py`**: a small test of the link.
+
+The old tools for removed firmware features (H:, R:, the modem, the network, typing text as
+keys) are gone.
 
 > Tools and firmware must come from the same release.
 

@@ -6,7 +6,7 @@ The Atari816 is a new 16-bit machine re-imagined around the 65C816: an Atari tha
 existed. It has its own operating system (Horizon), its own programs, an emulator and an SDK,
 and it runs on a Sipeed Tang Nano 20K FPGA board. Horizon is a preemptive multitasking kernel
 with memory protection and a mouse-driven desktop (windows, icons, a terminal, and
-applications such as Files, Edit, Write, Sheet, Paint and BASIC). Its own custom chips are
+applications such as Files, Edit, Write, Sheet, Paint, BASIC, a Downloader and a BBS terminal). Its own custom chips are
 FREDDIE II, the memory manager, Marga, the video chip, Ali, the blitter, and Lau, an 8-voice
 sample player, next to a second POKEY (POKEY 2).
 
@@ -30,7 +30,7 @@ active development; interfaces can still change.
 | [`horizon/`](horizon/) | Horizon, the operating system, and its programs (65816 assembly, ca65/ld65) |
 | [`emu/`](emu/) | emu816, a C emulator of the native machine, for developing on a PC |
 | [`sdk/`](sdk/) | The SDK: getting-started guide, programmer's reference, templates, examples, tools |
-| [`tools/`](tools/) | `atari816-link`, the PC side of the PC link (shares a folder of the PC with the Atari816) |
+| [`tools/`](tools/) | `atari816-link`, the PC side of the PC link (shares a folder of the PC with the Atari816, and connects it to the internet) |
 | [`Docs/`](Docs/) | Design documents: architecture, register specification, bring-up log, the PC link |
 
 ## How to try it
@@ -51,11 +51,19 @@ icon on the desktop, a `PC:` folder in Files, usable from the shell and from eve
 Atari816 also takes the PC's time when the gateway connects, so the clock no longer needs to
 be set by hand.
 
+The gateway also brings the **internet** to the Atari816: a URL is a file name. `get
+https://example.com/file.zip` in the shell (or `cp https://... /somewhere`, or the Downloader
+on the Programs menu) downloads a file; `http://`, `https://` and `ftp://` work. Programs can
+open TCP connections (`tcp://host:port`): the **BBS** program on the Programs menu uses this to
+reach the old Atari BBSes that are still on the internet by telnet. The PC does the hard
+parts (names, TLS and certificates, redirects).
+
 ```
 pip install pyserial
 tools/atari816-link                 # shares ~/Atari816 (made if missing)
 tools/atari816-link ~/somewhere     # shares another folder
 tools/atari816-link --read-only     # the Atari816 can read, not change anything
+tools/atari816-link --no-net        # no internet for the Atari816
 ```
 
 Leave it running; stop it with Ctrl-C. It finds the board by itself and reconnects when the
@@ -64,8 +72,11 @@ the gateway stops.
 
 - **Only that folder** is shared. Nothing outside it can be read or changed: `..`, hidden
   names (starting with `.`) and links that point out of the folder are refused.
-- **No network.** The gateway opens no network port. It only talks to the board over USB,
-  and to the developer tools through a socket in your runtime folder that only you can use.
+- **It listens on no network port.** It only talks to the board over USB, and to the
+  developer tools through a socket in your runtime folder that only you can use. It makes
+  connections outwards for the Atari816 (the internet is on unless you start it with
+  `--no-net`): **programs on the Atari816 can reach whatever the PC can reach, including your
+  home network.**
 - Without the gateway the Atari816 works as before; `/PC:` then answers "no PC link".
 - Linux: your user must be allowed to use the serial port (group `dialout`). Stop the gateway
   before you load a new bitstream with openFPGALoader.

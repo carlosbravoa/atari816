@@ -209,6 +209,8 @@ mb_drain:
         beq     @key
         cmp     #MBEV_MOUSE
         beq     @mouse
+        cmp     #MBEV_NET
+        jeq     @net
         cmp     #$80
         jcc     @next
         cmp     #$E0
@@ -217,7 +219,7 @@ mb_drain:
         and     #$00FF
         dec     a
         cmp     #NSLOT
-        bcs     @next
+        jcs     @next
         asl     a
         sta     kt5                     ; slot*2
         asl     a
@@ -252,6 +254,10 @@ mb_drain:
         plx
         jsr     key_put
         bra     @next
+@net:   lda     f:RSP_RING+8,x          ; (0.22) a connection's news: WE_NET to its owner
+        and     #NFILE-1
+        jsr     net_event
+        bra     @next
 @mouse: lda     f:RSP_RING+8,x          ; dx, dy
         pha
         and     #$00FF
@@ -274,8 +280,52 @@ mb_drain:
         a16
         brl     mb_drain
 
+; (0.22, IOP interrupt) event $E4: stream handle A has news -> WE_NET (a = its bit) for the
+; first window of the task that owns it (none: nothing; a program without windows polls)
+net_event:
+        tay
+        asl     a
+        tax
+        lda     fh_owner,x
+        beq     @out
+        dec     a
+        sta     kt5                     ; the owner (cur)
+        lda     #1
+:       dey
+        bmi     :+
+        asl     a
+        bra     :-
+:       sta     kt6
+        ldx     #0
+@w:     lda     w_used,x
+        beq     @n
+        lda     w_owner,x
+        cmp     kt5
+        bne     @n
+        lda     w_net,x
+        ora     kt6
+        sta     w_net,x
+        lda     #1
+        sta     ws_tflag
+        lda     #W_WS
+        ldy     #0
+        jmp     k_wake_all
+@n:     inx
+        inx
+        cpx     #NWIN*2
+        bne     @w
+@out:   rts
+
 ; ---- helpers for the file syscalls ----
 ; A = I/O processor result -> error code for set_err
+; (0.22) the same, and X = the answer's ARG1 (open, stat of a URL: the HTTP status)
+io_errx:
+        pha
+        jsr     rsp_of
+        lda     t_rsp+12,y
+        ldx     cur
+        sta     t_x,x
+        pla
 io_err: and     #$00FF
         clc
         adc     #EIO_BASE
@@ -346,7 +396,7 @@ sys_open:
         a16
         jsr     mb_call
         beq     :+
-        jsr     io_err
+        jsr     io_errx
         jmp     set_err
 :       jsr     rsp_of
         lda     t_rsp+12,y
@@ -542,7 +592,7 @@ sys_stat:
         beq     :+
         ply
         ply
-        jsr     io_err
+        jsr     io_errx
         jmp     set_err
 :       pla
         sta     kp1

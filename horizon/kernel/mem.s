@@ -230,6 +230,27 @@ uaccess:
 copy_upath:
         jsr     copy_ustr
         bcs     @out
+        ldx     #0                      ; (0.22) a URL ("scheme://..."): passed on as it is
+:       lda     kpath,x
+        and     #$00DF                  ; (letters: either case)
+        cmp     #'A'
+        bcc     :+
+        cmp     #'Z' + 1
+        bcs     :+
+        inx
+        bra     :-
+:       cpx     #2
+        bcc     @path
+        lda     kpath,x
+        cmp     #':' | ('/' << 8)
+        bne     @path
+        lda     kpath+2,x
+        and     #$00FF
+        cmp     #'/'
+        bne     @path
+        clc
+        rts
+@path:
         ldx     #126                    ; kpath -> kraw
 :       lda     kpath,x
         sta     kraw,x

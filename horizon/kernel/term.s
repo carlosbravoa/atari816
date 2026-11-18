@@ -818,7 +818,14 @@ term_csize:
         rts
 
 ; input_read: the next key of the terminal (the borrower only); blocks
+; (0.22) input_poll on a terminal: the same, but EAGAIN at once when nothing is queued
+; (before, input_poll ignored the terminal: cp's and get's ctrl-C in a Terminal window)
+term_ipoll:
+        lda     #1
+        bra     :+
 term_iread:
+        lda     #0
+:       sta     tm_poll
         jsr     term_of_cur
         bcc     :+
         rts
@@ -837,7 +844,13 @@ term_iread:
 :       ldx     tm_w
         lda     tm_kn,x
         bne     @take
-        ldx     cur
+        lda     tm_poll
+        beq     :+
+        lda     #EAGAIN
+        jsr     set_err
+        clc
+        rts
+:       ldx     cur
         lda     t_killed,x
         beq     :+
         lda     #EINVAL
@@ -854,7 +867,8 @@ term_iread:
         clc
         rts
 :       stx     tm_w
-        bra     :----
+        stz     tm_poll                 ; (only input_read waits; another task may have polled)
+        bra     :-----                  ; (to "lda tm_fg,x": who reads)
 @take:  lda     tm_kh,x
         asl     a
         asl     a

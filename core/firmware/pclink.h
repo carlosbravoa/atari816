@@ -17,6 +17,8 @@
 #define PL_CH_LOG   1           // the firmware's log, board -> PC (datagrams)
 #define PL_CH_FILES 2           // the PC volume: requests board -> PC
 #define PL_CH_DEV   3           // developer tools: requests PC -> board
+#define PL_CH_NET   4           // (step 2) TCP connections: streams (pcnet.c)
+#define PL_CH_FETCH 5           // (step 2) URLs: streams (pcnet.c)
 #define PL_NCH      16
 
 // frame flags
@@ -29,6 +31,8 @@
 // HELLO service bits
 #define PL_SV_FILES 0x01
 #define PL_SV_DEV   0x02
+#define PL_SV_NET   0x04
+#define PL_SV_FETCH 0x08
 
 // mailbox result codes of the PC volume
 #define PL_E_NOLINK 0x87        // no PC link (or the peer serves no files)
@@ -41,6 +45,7 @@ void     pl_poll(void);                     // main loop: frames in, timers (hot
 void     pl_log_putc(int c);                // uart_printf goes here: log datagrams per line
 int      pl_up(void);                       // a peer is connected (session up)
 int      pl_files(void);                    // ... and it serves the PC volume
+int      pl_svc(void);                      // the services of the peer (PL_SV_*), 0 without a session
 uint32_t pl_epoch(void);                    // +1 at every session start and end
 uint32_t pl_pc_time(void);                  // PC local time, seconds since 2000-01-01 (0: none)
 uint32_t pl_rx_bytes(void), pl_rx_bad(void), pl_retries(void);   // counters

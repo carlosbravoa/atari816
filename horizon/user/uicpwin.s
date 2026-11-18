@@ -135,7 +135,12 @@ cw_show:
         lsr     a
         ora     cw_tot
         sta     cw_tot
+        lda     ui_cpsize               ; (0.22) the size unknown (a URL): 0
+        ora     ui_cpsize+2
+        sta     cw_unk
         lda     ui_cpk                  ; done K (at most the total)
+        ldx     cw_unk
+        beq     :+
         cmp     cw_tot
         bcc     :+
         lda     cw_tot
@@ -165,7 +170,15 @@ cw_show:
         cmp     cw_lastk
         beq     @bar
         sta     cw_lastk
-        lda     #100
+        ldy     #.loword(cw_ptxt)       ; (0.22) the size unknown: "123 KB"
+        lda     cw_unk
+        bne     :+
+        lda     cw_k
+        jsr     cw_dec
+        ldx     #.loword(s_kbonly)
+        jsr     cw_app
+        bra     @draw
+:       lda     #100
         jsr     cw_part
         sta     cw_pct
         ldy     #.loword(cw_ptxt)       ; "123 of 1,500 KB (8%)"
@@ -181,9 +194,11 @@ cw_show:
         jsr     cw_dec
         ldx     #.loword(s_pct)
         jsr     cw_app
-        ldx     #.loword(cw_lprog)
+@draw:  ldx     #.loword(cw_lprog)
         jsr     ui_draw
-@bar:   lda     #CW_IN                  ; the bar: only the part that changed
+@bar:   lda     cw_unk                  ; (0.22) the size unknown: the bar stays empty
+        beq     @done
+        lda     #CW_IN                  ; the bar: only the part that changed
         jsr     cw_part
         sta     cw_tmp
         cmp     cw_bar
@@ -337,6 +352,7 @@ s_cancel: .byte "Cancel", 0
 s_of:   .byte   " of ", 0
 s_kb:   .byte   " KB (", 0
 s_pct:  .byte   "%)", 0
+s_kbonly: .byte " KB", 0
 s_empty: .byte  0
 cw_pow: .word   10000, 1000, 100, 10, 1
 
@@ -370,6 +386,7 @@ cw_tmp: .res    2
 cw_any: .res    2
 cw_dig: .res    2
 cw_pct: .res    2
+cw_unk: .res    2                       ; (0.22) 0: the size is unknown (ui_cpsize = 0)
 cw_op:  .res    2
 cw_n:   .res    2
 cw_ptxt: .res   32

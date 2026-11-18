@@ -1,0 +1,21 @@
+# (0.22) The Downloader (text shell; emu816 --net-root on a fresh copy of tests/net with
+# files.test/big.bin of 384 KB, --pc-kbps 100:55: about 4 s for it). Started with an address;
+# shot 1 at 5.5: the window (Save as: the current folder and the URL's name, no query)
+1500 {esc}
++1500 download http://files.test/big.bin?x=1\n
+# Enter: Download. shot 2 at 8.5: the progress (bar, "KB of KB (%)"), Cancel live
++3500 \n
+# shot 3 at 13.5: done ("Saved /big.bin (384 KB)."); the address kept in /SYSTEM/URLS
+# ctrl-A, an address that is not there, Enter. shot 4 at 16.8: "HTTP error 404"
++8000 {dE0}{d04}{u04}{uE0}http://files.test/nothere.zip\n
+# ctrl-A, the big file again: Save as /big.bin is there: the question (shot 5 at 19.5)
++2500 {dE0}{d04}{u04}{uE0}http://files.test/big.bin\n
+# Replace (Enter); Esc a second later cancels: shot 6 at 23 "Cancelled: nothing was
+# saved." (the partial file deleted)
++3500 \n
++1500 {esc}
+# Tab, Tab, Tab: Recent...; Space: the pop-up of the addresses (shot 7 at 25.5)
++2000 {d2B}{u2B}{d2B}{u2B}{d2B}{u2B}
++500 {d2C}{u2C}
+# Enter: the first one goes into the field (shot 8 at 27.5)
++1500 \n

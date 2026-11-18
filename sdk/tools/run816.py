@@ -38,6 +38,10 @@ Options:
                   scrolling, 9 no Lau, 8 no command lists / raster / NV_FRAME, 7 no blitter
   --log-sound     log every write to POKEY 2 / the DACs in emu.err
   --log-lau       log every write to Lau, the sample player, in emu.err ("lau $DBxx = $yy")
+  --net           (Horizon 0.22) the internet through an emulated PC link: tcp:// URLs
+                  become real connections of the PC running the emulator
+  --net-root DIR  (Horizon 0.22) http://, https://, ftp:// URLs are served from the
+                  files DIR/host/path (a missing file is HTTP status 404)
   --expect TEXT   fail unless console.txt contains TEXT (repeatable)
   --window        open the emulator's SDL window instead (needs emu816 built with SDL=1;
                   real time; type and click yourself)
@@ -87,7 +91,7 @@ def main():
                 die(f'{w} needs a value')
             return a[i + 1]
         if w in ('--horizon', '--emu', '--dest', '--args', '--script', '--seconds', '--out',
-                 '--rev', '--mode'):
+                 '--rev', '--mode', '--net-root'):
             opt[w[2:]] = val(); i += 2
         elif w == '--shot':
             opt['shots'].append(float(val())); i += 2
@@ -95,7 +99,7 @@ def main():
             opt['files'].append(val()); i += 2
         elif w == '--expect':
             opt['expect'].append(val()); i += 2
-        elif w in ('--log-sound', '--log-lau', '--window'):
+        elif w in ('--log-sound', '--log-lau', '--window', '--net'):
             opt[w[2:]] = True; i += 1
         elif w.startswith('--'):
             die(f'unknown option {w}')
@@ -184,6 +188,12 @@ def main():
         cmdl.append('--log-sound')
     if opt.get('log-lau'):
         cmdl.append('--log-lau')
+    if opt.get('net'):
+        cmdl.append('--net')
+    if opt.get('net-root'):
+        if not os.path.isdir(opt['net-root']):
+            die(f'--net-root {opt["net-root"]}: not a folder')
+        cmdl += ['--net-root', os.path.abspath(opt['net-root'])]
     if keys:
         cmdl += ['--keys', ','.join(keys)]
     if mouse:

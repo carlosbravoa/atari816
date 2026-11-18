@@ -2567,7 +2567,20 @@ wm_wheel:
 wm_timers:
         stz     ws_tflag
         ldx     #0
-@w:     lda     w_tdue,x
+@w:     lda     w_net,x                 ; (0.22) WE_NET: a = the stream handles with news
+        beq     @t
+        stz     w_net,x
+        ldy     w_used,x
+        beq     @t
+        sta     kg_t
+        stz     kg_u
+        lda     #WE_NET
+        sta     kg_v
+        phx
+        lda     #0
+        jsr     wev_push
+        plx
+@t:     lda     w_tdue,x
         beq     @n
         stz     w_tdue,x
         lda     w_used,x

@@ -316,6 +316,19 @@ FT_LINK    = 9          ; (0.14) .lnk: a shortcut (ui_open opens its target)
 ;                   /PC:), stops (in a folder copy what was copied before stays) and returns C
 ;                   set, A = ECANCELED. An error ($C8 the PC link lost, ...) also deletes the
 ;                   partial file.
+; ui_cpblk          (0.22, word) the piece in bytes (default 16384): a program copying a URL may
+;                   make it smaller (a URL's read waits until the piece is full, so ui_cpcb comes
+;                   more often: 4096). A file is read until a short read (a URL's size may be
+;                   unknown: ui_cpsize = 0), never only to its STAT size.
+; ui_cpx            (0.22, word) X of the last STAT or OPEN of a source: with A = E_HTTP the
+;                   HTTP status (404 ...).
+; ui_isurl          (0.22) X = a string -> C set if it is a URL (letters, then "://"; X = the
+;                   index after it). Keeps Y.
+; ui_urlname        (0.22) X = a path or URL, Y = a buffer of UI_NAMEMAX + 1 bytes -> the name a
+;                   copy of it gets in a folder: a path's last part; a URL's last path part
+;                   without its query or fragment ("index.html" when empty, "listing.txt" for
+;                   an ftp:// folder); characters a card name cannot hold become '_'.
+UI_NAMEMAX = 64
 ; ---------------------------------------------------------------- copy progress (0.21, uicpwin.s)
 ; ui_cpwin          A = 0 copy / 1 move: the progress window for the next ui_cptree / ui_mvtree
 ;                   (call it just before; it sets ui_cpcb). The window ("Copying" / "Moving",
@@ -326,7 +339,8 @@ FT_LINK    = 9          ; (0.14) .lnk: a shortcut (ui_open opens its target)
 ;                   the copy (ui_cptree / ui_mvtree return C set, A = ECANCELED: show no error
 ;                   for it); keys of the program's other windows go to it, their other events
 ;                   are dropped (a WE_RESIZE or WE_CLOSE is kept for ui_getev), as for a dialog.
-;                   Only what changed is redrawn.
+;                   Only what changed is redrawn. (0.22) A size of 0 (a URL whose size the
+;                   server did not give) shows "123 KB" and no percent; the bar stays empty.
 ; ui_cpdone         after ui_cptree / ui_mvtree: the window closed if it opened, ui_cpcb = 0.
 ;                   Keeps A and the carry: jsr ui_cptree, jsr ui_cpdone, bcs error.
 CK_YEAR  = 0
@@ -366,7 +380,7 @@ CK_WDAY  = 12
 .global ui_clk, ui_clksplit, ui_clkjoin, ui_clkcheck, ui_clkmdays, ui_clkfmt, ui_clklong
 .global ui_clkparse, ui_clkload, ui_clksave, ui_clkpc
 .global ui_cptree, ui_rmtree, ui_mvtree, ui_cpcb, ui_cpname, ui_cpk, ui_cpsize
-.global ui_cpwin, ui_cpdone
+.global ui_cpwin, ui_cpdone, ui_cpblk, ui_cpx, ui_isurl, ui_urlname
 .global ui_ev                   ; 8 bytes: the event (ui_getev)
 .globalzp ui_win, ui_x, ui_y, ui_w, ui_h, ui_font, ui_c2, ui_rsel
 

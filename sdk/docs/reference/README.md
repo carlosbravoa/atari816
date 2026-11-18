@@ -1,6 +1,6 @@
 # Programmer's reference
 
-The interface between Horizon 0.18 and its programs, reorganised by topic with an example
+The interface between Horizon 0.18 (and 0.22's internet) and its programs, reorganised by topic with an example
 for each call. The source of truth is `horizon/ABI.md` (and the sources it names);
 `make -C sdk check` compares this reference with `horizon/user/horizon.inc`, `ui.inc` and
 the kernel's syscall table, and assembles every example.
@@ -10,6 +10,7 @@ the kernel's syscall table, and assembles every example.
 | [program.md](program.md) | Program format, building, memory model (banks, direct page), register widths, calling convention, start conditions, exit, faults |
 | [system.md](system.md) | Error codes; syscalls for tasks, time, memory, the console, the keyboard (console programs), message ports, restart / shut down, settings |
 | [files.md](files.md) | Files and folders |
+| [internet.md](internet.md) | (0.22) The internet through the PC link: URLs as files, tcp:// and tls:// connections, WE_NET, the error codes |
 | [windows.md](windows.md) | The window system: windows, events (focus, WE_VBL), timer, menus, pointer, clipboard, drag and drop, palette (entries of your own), terminals |
 | [drawing.md](drawing.md) | win_draw: fills, frames, lines, text, blits (plain, keyed, with stride), copy; fonts; the system palette; win_draw or a draw list |
 | [controls.md](controls.md) | The controls library (ui.lib): buttons, fields, lists, scroll bars, alerts, the file dialog |

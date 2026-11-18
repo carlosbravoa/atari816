@@ -63,3 +63,4 @@ MBOP_STIME   = $1D           ; (0.19) the time for file dates (ARG0 = seconds si
 MBOP_CSTATE  = $1E           ; (0.19) ARG0 = 5: the cartridge's size (ARG1) and path (BUF)
 MBEV_KEY     = $E0
 MBEV_MOUSE   = $E1
+MBEV_NET     = $E4           ; (0.22) ARG0 = a stream handle (4-7) with news

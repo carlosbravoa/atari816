@@ -498,9 +498,20 @@ A ring is empty when HEAD equals TAIL and full when HEAD + 1 equals TAIL.
 | $21 | UNMOUNT | ARG0 = drive | 0 |
 | $30 | TIME | none | Seconds since 2000-01-01 |
 
-Paths are FAT32 paths, UTF-8, zero-terminated. LOAD streams a whole file straight into RAM, for ROM images, cartridge images and programs. $40 to $5F are reserved for FujiNet sockets later (or the PC link's internet services, `04-pc-link.md`, "Step 2").
+Paths are FAT32 paths, UTF-8, zero-terminated. LOAD streams a whole file straight into RAM, for ROM images, cartridge images and programs. $40 to $5F stay reserved (the internet of the PC link needed no new ops: a URL is a path, below).
 
 **The PC volume** (PC link, `04-pc-link.md`): a path that starts with `/PC:` (any case; then the end or `/`) is in the folder that the gateway on a connected PC shares. OPEN, CLOSE, READ, WRITE, SEEK, STAT, READDIR, MKDIR, DELETE, RENAME and LOAD work on it, with the same four handles. READDIR of `/` lists a folder `PC:` last while it is there; STAT of `/PC:` gives the PC's clock as its time. Results added: $87 no PC link (at once), $88 PC link lost (during the operation, or a handle of an ended link session; CLOSE frees such a handle and answers 0), $89 RENAME between the card and the PC volume. CLASSIC_MOUNT of such a path answers $82.
+
+**The internet** (PC link step 2, `04-pc-link.md`, "What the 65C816 sees (step 2)"): a path
+that is a URL is served by the gateway on the PC. `http://...`, `https://...` and `ftp://...`
+are read-only files (OPEN, STAT, READ, CLOSE); `tcp://host:port` and `tls://host:port` are
+connections (OPEN, READ and WRITE that never wait, CLOSE). They get handles **4 to 7** (the
+files keep 0 to 3). An OPEN, STAT or READ that has to wait for the internet is put aside: the
+request ring moves on (MB\_REQ\_TAIL advances) and its answer comes later, matched by TAG, while
+other requests are served. Results added: $8A no such service, $8B bad address, $8C name not
+found, $8D refused, $8E timeout, $8F HTTP status 400 or more (ARG1 = the status), $90 the
+connection was closed, $91 TLS failed, $92 too many streams on the PC, $93 another network
+error.
 
 ### Events (I/O processor to Horizon, TAG = 0)
 
@@ -510,6 +521,7 @@ Paths are FAT32 paths, UTF-8, zero-terminated. LOAD streams a whole file straigh
 | $E1 | MOUSE | ARG0 bytes: dx, dy (signed), wheel; ARG1 = buttons |
 | $E2 | GAMEPAD | ARG0 = pad number, ARG1 = buttons and directions |
 | $E3 | MEDIA | ARG0 = 0 SD card removed, 1 inserted |
+| $E4 | NET | ARG0 = a stream handle (4-7) of a connection: bytes came, it ended or it failed since its program last read it |
 
 KEY and MOUSE events keep coming while a request is being served (from firmware of Nov 18, 2026; before, they waited until the request was done, and a key pressed and released meanwhile was lost). So the answer of a request may come after events that were sent while it ran. The firmware keeps one free slot in the response ring for that answer. Every key change gives its own event, in order; mouse motion with the same buttons is added up until it is sent, and every button change gives its own event. A task that waits for an answer does not stop the pointer: Marga draws it from PTR\_X / PTR\_Y, which Horizon's interrupt service writes for each MOUSE event.
 

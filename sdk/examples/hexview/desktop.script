@@ -16,11 +16,11 @@
 +500 shot
 +200 {end}
 +500 shot
-# 4. drag and drop: Programs > Files opens a Files window over ours; drag README.TXT
+# 4. drag and drop: Programs > Files (the 11th item, 0.22) opens a Files window over ours; drag README.TXT
 # (its row at screen 100, 205) and release it on Hex View's box (at 520, 200)
 +300 move 110 6
 +200 click
-+400 move 100 149
++400 move 100 177
 +200 click
 +2000 move 100 205
 +200 press

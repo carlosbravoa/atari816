@@ -21,7 +21,7 @@ make sst             # downloads the SingleStepTests sample that make test uses 
 emu816 [--sd DIR] [--load FILE@ADDR]... [--max-seconds N] [--trace]
        [--keys LIST] [--mouse LIST] [--shot FILE.ppm] [--shot-at SECONDS] [--stats] [--headless] [--fast]
        [--ideal-timing] [--boot-cart PATH] [--pc-folder DIR] [--pc-time T]
-       [--card-kbps R:W] [--pc-kbps R:W] PROGRAM.BIN
+       [--card-kbps R:W] [--pc-kbps R:W] [--net] [--net-root DIR] [--net-delay MS] PROGRAM.BIN
 ```
 
 | Option | Meaning |
@@ -45,10 +45,13 @@ emu816 [--sd DIR] [--load FILE@ADDR]... [--max-seconds N] [--trace]
 | `--card-date YYYY-MM-DDTHH:MM` | The date STAT reports for every file this run did not create or write, on the card and on the PC volume (Horizon's tests run on fresh copies of the card, whose host dates mean nothing); the files the run writes keep the date SYS_TIME gives them |
 | `--pc-folder DIR` | The PC volume of the PC link: paths starting `/PC:` are served from DIR (see "The PC volume" below). Without it the volume is absent: those paths answer $87 |
 | `--pc-time YYYY-MM-DDTHH:MM` | The PC's clock at power-on; it counts on with emulated time. STAT `/PC:` reports it, and the PC files the run writes get it as their date. Default: the host's clock. (The PC files the run did not write get `--card-date`, as the card's) |
-| `--pc-drop-at SECONDS` | The PC link drops at this emulated time: open PC handles answer $88, new `/PC:` calls $87, the `PC:` entry leaves the root |
+| `--pc-drop-at SECONDS` | The PC link drops at this emulated time: open PC handles answer $88, new `/PC:` calls $87, the `PC:` entry leaves the root. Streams too (see "The internet"): open streams answer $88, requests put aside answer $88, each connection gets an $E4 event, new URL opens answer $87 |
 | `--pc-back-at SECONDS` | The link comes back at this time (after `--pc-drop-at`): a new session; handles from before the drop stay dead ($88) |
 | `--card-kbps R:W` | Slow card (see "Slow transfers"): READ and LOAD at R KB/s, WRITE at W KB/s, and 1 ms for every request on the card. 0 = instant. Default: off (every request instant). The board: about `170:100` |
 | `--pc-kbps R:W` | Slow PC volume: the same, with 6 ms for every request on the PC. The board: about `100:55` |
+| `--net` | The Net service of the PC link (step 2): `tcp://host:port` paths are real TCP connections from the host (see "The internet (PC link step 2)"). Without it they answer $8A |
+| `--net-root DIR` | The Fetch service: `http://`, `https://` and `ftp://` URLs are served from files in DIR (`scheme://host[:port]/path` = the file `DIR/host/path`). Without it they answer $8A |
+| `--net-delay MS` | The time the PC takes to answer an OPEN or STAT of a URL (the server's answer), in emulated milliseconds. Default 0 (+ 6 ms when `--pc-kbps` is given) |
 | `--boot-cart PATH` | A cartridge (a FAT path on `--sd`) that the I/O processor loaded by itself at power-on (`boot=ash` in /atari.ini): CLASSIC\_STATE ($1E) reports it, from power-on and after a full restart |
 
 Exit codes: 0 when the program executes STP, 3 at the `--max-seconds` limit, 1 on a usage
@@ -185,6 +188,7 @@ Result codes in ARG0 are:
 | $87 | No PC link: a `/PC:` path while the PC volume is absent |
 | $88 | PC link lost: READ, WRITE or SEEK on a handle of the PC volume opened before the link dropped |
 | $89 | Not the same volume: RENAME between the card and the PC volume |
+| $8A-$93 | The internet (PC link step 2, see "The internet"): $8A no such service, $8B bad address, $8C name not found, $8D refused, $8E timeout, $8F HTTP status >= 400 (ARG1 = the status), $90 the connection was closed, $91 TLS failed, $93 other network error |
 
 The open formats match the firmware:
 
@@ -292,6 +296,89 @@ request, a button change always its own event):
   pixels / 2, or / 4 in mode 2, with the remainder kept. Buttons and the wheel come from
   the window, and there is no grab.
 - **Testing without SDL:** `--mouse "t_ms:dx:dy:wheel:buttons,..."`, next to `--keys`.
+
+### The internet (PC link step 2) (`net.c`)
+
+The internet as the 65C816 sees it through the mailbox (`Docs/04-pc-link.md`, "What the 65C816
+sees (step 2)"): a URL is a path, and streams take 4 more handles, **4 to 7**. The gateway's
+services are the options: **Net** (`--net`) makes `tcp://` connections real host sockets;
+**Fetch** (`--net-root DIR`) serves `http://`, `https://` and `ftp://` URLs from host files.
+Tests never need the internet: a loopback server (`127.0.0.1`) is enough for Net.
+
+- **A URL** is a path that starts with letters and `://` (the scheme, any case), passed as it
+  is (no leading `/`). Its service: `http`, `https`, `ftp` = Fetch; `tcp`, `tls` = Net; any
+  other scheme answers $8B. The link: up while any PC service is given (`--pc-folder`, `--net`,
+  `--net-root`), down between `--pc-drop-at` and `--pc-back-at`. Without `--pc-folder` the
+  files service is absent as before (`/PC:` answers $87) while the other services work.
+- **At once:** the link down: $87; READDIR, LOAD, CLASSIC_MOUNT of a URL: $82; MKDIR, DELETE,
+  RENAME (either name a URL): 7; an unknown scheme: $8B; the service not given: $8A; STAT of
+  `tcp://` / `tls://`: $82; `tls://`: $91 (TLS is not modelled); a 5th stream: 18.
+- **Handles 4-7** (the lowest free), apart from the files' 0-3. CLOSE frees one (also one of
+  an ended session: 0); a handle not open, or whose OPEN is not answered yet: $80. SEEK on a
+  stream: $82. SYS_SYNC closes every stream (requests put aside answer $88); a reset of the
+  mailbox (a base cleared) and SYS_RESTART close them all (sockets closed).
+- **Requests put aside:** an OPEN or STAT of a URL, a Fetch READ that waits for its data and a
+  Net OPEN waiting for its connection do not hold the I/O processor: the request ring moves on
+  (MB_REQ_TAIL advances at once), other requests are served, KEY and MOUSE events keep coming,
+  and the answer comes later, matched by its TAG. The answers and $E4 events of the streams
+  are sent like KEY and MOUSE events: one per poll, while the response ring has 2 free slots
+  (a key or mouse event first). A request whose answer is already due is answered in the poll
+  that takes it, as before.
+
+**Fetch** (`--net-root DIR`):
+
+- `scheme://[user[:password]@]host[:port]/path[?query][#fragment]` is the file `DIR/host/path`:
+  the scheme, user and port are ignored; the query and fragment are left out; `%XX` is decoded;
+  every part is found ignoring case as on the PC volume, never outside DIR (`..` and links
+  pointing out: not found). No path = `/`.
+- A folder (with or without a final `/`) gives its listing as the body: `name\n` per entry,
+  sorted by name (byte order), names starting with `.` left out, folders without a mark. A path
+  ending in `/` that is a file: not found.
+- **Results:** no folder `DIR/host`: $8C (name not found). Not found: http(s) $8F with ARG1 =
+  404; ftp $8D. Otherwise 0.
+- **STAT:** writes `u32 size, u8 $21, u32 time` (the PC's clock now, `--pc-time`) into BUF;
+  ARG1 = the size. **OPEN** (FLAGS 0; any other mode: 7): ARG1 = the handle. Both answer after
+  `--net-delay` ms (+ 6 ms with `--pc-kbps`). A STAT and then an OPEN of the same URL (the same
+  bytes) within 15 s: the OPEN answers at once, and the body has been coming since the STAT's
+  answer.
+- **READ** answers when LEN bytes have come or the body ended (fewer = the end; then 0).
+  The body comes from the OPEN's answer at the `--pc-kbps` read rate (else all at once); while
+  no READ waits, at most 4 KB more than the program has read (the firmware's buffer) comes.
+  So a 64 KB download with `--pc-kbps 100:55` takes about 0.64 s, for progress windows.
+  WRITE: 7. A Fetch stream sends no $E4.
+
+**Net** (`--net`): `tcp://host:port` (port 1-65535, `[v6]` allowed, an optional final `/`;
+anything else $8B).
+
+- **OPEN** (any FLAGS): the name is looked up at once (blocking `getaddrinfo`, fine for
+  loopback and the LAN; failure: $8C), then the connection is made without blocking the
+  emulated machine; each address in turn. The answer (ARG1 = the handle) comes when it is
+  connected (and `--net-delay` has passed), or fails: refused / unreachable $8D, 15 s of host
+  time $8E, else $93. TCP_NODELAY is set.
+- **READ** never waits: the bytes that have come, up to LEN (0 = none yet; up to 4 KB are kept
+  per stream, more stays in the host's socket). When the other end has closed and every byte
+  was read: $90; after a socket error (reset): $93.
+- **WRITE** never waits: the bytes are copied into a 4 KB send buffer (the gateway's credit)
+  and sent as the socket takes them; ARG1 = the bytes taken (fewer than LEN, perhaps 0, when the
+  buffer is full: try again later). After the end: $90 (after an error: $93).
+- **$E4 NET** (TAG 0, ARG0 = the handle): when bytes come, the other end closes or an error
+  happens, and the program has READ from the handle since the last $E4 (an edge: each READ
+  re-arms it; the OPEN's answer arms it too, and gives an event at once if bytes came before
+  it). So a program reads until READ answers 0 (or an error), then waits for $E4.
+- **Time:** while a connection is open or connecting, emulated time is held to the host's
+  clock (each mailbox poll waits on the sockets for as long as emulated time is ahead), so a
+  remote program answers within the emulated time it would on the board and `--max-seconds`
+  is about host seconds. Otherwise emulated time runs as fast as it can.
+
+**Link drops** (`--pc-drop-at`, `--pc-back-at`): at the drop every stream ends (sockets closed,
+bodies dropped): READ and WRITE answer $88, requests put aside answer $88 at once, every
+connection that had answered its OPEN gets one $E4 event, CLOSE frees the handle (0), and new
+URL requests answer $87 until the link is back. Handles from before the drop stay dead after
+`--pc-back-at`.
+
+**Not modelled:** TLS (`tls://` answers $91), HTTP redirects and real HTTP / FTP (Fetch never
+connects anywhere), the 40 s limit for requests put aside, the 8-streams-per-channel limit of
+the gateway ($92), the gateway's own name lookup (the host's resolver is used).
 
 ### Marga (video) — $D900 (`nvc.c`)
 
@@ -516,6 +603,7 @@ every 512 CPU cycles here.
 | tests/asm/mousetest | MOUSE events from a `--mouse` script: clamping with the remainder carried, a key event taking priority, motion discarded while KB_ROUTE = 1, a quick click (motion, press and release in one poll: three events) and a key tap in one poll (two events) |
 | tests/asm/kbtest | `core/sw/a816/kbtest.s`, unchanged, run with a `--keys` script: modifiers, the 4-key limit, F12 (KEY event + NMI), a key held before KB_ROUTE = 0, releases in the order they happened |
 | tests/asm/slowtest | `--card-kbps 64:32 --pc-kbps 100:8 --pc-drop-at 3`: each answer after its time (a 32 KB card read 0.5 s, PC requests 6 ms), KEY and MOUSE events (a quick click, a tap) printed while a request is in progress, a mode 2 PC file not there before CLOSE, a 32 KB PC write cut by the drop: $88, no file left, the older file as it was |
+| tests/asm/nettest1-3 | The internet (PC link step 2), from `nettest.s` built three ways. 1: Fetch (`--net-root`, `--pc-kbps 16:16`): STAT then OPEN of the same URL (the OPEN at once), READ to the end, WRITE 7, SEEK $82, a closed handle $80, 404 in ARG1 with $8F, ftp $8D, no host $8C, mode 2 7, a folder's listing (case, query, dot files), MKDIR / RENAME 7, READDIR / LOAD $82, no Net $8A, an unknown scheme $8B, `/PC:` $87, an 8 KB READ put aside (0.5 s) while a card STAT is answered, the 5th stream 18. 2: Net (`--net`, `tests/netserver.py`: an echo server on 127.0.0.1 at a free port): OPEN, WRITE, $E4, READ, STAT / SEEK $82, a refused port $8D, `tls://` $91, no Fetch $8A, no port $8B, the server closing: $90. 3: `--pc-drop-at 1.5` with a connection and a slow Fetch READ open: $E4 at the drop, $88 for the READ put aside and on the handles, CLOSE 0, $87 after. Outputs `tests/expected/nettestN.txt`; 2 and 3 are skipped without python3 |
 | BLITTEST.BIN | `core/sw/a816/blittest.s`: every blitter op against a 65C816 reference (REV $08 and up) |
 | BLITLIST.BIN | `core/sw/a816/blitlist.s`: command lists against single blits, ABORT, WAIT_VBL, raster events, 60 frames = 999,504 us (REV $09 and up) |
 | SAMPLER.BIN | `core/sw/a816/sampler.s`: Lau's rate, end interrupt, loop, mix values, AU_LATE (REV $0A and up) |

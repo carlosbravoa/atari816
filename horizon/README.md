@@ -12,9 +12,9 @@ It boots into the Desktop (or, with `/SYSTEM/NODESK` on the card, into the text 
 
 | Folder | Contents |
 | --- | --- |
-| `/SYSTEM` | `HORIZON.SYS` (the kernel), `INIT.PRG`, the system programs `DESK.PRG` (the Desktop), `SH.PRG` (the shell), `ABOUT.PRG`, the settings files `CONFIG` (Settings), `PROGRAMS` (the Desktop's Programs menu) and `NODESK` (optional: boot into the text shell), and (0.14) `ICONS` (the Desktop's icons, made from `sdfiles/icons.txt`), `CLOCK` (the last time set, written by the Desktop and the shell) and `LAYOUT` (where the desktop icons are). Files hides it and refuses to start its programs |
+| `/SYSTEM` | `HORIZON.SYS` (the kernel), `INIT.PRG`, the system programs `DESK.PRG` (the Desktop), `SH.PRG` (the shell), `ABOUT.PRG`, the settings files `CONFIG` (Settings), `PROGRAMS` (the Desktop's Programs menu) and `NODESK` (optional: boot into the text shell), and (0.14) `ICONS` (the Desktop's icons, made from `sdfiles/icons.txt`), `CLOCK` (the last time set, written by the Desktop and the shell) and `LAYOUT` (where the desktop icons are), (0.22) `URLS` (the Downloader's last addresses) and `BBS.TXT` (the BBS terminal's address book). Files hides it and refuses to start its programs |
 | `/SYSTEM/TESTS` | Test and demo programs: SELFTEST, HELLO, COUNT, SPIN, TICK, REGS, CRASH, FTEST, PING, PONG, KEYS, MOUSE, MTEST, BENCH, WDEMO, LEAK, HOG, (0.15) KTEST, (0.17) STEST, (0.18) GTEST |
-| `/BIN` | The applications: WFILES (Files), TERM (Terminal), EDIT, WRITE, SHEET, PAINT, BASIC, CALC, SOLITAIR, (0.17) QUABRICK (Quabricks; its samples QUABRICK.SFX, its high scores QUABRICK.DAT), SETTINGS, and the shell's tools FILES (the text browser), CAT, DIR, MEM |
+| `/BIN` | The applications: WFILES (Files), TERM (Terminal), EDIT, WRITE, SHEET, PAINT, BASIC, CALC, SOLITAIR, (0.17) QUABRICK (Quabricks; its samples QUABRICK.SFX, its high scores QUABRICK.DAT), SETTINGS, (0.22) DOWNLOAD (the Downloader), BBS (the BBS terminal), and the shell's tools FILES (the text browser), CAT, DIR, MEM |
 | `/Desktop` | Created by the Desktop if missing: what is in it shows as icons on the desktop (0.14: shortcuts are `.LNK` files, below) |
 | `/atari.ini` | The classic machine's settings, read by the I/O processor at boot (Settings > Classic Atari edits it) |
 
@@ -306,6 +306,25 @@ the blitter: the software drawing paths; both must pass):
    kept for the next prompt; the console must equal `tests/cpstop.txt`, BIG.BIN stays, and no
    partial file is left.
 
+27. **The internet** (0.22, `make test-net` alone): emu816 with `--net-root` on a fresh copy
+   of `tests/net` (the host `files.test`, and a 384 KB `big.bin` from tests/mkbig.py) at the
+   board's speed. `tests/netshell.keys` (text shell, with `/PC:` too): `get` to the card and to
+   `/PC:` (the progress lines, the name without the query), an FTP and an HTTP folder
+   listing, 404, a host that is not there, ctrl-C (no partial file), `cp` of a URL into a
+   folder, `cat` of a URL, `ls`/`cd`/`rm` of a URL; the console must equal
+   `tests/netshell.txt` and the files the server's byte for byte. `netshell2` (a gateway
+   without the internet: "no such service"), `netshell3` (the link dropped during a get).
+   The Downloader (`tests/download.keys`, 8 pictures): the window, the progress, done, HTTP
+   404, the Replace question, Cancel (no file left), the Recent pop-up; /SYSTEM/URLS. The BBS
+   terminal (`tests/bbs.keys`, 5 pictures, `--net`): `tests/bbsserver.py`, started by the
+   Makefile on a free port of 127.0.0.1 (written into the card's address book as "Test
+   board"; the server stops after the session), sends a telnet negotiation and an ATASCII
+   screen, an ANSI screen on request, closes on request; the pictures show the ATASCII screen,
+   the ASCII mode, the remote close, the Connect dialog and the lost link (`--pc-drop-at`);
+   what the server got (the negotiation answers, the terminal types, the keys) must equal
+   `tests/bbs.log`. No internet is needed. Not covered: a URL whose size the server does not
+   give (emu816 always gives the file's size; uicpwin and `get` show "KB" only then).
+
 The Desktop sessions (`DESK=1` in `tests/shots.sh`) get `tests/desk.programs` as their
 Programs menu (the order of 0.12), so programs added to `sdfiles/PROGRAMS` do not change
 their pictures. `PREP=command` runs a command on the session's copy of the card first.
@@ -368,6 +387,45 @@ card. How to start the gateway on the PC: see the root README, "PC link".
 - **Unfinished files:** the gateway writes a new file under a temporary name and gives it its
   name only when it is complete. A copy to the PC that is cut off (Cancel, a lost link, a
   reset) never leaves a half file there, and an older file of that name stays as it was.
+
+## The internet (0.22)
+
+With the PC link's gateway running on a PC (and not started with `--no-net`), the Atari816
+reaches the internet through it: the PC makes the connections, does the name lookups and
+TLS; the Atari816 sees bytes (ABI.md, "The internet"). **A URL is a path:**
+
+- `http://`, `https://` and `ftp://` URLs read like files. The shell's `cat`, `cp` take them
+  (`cp https://example.org/file.zip /PC:`); an `ftp://` URL ending in `/` reads as the
+  folder's listing. They are read only.
+- `tcp://host:port` (and `tls://host:port`, TLS done by the PC) is a connection, for programs
+  like the BBS terminal.
+- The shell passes a URL on unchanged (no current folder in front, no change of case). A
+  copy into a folder takes the URL's last part without its query (`?...`): `index.html` when
+  there is none, `listing.txt` for an FTP folder.
+- **`get URL [to]`** (the shell) downloads: `to` is a folder (the name goes inside it) or the
+  new file's name, by default the URL's name in the current folder. The progress is one line,
+  `12 of 40 KB (30%)`, or `12 KB` when the server does not say the size; ctrl-C stops it and
+  deletes the partial file. Then `saved NAME (40 KB)`.
+- **The Downloader** (Programs menu; `/BIN/DOWNLOAD.PRG`, `download [URL]` in the shell): an
+  address field, Save as (the folder last used and the URL's name; Choose... opens the file
+  dialog), a bar with `123 of 456 KB (27%)` (or `123 KB`), a status line, Recent... (the last 8
+  addresses that worked, kept in /SYSTEM/URLS), Cancel (Esc, the close box) and Download
+  (Enter). It reads in pieces of 4 KB and looks at its window between them, so Cancel always
+  works; a cancelled or failed download leaves no file. It asks before replacing a file.
+- **The BBS terminal** (Programs menu; `/BIN/BBS.PRG`, `bbs [-ascii] [host[:port] | name]`):
+  telnet to a bulletin board. Connection > Connect... takes `host`, `host:port`,
+  `telnet://host[:port]` or `tcp://host:port` (port 23 when none is given); the address book
+  `/SYSTEM/BBS.TXT` (one `Name=host:port` per line, `#` comments; it ships with comments only:
+  add your boards) fills the rest of the menu. Mode: **ATASCII** (40 x 24, the Atari character
+  set with its graphics characters and inverse video, the screen editor's control codes; the
+  keys send Atari codes: Return $9B, Backspace $7E, Tab $7F, the arrows $1C-$1F) or **ASCII**
+  (80 x 24, VT52 and a small ANSI subset: positions, erase, bold, inverse). A remote close, a
+  lost link or a failed connection is said on the screen. Not yet: file transfers, capture,
+  colours.
+- **Errors** (the shell and the programs): "no such service: the gateway has no internet (or
+  --no-net)", "HTTP error 404", "name not found", "refused or unreachable", "timeout", "TLS
+  failed", "the connection was closed", "the PC link was lost", "no PC link".
+- **What it reaches:** whatever the PC can reach, the home network too.
 
 ## The shell and the file browser
 
@@ -517,8 +575,11 @@ names with spaces: "in quotes"; ctrl-C stops the foreground job
 | `user/uipop.s` | (0.15) ui_popup, ui_popat, ui_menukey, ui_chime, ui_beep, the text field's pop-up menu |
 | `user/ktest.s` | (0.15) KTEST, the test of the kernel's 0.15 additions |
 | `user/uidate.s` | (0.14) the date: seconds to a calendar date and back, `/SYSTEM/CLOCK` (also linked by the shell); (0.20) the clock from the PC (ui_clkpc) |
-| `user/uicopy.s` | (0.20) copying and deleting files and whole folders, and moves between the card and the PC volume (ui_cptree, ui_rmtree, ui_mvtree; also linked by the shell); (0.21) in pieces of 16 KB, a callback that may cancel |
+| `user/uicopy.s` | (0.20) copying and deleting files and whole folders, and moves between the card and the PC volume (ui_cptree, ui_rmtree, ui_mvtree; also linked by the shell); (0.21) in pieces of 16 KB, a callback that may cancel; (0.22) URLs as sources (to a short read, ui_cpblk, ui_cpx), ui_isurl, ui_urlname |
 | `user/uicpwin.s` | (0.21) the progress window of a long copy or move: name, KB, percent, a bar, Cancel (ui_cpwin, ui_cpdone) |
+| `user/download.s` | (0.22) the Downloader: a URL to a file through ui_cptree in pieces of 4 KB, its progress, Cancel, /SYSTEM/URLS |
+| `user/bbs.s`, `user/atascii.txt`, `tools/mkatascii.py` | (0.22) the BBS terminal (telnet, the ATASCII and ASCII / VT52 / ANSI screens, the address book /SYSTEM/BBS.TXT); its 8x8 ATASCII font: the graphics characters drawn in atascii.txt, the rest from the console font -> `user/atascii.inc` |
+| `tests/net/`, `tests/bbsserver.py` | (0.22) the test "web" for emu816 --net-root (`files.test`) and the scripted loopback BBS of the BBS terminal's session |
 | `sdfiles/icons.txt`, `tools/mkicons.py` | (0.14) the Desktop's icons as text art -> `/SYSTEM/ICONS` and `user/icons.inc` |
 | `user/horizon.inc` | User ABI: syscall numbers, error codes, macros (`sys`, `print`, `ptr`, `exit`, long branches) |
 | `user/ulib.s` | User library: line-buffered output and number printing, HID-to-ASCII (US, shift, caps lock, ctrl), `read_char`, `getline` (echo, backspace, ctrl-C), `parse_dec`, `spawn`, `exit_a`, `args_init` |
@@ -934,6 +995,47 @@ bus time (see emu/README.md, "Memory timing"). Expect the same factor on the CPU
   source stride), SYS_WGEOM, SYS_TNAME, WE_DROP's modifiers, the date routines (ui_clk*,
   `user/uidate.s`), shortcuts (ui_lnkread, ui_mklink), program and file icons (ui_prog,
   ui_ficon). See ABI.md and ui.inc.
+
+## Version 0.22 (the PC link, step 2: the internet)
+
+The I/O processor and the gateway carry TCP connections (channel 4, Net) and URL fetches
+(channel 5, Fetch: HTTP, HTTPS, FTP); Horizon gives them to programs as paths (ABI.md, "The
+internet"; Docs/04-pc-link.md, "Channels 4 and 5"). The kernel passes a path starting with
+`letters://` on unchanged, has 4 more handles (4-7) for streams, turns the firmware's $E4 into
+WE_NET (17) for the program's first window, and puts an HTTP status in X when open or stat
+fails with $CF. It also fixes input_poll for a program attached to a Terminal window: it
+looked only at the keyboard holder's queue, never at the window's, so ctrl-C during `cp`, `mv`
+(0.21) and `get` in the Terminal window was only seen at the next prompt (the text shell was
+not affected; found on the board). Bank $01 1,852 bytes left, k2 711, k3 2,386. New errors
+E_NOSVC ... E_NET ($CA-$D3) and E_NSTREAM in horizon.inc.
+
+- **The shell:** `get URL [to]` (a download with its progress line and ctrl-C), URLs passed
+  on unchanged everywhere, a copy into a folder named from the URL (no query), a sentence for
+  every new error ("HTTP error 404" with the status), "denied" ($47) and "not possible here"
+  ($C2). The command line holds 128 characters (LINEMAX; 80 before), but the line editor
+  still stops at the screen's width - 3 (75 in the text shell, 73 in the Terminal): it does
+  not wrap, so a longer URL can only come through a program's argument (the shell's own,
+  `SH get ...`) for now.
+- **The controls library:** `uicopy.s` reads a file until a short read, never only to its
+  STAT size (a URL's size may be unknown: 0); `ui_cpblk` (the piece, 16 KB by default; the
+  Downloader and `get` use 4 KB: a URL's read waits until the piece is full); `ui_cpx` (X of a
+  failed STAT or OPEN of the source: the HTTP status); `ui_isurl`, `ui_urlname` (the name a
+  copy of a path or URL gets). `uicpwin.s`: a size of 0 shows "123 KB", no percent, no bar.
+- **The Downloader** (`user/download.s`) and **the BBS terminal** (`user/bbs.s`): see "The
+  internet" above. The BBS terminal's 8x8 ATASCII font is Horizon's own: the graphics
+  characters are drawn in `user/atascii.txt`, the letters and signs come from the console font
+  (`tools/mkatascii.py` makes `user/atascii.inc`); no Atari ROM data. ASCII mode draws the
+  console font in 7-pixel cells (its eighth column is always blank) so 80 columns fit.
+- **emu816:** `--net` (tcp:// as real loopback sockets), `--net-root DIR` (URLs served from
+  `DIR/host/path`, 404 when missing), `--net-delay` (emu/README.md).
+- Pictures: About shows 0.22 (desk3, desk7, desk1413, kmenu2, system5, system6). The
+  programs linked with the controls library changed, so the Desktop's status line ("NNNNK
+  free") catches a program loading or a copy's bank at a slightly different moment in a few
+  early shots (desk1, desk151-153, system12-13, files1, files5-7, classic3; only that text
+  differs, checked against a run of the 0.21 programs on the same kernel); where REV $08-$0A
+  or $07 now differ from the default, `files-rev10.md5` and `classic-rev7.md5` (Makefile
+  REV10, REV7IF).
+- Tests: "Build, run, test", 27.
 
 ## Version 0.21 (long copies: progress and cancel)
 

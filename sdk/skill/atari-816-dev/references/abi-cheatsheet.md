@@ -185,6 +185,7 @@ transparent), 7 WD_DITHER, 8 WD_SBLIT (stride = c1|c2<<8), 9 WD_COPY (to c1|c2<<
 | 10 WE_LEAVE | | | |
 | 14 WE_FOCUS / 15 WE_UNFOCUS | (0.15; a game pauses on UNFOCUS) | | |
 | 16 WE_VBL | (0.18, win_vbl) | | |
+| 17 WE_NET | (0.22) bit mask of the internet handles (4-7) with news; to the program's first window | | |
 
 Read: `lda ev` / `and #$00FF` = type; `lda ev+1` / `and #$00FF` = window; a = `ev+2`,
 b = `ev+4` (down flag: `ev+5` byte or `and #$0100`), c = `ev+6`.
@@ -193,6 +194,24 @@ F1-F12 $3A-$45, Ins $49, Home $4A, PgUp $4B, Del $4C, End $4D, PgDn $4E, Right $
 Left $50, Down $51, Up $52. Mods: bit 0 lctrl, 1 lshift, 2 lalt, 3 lgui, 4-7 right ones
 (ctrl = `and #$11`, shift = `and #$22`). Programs never get F10, Alt alone, Alt+menu
 letter, Alt+Tab, Alt+F4, ctrl+W (= WE_CLOSE), F12.
+
+## The internet (0.22): `SDK/docs/reference/internet.md`
+
+Through the PC link; the PC must run the gateway `tools/atari816-link` (`--no-net`: E_NOSVC).
+No new syscalls: **a URL is a path** (127 characters with the scheme), on handles 4-7.
+- `http://`, `https://`, `ftp://`: read-only files. open mode 0 (waits for the server),
+  stat, read until a short read (= the end), close. E_HTTP ($CF): X = the HTTP status.
+- `tcp://host:port`, `tls://host:port`: connections. open waits until connected (~20 s
+  max); read and write **never wait** (read A = 0: nothing yet; write may take fewer bytes,
+  even 0); E_CLOSED ($D0) after the other end closed. Test A with `cmp #0` after `sys`.
+- Window programs wait for WE_NET (17, to their first window, a = handle mask); programs
+  without windows poll: read, sleep 10 ms, read again.
+- Errors: E_NOLINK $C7, E_LOST $C8, E_NOSVC $CA, E_BADADDR $CB, E_NONAME $CC, E_REFUSED $CD,
+  E_TIMEOUT $CE, E_HTTP $CF, E_CLOSED $D0, E_TLS $D1, E_PCBUSY $D2, E_NET $D3, E_NSTREAM $52.
+- Programs reach whatever the PC can reach, including the home network.
+- emu816 / run816.py: `--net` (tcp:// = real connections of the PC), `--net-root DIR`
+  (http://host/path = the file DIR/host/path; missing: 404). Examples: `SDK/examples/fetch`,
+  `SDK/examples/echo`.
 
 ## Colours
 

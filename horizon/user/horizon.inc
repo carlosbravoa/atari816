@@ -273,6 +273,7 @@ WE_STATUS = 12        ;         (0.14, the backdrop) the status text at the righ
 WE_MENUOPEN = 13      ;         (0.14, the backdrop) one of its menus is opening: a = the menu (it may call SYS_WMENU now: the menu opens again)
 WE_FOCUS  = 14        ;         (0.15) the window got the keyboard focus
 WE_UNFOCUS = 15       ;         (0.15) it lost it; the keys it held got their releases (WE_KEY up) just before
+WE_NET    = 17        ; (0.22) a = bit mask of the program's stream handles (4-7) with news (data, end, error)
 ; WE_BUTTON and WE_MOTION: c = buttons | modifiers << 8 (the HID modifier bits, as in key events)
 ; the system palette: 0-15 UI colours, 16-231 colour cube 16 + 36 r + 6 g + b, 232-255 greys
 C_BLACK = 0
@@ -322,6 +323,20 @@ ENODEV  = 9            ; (0.17) the hardware is not there (SYS_SPLAY ... on REV 
 ECANCELED = 10         ; (0.21) user side only (the kernel never returns it): a copy cancelled by
                        ; the user (the controls library's ui_cpcb said so; ui_cptree, ui_mvtree)
 EIO    = $40           ; + I/O processor result (FatFs FRESULT: $44 = no file, $45 = no path)
+; (0.22) the internet (PC link step 2): URLs and connections (ABI.md, "The internet")
+E_NOLINK  = EIO + $87   ; no PC link
+E_LOST    = EIO + $88   ; the PC link was lost
+E_NOSVC   = EIO + $8A   ; no such service (an older gateway, or one started with --no-net)
+E_BADADDR = EIO + $8B   ; bad address (URL, host or port)
+E_NONAME  = EIO + $8C   ; name not found
+E_REFUSED = EIO + $8D   ; refused or unreachable
+E_TIMEOUT = EIO + $8E   ; timeout
+E_HTTP    = EIO + $8F   ; HTTP status 400 or more: open and stat return the status in X
+E_CLOSED  = EIO + $90   ; the connection was closed (read after the end, write after it)
+E_TLS     = EIO + $91   ; TLS failed (certificate)
+E_PCBUSY  = EIO + $92   ; too many connections on the PC
+E_NET     = EIO + $93   ; other network error
+E_NSTREAM = EIO + 18    ; too many open files / streams
 
 ; ---- macros (a16 i16) ----
 .macro  sys     n

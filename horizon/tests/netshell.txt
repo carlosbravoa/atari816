@@ -1,0 +1,202 @@
+> get http://files.test/hello.txt
+
+1 of 1 KB (100%)K
+Ksaved hello.txt (1 KB)
+> cat hello.txt
+Hello from the web.
+This file came through the PC link.
+> get http://files.test/big.bin?size=1#top /PC:
+
+4 of 384 KB (1%)K
+8 of 384 KB (2%)K
+12 of 384 KB (3%)K
+16 of 384 KB (4%)K
+20 of 384 KB (5%)K
+24 of 384 KB (6%)K
+28 of 384 KB (7%)K
+32 of 384 KB (8%)K
+36 of 384 KB (9%)K
+40 of 384 KB (10%)K
+44 of 384 KB (11%)K
+48 of 384 KB (12%)K
+52 of 384 KB (13%)K
+56 of 384 KB (14%)K
+60 of 384 KB (15%)K
+64 of 384 KB (16%)K
+68 of 384 KB (17%)K
+72 of 384 KB (18%)K
+76 of 384 KB (19%)K
+80 of 384 KB (20%)K
+84 of 384 KB (21%)K
+88 of 384 KB (22%)K
+92 of 384 KB (23%)K
+96 of 384 KB (25%)K
+100 of 384 KB (26%)K
+104 of 384 KB (27%)K
+108 of 384 KB (28%)K
+112 of 384 KB (29%)K
+116 of 384 KB (30%)K
+120 of 384 KB (31%)K
+124 of 384 KB (32%)K
+128 of 384 KB (33%)K
+132 of 384 KB (34%)K
+136 of 384 KB (35%)K
+140 of 384 KB (36%)K
+144 of 384 KB (37%)K
+148 of 384 KB (38%)K
+152 of 384 KB (39%)K
+156 of 384 KB (40%)K
+160 of 384 KB (41%)K
+164 of 384 KB (42%)K
+168 of 384 KB (43%)K
+172 of 384 KB (44%)K
+176 of 384 KB (45%)K
+180 of 384 KB (46%)K
+184 of 384 KB (47%)K
+188 of 384 KB (48%)K
+192 of 384 KB (50%)K
+196 of 384 KB (51%)K
+200 of 384 KB (52%)K
+204 of 384 KB (53%)K
+208 of 384 KB (54%)K
+212 of 384 KB (55%)K
+216 of 384 KB (56%)K
+220 of 384 KB (57%)K
+224 of 384 KB (58%)K
+228 of 384 KB (59%)K
+232 of 384 KB (60%)K
+236 of 384 KB (61%)K
+240 of 384 KB (62%)K
+244 of 384 KB (63%)K
+248 of 384 KB (64%)K
+252 of 384 KB (65%)K
+256 of 384 KB (66%)K
+260 of 384 KB (67%)K
+264 of 384 KB (68%)K
+268 of 384 KB (69%)K
+272 of 384 KB (70%)K
+276 of 384 KB (71%)K
+280 of 384 KB (72%)K
+284 of 384 KB (73%)K
+288 of 384 KB (75%)K
+292 of 384 KB (76%)K
+296 of 384 KB (77%)K
+300 of 384 KB (78%)K
+304 of 384 KB (79%)K
+308 of 384 KB (80%)K
+312 of 384 KB (81%)K
+316 of 384 KB (82%)K
+320 of 384 KB (83%)K
+324 of 384 KB (84%)K
+328 of 384 KB (85%)K
+332 of 384 KB (86%)K
+336 of 384 KB (87%)K
+340 of 384 KB (88%)K
+344 of 384 KB (89%)K
+348 of 384 KB (90%)K
+352 of 384 KB (91%)K
+356 of 384 KB (92%)K
+360 of 384 KB (93%)K
+364 of 384 KB (94%)K
+368 of 384 KB (95%)K
+372 of 384 KB (96%)K
+376 of 384 KB (97%)K
+380 of 384 KB (98%)K
+384 of 384 KB (100%)K
+Ksaved /PC:/big.bin (384 KB)
+> ls /PC:
+  Games                                                <DIR>  2026-11-01 12:00
+  Notes.txt                                               64  2026-11-01 12:00
+  big.bin                                               384K  2026-03-04 05:06
+> get ftp://files.test/pub/
+
+1 of 1 KB (100%)K
+Ksaved listing.txt (1 KB)
+> cat listing.txt
+notes.md
+readme.txt
+> get HTTP://Files.Test/pub/
+
+1 of 1 KB (100%)K
+Ksaved index.html (1 KB)
+> get http://files.test/missing.txt
+get: http://files.test/missing.txt: HTTP error 404
+> get https://nowhere.test/a.zip
+get: https://nowhere.test/a.zip: name not found
+> get http://files.test/big.bin /part.bin
+
+4 of 384 KB (1%)K
+8 of 384 KB (2%)K
+12 of 384 KB (3%)K
+16 of 384 KB (4%)K
+20 of 384 KB (5%)K
+24 of 384 KB (6%)K
+28 of 384 KB (7%)K
+32 of 384 KB (8%)K
+36 of 384 KB (9%)K
+40 of 384 KB (10%)K
+44 of 384 KB (11%)K
+48 of 384 KB (12%)K
+52 of 384 KB (13%)K
+56 of 384 KB (14%)K
+60 of 384 KB (15%)K
+64 of 384 KB (16%)K
+68 of 384 KB (17%)K
+72 of 384 KB (18%)K
+76 of 384 KB (19%)K
+80 of 384 KB (20%)K
+84 of 384 KB (21%)K
+88 of 384 KB (22%)K
+92 of 384 KB (23%)K
+96 of 384 KB (25%)K
+100 of 384 KB (26%)K
+104 of 384 KB (27%)K
+108 of 384 KB (28%)K
+112 of 384 KB (29%)K
+116 of 384 KB (30%)K
+120 of 384 KB (31%)K
+124 of 384 KB (32%)K
+128 of 384 KB (33%)K
+132 of 384 KB (34%)K
+136 of 384 KB (35%)K
+140 of 384 KB (36%)K
+144 of 384 KB (37%)K
+148 of 384 KB (38%)K
+152 of 384 KB (39%)K
+156 of 384 KB (40%)K
+Kget: http://files.test/big.bin: cancelled
+> ls
+  BIN                                                  <DIR>  2026-11-01 12:00
+  BLUE.XEX                                                20  2026-11-01 12:00
+  LONG.TXT                                              9635  2026-11-01 12:00
+  README.TXT                                             110  2026-11-01 12:00
+  SYSTEM                                               <DIR>  2026-11-01 12:00
+  carts                                                <DIR>  2026-11-01 12:00
+  disks                                                <DIR>  2026-11-01 12:00
+  docs                                                 <DIR>  2026-11-01 12:00
+  hello.txt                                               56  2026-03-04 05:06
+  index.html                                              20  2026-03-04 05:06
+  listing.txt                                             20  2026-03-04 05:06
+  many                                                 <DIR>  2026-11-01 12:00
+  programs                                             <DIR>  2026-11-01 12:00
+  PC:                                                  <DIR>  2026-03-04 05:06
+> cp http://files.test/pub/readme.txt /docs
+> cat /docs/readme.txt
+Read me: a file in a folder of the test server.
+> cat http://files.test/pub/notes.md
+# Notes
+
+A second file.
+> ls http://files.test/
+dir: not possible here (a URL cannot do that)
+> cd http://files.test/pub
+cd: not a directory (or too long)
+> rm http://files.test/hello.txt
+rm: http://files.test/hello.txt: denied
+> get http://files.test/hello.txt /nofolder/x.txt
+get: http://files.test/hello.txt: not found
+> cat tcp://127.0.0.1:1
+cat: no such service: the gateway has no internet (or --no-net)
+> get
+usage: get URL [to]
+> 

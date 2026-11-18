@@ -1,0 +1,55 @@
+> get http://files.test/big.bin
+
+4 of 384 KB (1%)K
+8 of 384 KB (2%)K
+12 of 384 KB (3%)K
+16 of 384 KB (4%)K
+20 of 384 KB (5%)K
+24 of 384 KB (6%)K
+28 of 384 KB (7%)K
+32 of 384 KB (8%)K
+36 of 384 KB (9%)K
+40 of 384 KB (10%)K
+44 of 384 KB (11%)K
+48 of 384 KB (12%)K
+52 of 384 KB (13%)K
+56 of 384 KB (14%)K
+60 of 384 KB (15%)K
+64 of 384 KB (16%)K
+68 of 384 KB (17%)K
+72 of 384 KB (18%)K
+76 of 384 KB (19%)K
+80 of 384 KB (20%)K
+84 of 384 KB (21%)K
+88 of 384 KB (22%)K
+92 of 384 KB (23%)K
+96 of 384 KB (25%)K
+100 of 384 KB (26%)K
+104 of 384 KB (27%)K
+108 of 384 KB (28%)K
+112 of 384 KB (29%)K
+116 of 384 KB (30%)K
+120 of 384 KB (31%)K
+124 of 384 KB (32%)K
+128 of 384 KB (33%)K
+132 of 384 KB (34%)K
+136 of 384 KB (35%)K
+140 of 384 KB (36%)K
+144 of 384 KB (37%)K
+148 of 384 KB (38%)K
+152 of 384 KB (39%)K
+Kget: http://files.test/big.bin: the PC link was lost
+> ls
+  BIN                                                  <DIR>  2026-11-01 12:00
+  BLUE.XEX                                                20  2026-11-01 12:00
+  LONG.TXT                                              9635  2026-11-01 12:00
+  README.TXT                                             110  2026-11-01 12:00
+  SYSTEM                                               <DIR>  2026-11-01 12:00
+  carts                                                <DIR>  2026-11-01 12:00
+  disks                                                <DIR>  2026-11-01 12:00
+  docs                                                 <DIR>  2026-11-01 12:00
+  many                                                 <DIR>  2026-11-01 12:00
+  programs                                             <DIR>  2026-11-01 12:00
+> get http://files.test/hello.txt
+get: http://files.test/hello.txt: no PC link
+> 

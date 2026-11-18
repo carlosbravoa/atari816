@@ -1,0 +1,6 @@
+# (0.22) The PC link drops during a get (emu816 --net-root, --pc-kbps 100:55, --pc-drop-at 6):
+# "the PC link was lost", no partial file; then "no PC link" at once
+1500 {esc}
++1500 get http://files.test/big.bin\n
++5000 ls\n
++2500 get http://files.test/hello.txt\n

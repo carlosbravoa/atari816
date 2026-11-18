@@ -48,7 +48,7 @@ t_iobuf:    .res    NSLOT*256   ; path (+0) and a scratch copy (+128) for the I/
 bank_st:    .res    256         ; BK_FREE, BK_NONE, BK_KERNEL or owner task id
 
 ; ---- files ----
-NFILE = 4
+NFILE = 8                   ; (0.22) 0-3 files, 4-7 streams (URLs, connections)
 fh_owner:   .res    NFILE*2     ; slot*2 + 1 of the owner, 0 = closed
 
 ; ---- ports ----
@@ -120,6 +120,7 @@ sy_w:       .res    2
 w_tper:     .res    16*2        ; timer events: period, countdown (ticks), due
 w_tcnt:     .res    16*2
 w_tdue:     .res    16*2
+w_net:      .res    16*2        ; (0.22) WE_NET due: bit n = stream handle n has news
 ws_tflag:   .res    2           ; a timer is due
 ws_wheel:   .res    2           ; wheel steps not yet delivered
 wk_n:       .res    2           ; keys for the window manager
@@ -170,6 +171,7 @@ tm_fg:      .res    16*2        ; the task that gets its keys (slot*2), NONE
 tm_kn:      .res    16*2
 tm_kh:      .res    16*2
 tm_w:       .res    2           ; the terminal being written
+tm_poll:    .res    2           ; (0.22) term_iread called for input_poll: never block
 tm_ch:      .res    2           ; one character and its terminator
 tm_c:       .res    2
 tm_t:       .res    2

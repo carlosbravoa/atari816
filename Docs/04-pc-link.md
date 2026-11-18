@@ -121,7 +121,9 @@ Channel 0 carries only datagrams. Their first payload byte is an op.
 - **time**: the PC's local time in seconds since 2000-01-01 00:00 (the clock the Atari816
   uses; no time zone, no daylight saving: it is the PC's wall clock).
 - **services**: bit 0 FILES (the PC serves the PC volume, channel 2), bit 1 DEV (the PC may
-  send developer requests, channel 3).
+  send developer requests, channel 3), bit 2 NET (the PC makes TCP connections, channel 4),
+  bit 3 FETCH (the PC fetches URLs, channel 5). A gateway started with `--no-net` leaves bits 2
+  and 3 clear.
 
 **Starting.** The PC sends HELLO (a new random nonce each time) once a second until a
 HELLO_ACK with its nonce comes back. The session is up. A HELLO always starts a new session
@@ -151,15 +153,15 @@ PC at start, and PC volume requests answer "no PC link" at once.
 | 1 | Log | | The firmware's log: datagrams, board to PC, one line of text each (no newline) |
 | 2 | Files | the board | The PC volume (below) |
 | 3 | Developer | the PC | The developer tools (below) |
-| 4 | Net | the board | Reserved for step 2: TCP connections |
-| 5 | Fetch | the board | Reserved for step 2: fetch a URL (HTTP and HTTPS, TLS on the PC) |
+| 4 | Net | the board | Step 2: outgoing TCP connections (below) |
+| 5 | Fetch | the board | Step 2: fetch a URL: HTTP, HTTPS, FTP (below) |
 | 6 | Print | the board | Reserved for step 3 |
 | 7 | Classic | either | Reserved for step 3: the bridge for the classic Atari |
 | 8-15 | | | Reserved |
 
 A receiver acknowledges DATA frames on a channel it does not know, and drops them.
 
-### Requests and responses (channels 2 to 7)
+### Requests and responses (channels 2, 3, 6 and 7)
 
 Every DATA payload on these channels starts with a 4-byte header:
 
@@ -261,7 +263,7 @@ above.
 | $07 | EJECT | none | none (the virtual .xex disk is ejected) |
 | $08 | KEY | u8 modifiers (bit 0 Ctrl, bit 1 Shift), u8 HID usage, u8 hold time in 10 ms | none |
 | $09 | MOUSE | s8 dx, s8 dy, s8 wheel, u8 buttons | none (a MOUSE event for Horizon) |
-| $0A | TYPE | text (up to 256 bytes) | none; sent when the text is typed on the classic keyboard |
+| $0A | (TYPE) | | Removed (step 2, to free block RAM): answers $82 |
 | $0B | PEEK | u16 address, u16 length (up to 1024) | classic machine memory |
 | $0C | POKE | u16 address, bytes | none |
 | $0D | FWPEEK | u32 address, u16 length (up to 1024) | the I/O processor's memory |
@@ -287,16 +289,134 @@ above.
   longest time in microseconds between two looks (`gap`) and the events sent to Horizon
   (`ev`); INFO starts `gap` and `ev` again. `core/tools/intest.py` with
   `sw/a816/INTEST.BIN` uses it.
-- Results: 0, FatFs codes, $82 unknown op, $83 bad arguments, $85 busy (TYPE).
+- Results: 0, FatFs codes, $82 unknown op, $83 bad arguments.
 - Requests are served by the firmware's main loop; while it serves a PC volume request
   they wait.
 
+## Channels 4 and 5: the internet (step 2)
+
+The PC makes the Atari816's connections for it: **Net** (channel 4) is outgoing TCP, with TLS
+on the PC if asked; **Fetch** (channel 5) gets a URL (`http://`, `https://`, `ftp://`) and
+streams its body. The PC does the name lookup, TLS and its certificates, HTTP redirects and the
+FTP dialogue; the board sees only bytes. **Programs on the Atari816 can reach whatever the PC
+can reach, including the home network.** The gateway connects outwards only: it never listens.
+
+Both channels carry **streams**. They are not request / response channels: either side sends
+DATA frames whenever it has something to say, all with the same 4-byte payload header:
+
+| Byte | Field | Meaning |
+| --- | --- | --- |
+| 0 | OP | Below |
+| 1 | SID | The stream (1-255), chosen by the board at OPEN; the PC keeps one table per channel |
+| 2 | FLAGS | 0 |
+| 3 | RESULT | 0, or an error code (OPENED, END) |
+
+**Board to PC**
+
+| Op | Name | Data |
+| --- | --- | --- |
+| $01 | OPEN | u16 window (the bytes the board can take before it gives more credit), then Net: u16 port, u8 flags (bit 0 TLS), host (zero-terminated, at most 100 bytes); Fetch: u16 0, the URL (zero-terminated, at most 255 bytes) |
+| $02 | SEND | (Net) 1 to 1024 bytes for the connection, never more than the send credit |
+| $03 | CREDIT | u16: the board takes that many bytes more |
+| $04 | CLOSE | none: the PC closes the stream and forgets the SID; it sends nothing more for it |
+
+**PC to board**
+
+| Op | Name | Data |
+| --- | --- | --- |
+| $81 | OPENED | RESULT 0 or an error. u32 size (Fetch: Content-Length or the FTP SIZE when known, else $FFFFFFFF; Net: $FFFFFFFF), u16 status (HTTP: the final status, also on an HTTP error; else 0), u16 send credit (Net: the bytes the board may SEND; Fetch: 0). After an error nothing more comes for the SID |
+| $82 | DATA | 1 to 1024 bytes of the stream. The PC never sends more than the credit: the window of OPEN plus every CREDIT, minus the bytes sent so far |
+| $83 | SCREDIT | (Net) u16: the board may SEND that many bytes more |
+| $84 | END | RESULT 0: the end of the stream (Fetch: the whole body; Net: the other end closed), else an error. Nothing more comes for the SID; the PC has closed it |
+
+- A SID is any number 1-255 the board does not use at that moment. OPEN with a SID still open
+  on the PC first closes the old stream there. The board ignores frames for a SID it does not
+  know (they can cross a CLOSE).
+- The board gives credit back (CREDIT) as its programs read; it never grows the window beyond
+  what it can hold, so it is never flooded. The firmware keeps 4 KB per stream and gives credit
+  in steps of 1 KB.
+- When the session ends every stream ends on both sides (the PC closes its sockets).
+- At most 8 streams per channel on the PC; one more is refused with $92.
+
+**Results** (RESULT of OPENED and END; the board passes them on as mailbox results, below)
+
+| Code | Meaning |
+| --- | --- |
+| $8A | No such service: the gateway does not offer it (an older gateway, or `--no-net`). The board answers this itself |
+| $8B | Bad address: a URL or host the PC cannot use, an unknown scheme, a port of 0 |
+| $8C | Name not found (DNS) |
+| $8D | Refused or unreachable (connection refused, no route, FTP login refused, FTP file not found) |
+| $8E | Timeout |
+| $8F | HTTP status 400 or more (the status is in OPENED) |
+| $90 | (board only) The connection was closed: reading after END 0 of a Net stream, or writing after it |
+| $91 | TLS failed (certificate not valid for the name, handshake failed) |
+| $92 | Too many streams on the PC |
+| $93 | Other network error (the connection was reset, a broken HTTP answer, ...) |
+
+**The gateway's rules.**
+
+- Fetch: name lookup, connection, TLS and the answer's headers must take less than 20 s in
+  all, and the body may pause at most 30 s ($8E). Up to 5 redirects (HTTP 301, 302, 303, 307,
+  308). Certificates are checked against the system's store. The request has only `Host`,
+  `User-Agent: Atari816-link/1`, `Accept: */*`, `Accept-Encoding: identity`,
+  `Connection: close`: nothing about the user or the PC.
+- FTP (Fetch): `ftp://[user[:password]@]host[:port]/path`, passive mode, binary; anonymous
+  when no user is given. Size from SIZE when the server answers it. A URL that ends with `/`
+  gives the folder's listing as text, one entry per line (`name`, or with MLSD
+  `name<TAB>size<TAB>YYYY-MM-DD HH:MM`, folders ending in `/`), lines ending in LF. Read only.
+  Passwords are never written to the gateway's output.
+- Net: name lookup and connection (and TLS) within 15 s ($8E); then no time limit: an idle
+  connection stays open. The send credit starts at 4 KB; the gateway gives more (SCREDIT) as
+  it hands the bytes to the socket. Small sends go out at once (TCP_NODELAY), for interactive
+  use.
+- `--no-net` switches both services off (HELLO without bits 2 and 3).
+
+### What the 65C816 sees (step 2)
+
+A **URL is a path**: the normal file operations of the mailbox take it. The scheme (any case)
+picks the service; `:` cannot be in a FAT name, so no card name is hidden by it. The whole
+path must fit in 127 bytes (Horizon's path limit).
+
+| Path | Service |
+| --- | --- |
+| `http://...`, `https://...`, `ftp://...` | Fetch: a read-only file |
+| `tcp://host:port`, `tls://host:port` | Net: a connection (port 1-65535; `tls://` = TLS on the PC) |
+
+- **Handles.** The firmware has 4 more mailbox handles for streams, **4 to 7** (0 to 3 stay the
+  files'), so a connection never takes a file's handle.
+- **A URL (Fetch).** OPEN (mode 0; other modes: 7 denied) answers when the server has answered
+  (or failed); STAT answers the same way: size = the size if known, else 0; attributes $21
+  (a read-only file); time = the PC's clock now. A STAT and then an OPEN of the same URL within
+  15 s make one request to the PC (the STAT's stream is kept for the OPEN). READ answers when
+  LEN bytes have come or the stream ended: fewer than LEN = the end, as with a file. WRITE: 7.
+  SEEK: $82. MKDIR, DELETE, RENAME: 7. READDIR, LOAD, CLASSIC_MOUNT: $82.
+- **A connection (Net).** OPEN answers when it is connected or failed (at most 20 s). READ
+  never waits: it gives the bytes that have come (up to LEN; 0 = none yet); after the other end
+  closed and every byte was read it answers $90. WRITE never waits: it takes as many bytes as
+  the send credit allows (perhaps 0: try again later) and answers that count; after the end:
+  $90. SEEK, STAT: $82.
+- **Waiting.** Whenever something new happens on a connection (bytes came, it ended, it
+  failed) and its program has read from it since the last time, the firmware sends the event
+  **$E4 NET** (ARG0 = the handle). Horizon turns it into a window event.
+- **Waiting requests do not stop the I/O processor.** An OPEN, a STAT or a READ that waits for
+  the internet is put aside: the request ring moves on and its answer comes later (answers are
+  matched by TAG). Other programs' file requests go on meanwhile, and keys and the mouse keep
+  coming. If no answer comes from the PC within 40 s the request answers $8E.
+- **Results** as above, and: $87 no PC link; $88 the link was lost (during the request, or on
+  a handle of an ended session; CLOSE frees it and answers 0); $8A no such service; 18 too many
+  streams (all four handles in use). In an answer with $8F, ARG1 is the HTTP status.
+- CLOSE sends CLOSE to the PC and frees the handle. SYS_SYNC and a 65C816 restart close every
+  stream.
+
 ## The gateway
 
-`tools/atari816-link [FOLDER] [--port P] [--read-only] [--log FILE] [-v]`
+`tools/atari816-link [FOLDER] [--port P] [--read-only] [--no-net] [--log FILE] [-v]`
 
 - Shares FOLDER (default `~/Atari816`, created if missing). Only the Python standard library
   and pyserial.
+- Gives the Atari816 the internet (channels 4 and 5) unless started with `--no-net`.
+  Programs on the Atari816 can reach whatever the PC can reach, including the home network.
+  `-v` writes every connection and URL opened and how it ended (never a password).
 - Finds the port by itself (the second port of a pair with the same USB VID:PID), and keeps
   trying when the board is not there, is unplugged or reset: it reopens the port and starts a
   new session.
@@ -308,16 +428,3 @@ above.
   state. One tool's request at a time; the gateway passes the frames on unchanged.
 - Stop it before loading a bitstream with openFPGALoader (both use the board's USB).
 
-## Step 2: how the internet fits
-
-Channel 4 (Net) carries TCP connections: the board asks `CONNECT host port` (a request on
-channel 4) and gets a socket number; `SEND socket data` and `CLOSE socket` are requests; data
-arriving from the internet comes back as responses to a pending `RECV socket room` request (so
-the board always has room for what arrives: no flow control is needed beyond the request
-itself). Channel 5 (Fetch) carries `GET url` (HTTP or HTTPS; the gateway does TLS, follows
-redirects and checks certificates) with the body as the response stream, and a `HEAD` and a
-`POST` later. Both are request / response channels like channel 2, so nothing in the frame
-format, the sessions or the reliability changes; HELLO's services byte gets bits for them
-(bit 2 NET, bit 3 FETCH), and the mailbox gets ops in the reserved range $40 to $5F. The
-throughput is that of the PC volume: about 100 KB/s from the internet to the board's memory,
-about 55 KB/s from the board to the internet; latency is the internet's plus about 6 ms.

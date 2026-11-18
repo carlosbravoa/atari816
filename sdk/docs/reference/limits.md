@@ -8,6 +8,7 @@ From horizon/README.md ("Current limits"), ABI.md and the sources.
 | Memory | 64 KB banks only, no heap; 92 banks on 8 MB, 4 for the text screen, 88 for programs; the window system takes 6 contiguous banks, each window its bitmap (a power-of-two stride, contiguous banks) |
 | Tasks | 16 task slots, ids 1-62 |
 | Files | 4 open files in the whole system; paths at most 127 characters (absolute, after `.`/`..` are resolved) |
+| Internet (0.22) | 4 URLs or connections in the whole system (handles 4-7); a URL at most 127 characters with its scheme; needs the PC link's gateway |
 | Arguments | one string, 127 characters |
 | Message ports | 16, 8 messages of 16 bytes each |
 | Keyboard | 128 queued key events (console); 4 keys held at once plus modifiers (the I/O processor) |

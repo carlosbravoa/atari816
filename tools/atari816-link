@@ -5,16 +5,22 @@
 
 Shares ONE folder of this computer with the Atari816 over its USB cable. On the Atari816 the
 folder is the volume /PC: (a "PC" icon on the desktop). It also gives the Atari816 the time,
-and lets the developer tools (core/tools/atari.py) reach the board while it runs.
+the internet (its programs open URLs and TCP connections, and this computer makes them), and
+lets the developer tools (core/tools/atari.py) reach the board while it runs.
 
     atari816-link                 # share ~/Atari816 (created if missing)
     atari816-link ~/games         # share another folder
     atari816-link --read-only     # the Atari816 may read, not change anything
+    atari816-link --no-net        # no internet for the Atari816
     atari816-link --port /dev/ttyUSB1
 
 Safety: only that folder is shared, never anything outside it ('..', hidden names and links
 that point out of it are refused). The gateway opens no network port: the tools talk to it
 through a Unix socket in your runtime folder that only you can use. Stop it with Ctrl-C.
+
+Internet: programs on the Atari816 can reach whatever this computer can reach, including
+your home network. The gateway only connects outwards, never listens, and checks HTTPS
+certificates. Use --no-net to switch it off.
 
 Needs Python 3 and pyserial (pip install pyserial). Linux: you must be allowed to use the
 serial port (group "dialout"). Stop the gateway before loading a bitstream with
@@ -36,9 +42,11 @@ def main():
                     help="the folder to share (default ~/Atari816)")
     ap.add_argument("-p", "--port", default=None, help="serial port (default: found by itself)")
     ap.add_argument("--read-only", action="store_true", help="the Atari816 may not change files")
+    ap.add_argument("--no-net", action="store_true",
+                    help="no internet for the Atari816 (no URLs, no TCP connections)")
     ap.add_argument("--log", default=None, help="append the board's log to this file")
     ap.add_argument("-v", "--verbose", action="count", default=0,
-                    help="say more (-vv: every file opened)")
+                    help="say more: every file opened, every connection and URL (never a password)")
     args = ap.parse_args()
     folder = os.path.abspath(os.path.expanduser(args.folder))
     if not os.path.exists(folder):
@@ -52,7 +60,7 @@ def main():
     signal.signal(signal.SIGINT, stop)
     try:
         gw = pclink.Gateway(folder, port=args.port, readonly=args.read_only,
-                            verbose=args.verbose + 1, logfile=logfile)
+                            verbose=args.verbose + 1, logfile=logfile, net=not args.no_net)
         gw.run()
     except KeyboardInterrupt:
         print("\nstopped")

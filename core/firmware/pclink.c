@@ -14,6 +14,7 @@
 // Build on a PC with -DPL_HOST for the host test (core/firmware/test/pclink_host.c).
 
 #include "pclink.h"
+#include "pcnet.h"
 
 #ifdef PL_HOST
 #include <string.h>
@@ -24,6 +25,7 @@ uint32_t host_ms(void);
 #define HW_TX(c)    host_tx(c)
 #define NOW()       host_ms()
 #define HOT
+#define HOTDATA
 #define SDBUF
 #else
 #include "picorv32.h"
@@ -34,6 +36,7 @@ static inline int hw_rx(void) { uint32_t v = reg_blrx; return (v & 0x100) ? (int
 #define NOW()       time_millis()
 #define HOT         __attribute__((section(".text.hot")))
 #define SDBUF       __attribute__((section(".sdbuf")))
+#define HOTDATA     __attribute__((section(".data.hot")))   // read-only, but in block RAM
 #include "string.h"
 #endif
 
@@ -52,9 +55,16 @@ static inline int hw_rx(void) { uint32_t v = reg_blrx; return (v & 0x100) ? (int
 #define T_CALL      30000   // ms without progress on a PC volume request: lost
 #define T_GAP       100     // ms between two bytes of one frame: start over
 
-// ---- CRC-16/CCITT-FALSE (poly 0x1021, init 0xFFFF), byte tables split in high / low ----
-static uint8_t crc_th[256], crc_tl[256];
-#define CRC(h, l, b) do { uint8_t i_ = (h) ^ (b); (h) = (l) ^ crc_th[i_]; (l) = crc_tl[i_]; } while (0)
+// ---- CRC-16/CCITT-FALSE (poly 0x1021, init 0xFFFF), a byte at a time, kept as two bytes h, l.
+// The byte table T[x] is split by nibbles (the CRC is linear: T[x] = T[x & $F0] ^ T[x & $0F]):
+// four 16-byte tables, 64 bytes of block RAM instead of 512, and only one 4-bit shift a byte
+// (the PicoRV32 here has no barrel shifter: a shift costs a cycle per bit) ----
+static const uint8_t crc_hh[16] HOTDATA = { 0x00, 0x12, 0x24, 0x36, 0x48, 0x5A, 0x6C, 0x7E, 0x91, 0x83, 0xB5, 0xA7, 0xD9, 0xCB, 0xFD, 0xEF };
+static const uint8_t crc_hl[16] HOTDATA = { 0x00, 0x10, 0x20, 0x30, 0x40, 0x50, 0x60, 0x70, 0x81, 0x91, 0xA1, 0xB1, 0xC1, 0xD1, 0xE1, 0xF1 };
+static const uint8_t crc_lh[16] HOTDATA = { 0x00, 0x31, 0x62, 0x53, 0xC4, 0xF5, 0xA6, 0x97, 0x88, 0xB9, 0xEA, 0xDB, 0x4C, 0x7D, 0x2E, 0x1F };
+static const uint8_t crc_ll[16] HOTDATA = { 0x00, 0x21, 0x42, 0x63, 0x84, 0xA5, 0xC6, 0xE7, 0x08, 0x29, 0x4A, 0x6B, 0x8C, 0xAD, 0xCE, 0xEF };
+#define CRC(h, l, b) do { uint32_t x_ = (uint8_t)((h) ^ (b)), u_ = x_ >> 4, v_ = x_ & 15;      \
+        (h) = (l) ^ crc_hh[u_] ^ crc_hl[v_]; (l) = crc_lh[u_] ^ crc_ll[v_]; } while (0)
 
 // ---- state ----
 static uint8_t  up, svc;                       // session up; the PC's services
@@ -66,7 +76,7 @@ static uint32_t n_rx, n_bad, n_retry;
 // receive: the frame from LEN on
 static uint8_t  rxf[7 + PL_MAXPAY + 2];
 static uint16_t rxn, rxlen, rxend;
-static uint8_t  rxst, rxh, rxl, rxhc;
+static uint8_t  rxst, rxhc, rxh, rxl;          // rxh, rxl: the CRC so far
 static uint32_t rx_t;
 
 // a developer request that came while the firmware was waiting (handled afterwards)
@@ -86,6 +96,7 @@ static uint8_t  logn;
 
 int      pl_up(void)       { return up; }
 int      pl_files(void)    { return up && (svc & PL_SV_FILES); }
+int      pl_svc(void)      { return up ? svc : 0; }
 uint32_t pl_epoch(void)    { return epoch; }
 uint32_t pl_rx_bytes(void) { return n_rx; }
 uint32_t pl_rx_bad(void)   { return n_bad; }
@@ -138,14 +149,12 @@ HOT void pl_log_putc(int c)
 HOT static int rx_drain(void)
 {
     int got = 0;
+    uint32_t n = rxn;                          // (in registers: the payload loop is the hot one)
+    uint8_t  ch_ = rxh, cl = rxl;
     for (;;) {
-        int c = HW_RX();
-        if (c < 0) {
-            if (got) rx_t = NOW();
-            else if (rxst && NOW() - rx_t > T_GAP) rxst = 0;
-            return 0;
-        }
-        uint8_t b = (uint8_t)c;
+        int v = HW_RX();
+        if (v < 0) break;
+        uint8_t b = (uint8_t)v;
         got = 1;
         n_rx++;
         switch (rxst) {
@@ -153,29 +162,48 @@ HOT static int rx_drain(void)
             if (b == 0xA8) rxst = 1;
             break;
         case 1:
-            if (b == 0x16) { rxst = 2; rxn = 0; rxh = rxl = 0xFF; rx_t = NOW(); }
+            if (b == 0x16) { rxst = 2; n = 0; ch_ = cl = 0xFF; rx_t = NOW(); }
             else if (b != 0xA8) rxst = 0;
             break;
         case 2:
-            rxf[rxn++] = b;
-            if (rxn < 7) { CRC(rxh, rxl, b); if (rxn == 6) rxhc = rxl; break; }
+            rxf[n++] = b;
+            if (n < 7) { CRC(ch_, cl, b); if (n == 6) rxhc = cl; break; }
             rxlen = rxf[0] | rxf[1] << 8;
             if (b != rxhc || rxlen > PL_MAXPAY || rxf[2] >= PL_NCH) { rxst = 0; n_bad++; break; }
-            CRC(rxh, rxl, b);
+            CRC(ch_, cl, b);
             rxend = 7 + rxlen + 2;
             rxst = 3;
             break;
-        default:
-            rxf[rxn++] = b;
-            if (rxn <= 7 + rxlen) CRC(rxh, rxl, b);
-            else if (rxn == rxend) {
+        default: {
+            rxf[n++] = b;
+            uint32_t end = 7 + rxlen;
+            if (n <= end) {
+                CRC(ch_, cl, b);
+                uint32_t n0 = n;
+                while (n < end) {                  // the rest of the payload, as long as it is there
+                    if ((v = HW_RX()) < 0) break;
+                    rxf[n++] = (uint8_t)v;
+                    CRC(ch_, cl, (uint32_t)v);
+                }
+                n_rx += n - n0;
+                if (n < end) goto out;
+            } else if (n == rxend) {
                 rxst = 0;
-                if (rxf[rxend - 2] == rxl && rxf[rxend - 1] == rxh) return 1;
+                if (rxf[rxend - 2] == cl && rxf[rxend - 1] == ch_) {
+                    rxh = ch_; rxl = cl; rxn = n;
+                    return 1;
+                }
                 n_bad++;
             }
             break;
         }
+        }
     }
+out:
+    rxh = ch_; rxl = cl; rxn = n;
+    if (got) rx_t = NOW();
+    else if (rxst && NOW() - rx_t > T_GAP) rxst = 0;
+    return 0;
 }
 
 static void session_end(void)
@@ -254,6 +282,8 @@ static void rx_frame(void)
         if (!(p[2] & PL_RQ_MORE)) { fw_res = p[3]; fw_done = 1; }
     } else if (ch == PL_CH_DEV && !nested) {
         pl_dev_request(p, n);
+    } else if (ch == PL_CH_NET || ch == PL_CH_FETCH) {
+        ns_frame(ch, p, n);                                  // (any time: it only stores)
     }
 }
 
@@ -340,12 +370,6 @@ int pl_call(uint8_t op, const uint8_t *args, uint32_t nargs,
 
 HOT void pl_init(void)                                   // (runs before the cold image is loaded)
 {
-    for (int i = 0; i < 256; i++) {                     // the CRC tables
-        uint16_t c = (uint16_t)(i << 8);
-        for (int k = 0; k < 8; k++) c = (c & 0x8000) ? (uint16_t)(c << 1) ^ 0x1021 : (uint16_t)(c << 1);
-        crc_th[i] = c >> 8;
-        crc_tl[i] = (uint8_t)c;
-    }
 #ifndef PL_HOST
     uint32_t d = (27000000 + PL_BAUD / 2) / PL_BAUD;     // 27 for 1 Mbaud
     reg_blrx_div = d - 1;                                // receiver: bit = div + 1 clocks

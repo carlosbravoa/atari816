@@ -41,6 +41,7 @@ DSTATUS disk_status (
 /* Inidialize a Drive                                                    */
 /*-----------------------------------------------------------------------*/
 
+__attribute__((section(".coldtext")))   /* (Atari816) at mount only: cold */
 DSTATUS disk_initialize (
 	BYTE pdrv				/* Physical drive nmuber to identify the drive */
 )

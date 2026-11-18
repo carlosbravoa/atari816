@@ -23,7 +23,7 @@ The examples assume the usual `.a16` / `.i16` and these names from your program:
 | `ERUNNING` | 8 | A single-instance program runs already (its windows were raised) |
 | `ENODEV` | 9 | (0.17) The hardware is not there: the sample calls without Lau (REV < $0A) |
 | `ECANCELED` | 10 | (0.21) User side only (the kernel never returns it): a copy cancelled by the user (the controls library's `ui_cptree` / `ui_mvtree`) |
-| `EIO` | $40 | + the I/O processor's result: $44 no such file, $45 no such path, $46 bad name, $47 denied, $48 exists, $52 too many open files; $C0 + n for the classic ops; (0.20) $C7 no PC link, $C8 the PC link was lost, $C9 not the same volume (the PC volume, `/PC:`) |
+| `EIO` | $40 | + the I/O processor's result: $44 no such file, $45 no such path, $46 bad name, $47 denied, $48 exists, $52 too many open files; $C0 + n for the classic ops; (0.20) $C7 no PC link, $C8 the PC link was lost, $C9 not the same volume (the PC volume, `/PC:`); (0.22) $CA-$D3 the internet (`E_NOSVC` ... `E_NET`: [internet.md](internet.md)) |
 
 ## Tasks
 

@@ -21,6 +21,9 @@ The kernel makes every path absolute; the result must fit in 127 characters (EIN
   the card about 170 and 100). (0.21) A file opened with mode 2 on the PC gets its name only
   when it is closed: a copy cut off leaves no half file there. See Horizon's ABI.md, "The PC
   volume".
+- (Horizon 0.22) **URLs.** `http://`, `https://` and `ftp://` URLs open as read-only files,
+  and `tcp://host:port` / `tls://host:port` as connections, on their own handles 4-7: see
+  [internet.md](internet.md).
 - Data reaches the card when the file is closed (or at `SYS_SYNC`): close files you
   write before the user can switch off.
 

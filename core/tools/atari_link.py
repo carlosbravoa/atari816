@@ -16,7 +16,7 @@ Developer channel ops (payload: op, tag, flags, result, then the data):
   $02 PUT         size u32 + path, then frames of offset u32 + data -> result
   $03 RESTART816  [1 = /A816.BIN only]
   $04 RUN path    (a .xex: mount + cold boot)     $05 COLD   $06 WARM   $07 EJECT
-  $08 KEY mod hid hold10ms      $09 MOUSE dx dy wheel buttons      $0A TYPE text
+  $08 KEY mod hid hold10ms      $09 MOUSE dx dy wheel buttons      ($0A TYPE: removed)
   $0B PEEK addr16 len16         $0C POKE addr16 bytes              $0D FWPEEK addr32 len16
   $0E PEEK816 addr32 width16 rows16 stride32 flags8 -> data + sum16
       (flags bit 0 RLE: h < 128: h + 1 literals, h >= 128: next byte x (h - 125);
@@ -41,10 +41,6 @@ def _screencode_to_ascii(c):
     c &= 0x7F
     a = c + 32 if c < 64 else (c - 64 if c < 96 else c)
     return chr(a) if 32 <= a < 127 else "."
-
-
-class MenuTakeover(Exception):
-    """(Kept for old callers; the firmware menu is gone and never takes the keyboard.)"""
 
 
 def usb_ports():
@@ -173,32 +169,6 @@ class AtariLink:
         self._req(pclink.D_MOUSE, bytes([dx & 0xFF, dy & 0xFF, wheel & 0xFF, buttons & 0xFF]),
                   what="mouse")
 
-    def type_text(self, text, progress=None):
-        """Paste text as keystrokes on the classic machine (~18 chars/s)."""
-        data = text.replace("\r\n", "\n").encode("ascii", "replace")
-        done = 0
-        for i in range(0, len(data), 200):
-            part = data[i:i + 200]
-            self._req(pclink.D_TYPE, part, timeout=len(part) * 0.4 + 10, what="type")
-            done += len(part)
-            if progress:
-                progress(done, len(data))
-
-    def type_lines(self, text, progress=None, retries=4):
-        lines = [l for l in text.replace("\r\n", "\n").split("\n") if l != ""]
-        for n, line in enumerate(lines):
-            self.type_text(line + "\n")
-            if progress:
-                progress(n + 1, len(lines))
-
-    def type_key(self, ch):
-        data = ch.encode("ascii", "replace")[:1]
-        if data:
-            self._req(pclink.D_TYPE, data, timeout=5, what="type")
-
-    def kbd_session(self):
-        return KbdSession(self)
-
     def status(self, timeout=3):
         """The firmware's status line."""
         return self._req(pclink.D_INFO, timeout=timeout, what="status").decode("ascii", "replace").strip()
@@ -317,24 +287,3 @@ class AtariLink:
         except queue.Empty:
             pass
         return out
-
-
-class KbdSession:
-    """Live keyboard: every key is one TYPE request."""
-
-    def __init__(self, link):
-        self.link = link
-        self.open = True
-
-    def send_key(self, ch):
-        if not self.open:
-            raise LinkError("session closed")
-        if ch == "\r":
-            ch = "\n"
-        self.link.type_key(ch)
-
-    def poll_takeover(self):
-        pass
-
-    def end(self):
-        self.open = False

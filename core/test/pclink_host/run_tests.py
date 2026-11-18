@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: CC-BY-NC-SA-4.0 OR GPL-3.0-or-later
 # Copyright (c) 2026 Carlos Bravo
-"""Host test of the PC link: the firmware's engine (pclink.c, built for the PC as
-`harness`) against the real gateway (tools/pclink.py) through a pseudo terminal.
+"""Host test of the PC link: the firmware's engine (pclink.c and pcnet.c, built for the PC as
+`harness`) against the real gateway (tools/pclink.py) through a pseudo terminal. (Step 2) also
+URLs from a loopback web server and a connection to a loopback echo server: no internet.
 
   ./run_tests.py            # build, run, print PASS / FAIL lines; exit 1 on a failure
   ./run_tests.py --drop N   # the board side loses one received byte in every N
@@ -55,7 +56,36 @@ def main():
     os.mkdir(share)
     os.symlink("/etc", os.path.join(share, "OUT"))
     os.environ["XDG_RUNTIME_DIR"] = tmp
-    h = subprocess.Popen([exe, drop], stdout=subprocess.PIPE, text=True)
+    # (step 2) a loopback web server with a file, and a loopback echo server that closes on QUIT
+    web = os.path.join(tmp, "web")
+    os.mkdir(web)
+    big = bytes((i * 131 + (i >> 8)) & 0xFF for i in range(300000))
+    open(os.path.join(web, "big.bin"), "wb").write(big)
+    import functools
+    import http.server
+    import socketserver
+
+    class Quiet(http.server.SimpleHTTPRequestHandler):
+        def log_message(self, *a):
+            pass
+    httpd = http.server.ThreadingHTTPServer(("127.0.0.1", 0),
+                                            functools.partial(Quiet, directory=web))
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+
+    class Echo(socketserver.BaseRequestHandler):
+        def handle(self):
+            while True:
+                d = self.request.recv(1024)
+                if not d or b"QUIT" in d:
+                    break
+                self.request.sendall(d)
+    socketserver.ThreadingTCPServer.allow_reuse_address = True
+    echo = socketserver.ThreadingTCPServer(("127.0.0.1", 0), Echo)
+    echo.daemon_threads = True
+    threading.Thread(target=echo.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{httpd.server_address[1]}"
+    h = subprocess.Popen([exe, drop, base, str(len(big)), str(sum(big)), str(echo.server_address[1])],
+                         stdout=subprocess.PIPE, text=True)
     line = h.stdout.readline().split()
     assert line[0] == "PTY", line
     pty = line[1]
@@ -89,6 +119,10 @@ def main():
     while not any(l.startswith("FILES DONE") for l in lines) and time.time() - t0 < 90:
         time.sleep(0.1)
     check(any(l.startswith("FILES DONE 0") for l in lines), "board side file requests")
+    t0 = time.time()
+    while not any(l.startswith("NET DONE") for l in lines) and time.time() - t0 < 120:
+        time.sleep(0.1)
+    check(any(l.startswith("NET DONE 0") for l in lines), "board side URLs and connections (step 2)")
     check(not any(l.startswith("FAIL") for l in lines), "no board side FAIL")
     # the gateway goes away and comes back: a new session
     gw.close()

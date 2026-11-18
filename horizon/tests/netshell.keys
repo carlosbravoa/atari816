@@ -1,0 +1,29 @@
+# (0.22) The internet in the text shell: emu816 --net-root on a fresh copy of tests/net (the
+# "web": DIR/host/path, and build/run-net/files.test/big.bin, 393216 bytes from
+# tests/mkbig.py), --pc-folder (tests/pc), the board's transfer speeds (--pc-kbps 100:55).
+# get to the card and to /PC:, a URL's name without its query, a folder listing (ftp://,
+# http://), 404, a host that is not there, ctrl-C during a get (no partial file), cp from a
+# URL into a folder, cat of a URL, URLs where a file or folder is needed, tcp:// without
+# --net. (Each line's typing takes 50 ms a character.)
+1500 {esc}
++1500 get http://files.test/hello.txt\n
++3000 cat hello.txt\n
++2000 get http://files.test/big.bin?size=1#top /PC:\n
++9000 ls /PC:\n
++2000 get ftp://files.test/pub/\n
++3000 cat listing.txt\n
++2000 get HTTP://Files.Test/pub/\n
++3000 get http://files.test/missing.txt\n
++3000 get https://nowhere.test/a.zip\n
++3000 get http://files.test/big.bin /part.bin\n
++3500 ^C
++1000 ls\n
++3000 cp http://files.test/pub/readme.txt /docs\n
++4000 cat /docs/readme.txt\n
++2500 cat http://files.test/pub/notes.md\n
++3000 ls http://files.test/\n
++2500 cd http://files.test/pub\n
++2500 rm http://files.test/hello.txt\n
++3000 get http://files.test/hello.txt /nofolder/x.txt\n
++4000 cat tcp://127.0.0.1:1\n
++3000 get\n

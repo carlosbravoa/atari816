@@ -138,6 +138,7 @@ full, key releases are dropped).
 | `WE_FOCUS` | 14 | (0.15) the window got the keyboard focus | - | - |
 | `WE_UNFOCUS` | 15 | (0.15) it lost it; the keys it held got their releases just before | - | - |
 | `WE_VBL` | 16 | (0.18) a vertical blank, asked for with `win_vbl` ([games.md](games.md)) | - | - |
+| `WE_NET` | 17 | (0.22) to the program's first window: bit mask of its internet handles (4-7) with news ([internet.md](internet.md)) | - | - |
 
 - **Keys** go to the focused window (the top one). A held key repeats as further down
   events (the user's repeat setting). Modifier bits: 0 left ctrl, 1 left shift, 2 left

@@ -1,0 +1,7 @@
+# The BBS terminal's address book (/SYSTEM/BBS.TXT): its entries are in the Connection menu.
+# One entry per line:   Name=host:port   (or Name=host: port 23, telnet's)
+# The host is a name or an address; telnet://host:port works too. A line starting with #
+# is a comment. At most 12 entries; names up to 31 characters, addresses up to 63.
+# Edit this file (Edit, or on the PC) to add the boards you call. For example:
+#   My board=bbs.example.org:23
+#   Test=192.168.1.20:6400

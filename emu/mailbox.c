@@ -12,9 +12,13 @@
  * --card-kbps / --pc-kbps a request's answer comes after its transfer time, and key and mouse
  * events keep coming meanwhile (the firmware of Horizon 0.21). A PC file opened with mode 2 is
  * written under a temporary name and moved onto its name at CLOSE (the gateway's rule).
+ *
+ * The internet (PC link step 2, net.c): URL paths and the stream handles 4-7 are served there.
+ * The link counts as up while any PC service is given (--pc-folder, --net, --net-root).
  */
 
 #include "machine.h"
+#include "net.h"
 #include <dirent.h>
 #include <errno.h>
 #include <stdlib.h>
@@ -73,13 +77,17 @@ double      mailbox_pc_drop = -1, mailbox_pc_back = -1;
 
 static double emu_sec(void) { return (double)M.cpu.cycles / CPU_HZ; }
 
-static int pc_up(void)
+/* the link: up while a gateway with some service is there (--pc-folder, --net, --net-root) */
+static int link_up(void)
 {
-    if (!mailbox_pc_root) return 0;
+    if (!mailbox_pc_root && !mailbox_net && !mailbox_net_root) return 0;
     double t = emu_sec();
     if (mailbox_pc_drop < 0 || t < mailbox_pc_drop) return 1;
     return mailbox_pc_back > mailbox_pc_drop && t >= mailbox_pc_back;
 }
+
+/* the files service (the PC volume) */
+static int pc_up(void) { return mailbox_pc_root && link_up(); }
 
 static uint8_t pc_session(void)
 {
@@ -202,6 +210,7 @@ void mailbox_reset(void)
     uint8_t btn = m->ms_btn;
     memcpy(now, m->kb_now, 4);
     close_all(m, 0);
+    net_close_all(0);
     memset(m, 0, sizeof *m);
     m->root = root;
     m->restart = restart;
@@ -624,13 +633,14 @@ static void serve(Mailbox *m, uint8_t *msg)
          * /atari.ini and cold boots the classic core first: nothing to do here). Answered
          * OK; main.c then restarts the 65C816 with HORIZON.SYS read again from the card. */
         if (arg0 > 1) { res = 0x83; }
-        else { close_all(m, 0); m->restart = 1 + (int)arg0; }
+        else { close_all(m, 0); net_close_all(0); m->restart = 1 + (int)arg0; }
         fprintf(stderr, "emu816: SYS_RESTART %u -> %02X\n", (unsigned)arg0, (unsigned)res);
         break;
     case 0x1C:                                           /* SYS_SYNC (stub) */
         /* the firmware flushes and closes everything on the card and closes the PC volume's
          * files: here, close the files */
         close_all(m, 1);
+        net_close_all(1);                                /* every stream too */
         fprintf(stderr, "emu816: SYS_SYNC -> 00\n");
         break;
     case 0x1D:                                           /* SYS_TIME: the clock for file dates */
@@ -841,16 +851,27 @@ static void answer(Mailbox *m, uint8_t *msg)
     machine_update_irq();
 }
 
+/* ── for net.c ── */
+int      mbx_get(uint32_t n, uint8_t *dst, uint32_t len) { return mb_get(n, dst, len); }
+int      mbx_put(uint32_t n, const uint8_t *src, uint32_t len) { return mb_put(n, src, len); }
+int      mbx_path(uint32_t n, char *dst, int max) { return mb_path(n, dst, max); }
+int      mbx_link_up(void) { return link_up(); }
+uint8_t  mbx_link_session(void) { return pc_session(); }
+uint32_t mbx_pc_fat_now(void) { return fat_time(pc_now()); }
+int      mbx_resolve_in(const char *root, const char *fat, char *out, unsigned long n) { return host_path_in(root, fat, out, n, 1); }
+
 void mailbox_poll(uint64_t now)
 {
     Mailbox *m = &M.mb;
     if (now < m->next_poll) return;
     m->next_poll = now + MB_POLL;
     if (mailbox_pc_root) pc_drop_tmp(m);
+    net_tick(now);
 
     if (!m->req_base || !m->rsp_base) {                  /* not set up (or torn down) */
         if (m->ready || m->error || m->req_tail || m->rsp_head || m->busy) {
             close_all(m, 0);
+            net_close_all(0);
             m->ready = m->error = 0;
             m->req_tail = m->rsp_head = 0;
             m->busy = 0;
@@ -861,7 +882,13 @@ void mailbox_poll(uint64_t now)
     /* events: one per poll, also while a request is in progress, while the response ring has
      * at least 2 free slots (one stays free for the answer of that request) */
     int ev = 0;
-    if ((uint8_t)(m->rsp_tail - m->rsp_head - 1) >= 2) ev = key_event(m) || mouse_event(m);
+    if ((uint8_t)(m->rsp_tail - m->rsp_head - 1) >= 2) {
+        ev = key_event(m) || mouse_event(m);
+        if (!ev) {                                       /* the answer of a request put aside, or $E4 */
+            uint8_t e[16];
+            if (net_output(e, now)) { put_event(m, e); ev = 1; }
+        }
+    }
     if ((uint8_t)(m->rsp_head + 1) == m->rsp_tail) return;      /* no room for an answer */
     if (m->busy) {                                       /* a request in progress */
         if (now < m->busy_until) return;
@@ -881,6 +908,13 @@ void mailbox_poll(uint64_t now)
     if (m->req_head == m->req_tail) return;
     uint8_t msg[16];
     if (!mb_get(m->req_base + m->req_tail * 16u, msg, 16)) { m->error = 1; return; }
+    int nr = net_take(msg, now);                         /* a URL or a stream handle (4-7) */
+    if (nr) {
+        m->n_req++;
+        if (nr == 1) answer(m, msg);
+        else m->req_tail++;                              /* put aside: its answer comes later */
+        return;
+    }
     int pc;
     uint64_t d = req_cycles(m, msg, &pc);
     if (d) {                                             /* served one at a time: the answer later */

@@ -1,0 +1,7 @@
+# (0.22) The text shell with a gateway that gives no internet (emu816 --pc-folder only: the
+# link is up, Net and Fetch are not offered, as with the gateway's --no-net): clean errors
+1500 {esc}
++1500 get http://files.test/hello.txt\n
++3000 cat tcp://127.0.0.1:23\n
++2500 cp ftp://files.test/pub/readme.txt /\n
++3500 ls /PC:\n

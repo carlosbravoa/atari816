@@ -41,6 +41,10 @@ sprites, scrolling, draw lists) and the classic machine.
   16 hardware sprites, draw lists that Ali runs in the vertical blank, its own palette), or
   in a window (blitter sprites over a tile map, or hardware sprites), with keyboard, mouse
   and joysticks, frame sync, POKEY sound effects and sampled sound on Lau (Horizon 0.17).
+- **Internet programs** (Horizon 0.22): through the PC link, a URL (`http://`, `https://`,
+  `ftp://`) opens as a read-only file and `tcp://host:port` as a connection. Programs can
+  reach whatever the PC can reach, including the home network
+  ([docs/reference/internet.md](docs/reference/internet.md)).
 - **BASIC programs**: Horizon BASIC has graphics, sound and the mouse; BASIC 2.0 the games
   hardware too: sprites with collisions, a scrolling full screen with a panel and raster
   colours, blitter blocks, samples made or loaded and played by note name.
@@ -54,7 +58,7 @@ run in **emu816**, the machine's emulator, with scripted input and screenshots.
 | | |
 | --- | --- |
 | [docs/getting-started.md](docs/getting-started.md) | Install, build the emulator and Horizon, hello as a console and a window program, run, screenshot, script input, the real machine |
-| [docs/reference/](docs/reference/README.md) | The programmer's reference: program format and memory, every syscall with an example, the window system, drawing, the controls library, sound, the games calls (full screen, sprites, scrolling, draw lists, palette entries, frame sync: [games.md](docs/reference/games.md)), the classic machine, the hardware, performance, game patterns, limits |
+| [docs/reference/](docs/reference/README.md) | The programmer's reference: program format and memory, every syscall with an example, the window system, drawing, the controls library, sound, the internet ([internet.md](docs/reference/internet.md)), the games calls (full screen, sprites, scrolling, draw lists, palette entries, frame sync: [games.md](docs/reference/games.md)), the classic machine, the hardware, performance, game patterns, limits |
 | [docs/roadmap-notes.md](docs/roadmap-notes.md) | What a C compiler target would need, and the candidates |
 | [templates/console](templates/console) | Arguments, output, a line of input, a file |
 | [templates/window-app](templates/window-app) | A window with menus, a text field, buttons, the file dialog, an alert |
@@ -63,6 +67,8 @@ run in **emu816**, the machine's emulator, with scripted input and screenshots.
 | [examples/lantern](examples/lantern) | An arcade game: paddle, ball, lanterns and a moth; big letters from a 1 bpp font; a self-playing demo for its test |
 | [examples/slider](examples/slider) | A sliding-tile puzzle: mouse and keys, a fanfare |
 | [examples/hexview](examples/hexview) | A hex viewer: the controls library, a file loaded into a bank, scrolling with the blitter, resizing, drag and drop |
+| [examples/fetch](examples/fetch) | Fetch (Horizon 0.22): prints a URL on the console; a URL opened as a read-only file, a message for every error |
+| [examples/echo](examples/echo) | Echo (Horizon 0.22): a TCP client; connect, send a line, poll for the answer |
 | [examples/deepdive](examples/deepdive) | Deep Dive, a full-screen scrolling game skeleton (Horizon 0.18): its own framebuffer in two banks, fine scrolling with wrap and a split panel, one draw list a frame, 15 hardware sprites, its own palette and a raster table, Lau samples, pause on focus loss |
 | [tools/](tools) | `run816.py` (run in the emulator: input scripts, screenshots, checks, sound logs), `inputscript.py`, `contact.py` (screenshots on one sheet), `img2inc.py` (PNG or text art to sprites / tiles / palettes), `font2inc.py` (1 bpp fonts), `deploy816.py` (the real machine over the PC link), `abicheck.py` and `snippets.py` (`make check`), `probe/` (the performance measurements) |
 | [skill/atari-816-dev](skill/atari-816-dev/SKILL.md) | A Claude skill: the workflow and condensed references for writing Atari816 programs |
@@ -87,5 +93,7 @@ Verified in the emulator (REV $0B, its default): every template and example buil
 passes its scripted test, every reference example assembles and links, and the reference
 matches horizon.inc and the kernel's syscall tables. Not verified: the real board (no access
 while writing), sound (the emulator only logs it, and writes Lau's output to a WAV file),
-the PC link scripts, the C compiler notes. Where a document states something that was not checked,
+the PC link scripts, the C compiler notes. The internet examples (Fetch, Echo, Horizon 0.22)
+are tested in the emulator only (`--net-root` stands in for the web, a local echo server
+for TCP), not yet through the real gateway. Where a document states something that was not checked,
 it says so.

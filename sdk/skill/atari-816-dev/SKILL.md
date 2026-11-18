@@ -38,6 +38,9 @@ the Horizon tree, copy `horizon/` and `emu/` somewhere private, build there, and
      fine scrolling with wrap and a split panel, one draw list a frame, hardware sprites,
      own palette and raster table, Lau samples. Copy it for anything full screen.
    - `SDK/templates/basic-game` - a Horizon BASIC program (no assembler).
+   - `SDK/examples/fetch`, `SDK/examples/echo` - (Horizon 0.22) the internet through the PC
+     link: a URL read as a file, a TCP connection polled with sleep. Rules in the
+     cheat sheet's "The internet" and `SDK/docs/reference/internet.md`.
    Set `NAME` in the Makefile. If the folder is not two levels below SDK, pass both
    paths on every make command: `make HORIZON=/abs/horizon SDK=/abs/sdk` (run816 is
    found through `SDK`). Replace the template's `test` target with checks for your

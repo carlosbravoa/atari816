@@ -1,9 +1,15 @@
 ; SH - the Horizon shell (/SYSTEM/SH.PRG). Prompt "> ".
 ;   built-ins: help, ls [path] (alias dir), cat file, cd [path], pwd, ps, mem, kill id, cls, atari,
 ;     exit, restart [full], shutdown (both ask the Desktop when one runs), mount file [1-4], eject d1-d4|cart|xex, boot, run file (Atari software),
-;     rm path..., mkdir path, mv from to, cp from to (into a folder: keeps the name)
+;     rm path..., mkdir path, mv from to, cp from to (into a folder: keeps the name),
+;     (0.22) get URL [to] (a download: cp with progress; "to" a folder or a name, by default
+;     the URL's last part in the current folder)
 ;   Arguments may be quoted: "River Raid (Title Version).xex". Paths are relative to the
 ;     current directory (cd, kept by the kernel per task and inherited by programs).
+;   (0.22) A URL (http://, https://, ftp://, tcp://, tls://: the PC link's internet) is a path
+;     like any other: the shell passes it on unchanged (the kernel adds no current folder);
+;     cp and get into a folder take its last part without the query ("index.html" when it
+;     has none, "listing.txt" for an ftp:// folder listing).
 ;   Any other word runs a program: a word with a '/' or ending in .PRG is that file
 ;     (relative to the current directory); otherwise <WORD>.PRG from the first of /BIN,
 ;     /SYSTEM, /SYSTEM/TESTS that has it. The rest of the
@@ -16,7 +22,8 @@
         .include "horizon.inc"
         .include "ui.inc"
 
-LINEMAX = 80
+LINEMAX = 128                           ; (0.22: 80 before; getline still stops at the
+                                        ; screen's width - 3: it does not wrap)
 NJOBS   = 8
 
         .segment "CODE"
@@ -444,6 +451,34 @@ errmsg: cmp     #$44
         bne     :+
         print   "not on the same volume"
         rts
+:       cmp     #EIO + 7
+        bne     :+
+        print   "denied"
+        rts
+:       cmp     #EIO + $82
+        bne     :+
+        print   "not possible here (a URL cannot do that)"
+        rts
+:       cmp     #E_HTTP                 ; (0.22) the internet's errors
+        bne     :+
+        print   "HTTP error "
+        lda     z:hst
+        jmp     put_dec
+:       cmp     #E_NOSVC
+        bcc     :+
+        cmp     #E_NET + 1
+        bcs     :+
+        sbc     #E_NOSVC - 1            ; (C clear: - E_NOSVC)
+        asl     a
+        tax
+        lda     netmsg,x
+        tax
+        ldy     #^netmsg
+        jmp     out_str
+:       cmp     #E_NSTREAM
+        bne     :+
+        print   "too many open files or connections"
+        rts
 :       pha
         print   "error $"
         pla
@@ -460,6 +495,8 @@ getword:
 b_help: print   "built-ins: help, ls [path] (or dir), cat file, cd [path], pwd, ps, date [set],\n"
         print   "  mem, kill id, cls, atari, exit, files (the file browser), restart [full], shutdown\n"
         print   "files: rm path..., mkdir path, mv from to, cp from to (to: a folder too)\n"
+        print   "internet (the PC link): get URL [to] downloads (http:// https:// ftp://);\n"
+        print   "  a URL is a path: cp, cat take one too\n"
         print   "Atari: mount file [1-4], eject d1-d4|cart|xex, boot, run file\n"
         print   "other words run <WORD>.PRG from /BIN, /SYSTEM or /SYSTEM/TESTS (or a .PRG path);\n"
         print   "  the rest of the line is its argument; a trailing & runs it in the background\n"
@@ -991,6 +1028,7 @@ b_cat:  jsr     getword
         ldy     #^fname
         lda     #0
         sys     SYS_OPEN
+        stx     z:hst                   ; (0.22) E_HTTP: the status
         bcc     :+
         pha
         print   "cat: "
@@ -1107,19 +1145,15 @@ two_names:
         lda     dbuf+4
         and     #$0010
         beq     @ok
-        ldx     #0                      ; the last part of "from" (after the last '/')
-        ldy     #0
-:       lda     fname,y
-        and     #$00FF
-        beq     :++
-        cmp     #'/'
-        bne     :+
-        tya
-        inc     a
-        tax
-:       iny
-        bra     :--
-:       stx     z:t1
+        jsr     into_dir                ; a folder: to/<the last part of from>
+@ok:    clc
+        rts
+@use:   sec
+        rts
+
+; (0.22) fname2 (a folder) + '/' + srcname (the name fname gives)
+into_dir:
+        jsr     srcname
         ldy     #0                      ; the end of "to"
 :       lda     fname2,y
         and     #$00FF
@@ -1127,34 +1161,41 @@ two_names:
         iny
         bra     :-
 :       dey
+        bmi     :+                      ; ("" cannot be: STAT said a folder)
         lda     fname2,y                ; add a '/' unless there is one
         and     #$00FF
         cmp     #'/'
         beq     :+
         iny
         lda     #'/'
-        jsr     @put
+        jsr     putf2
 :       iny
-        ldx     z:t1
-:       lda     fname,x
+        ldx     #0
+:       lda     nbuf,x
         and     #$00FF
-        jsr     @put
+        jsr     putf2
         cmp     #0
-        beq     @ok
+        beq     :+
         inx
         iny
         cpy     #250
         bcc     :-
-@ok:    clc
-        rts
-@use:   sec
-        rts
-@put:   sep     #$20
+        lda     #0
+        jsr     putf2
+:       rts
+putf2:  sep     #$20
         .a8
         sta     fname2,y
         rep     #$20
         .a16
         rts
+
+; (0.22) nbuf = the name fname gives a copy (ui_urlname: a path's last part; a URL's last
+; path part without its query, "index.html" / "listing.txt" when it has none)
+srcname:
+        ldx     #.loword(fname)
+        ldy     #.loword(nbuf)
+        jmp     ui_urlname
 
 ; mv from to: rename, or move (0.20: between the card and the PC volume a copy, then the
 ; source deleted: ui_mvtree)
@@ -1190,6 +1231,8 @@ b_cp:   jsr     two_names
         ldy     #.loword(fname2)
         jsr     ui_cptree
         stz     ui_cpcb
+        ldx     ui_cpx                  ; (0.22) E_HTTP: the status
+        stx     z:hst
         bcc     :+
         pha
         print   "cp: "
@@ -1198,6 +1241,170 @@ b_cp:   jsr     two_names
         jsr     errmsg
         jmp     put_nl
 :       rts
+
+; (0.22) get URL [to]: a download (ui_cptree from the URL) with its progress on one line
+; ("12 of 40 KB (30%)", or "12 KB" when the server gave no size), redrawn after every piece
+; of 4 KB; ctrl-C stops it (the partial file deleted). "to": a folder (the name goes inside
+; it), or the new file's name; by default the URL's last part (srcname) in the current folder
+b_get:  jsr     getword
+        bne     :+
+        print   "usage: get URL [to]\n"
+        rts
+:       ldx     #.loword(fname2)
+        ldy     #^fname2
+        lda     #128
+        jsr     next_arg
+        bne     :+
+        jsr     srcname                 ; no "to": the name in the current folder
+        ldx     #.loword(nbuf)
+        ldy     #.loword(fname2)
+        jsr     scpy
+        bra     @go
+:       lda     #.loword(fname2)        ; "to" a folder?
+        sta     sblk
+        lda     #.loword(dbuf)
+        sta     sblk+3
+        sep     #$20
+        .a8
+        lda     #^fname2
+        sta     sblk+2
+        lda     #^dbuf
+        sta     sblk+5
+        rep     #$20
+        .a16
+        ldx     #.loword(sblk)
+        ldy     #^sblk
+        sys     SYS_STAT
+        bcs     @go
+        lda     dbuf+4
+        and     #$0010
+        beq     @go
+        jsr     into_dir
+@go:    stz     z:prog
+        lda     #.loword(getcb)
+        sta     ui_cpcb
+        lda     #4096
+        sta     ui_cpblk
+        ldx     #.loword(fname)
+        ldy     #.loword(fname2)
+        jsr     ui_cptree
+        php
+        pha
+        stz     ui_cpcb
+        lda     #16384
+        sta     ui_cpblk
+        lda     ui_cpx
+        sta     z:hst
+        jsr     progoff
+        pla
+        plp
+        bcc     :+
+        pha
+        print   "get: "
+        jsr     pr_fname
+        pla
+        jsr     errmsg
+        jmp     put_nl
+:       print   "saved "
+        ldx     #.loword(fname2)
+        ldy     #^fname2
+        jsr     out_str
+        print   " ("
+        lda     ui_cpk
+        jsr     put_dec
+        print   " KB)\n"
+        rts
+
+; the progress line erased (if one was printed)
+progoff:
+        lda     z:prog
+        beq     :+
+        stz     z:prog
+        lda     #13
+        jsr     out_char
+        lda     #27
+        jsr     out_char
+        lda     #'K'
+        jsr     out_char
+        jsr     out_flush
+:       rts
+
+; ui_cpcb of get: the progress line, then ctrl-C (cpkeys)
+getcb:  lda     ui_cpk
+        jeq     cpkeys                  ; (a file starts: nothing yet)
+        lda     #1
+        sta     z:prog
+        lda     #13
+        jsr     out_char
+        lda     ui_cpk
+        jsr     put_dec
+        lda     ui_cpsize
+        ora     ui_cpsize+2
+        beq     @kb                     ; the size unknown: "12 KB"
+        print   " of "
+        lda     ui_cpsize               ; the total K = (size + 1023) / 1024
+        clc
+        adc     #1023
+        sta     z:t3
+        lda     ui_cpsize+2
+        adc     #0
+        xba                             ; (high << 6 | low >> 10)
+        and     #$FF00
+        lsr     a
+        lsr     a
+        sta     z:t4
+        lda     z:t3
+        xba
+        and     #$00FF
+        lsr     a
+        lsr     a
+        ora     z:t4
+        sta     z:t4
+        jsr     put_dec
+        print   " KB ("
+        stz     z:t3                    ; percent = K * 100 / total (at most 100)
+        stz     z:t2
+        ldx     #100
+:       lda     z:t3
+        clc
+        adc     ui_cpk
+        sta     z:t3
+        bcc     :+
+        inc     z:t2
+:       dex
+        bne     :--
+        jsr     div32
+        cmp     #101
+        bcc     :+
+        lda     #100
+:       jsr     put_dec
+        print   "%)"
+        bra     @eol
+@kb:    print   " KB"
+@eol:   lda     #27
+        jsr     out_char
+        lda     #'K'
+        jsr     out_char
+        jsr     out_flush
+        jmp     cpkeys
+
+; t2:t3 (32 bits) / t4 (16 bits, not 0) -> A = the quotient (16 bits)
+div32:  ldx     #32
+        stz     z:t1                    ; the remainder
+:       asl     z:t3
+        rol     z:t2
+        rol     z:t1
+        lda     z:t1
+        bcs     :+                      ; (a 17th bit: it goes in)
+        cmp     z:t4
+        bcc     :++
+:       sbc     z:t4
+        sta     z:t1
+        inc     z:t3
+:       dex
+        bne     :---
+        lda     z:t3
+        rts
 
 ; (0.21) ui_cpcb of cp and mv, between two pieces: the keys typed meanwhile. ctrl-C cancels
 ; (C set); the other characters are kept for the next prompt (ulib key_keep: type-ahead)
@@ -1418,10 +1625,23 @@ bnames: .byte   "help", 0, 0, 0, 0
         .byte   "restart", 0
         .byte   "shutdown"              ; (8 characters: the table's end is its terminator)
         .byte   "date", 0, 0, 0, 0
+        .byte   "get", 0, 0, 0, 0, 0
         .byte   0
 bfuncs: .addr   b_help, b_dir, b_cat, b_ps, b_mem, b_kill, b_exit, b_cls, b_atari
         .addr   b_mount, b_eject, b_boot, b_run, b_cd, b_pwd, b_dir
-        .addr   b_rm, b_mkdir, b_mv, b_cp, b_restart, b_shutdown, b_date
+        .addr   b_rm, b_mkdir, b_mv, b_cp, b_restart, b_shutdown, b_date, b_get
+; (0.22) the internet's errors, E_NOSVC to E_NET
+netmsg: .addr   m_nosvc, m_badaddr, m_noname, m_refused, m_timeout, 0, m_closed, m_tls
+        .addr   m_pcbusy, m_net
+m_nosvc: .byte  "no such service: the gateway has no internet (or --no-net)", 0
+m_badaddr: .byte "bad address (URL, host or port)", 0
+m_noname: .byte "name not found", 0
+m_refused: .byte "refused or unreachable", 0
+m_timeout: .byte "timeout", 0
+m_closed: .byte "the connection was closed", 0
+m_tls:  .byte   "TLS failed (certificate)", 0
+m_pcbusy: .byte "too many connections on the PC", 0
+m_net:  .byte   "network error", 0
 ; the search path for a command word
 pfxs:   .addr   pf_bin, pf_sys, pf_tests
 NPFX    = (* - pfxs) / 2
@@ -1447,6 +1667,7 @@ info:   .res    16
 blk:    .res    10
 sblk:   .res    6
 dbuf:   .res    DBUFLEN + 2
+nbuf:   .res    UI_NAMEMAX + 1            ; (0.22) the name a copy gets (srcname)
 jobs:   .res    NJOBS * 2
 
         .segment "ZEROPAGE"
@@ -1465,4 +1686,6 @@ cols:   .res    2
 rows:   .res    2
 lines:  .res    2
 namew:  .res    2
+hst:    .res    2                       ; (0.22) the HTTP status of the last E_HTTP
+prog:   .res    2                       ; (0.22) get: a progress line is shown
 sp:     .res    4

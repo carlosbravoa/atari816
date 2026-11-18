@@ -4,6 +4,7 @@
  *          [--shot FILE.ppm] [--shot-at SECONDS] [--stats] [--headless] [--fast] PROGRAM.BIN
  */
 #include "machine.h"
+#include "net.h"
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
@@ -282,6 +283,9 @@ static void usage(void)
         "                       default: the host's clock)\n"
         "  --pc-drop-at SECONDS the PC link drops at this emulated time\n"
         "  --pc-back-at SECONDS and comes back at this one (a new session)\n"
+        "  --net                the internet (PC link step 2): tcp://host:port are real host connections\n"
+        "  --net-root DIR       ... and http://, https://, ftp:// URLs are served from DIR/host/path\n"
+        "  --net-delay MS       the PC's time to answer a URL OPEN or STAT (default 0)\n"
         "  --card-kbps R:W      slow card: READ / LOAD at R KB/s, WRITE at W KB/s, + 1 ms a request\n"
         "                       (0:0 = instant, the default; the board: about 170:100)\n"
         "  --pc-kbps R:W        slow PC volume: the same, + 6 ms a request (the board: about 100:55)\n"
@@ -334,6 +338,12 @@ int main(int argc, char **argv)
             if (a[2] == 'c') mailbox_card_date = mktime(&tm); else mailbox_pc_time = mktime(&tm);
         }
         else if (!strcmp(a, "--pc-folder") && i + 1 < argc) mailbox_pc_root = argv[++i];
+        else if (!strcmp(a, "--net")) mailbox_net = 1;
+        else if (!strcmp(a, "--net-root") && i + 1 < argc) mailbox_net_root = argv[++i];
+        else if (!strcmp(a, "--net-delay") && i + 1 < argc) {
+            mailbox_net_delay = atof(argv[++i]);
+            if (mailbox_net_delay < 0) usage();
+        }
         else if (!strcmp(a, "--pc-drop-at") && i + 1 < argc) mailbox_pc_drop = atof(argv[++i]);
         else if (!strcmp(a, "--pc-back-at") && i + 1 < argc) mailbox_pc_back = atof(argv[++i]);
         else if ((!strcmp(a, "--card-kbps") || !strcmp(a, "--pc-kbps")) && i + 1 < argc) {
@@ -383,6 +393,13 @@ int main(int argc, char **argv)
         struct stat st;
         if (stat(mailbox_pc_root, &st) || !S_ISDIR(st.st_mode)) {
             fprintf(stderr, "emu816: --pc-folder %s: not a folder\n", mailbox_pc_root);
+            return 1;
+        }
+    }
+    if (mailbox_net_root) {                             /* the Fetch service's folder too */
+        struct stat st;
+        if (stat(mailbox_net_root, &st) || !S_ISDIR(st.st_mode)) {
+            fprintf(stderr, "emu816: --net-root %s: not a folder\n", mailbox_net_root);
             return 1;
         }
     }

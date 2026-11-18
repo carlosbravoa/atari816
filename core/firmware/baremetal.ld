@@ -6,6 +6,8 @@
  * COLD : SDRAM at 0x10000 (physical 0x210000). Everything not listed as hot. Loaded from
  *        SPI flash by cold_load() in firmware.c before main_app() runs. Code there runs
  *        about 4x slower, which is fine for menus, mounting, H: and the PC Link.
+ *        A function given the section ".coldtext" is cold even in a file listed as hot
+ *        (sd_init, disk_initialize, sio_init: run once at boot or at card insertion).
  *
  * To move a function into block RAM, add its name to a hot list (or give it the section
  * ".text.hot", as pclink.c does). Functions the compiler inlines into a hot function are hot
@@ -46,7 +48,6 @@ SECTIONS
         firmware.o(.text.sio_wait_cmd_high .text.sio_wait_cmd_high.* .rodata.sio_wait_cmd_high .rodata.sio_wait_cmd_high.*)
         firmware.o(.text.sio_delay .text.sio_delay.* .rodata.sio_delay .rodata.sio_delay.*)
         firmware.o(.text.sio_rx_empty .text.sio_rx_empty.* .rodata.sio_rx_empty .rodata.sio_rx_empty.*)
-        firmware.o(.text.sio_init .text.sio_init.* .rodata.sio_init .rodata.sio_init.*)
         firmware.o(.text.sio_stream_file .text.sio_stream_file.* .rodata.sio_stream_file .rodata.sio_stream_file.*)
         firmware.o(.text.atr_read_sector .text.atr_read_sector.* .rodata.atr_read_sector .rodata.atr_read_sector.*)
         firmware.o(.text.atr_write_sector .text.atr_write_sector.* .rodata.atr_write_sector .rodata.atr_write_sector.*)
@@ -102,8 +103,6 @@ SECTIONS
         fatfs/ff.o(.text.dir_next .text.dir_next.* .rodata.dir_next .rodata.dir_next.*)
         fatfs/ff.o(.text.dir_read .text.dir_read.* .rodata.dir_read .rodata.dir_read.*)
         fatfs/ff.o(.text.get_fileinfo .text.get_fileinfo.* .rodata.get_fileinfo .rodata.get_fileinfo.*)
-        fatfs/ff.o(.text.mount_volume .text.mount_volume.* .rodata.mount_volume .rodata.mount_volume.*)
-        fatfs/ff.o(.text.check_fs .text.check_fs.* .rodata.check_fs .rodata.check_fs.*)
         fatfs/ff.o(.text.get_ldnumber .text.get_ldnumber.* .rodata.get_ldnumber .rodata.get_ldnumber.*)
         . = ALIGN(4);
         _end = .;
@@ -139,6 +138,7 @@ SECTIONS
     .cold :
     {
         _cold_start = .;
+        *(.coldtext .coldtext.*)
         *(.text)
         *(.text*)
         *(.rodata)

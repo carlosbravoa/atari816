@@ -54,7 +54,8 @@ WE_DROP     = 8
 WE_MOTION   = 9
 WE_LEAVE    = 10            ; (WF_HOVER) the pointer left the window
 WE_FOCUS    = 14            ; (0.15) the window got the focus
-WE_UNFOCUS  = 15            ; (0.15) the window lost it (its held keys were released first)
+WE_UNFOCUS  = 15
+WE_NET      = 17            ; (0.22) a = bit mask of the stream handles with news            ; (0.15) the window lost it (its held keys were released first)
 
 CB_STAY     = $C01D         ; (0.18) classic_boot: A = this, cold boot without showing it
 CART_B0     = $70           ; (0.18) a cartridge's image: banks $70 .. $70 + CART_NB - 1

@@ -6,6 +6,8 @@ Horizon shell. Type help.
 built-ins: help, ls [path] (or dir), cat file, cd [path], pwd, ps, date [set],
   mem, kill id, cls, atari, exit, files (the file browser), restart [full], shutdown
 files: rm path..., mkdir path, mv from to, cp from to (to: a folder too)
+internet (the PC link): get URL [to] downloads (http:// https:// ftp://);
+  a URL is a path: cp, cat take one too
 Atari: mount file [1-4], eject d1-d4|cart|xex, boot, run file
 other words run <WORD>.PRG from /BIN, /SYSTEM or /SYSTEM/TESTS (or a .PRG path);
   the rest of the line is its argument; a trailing & runs it in the background

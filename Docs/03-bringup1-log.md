@@ -646,3 +646,92 @@ the PC; a fast click and a fast double click during a copy.
 **Flash:** `core/impl/input1/` (bitstream, report, timing, `cold.bin`) is in flash; the board
 came up from flash to the Horizon 0.21 desktop. `core/impl/pclink1/` is the fallback (with
 its own `cold.bin`).
+
+## Step 23: the internet through the PC link (2026-11-18, Horizon 0.22)
+
+The gateway on the PC now gives the Atari816 the internet (`04-pc-link.md`, "Channels 4 and
+5"): a URL is a path (`http://`, `https://`, `ftp://` read as files; `tcp://host:port`,
+`tls://host:port` are connections), served by the gateway; the firmware only moves bytes. No
+RTL change: the bitstream was rebuilt for the new firmware only.
+
+**Block RAM first** (the hot firmware had 256 of 28,672 bytes left):
+
+| Item | Freed |
+| --- | --- |
+| A. Run-once code to SDRAM: `mount_volume`, `check_fs`, `sd_init`, `disk_initialize`, `sio_init` (a new section `.coldtext` makes a function cold inside a hot file) | 1,708 |
+| B. Dead features: the developer op TYPE (typing text on the classic keyboard: `ty_buf`, its typer, the two ASCII tables), the OSD's drive names | 784 |
+| C. The link's CRC tables: the 256-entry byte table split by nibbles (CRC-16 is linear: T[x] = T[x & $F0] ^ T[x & $0F]), four 16-byte tables; the receive loop rewritten (the payload is read in a tight loop with the CRC in registers) | 148 (tables 512 -> 64; the loop grew) |
+| F. The screenshot speed-up of step 22 reverted (`dev_peek816` and its RLE helpers back in SDRAM) | 780 |
+
+A first try of C with a plain 16-entry nibble table cost 28 % of the PC-to-board speed
+(PCBENCH READ 5.1 -> 7.3 s): this PicoRV32 has no barrel shifter, so a shift costs one cycle
+per bit, and the nibble method shifts by 12. The split byte table needs one 4-bit shift a byte.
+
+Hot firmware now: text 20,200 + data 612 + bss 4,296 = **25,108 of 28,672 bytes** (3,564
+left; step 2 itself added 112 hot bytes: the stream service check in the main loop, the
+event hook, the stack paint). The 4 KB stack reserve is unchanged; the most stack used, now
+reported by INFO (`stk`, from a pattern painted at start), was **1,904 bytes** after the self
+test, FSBENCH, PCBENCH, NETBENCH and INTEST. Cold image 31,440 bytes; SDRAM buffers after it
+19.4 KB (the streams' rings: 4 x 4 KB). The tools lost the commands that used TYPE (`type`,
+`kbd`) and those of long-gone features (`hdd-install`, `r-install`); the tools for H:, R:,
+the modem and ASH were deleted.
+
+**Firmware** (`core/firmware/pcnet.c`, new, cold): 4 streams (mailbox handles 4-7), 4 KB of
+ring each in SDRAM; the gateway sends a stream's bytes only within the credit the board gave
+(the ring's room, given back in steps of 1 KB). An OPEN, STAT or READ that waits for the
+internet is put aside: the request ring moves on and the answer comes later (matched by TAG),
+so the I/O processor never waits for the internet and other programs' file requests go on.
+Bytes for a waiting READ go straight into the 65C816's buffer (the hot `pc_put816`). New
+mailbox event $E4 NET (a connection has news). Nothing new runs from SDRAM in the idle loop:
+the main loop checks a flag (and, while requests are put aside, a 250 ms timer).
+
+**Board** (build `core/impl/net1/`, from SRAM first):
+
+| Test | Before (step 22) | After |
+| --- | --- | --- |
+| Self test A816.BIN | 11 OK + DONE | 11 OK + DONE |
+| FSBENCH write / read / load | 5.11-5.33 / 3.10 / 3.09 s | 4.93-5.31 / 3.10 / 3.10 s |
+| PCBENCH write / read / load (512 KB) | 9.23 / 5.14 / 5.06 s | 9.22 / **4.00** / **3.90** s (read 131 KB/s) |
+| NETBENCH: 1 MB from a web server on the PC (`http://127.0.0.1`) | - | 13.0 s, **80 KB/s** |
+| NETBENCH: 100 round trips of one byte on a TCP connection (polled) | - | 1.21 s, **12 ms** each |
+| INTEST (no input lost; longest look gap) | 0 lost; 10.3 ms | 0 lost in all 4 phases; 10.0 ms |
+| Desktop screenshot (`shot816`) | 2.3 s | 5.7 s (F) |
+| Boot to the main loop (first contact after loading) | ~1.1 s | ~1.2 s |
+
+`sw/a816/NETBENCH.BIN` needs `core/tools/netbench_servers.py` (a web server and an echo server
+on the PC's loopback); with an older gateway it stops at once with $8A (no such service).
+
+**Build** (place_option 1; the netlist did not change): logic 16,596 / 20,736 (81 %), CLS
+9,395 (91 %), registers 8,325, block RAM 44 / 46; clk_core 31.85 MHz (rule 29.7), clk_pix
+89.83, sys_clk 41.34.
+
+**Horizon 0.22 on the board** (gateway `tools/atari816-link`, the board flashed with `net1`):
+
+- `get https://example.com/ /PC:/EX.HTM`: 577 bytes, the same MD5 as curl's copy on the PC.
+  `get https://ftp.gnu.org/gnu/hello/hello-2.12.1.tar.gz` (1,033,297 bytes) to the card in
+  about 27 s (with the card's writes); copied to /PC:, its MD5 equals a direct download's.
+  `get ftp://ftp.gnu.org/gnu/hello/ /PC:/` gave the folder's listing (the gateway now keeps only
+  the name of NLST answers that come with the folder in front).
+- ctrl-C during `get` to the card and to /PC: (a 1 MB file from a web server on the PC):
+  "cancelled", no file on either side. This found a kernel bug older than this step:
+  input_poll ignored the Terminal window's keys, so `cp`'s and `get`'s ctrl-C in the Terminal
+  window was only seen at the next prompt (fixed in 0.22). Developer KEY injections are
+  released by the firmware's main loop, so while the card deletes a partial file the key looks
+  held and repeats (`^C` lines at the prompt): a test artefact, a real keyboard's release goes
+  through the input layer.
+- Gateway killed (SIGKILL) during `get`: "the PC link was lost", no partial file. During a BBS
+  session: "The PC link was lost: the connection ended."
+- Input during a download and during an open BBS session (developer INJECT, 500 mouse reports
+  each): none lost; longest look gap 17.1 ms and 9.6 ms.
+- The BBS program against `horizon/tests/bbsserver.py` on the PC (no public board is in the
+  address book): the ATASCII test screen with graphics characters and inverse video; the
+  telnet answers (WILL TTYPE, DO ECHO, DO SGA, WONT NAWS, terminal type "ATASCII"); echo; the
+  remote close message.
+- The Downloader (Programs menu): progress "258 of 1,024 KB (25%)" with the bar; Cancel:
+  "Cancelled: nothing was saved.", no file; a file that is there: "Replace it?".
+- `--no-net` gateway: NETBENCH stops at once with $8A; an old gateway too.
+- Classic machine: `run /BLUE.XEX` from the shell, COLOR4 = $94, F12 back.
+
+**Flash:** `core/impl/net1/` (bitstream, report, timing, `cold.bin`) is in flash (`cold.bin` at
+0x500000, then the bitstream); the board came up from flash to the Horizon 0.22 desktop and the
+self test passed (11 OK + DONE). `core/impl/input1/` is the fallback (with its own `cold.bin`).

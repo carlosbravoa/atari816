@@ -1,0 +1,8 @@
+caller 1: negotiation answers: ff fb 18 ff fd 01 ff fd 03 ff fc 1f
+caller 1: terminal type: ff fa 18 00 41 54 41 53 43 49 49 ff f0
+caller 1: typed: 65 61 68 69 0d 00 1b 5b 44 71
+caller 1: the server closed it
+caller 2: negotiation answers: ff fb 18 ff fd 01 ff fd 03 ff fc 1f
+caller 2: terminal type: ff fa 18 00 41 4e 53 49 ff f0
+caller 2: typed:
+caller 2: closed by the caller

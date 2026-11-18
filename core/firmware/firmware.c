@@ -8,6 +8,7 @@
 #include "firmware.h"
 #include "xex_loader.h"   // 6502 binary-load boot loader image (virtual D1: disk)
 #include "pclink.h"       // the PC link (Docs/04-pc-link.md)
+#include "pcnet.h"        // the internet through it: URLs and connections (step 2)
 
 uint32_t CORE_ID;
 #define HOT_FN __attribute__((section(".text.hot")))   // runs from block RAM (baremetal.ld)
@@ -705,7 +706,7 @@ bool sio_rx_empty(void) {
     return (reg_sio_rx_stat & 0x100) != 0;
 }
 
-void sio_init(void) {
+__attribute__((section(".coldtext"))) void sio_init(void) {   // once at boot: cold
     reg_sio_divisor = 0x5D; // divisor 93 — matches the Atari's measured bit period
                             // (the WIP regressed this to 94 / 0x5E; measured rate is 93)
     
@@ -849,9 +850,8 @@ int sio_rx_data_frame(uint8_t *buf, int len) {
 
 extern int bridge_req;
 extern char bridge_req_path[SD_PATH_MAX];
-extern char mounted_atr_name[ATR_DRIVES][16];
 
-// OSD display name (16 B) = basename of an SD path.
+// the cartridge's name (16 B, mounted_cart_name) = basename of an SD path
 static void name_from_path(char *dst, const char *path) {
     const char *base = strrchr(path, '/');
     strncpy(dst, base ? base + 1 : path, 16);
@@ -1263,9 +1263,6 @@ static int cold_boot_xex(void) {               // returns load_system_roms() (0 
 static FIL bridge_file;
 int bridge_req = 0;                     // 1 = run xex, 2 = cold boot, 3 = warm
 char bridge_req_path[SD_PATH_MAX];      // full path, subfolders allowed (sd_resolve'd names too)
-// OSD drive/cart display names — global so the bridge keeps the menu truthful
-// when it mounts/ejects behind the menu's back (remote RUN/eject).
-char mounted_atr_name[ATR_DRIVES][16] = {"None", "None", "None", "None"};
 int bridge_boot_stage = 0;   // 0 start, 1 sd ok, 2 options, 3 roms tried, 4 running
 int bridge_rom_ok = -1;
 
@@ -1301,57 +1298,6 @@ int bridge_put_chunk(const uint8_t *buf, unsigned int len) {
 int bridge_put_close(void) {
     return f_close(&bridge_file) == FR_OK ? 0 : -1;
 }
-
-// ── KEY injection: ASCII -> (HID keycode, shift) on the ATARI layout ─────────
-// The HID->matrix table in usb_to_atari800.sv is positional by Atari matrix
-// code (letters prove it: A=63, L=0 = POKEY KBCODE), so symbols use the HID
-// code whose matrix slot is the Atari key that PRODUCES the char:
-//   Atari '-'=KBCODE 14 -> HID 0x2F('[')   '='=15 -> 0x30(']')
-//   '+'=6 -> 0x34(''')   '*'=7 -> 0x31('\')   '<'=54 -> 0x2D   '>'=55 -> 0x2E
-// Shifted chars follow the ATARI key legends (e.g. '"' = SHIFT+2, '@' = SHIFT+8).
-#define KSH 0x80                              // shift flag in the table
-static const uint8_t ascii2hid[95] = {
-    /* 0x20 ' ' */ 0x2C,        /* ! */ 0x1E|KSH, /* " */ 0x1F|KSH,
-    /* # */ 0x20|KSH, /* $ */ 0x21|KSH, /* % */ 0x22|KSH, /* & */ 0x23|KSH,
-    /* ' */ 0x24|KSH, /* ( */ 0x26|KSH, /* ) */ 0x27|KSH,
-    /* * */ 0x31,     /* + */ 0x34,     /* , */ 0x36, /* - */ 0x2F,
-    /* . */ 0x37,     /* / */ 0x38,
-    /* 0-9 */ 0x27,0x1E,0x1F,0x20,0x21,0x22,0x23,0x24,0x25,0x26,
-    /* : */ 0x33|KSH, /* ; */ 0x33,     /* < */ 0x2D, /* = */ 0x30,
-    /* > */ 0x2E,     /* ? */ 0x38|KSH, /* @ */ 0x25|KSH,
-    /* A-Z */ 0x04,0x05,0x06,0x07,0x08,0x09,0x0A,0x0B,0x0C,0x0D,0x0E,0x0F,
-              0x10,0x11,0x12,0x13,0x14,0x15,0x16,0x17,0x18,0x19,0x1A,0x1B,
-              0x1C,0x1D,
-    /* [ */ 0x36|KSH, /* \ */ 0x34|KSH, /* ] */ 0x37|KSH,
-    /* ^ */ 0x31|KSH, /* _ */ 0x2F|KSH, /* ` */ 0,
-    /* a-z (Atari default caps: same keys as A-Z) */
-              0x04,0x05,0x06,0x07,0x08,0x09,0x0A,0x0B,0x0C,0x0D,0x0E,0x0F,
-              0x10,0x11,0x12,0x13,0x14,0x15,0x16,0x17,0x18,0x19,0x1A,0x1B,
-              0x1C,0x1D,
-    /* { */ 0, /* | */ 0x30|KSH, /* } */ 0, /* ~ */ 0
-};
-
-// Same table for the OSD "Keyboard: PC" layout: the injected HID code must then be the
-// US-ANSI key that prints the char, because usb_to_atari800 remaps symbolically.
-static const uint8_t ascii2hid_pc[95] = {
-    /* 0x20 ' ' */ 0x2C,        /* ! */ 0x1E|KSH, /* " */ 0x34|KSH,
-    /* # */ 0x20|KSH, /* $ */ 0x21|KSH, /* % */ 0x22|KSH, /* & */ 0x24|KSH,
-    /* ' */ 0x34,     /* ( */ 0x26|KSH, /* ) */ 0x27|KSH,
-    /* * */ 0x25|KSH, /* + */ 0x2E|KSH, /* , */ 0x36, /* - */ 0x2D,
-    /* . */ 0x37,     /* / */ 0x38,
-    /* 0-9 */ 0x27,0x1E,0x1F,0x20,0x21,0x22,0x23,0x24,0x25,0x26,
-    /* : */ 0x33|KSH, /* ; */ 0x33,     /* < */ 0x36|KSH, /* = */ 0x2E,
-    /* > */ 0x37|KSH, /* ? */ 0x38|KSH, /* @ */ 0x1F|KSH,
-    /* A-Z */ 0x04,0x05,0x06,0x07,0x08,0x09,0x0A,0x0B,0x0C,0x0D,0x0E,0x0F,
-              0x10,0x11,0x12,0x13,0x14,0x15,0x16,0x17,0x18,0x19,0x1A,0x1B,
-              0x1C,0x1D,
-    /* [ */ 0x2F,     /* \ */ 0x31,     /* ] */ 0x30,
-    /* ^ */ 0x23|KSH, /* _ */ 0x2D|KSH, /* ` */ 0,
-    /* a-z */ 0x04,0x05,0x06,0x07,0x08,0x09,0x0A,0x0B,0x0C,0x0D,0x0E,0x0F,
-              0x10,0x11,0x12,0x13,0x14,0x15,0x16,0x17,0x18,0x19,0x1A,0x1B,
-              0x1C,0x1D,
-    /* { */ 0, /* | */ 0x31|KSH, /* } */ 0, /* ~ */ 0
-};
 
 // ── Atari816 bring-up 1 ─────────────────────────────────────────────────────
 // The 65C816's native $00:0000-$0F:FFFF sits at firmware address 0x100000 + native
@@ -1565,7 +1511,30 @@ static uint32_t mb_close_all(void) {    // close every mailbox handle; first err
     }
     mb_open = 0;
     mb_pc = 0;
+    ns_close_all();                                      // (step 2) every URL and connection
     return res;
+}
+
+// ---- (step 2) what pcnet.c needs from the mailbox side ----
+int ns_put816(uint32_t dst, const uint8_t *src, uint32_t n) { return pc_put816(dst, src, n); }
+const volatile uint8_t *ns_ptr816(uint32_t a, uint32_t n) {
+    uint32_t room;
+    uint8_t *p = mb_ptr(a, &room);
+    return (p && room >= n) ? p : 0;
+}
+uint32_t ns_fattime(void) { return fat_from2000(pl_pc_time()); }
+void ns_event(int handle);                               // (below, with the input queue)
+// an answer of a request put aside -> the response ring (it needs one free slot)
+static uint8_t sys_restart;
+int ns_answer(uint8_t *m16) {
+    uint32_t q = rd2(&reg_a816_mbq), r = rd2(&reg_a816_mbr), iop = reg_a816_mbi;
+    uint32_t rbase = r & 0xFFFFFF;
+    uint8_t rtail = r >> 24, rhead = iop >> 8;
+    if (!(q & 0xFFFFFF) || !rbase || !(iop & 0x10000) || sys_restart) return 1;   // gone: dropped
+    if ((uint8_t)(rhead + 1) == rtail) return 0;         // full: later
+    if (!mb_put(rbase + rhead * 16, m16, 16)) return 1;
+    reg_a816_mbi = (reg_a816_mbi & 0x300FF) | (uint8_t)(rhead + 1) << 8;
+    return 1;
 }
 
 // SYS_RESTART ($1B) runs after its reply was read (or 500 ms later): 1 = Horizon only, 2 = full
@@ -1591,7 +1560,6 @@ static void sys_do_restart(int full) {
         // classic media out, as at power-on (the default cartridge and /HDD.ATR come back below)
         for (int i = 0; i < ATR_DRIVES; i++) {
             if (atr_mounted[i]) { f_close(&atr_file[i]); atr_mounted[i] = false; }
-            strcpy(mounted_atr_name[i], "None");
         }
         if (xex_active) { f_close(&xex_file); xex_active = false; }
         reg_cart_mode = 0;
@@ -1604,7 +1572,7 @@ static void sys_do_restart(int full) {
         bridge_rom_ok = rom;
         if (!rom) {
             mount_silent = 1;
-            if (mount_atr("/HDD.ATR", 3) == 0) strncpy(mounted_atr_name[3], "HDD.ATR", 16);
+            mount_atr("/HDD.ATR", 3);
             mount_silent = 0;
         }
         uart_printf("boot: roms %d\n", rom);
@@ -1667,6 +1635,7 @@ static HOT_FN int ms_queue(void) {
     }
     return 1;
 }
+void ns_event(int handle) { eq_push(0xE4, handle, 0, 0, 0, 0); }   // $E4 NET (step 2)
 HOT_FN void in_mouse(int btn, int dx, int dy, int wheel) {
     if (btn != ms_btn) { ms_queue(); ms_btn = btn; }
     ms_dx += dx; ms_dy += dy; ms_wheel += wheel;
@@ -1825,6 +1794,8 @@ static void a816_mailbox(void) {
     int pch = f && (mb_pc & (1 << arg0));                // a handle of a PC file
     const char *pcp = 0;                                 // the PC path of a path op
     pc_sink_t k = { 0 };
+    int later = NS_NOW;                                  // (step 2) the answer comes later
+    int nsh = arg0 - NS_H0 < NS_N;                       // (step 2) a stream handle (4-7)
 
     // after SYS_SYNC every op below $1B (files, LOAD, classic machine) is refused with $86
     switch (mb_synced && m[0] < 0x1B ? 0x7F : m[0]) {
@@ -1837,8 +1808,9 @@ static void a816_mailbox(void) {
                                          FA_WRITE | FA_OPEN_APPEND };
         int h = 0;
         while (h < MB_FILES && (mb_open & (1 << h))) h++;
-        if (h == MB_FILES) res = FR_TOO_MANY_OPEN_FILES;
-        else if (!mb_path(buf, path, sizeof path)) res = 0x81;
+        if (!mb_path(buf, path, sizeof path)) res = 0x81;
+        else if (ns_kind(path)) later = ns_open(path, m, &res, &val);   // a URL, a connection
+        else if (h == MB_FILES) res = FR_TOO_MANY_OPEN_FILES;
         else if ((pcp = pc_path(path))) {                // a file on the PC
             pc_args[0] = m[7] & 3; pc_args[1] = pc_args[2] = pc_args[3] = 0;
             int na = pc_args_path(4, pcp);
@@ -1852,12 +1824,17 @@ static void a816_mailbox(void) {
         break;
     }
     case 0x02:                                           // CLOSE
-        if (!f) res = 0x80;
+        if (nsh) res = ns_close(arg0);
+        else if (!f) res = 0x80;
         else if (pch) res = pc_close(arg0);
         else { res = f_close(f); mb_open &= ~(1 << arg0); }
         break;
     case 0x03: case 0x04:                                // READ, WRITE
-        if (!f) res = 0x80;
+        if (nsh) {
+            if (m[0] == 0x03) later = ns_read(arg0, buf, len, m, &res, &val);
+            else ns_write(arg0, buf, len, &res, &val);
+        }
+        else if (!f) res = 0x80;
         else if (pch) {
             uint8_t a[8] = { mb_pch[arg0], 0, 0, 0, len, len >> 8, 0, 0 };
             uint32_t room;
@@ -1877,7 +1854,8 @@ static void a816_mailbox(void) {
         else val = mb_xfer(f, buf, len, m[0] == 0x04, &res);
         break;
     case 0x05:                                           // SEEK
-        if (!f) res = 0x80;
+        if (nsh) res = 0x82;                             // (a stream: no seek)
+        else if (!f) res = 0x80;
         else if (pch) {
             uint8_t a[8] = { mb_pch[arg0], 0, 0, 0, arg1, arg1 >> 8, arg1 >> 16, arg1 >> 24 };
             if (!pc_live(arg0)) res = PL_E_LOST;
@@ -1889,6 +1867,7 @@ static void a816_mailbox(void) {
         FILINFO fi;
         uint8_t o[9];
         if (!mb_path(buf, path, sizeof path)) { res = 0x81; break; }
+        if (ns_kind(path)) { later = ns_stat(path, buf, m, &res, &val); break; }
         if ((pcp = pc_path(path))) {
             if (!pl_files()) { res = PL_E_NOLINK; break; }
             if (pcp[1] == 0) {                           // its root: a folder, the PC's clock now
@@ -1920,6 +1899,7 @@ static void a816_mailbox(void) {
         uint32_t off = 0;
         int full = 0;
         if (!mb_path(buf, path, sizeof path)) { res = 0x81; break; }
+        if (ns_kind(path)) { res = 0x82; break; }
         if ((pcp = pc_path(path))) {                     // skip u16, room u16, path
             pc_args[0] = arg0; pc_args[1] = arg0 >> 8; pc_args[2] = len; pc_args[3] = len >> 8;
             int na = pc_args_path(4, pcp);
@@ -1952,6 +1932,7 @@ static void a816_mailbox(void) {
     }
     case 0x08: case 0x09:                                // MKDIR, DELETE
         if (!mb_path(buf, path, sizeof path)) res = 0x81;
+        else if (ns_kind(path)) res = FR_DENIED;
         else if ((pcp = pc_path(path))) {
             if (pc_args_path(0, pcp) < 0) res = FR_INVALID_NAME;
             else res = pl_call(m[0], pc_args, strlen(pcp) + 1, 0, 0, pc_tohdr, &k);
@@ -1962,6 +1943,7 @@ static void a816_mailbox(void) {
         static char to[128];
         const char *pct;
         if (!mb_path(buf, path, sizeof path) || !mb_path(buf + strlen(path) + 1, to, sizeof to)) res = 0x81;
+        else if (ns_kind(path) || ns_kind(to)) res = FR_DENIED;
         else if ((pcp = pc_path(path)) && (pct = pc_path(to))) {
             int na = pc_args_path(0, pcp);
             if (na < 0 || (na = pc_args_path(na, pct)) < 0) res = FR_INVALID_NAME;
@@ -1974,6 +1956,7 @@ static void a816_mailbox(void) {
     case 0x10: {                                         // LOAD whole file to ARG0
         FIL lf;
         if (!mb_path(buf, path, sizeof path)) { res = 0x81; break; }
+        if (ns_kind(path)) { res = 0x82; break; }
         if ((pcp = pc_path(path))) {
             if (pc_args_path(0, pcp) < 0) { res = FR_INVALID_NAME; break; }
             k.dst = arg0 & 0xFFFFFF;
@@ -2030,6 +2013,7 @@ static void a816_mailbox(void) {
         if (m[0] == 0x18) {
             if (!mb_path(buf, path, sizeof path)) { res = 0x81; break; }
             if (pc_path(path)) { res = pl_files() ? 0x82 : PL_E_NOLINK; break; }   // not in step 1
+            if (ns_kind(path)) { res = 0x82; break; }
             char *e = strrchr(path, '.');
             if (!kind && e && strlen(e) == 4)
                 for (int i = 0; i < 8; i++) {
@@ -2041,8 +2025,8 @@ static void a816_mailbox(void) {
         if (kind < 1 || kind > 3 || (uint32_t)s >= ATR_DRIVES) { res = 0x83; break; }
         if (m[0] == 0x19) {                              // EJECT
             if (kind == 3) { reg_cart_mode = 0; strcpy(mounted_cart_name, "None"); break; }
-            if (!s && xex_active) { f_close(&xex_file); xex_active = false; strcpy(mounted_atr_name[0], "None"); }
-            if (kind == 1 && atr_mounted[s]) { f_close(&atr_file[s]); atr_mounted[s] = false; strcpy(mounted_atr_name[s], "None"); }
+            if (!s && xex_active) { f_close(&xex_file); xex_active = false; }
+            if (kind == 1 && atr_mounted[s]) { f_close(&atr_file[s]); atr_mounted[s] = false; }
             break;
         }
         mount_silent = 1;                                // MOUNT: no OSD popups
@@ -2050,9 +2034,7 @@ static void a816_mailbox(void) {
         mount_silent = 0;
         val = kind;
         res = !r ? 0 : r > 0 ? r : r == -6 ? FR_DISK_ERR : 0x84;
-        char *name = kind == 3 ? mounted_cart_name : mounted_atr_name[s];
-        if (!r) name_from_path(name, path);
-        else if (kind != 3 && !atr_mounted[s] && !(s == 0 && xex_active)) strcpy(name, "None");
+        if (kind == 3 && !r) name_from_path(mounted_cart_name, path);
         break;
     }
     // ── System, ops $1B-$1C ──
@@ -2099,7 +2081,6 @@ static void a816_mailbox(void) {
         res = mb_close_all();
         for (int i = 0; i < ATR_DRIVES; i++) {
             if (atr_mounted[i]) { FRESULT r = f_close(&atr_file[i]); if (r && !res) res = r; atr_mounted[i] = false; }
-            strcpy(mounted_atr_name[i], "None");
         }
         if (xex_active) { f_close(&xex_file); xex_active = false; }
         if (!mb_synced) f_mount(0, "", 0);
@@ -2137,6 +2118,12 @@ static void a816_mailbox(void) {
         res = 0x82;
     }
 
+    if (later == NS_LATER) {                             // put aside: only the request ring moves
+        busy = 0;
+        iop = reg_a816_mbi;
+        reg_a816_mbi = (iop & 0x3FF00) | (uint8_t)(qtail + 1);
+        return;
+    }
     m[0] |= 0x80;
     m[8]  = res; m[9]  = res >> 8; m[10] = res >> 16; m[11] = res >> 24;
     m[12] = val; m[13] = val >> 8; m[14] = val >> 16; m[15] = val >> 24;
@@ -2207,7 +2194,7 @@ static int a816_mb_wanted(void) {
 #define D_EJECT 0x07
 #define D_KEY 0x08
 #define D_MOUSE 0x09
-#define D_TYPE 0x0A
+#define D_TYPE 0x0A          // (removed: typing text on the classic keyboard; answers $82)
 #define D_PEEK 0x0B
 #define D_POKE 0x0C
 #define D_FWPEEK 0x0D
@@ -2229,50 +2216,13 @@ static void dv_flush(int more) {
     if (!dv_fail && pl_send(PL_CH_DEV, dv_hdr, dv_out, dv_n)) dv_fail = 1;
     dv_n = 0;
 }
-static HOT_FN void dv_put(uint8_t b) { dv_out[dv_n++] = b; if (dv_n == sizeof dv_out) dv_flush(1); }
+static void dv_put(uint8_t b) { dv_out[dv_n++] = b; if (dv_n == sizeof dv_out) dv_flush(1); }
 static void dv_end(uint8_t res) { dv_hdr[3] = res; dv_flush(0); }
 static void dv_reply(const uint8_t *p, uint8_t res) { dv_begin(p); dv_end(res); }
 
 // print into the answer (INFO): uart_printf with its output caught (picorv32.c, uart_putchar)
 extern char *uart_catch;
 extern int uart_catch_n, uart_catch_max;
-
-// TYPE: the text is typed by the main loop, one key every ~55 ms (typer_step)
-static char     ty_buf[256];
-static uint16_t ty_head, ty_n;
-static uint8_t  ty_phase, ty_prev, ty_tag, ty_wait;   // ty_wait: a TYPE answer is due
-static uint32_t ty_t;
-static void typer_step(void) {
-    uint32_t now = time_millis();
-    if ((int32_t)(now - ty_t) < 0) return;
-    if (ty_phase == 1) {                                 // key held long enough: release
-        kv_set0(0);
-        ty_phase = 0;
-        ty_t = now + (ty_prev == 0x28 ? 275 : 25);       // after RETURN the line is processed
-        return;
-    }
-    if (!ty_n) {
-        if (ty_wait) { uint8_t q[2] = { D_TYPE, ty_tag }; ty_wait = 0; dv_reply(q, 0); }
-        return;
-    }
-    uint8_t c = ty_buf[ty_head], e;
-    ty_head = (ty_head + 1) & 255; ty_n--;
-    if (c == '\n' || c == '\r') e = 0x28;                // RETURN
-    else if (c == 0x08 || c == 0x7F) e = 0x2A;           // Backspace
-    else if (c == 0x09) e = 0x2B;                        // Tab
-    else if (c == 0x1B) e = 0x29;                        // Esc
-    else if (c < 0x20 || c > 0x7E) return;               // unmappable: skipped
-    else { e = (option_kbd_layout ? ascii2hid_pc : ascii2hid)[c - 0x20]; if (!e) return; }
-    if (e == ty_prev && ty_phase == 0) {                 // the OS ignores a repeat within ~50 ms
-        ty_phase = 2; ty_t = now + 45;
-        ty_head = (ty_head - 1) & 255; ty_n++;
-        return;
-    }
-    ty_phase = 1;
-    ty_prev = e;
-    kv_set0(((uint32_t)(e & 0x7F) << 8) | ((e & KSH) ? 0x02 : 0x00));
-    ty_t = now + 30;
-}
 
 // PUT: frame 1 = size u32, path; then frames of offset u32 + data; the answer after the last
 static uint8_t  put_on, put_tag;
@@ -2326,17 +2276,17 @@ static void dev_put(const uint8_t *p, uint32_t n) {
 // never disturbs the 65C816. Requests of up to 1 MB; the tools ask for about 64 KB at a time.
 static uint8_t  pk_lit[128];
 static uint32_t pk_nl;
-static HOT_FN void pk_flush_lit(void) {
+static void pk_flush_lit(void) {
     if (!pk_nl) return;
     dv_put((uint8_t)(pk_nl - 1));
     for (uint32_t i = 0; i < pk_nl; i++) dv_put(pk_lit[i]);
     pk_nl = 0;
 }
-static HOT_FN void pk_run(uint32_t run_n, uint8_t run_b) {
+static void pk_run(uint32_t run_n, uint8_t run_b) {
     if (run_n >= 3) { pk_flush_lit(); dv_put((uint8_t)(run_n + 125)); dv_put(run_b); }
     else while (run_n--) { pk_lit[pk_nl++] = run_b; if (pk_nl == 128) pk_flush_lit(); }
 }
-static HOT_FN __attribute__((noinline)) void dev_peek816(const uint8_t *p, uint32_t n) {
+static __attribute__((noinline)) void dev_peek816(const uint8_t *p, uint32_t n) {
     if (n < 4 + 13) { dv_reply(p, 0x83); return; }
     uint32_t addr = le32(p + 4) & 0xFFFFFF;
     uint32_t width = p[8] | p[9] << 8, rows = p[10] | p[11] << 8, stride = le32(p + 12);
@@ -2374,6 +2324,14 @@ static HOT_FN __attribute__((noinline)) void dev_peek816(const uint8_t *p, uint3
     dv_end(0);
 }
 
+// the most stack ever used, in bytes (main() painted it; the top is 0x8000)
+static int stack_used(void) {
+    extern char _ebss[];
+    uint32_t *w = (uint32_t *)_ebss + 1;
+    while ((uint32_t)w < 0x8000 && *w == 0x5AC3A55Au) w++;
+    return 0x8000 - (int)(uint32_t)w;
+}
+
 void pl_dev_request(const uint8_t *p, uint32_t n) {
     if (n < 4) return;
     const uint8_t *a = p + 4;
@@ -2385,7 +2343,7 @@ void pl_dev_request(const uint8_t *p, uint32_t n) {
         uart_catch = (char *)dv_out; uart_catch_n = 0; uart_catch_max = sizeof dv_out;
         uart_printf("ST u:%d bs:%d rom:%d x:%d m:%d%d%d%d c:%b s:%d st:%d e:%d cn:%d br:%d"
                     " link rx:%d bad:%d retry:%d pc:%d"
-                    " in gap:%d ev:%d ksent:%d klost:%d msent:%d mlost:%d\n",
+                    " in gap:%d ev:%d ksent:%d klost:%d msent:%d mlost:%d stk:%d\n",
                     (int)time_millis(), bridge_boot_stage, bridge_rom_ok, xex_active ? 1 : 0,
                     atr_mounted[0] ? 1 : 0, atr_mounted[1] ? 1 : 0,
                     atr_mounted[2] ? 1 : 0, atr_mounted[3] ? 1 : 0,
@@ -2394,7 +2352,7 @@ void pl_dev_request(const uint8_t *p, uint32_t n) {
                     (*(volatile uint32_t *)_ebss != 0x53544B21u) ? 1 : 0, boot_retries,
                     (int)pl_rx_bytes(), (int)pl_rx_bad(), (int)pl_retries(), pl_files(),
                     (int)(in_gap / 27), (int)in_nev, (int)gk_sent, (int)gk_lost,
-                    (int)gm_sent, (int)gm_lost);
+                    (int)gm_sent, (int)gm_lost, stack_used());
         in_gap = 0; in_nev = 0;                         // (the meters start again)
         dv_n = uart_catch_n;
         uart_catch = 0;
@@ -2419,7 +2377,7 @@ void pl_dev_request(const uint8_t *p, uint32_t n) {
     case D_COLD: bridge_req = 2; dv_reply(p, 0); break;
     case D_WARM: bridge_req = 3; dv_reply(p, 0); break;
     case D_EJECT:                        // the virtual .xex boot disk (D1:)
-        if (xex_active) { f_close(&xex_file); xex_active = false; strncpy(mounted_atr_name[0], "None", 16); }
+        if (xex_active) { f_close(&xex_file); xex_active = false; }
         dv_reply(p, 0);
         break;
     case D_KEY:                          // mod, HID usage, hold (10 ms units): a raw key press
@@ -2433,11 +2391,6 @@ void pl_dev_request(const uint8_t *p, uint32_t n) {
         if (na < 4) { dv_reply(p, 0x83); break; }
         in_mouse(a[3], (int8_t)a[0], (int8_t)a[1], (int8_t)a[2]);
         dv_reply(p, 0);
-        break;
-    case D_TYPE:                         // text typed on the classic keyboard; answer when done
-        if (ty_wait || na > 256 - ty_n) { dv_reply(p, 0x85); break; }
-        for (uint32_t i = 0; i < na; i++) { ty_buf[(ty_head + ty_n) & 255] = a[i]; ty_n++; }
-        ty_tag = p[1]; ty_wait = 1;
         break;
     case D_PEEK: {                       // addr u16, len u16: classic machine memory
         uint32_t ad = a[0] | a[1] << 8, len = a[2] | a[3] << 8;
@@ -2499,6 +2452,7 @@ void pl_dev_request(const uint8_t *p, uint32_t n) {
 // (Horizon gives its own time again when its clock is set).
 void pl_session(int up) {
     if (up) { clk_base = pl_pc_time(); clk_ms = time_millis(); clk_set = 1; }
+    ns_session(up);                                      // (step 2) streams of an old session end
     uart_printf("link: %s\n", up ? "PC connected" : "PC gone");
 }
 
@@ -2511,6 +2465,7 @@ void pl_idle(void) {
 // while frames keep coming during a wait (a long READ or LOAD from the PC): input only
 void pl_busy(void) { in_tick(); }
 
+static uint32_t ns_t;
 static void bridge_poll(void) {
     static int busy = 0;             // re-entry guard
     if (busy) return;
@@ -2519,7 +2474,8 @@ static void bridge_poll(void) {
     a816_poll();
     if ((reg_a816_mbq | reg_a816_mbi) && a816_mb_wanted()) a816_mailbox();
     pl_poll();
-    if (ty_n | ty_wait | ty_phase) typer_step();
+    if (ns_work) ns_service();                            // (step 2) answers put aside, credit
+    else if (ns_npend && time_millis() - ns_t > 250) { ns_t = time_millis(); ns_service(); }   // their timeouts
     busy = 0;
 }
 // Stack canary at the very bottom of the stack region (= _ebss, no heap in this
@@ -2570,6 +2526,12 @@ static int cold_load(void) {
 int main_app(void);
 
 int main() {
+    {                                          // paint the free stack (INFO's "stk": the most used)
+        extern char _ebss[];
+        uint32_t sp;
+        __asm__ volatile ("mv %0, sp" : "=r"(sp));
+        for (uint32_t *w = (uint32_t *)_ebss + 1; (uint32_t)w < sp - 64; w++) *w = 0x5AC3A55Au;
+    }
     pl_init();                                 // the PC link: its rate, the log (hot)
     uart_printf("boot: hot\n");
     for (;;) {
@@ -2667,10 +2629,7 @@ int main_app() {
     // with the OSD's New-blank-disk + rename, or copy any big MyDOS ATR.
     if (rom_ok == 0) {
         mount_silent = 1;
-        if (mount_atr("/HDD.ATR", 3) == 0) {
-            strncpy(mounted_atr_name[3], "HDD.ATR", 16);
-            uart_printf("boot: hdd mounted on D4\n");
-        }
+        if (mount_atr("/HDD.ATR", 3) == 0) uart_printf("boot: hdd mounted on D4\n");
         mount_silent = 0;
     }
    
@@ -2730,7 +2689,6 @@ int main_app() {
                     }
                     mount_silent = 0;
                     if (mr == 0) {
-                        name_from_path(mounted_atr_name[0], bridge_req_path);
                         cold_boot_xex();
                     } else {
                         uart_printf("run: mount failed %d\n", mr);

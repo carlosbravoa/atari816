@@ -172,7 +172,8 @@ uint8_t sd_send_command(uint8_t cmd, uint32_t arg) {
 
 int flag;
 
-int sd_init() {
+// (Atari816) run once per card insertion / mount: from SDRAM (the cold image)
+__attribute__((section(".coldtext"))) int sd_init() {
     int retries = 0;
     uint8_t response = 0xFF;
     uint8_t sd_version;

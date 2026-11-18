@@ -78,6 +78,7 @@ loop:   lda     #0                      ; 0 = wait for the next event
         jeq     quit
         cmp     #WE_MENU
         beq     menu
+        ; (0.22) a program using the internet handles WE_NET here: a = its handles with news
         cmp     #WE_KEY
         bne     loop
         lda     ui_ev+4                 ; b = modifiers | down << 8

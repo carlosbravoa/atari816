@@ -202,8 +202,9 @@ emulator should keep it on the board; still check it there.
 - `sdk/templates/`: console, window-app, game (a complete small game), basic-game.
 - `sdk/examples/`: Lantern (arcade), Slider (puzzle), Hex View (a utility), Deep Dive (a
   full-screen scrolling game: Horizon 0.18's framebuffer, scrolling, sprites, draw lists),
-  with commentary.
+  with commentary; Fetch and Echo (Horizon 0.22: the internet through the PC link, a URL
+  opened as a file and a TCP connection).
 - `sdk/docs/reference/`: every syscall with an example, the window system, drawing,
   sound, the hardware, performance; `games.md` for full-screen mode, sprites, draw lists,
-  palette entries and frame sync.
+  palette entries and frame sync; `internet.md` for URLs and connections (Horizon 0.22).
 - `sdk/skill/atari-816-dev/`: the same knowledge as a Claude skill.

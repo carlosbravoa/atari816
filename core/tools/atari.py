@@ -13,10 +13,6 @@ Usage:
   atari.py send FILE [NAME] [-p P]   # copy FILE to the SD, default /PC/<name>;
                                      #   NAME may include folders: GAMES/X.ATR
   atari.py run  FILE.XEX [-p P]      # send + boot it (the make-run dev loop)
-  atari.py type FILE|- [-p P]        # paste text as keystrokes (~18 chars/s;
-                                     #   OSD must be closed)
-  atari.py kbd [-p P]                # LIVE keyboard: type on the PC, it lands
-                                     #   on the Atari; Ctrl-] exits
   atari.py eject [-p P]              # just eject the virtual .xex from D1:
   atari.py key NAME|0xNN [--shift] [--ctrl] [--hold MS]  # press one raw key:
                                      #   start/select/option (=F6/F7/F8), f1..f12,
@@ -34,10 +30,6 @@ Usage:
   atari.py peek ADDR [LEN] [-p P]    # hex dump of Atari memory (e.g. 0x58 16)
   atari.py fwpeek ADDR [LEN] [-p P]  # hex dump of FIRMWARE BSRAM (fw globals, debug)
   atari.py poke ADDR B [B...] [-p P] # write bytes into Atari memory
-  atari.py hdd-install [-p P]        # install the H: handler above MEMLO
-  atari.py r-install [-p P]          # install the R: modem handler (for BobTerm)
-                                     #   (files -> /HDD on the SD); session-
-                                     #   scoped; type NEW in BASIC after
 
 Protocol implementation lives in atari_link.py (shared with the desktop app,
 atari_gui.py) on top of tools/pclink.py. Needs: pip install pyserial.
@@ -107,38 +99,6 @@ def cmd_run(args):
     print("\nbooting it on the Atari…")
 
 
-def cmd_type(args):
-    text = sys.stdin.read() if args.file == "-" else \
-        open(args.file, "r", encoding="utf-8", errors="replace").read()
-    with AtariLink(args.port) as l:
-        # line-wise with drop-recovery (BL616 USB flaps mid-session; numbered
-        # BASIC lines make whole-line retypes idempotent)
-        l.type_lines(text, _progress("lines"))
-    print("\ndone — check the screen")
-
-
-def cmd_kbd(args):
-    import os
-    import termios
-    import tty
-    print("live keyboard -> the classic Atari  (Ctrl-] to exit)")
-    with AtariLink(args.port) as l:
-        sess = l.kbd_session()
-        fd = sys.stdin.fileno()
-        old_t = termios.tcgetattr(fd)
-        try:
-            tty.setraw(fd)
-            while True:
-                ch = os.read(fd, 1)
-                if ch == b"\x1d":          # Ctrl-]
-                    break
-                sess.send_key(ch.decode("latin1"))
-        finally:
-            termios.tcsetattr(fd, termios.TCSADRAIN, old_t)
-        sess.end()
-    print("\nsession closed")
-
-
 def cmd_status(args):
     with AtariLink(args.port) as l:
         print(l.status())
@@ -179,26 +139,6 @@ def cmd_fwpeek(args):
         hexs = " ".join(f"{b:02x}" for b in row)
         text = "".join(chr(b) if 32 <= b < 127 else "." for b in row)
         print(f"{addr + off:04x}  {hexs:<48}  {text}")
-
-
-def cmd_hdd_install(args):
-    with AtariLink(args.port) as l:
-        lo, hi, memlo = l.hdd_install()
-    print(f"H: installed at ${lo:04X}-${hi - 1:04X} (above MEMLO), "
-          f"MEMLO raised to ${memlo:04X}.")
-    print("In BASIC, type NEW now (BASIC only re-reads MEMLO on NEW), then "
-          'try OPEN #1,8,0,"H:HELLO.TXT" (files land in /HDD on the SD). '
-          "RESET clears it; re-run to restore.")
-
-
-def cmd_r_install(args):
-    with AtariLink(args.port) as l:
-        lo, hi, memlo = l.r_install(force=args.force)
-    print(f"R: installed at ${lo:04X}-${hi - 1:04X} (above MEMLO), "
-          f"MEMLO raised to ${memlo:04X}.")
-    print("In BASIC, type NEW now (BASIC only re-reads MEMLO on NEW). BobTerm "
-          "(and R:-aware software) will now find the modem handler. Run "
-          "`atari_net.py --modem` for the PC side. RESET clears it; re-run.")
 
 
 def cmd_eject(args):
@@ -312,14 +252,7 @@ def main():
                                    help="convert \\n line endings to ATASCII $9B"))
     add("run", cmd_run, lambda sp: sp.add_argument("file"),
         lambda sp: sp.add_argument("name", nargs="?", default=None))
-    add("type", cmd_type,
-        lambda sp: sp.add_argument("file", help="text file, or - for stdin"))
-    add("kbd", cmd_kbd)
     add("eject", cmd_eject)
-    add("hdd-install", cmd_hdd_install)
-    add("r-install", cmd_r_install,
-        lambda sp: sp.add_argument("--force", action="store_true",
-                                   help="reinstall even if R: is already in HATABS"))
     add("status", cmd_status)
     add("screen", cmd_screen)
     add("peek", cmd_peek, lambda sp: sp.add_argument("addr"),

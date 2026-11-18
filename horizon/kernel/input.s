@@ -355,7 +355,10 @@ rep_tick:
 
 ; ---- $54 input_poll -> as input_read, or EAGAIN at once when nothing is queued ----
 sys_ipoll:
-        lda     cur
+        jsr     term_ipoll              ; (0.22) a task attached to a Terminal window
+        bcs     :+
+        rts
+:       lda     cur
         inc     a
         cmp     in_owner
         beq     :+

@@ -1,0 +1,31 @@
+# (0.22) The BBS terminal (text shell; emu816 --net, --pc-drop-at 26): tests/bbsserver.py
+# serves on a free port of 127.0.0.1; the Makefile writes it into the card's address book
+# (/SYSTEM/BBS.TXT: "Test board=127.0.0.1:PORT"), so the pictures show the name, not the port.
+# Started with the entry's name: it connects at once; the server's negotiation (answers logged
+# by the server), then its ATASCII screen (graphics characters, inverse video, ESC-shown
+# codes): shot 1 at 8.5
+1500 {esc}
++1500 bbs "Test board"\n
+# e: the server echoes "e!", CR LF, IAC IAC (in ATASCII: glyphs and an insert-character)
++6000 e
+# Alt+M, Down, Enter: Mode > ASCII (80 columns: the window grows); a: the server's ANSI / VT52
+# screen (bold, inverse, positions, a full line, erase): shot 2 at 14
++1000 {dE2}{d10}{u10}{uE2}
++800 {down}
++500 \n
++1200 a
+# typed: "hi", Return (CR NUL), Left (ESC [ D); q: "Bye." and the server closes: the message
+# (shot 3 at 17)
++1500 hi\n{left}
++1500 q
+# Return (not connected): the Connect dialog; "a" typed (shot 4 at 19); Esc. Alt+C, Down, Enter: the
+# address book's entry (Disconnect dimmed, the separator skipped): connected again (still
+# ASCII: the terminal type is now ANSI)
++2000 \n
++1000 a
++1000 {esc}
++1000 {dE2}{d06}{u06}{uE2}
++800 {down}
++500 \n
+# the PC link drops at 26: the message, no hang (shot 5 at 27.5)
++5500 x

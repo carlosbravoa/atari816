@@ -28,11 +28,13 @@ TSD    := $(B)/tsd
 # and demo programs (the shell finds them too); /BIN the applications (lowercase source names).
 PROGS  := wfiles term paint settings cat files dir mem edit basic sheet
 PROGS  += calc solitair quabrick
+# (0.22) the internet through the PC link: the Downloader, the BBS terminal
+PROGS  += download bbs
 SYSPROGS := desk sh about
 TESTPROGS := selftest bench mouse mtest wdemo hello count spin tick regs crash ping pong keys ftest leak hog ktest stest gtest
 # programs linked with the controls library (build/ui.lib from user/ui*.s, API in user/ui.inc)
 UIPROGS := edit wfiles desk paint settings basic sheet about
-UIPROGS += calc solitair quabrick
+UIPROGS += calc solitair quabrick download bbs
 # (0.14) the shell links the library for the date (uidate.s)
 UIPROGS += sh
 UISRC  := $(wildcard user/ui*.s)
@@ -138,6 +140,12 @@ REV9F   = $(if $(OLD89),$(if $(wildcard tests/pictures/$(1)-rev9.md5),$(1)-rev9.
 OLD89   = $(or $(findstring --rev 9,$(EMUFLAGS)),$(findstring --rev 8,$(EMUFLAGS)))
 REV7    = $(if $(findstring --rev 7,$(EMUFLAGS)),$(1)-rev7.md5,$(call REV9F,$(1)))
 DMD5    = $(call REV7,desk)
+# (0.22) REV $08-$0A where a picture differs from the default one (a moment's free memory on
+# the Desktop's status line: Files' session): $(1)-rev10.md5 when it exists, else $(2)
+# (0.22) $(1)-rev7.md5 without the blitter when it exists, else $(1).md5 (the Classic Atari
+# page: the free memory on the status line)
+REV7IF  = $(if $(and $(findstring --rev 7,$(EMUFLAGS)),$(wildcard tests/pictures/$(1)-rev7.md5)),$(1)-rev7.md5,$(1).md5)
+REV10   = $(if $(and $(findstring --rev,$(EMUFLAGS)),$(if $(findstring --rev 7,$(EMUFLAGS)),,1),$(wildcard tests/pictures/$(1)-rev10.md5)),$(1)-rev10.md5,$(2))
 
 KSRC   := $(wildcard kernel/*.s kernel/*.inc)
 UPPER   = $(shell echo $(1) | tr a-z A-Z)
@@ -231,6 +239,15 @@ all: $(SD)/docs/Welcome.md
 $(TSD)/SYSTEM/INIT.PRG: $(SD)/docs/Welcome.md
 $(SD)/docs/Welcome.md: sdfiles/docs/Welcome.md $(B)/tree.stamp
 	mkdir -p $(SD)/docs
+	cp $< $@
+# (0.22) the BBS terminal: its 8x8 ATASCII font (tools/mkatascii.py: the graphics characters
+# drawn in user/atascii.txt, the others from the console font) and its address book
+$(SD)/BIN/BBS.PRG: user/atascii.inc kernel/font.inc
+user/atascii.inc: kernel/font8x12.txt user/atascii.txt tools/mkatascii.py
+	python3 tools/mkatascii.py kernel/font8x12.txt user/atascii.txt $@
+all: $(SD)/SYSTEM/BBS.TXT
+$(TSD)/SYSTEM/INIT.PRG: $(SD)/SYSTEM/BBS.TXT
+$(SD)/SYSTEM/BBS.TXT: sdfiles/BBS.TXT | $(SD)/SYSTEM
 	cp $< $@
 # Calculator and Solitaire are one assembly unit each
 $(SD)/BIN/CALC.PRG: $(wildcard user/calc_*.s)
@@ -363,14 +380,15 @@ test: all $(EMU)
 	@if diff -u tests/pictures/$(subst edit,settings,$(EMD5)) $(B)/settings.md5; then echo "PASS  Settings pictures"; \
 	else echo "FAIL  Settings pictures (look at $(B)/settings*.ppm, then make pictures)"; exit 1; fi
 	@PREP='cp ../../sdfiles/atari.ini atari.ini' DESK=1 sh tests/shots.sh "$(EMU) $(EMUFLAGS) $(CARDDATE)" $(SD) classic 16 $(CLSHOTS)
-	@if diff -u tests/pictures/classic.md5 $(B)/classic.md5; then echo "PASS  Settings pictures: the Classic Atari page"; \
+	@if diff -u tests/pictures/$(call REV7IF,classic) $(B)/classic.md5; then echo "PASS  Settings pictures: the Classic Atari page"; \
 	else echo "FAIL  Settings pictures, Classic Atari (look at $(B)/classic*.ppm, then make pictures)"; exit 1; fi
 	@if cmp $(B)/run-pic/atari.ini tests/atari-ini.txt; then echo "PASS  Settings: the /atari.ini it saved"; \
 	else echo "FAIL  Settings: build/run-pic/atari.ini is not tests/atari-ini.txt"; exit 1; fi
 	@DESK=1 sh tests/shots.sh "$(EMU) $(EMUFLAGS) $(CARDDATE)" $(SD) files 46 $(FSHOTS)
-	@if diff -u tests/pictures/$(subst edit,files,$(EMD5)) $(B)/files.md5; then echo "PASS  Files pictures"; \
+	@if diff -u tests/pictures/$(call REV10,files,$(subst edit,files,$(EMD5))) $(B)/files.md5; then echo "PASS  Files pictures"; \
 	else echo "FAIL  Files pictures (look at $(B)/files*.ppm, then make pictures)"; exit 1; fi
 	@$(MAKE) --no-print-directory test-pc
+	@$(MAKE) --no-print-directory test-net
 	@rm -rf build/run-sd; cp -r $(SD) build/run-sd; touch build/run-sd/SYSTEM/NODESK; cp tests/basic.bas build/run-sd/BT.BAS
 	@$(EMU) $(EMUFLAGS) $(CARDDATE) --headless --sd build/run-sd --max-seconds $(BASSECS) \
 	    --keys "$$(python3 tests/keyscript.py tests/basic-t.keys)" \
@@ -558,6 +576,70 @@ test-pc: all $(EMU)
 	then echo "FAIL  blitter rules (the PC volume sessions)"; exit 1; \
 	else echo "PASS  blitter rules: the PC volume sessions"; fi
 
+# (0.22) the internet (PC link step 2): emu816 --net-root serves http://, https://, ftp:// URLs
+# from a fresh copy of tests/net (DIR/host/path; NETPREP adds files.test/big.bin, 384 KB of
+# tests/mkbig.py) at the board's speed (--pc-kbps 100:55); --net makes tcp:// real loopback
+# connections: tests/bbsserver.py is a scripted BBS on a free port of 127.0.0.1 (written to
+# build/bbs.port, then into the card's /SYSTEM/BBS.TXT as "Test board": the pictures show that
+# name, not the port), stopped after the session. No internet is
+# needed. The shell: tests/netshell.keys (get, cp, cat of URLs, 404, ctrl-C), netshell2 (no
+# internet service), netshell3 (the link lost during a get); the Downloader's pictures
+# (tests/download.keys); the BBS terminal's pictures (tests/bbs.keys) and the server's log of
+# what it got (tests/bbs.log). make pictures-net freezes the pictures.
+NETPREP := rm -rf build/run-net; cp -r tests/net build/run-net; python3 tests/mkbig.py build/run-net/files.test/big.bin 393216
+NETFLAGS := --net-root build/run-net --pc-kbps 100:55
+DLSHOTS := 5.5 8.5 13.5 16.8 19.5 23 25.5 27.5
+BBSSHOTS := 8.5 14 17 19 27.5
+test-net: all $(EMU)
+	@rm -rf build/run-sd build/run-pc; cp -r $(SD) build/run-sd; touch build/run-sd/SYSTEM/NODESK; cp -r tests/pc build/run-pc; $(NETPREP)
+	@$(EMU) $(EMUFLAGS) $(CARDDATE) $(PCFLAGS) $(NETFLAGS) --headless --sd build/run-sd --max-seconds 75 \
+	    --keys "$$(python3 tests/keyscript.py tests/netshell.keys)" \
+	    $(SD)/SYSTEM/HORIZON.SYS > $(B)/netshell.out 2> $(B)/netshell.err || true
+	@python3 -c "L = open('$(B)/netshell.out', encoding='latin-1').read().split('\n'); i = [k for k, l in enumerate(L) if '> get http://files.test/hello.txt' in l][0]; open('$(B)/netshell.txt', 'w', encoding='latin-1').write('\n'.join([L[i][L[i].index('> get'):]] + L[i + 1:]))"
+	@if python3 tests/compare.py tests/netshell.txt $(B)/netshell.txt; then echo "PASS  0.22 internet, shell: get to the card and /PC: (progress, the name without the query), folder listings, 404, no such host, ctrl-C, cp and cat of a URL, URL errors"; \
+	else echo "FAIL  0.22 internet, shell ($(B)/netshell.out)"; exit 1; fi
+	@python3 tests/mkbig.py $(B)/big.ref 393216
+	@if cmp -s build/run-pc/big.bin $(B)/big.ref && cmp -s build/run-sd/hello.txt tests/net/files.test/hello.txt && cmp -s build/run-sd/docs/readme.txt tests/net/files.test/pub/readme.txt \
+	  && printf 'notes.md\nreadme.txt\n' | cmp -s - build/run-sd/listing.txt && ! test -e build/run-sd/part.bin && [ -z "$$(ls -A build/run-pc/.atari816-partial)" ]; \
+	then echo "PASS  0.22 internet, shell: the files byte for byte; no partial file after ctrl-C"; \
+	else echo "FAIL  0.22 internet, shell: the files (build/run-sd, build/run-pc)"; exit 1; fi
+	@rm -rf build/run-sd build/run-pc; cp -r $(SD) build/run-sd; touch build/run-sd/SYSTEM/NODESK; cp -r tests/pc build/run-pc
+	@$(EMU) $(EMUFLAGS) $(CARDDATE) $(PCFLAGS) --headless --sd build/run-sd --max-seconds 14 \
+	    --keys "$$(python3 tests/keyscript.py tests/netshell2.keys)" \
+	    $(SD)/SYSTEM/HORIZON.SYS > $(B)/netshell2.out 2> $(B)/netshell2.err || true
+	@python3 -c "L = open('$(B)/netshell2.out', encoding='latin-1').read().split('\n'); i = [k for k, l in enumerate(L) if '> get http' in l][0]; open('$(B)/netshell2.txt', 'w', encoding='latin-1').write('\n'.join([L[i][L[i].index('> get'):]] + L[i + 1:]))"
+	@if python3 tests/compare.py tests/netshell2.txt $(B)/netshell2.txt && ! test -e build/run-sd/readme.txt; then echo "PASS  0.22 internet, shell: a gateway without internet: \"no such service\", nothing written"; \
+	else echo "FAIL  0.22 internet, shell without the service ($(B)/netshell2.out)"; exit 1; fi
+	@rm -rf build/run-sd; cp -r $(SD) build/run-sd; touch build/run-sd/SYSTEM/NODESK; $(NETPREP)
+	@$(EMU) $(EMUFLAGS) $(CARDDATE) $(NETFLAGS) --pc-drop-at 6 --headless --sd build/run-sd --max-seconds 14 \
+	    --keys "$$(python3 tests/keyscript.py tests/netshell3.keys)" \
+	    $(SD)/SYSTEM/HORIZON.SYS > $(B)/netshell3.out 2> $(B)/netshell3.err || true
+	@python3 -c "L = open('$(B)/netshell3.out', encoding='latin-1').read().split('\n'); i = [k for k, l in enumerate(L) if '> get http' in l][0]; open('$(B)/netshell3.txt', 'w', encoding='latin-1').write('\n'.join([L[i][L[i].index('> get'):]] + L[i + 1:]))"
+	@if python3 tests/compare.py tests/netshell3.txt $(B)/netshell3.txt && ! test -e build/run-sd/big.bin; then echo "PASS  0.22 internet, shell: the link lost during a get (no partial file), then \"no PC link\""; \
+	else echo "FAIL  0.22 internet, shell, the link lost ($(B)/netshell3.out)"; exit 1; fi
+	@$(NETPREP)
+	@sh tests/shots.sh "$(EMU) $(EMUFLAGS) $(CARDDATE) $(NETFLAGS)" $(SD) download 29 $(DLSHOTS)
+	@if diff -u tests/pictures/$(call REV7,download) $(B)/download.md5; then echo "PASS  0.22 the Downloader: the window, progress, done, HTTP 404, Replace?, Cancel, Recent addresses"; \
+	else echo "FAIL  0.22 Downloader pictures (look at $(B)/download*.ppm, then make pictures-net)"; exit 1; fi
+	@if ! test -e build/run-pic/big.bin && [ "$$(cat build/run-pic/SYSTEM/URLS)" = "http://files.test/big.bin?x=1" ]; then echo "PASS  0.22 the Downloader: no file left by Cancel; /SYSTEM/URLS"; \
+	else echo "FAIL  0.22 the Downloader: build/run-pic/big.bin or SYSTEM/URLS"; exit 1; fi
+	@rm -f build/bbs.port build/bbs.got; python3 tests/bbsserver.py build/bbs.port build/bbs.got & spid=$$!; \
+	  n=0; while [ ! -s build/bbs.port ] && [ $$n -lt 50 ]; do sleep 0.1; n=$$((n + 1)); done; \
+	  PREP="echo Test board=127.0.0.1:$$(cat build/bbs.port) > SYSTEM/BBS.TXT" sh tests/shots.sh "$(EMU) $(EMUFLAGS) $(CARDDATE) --net --pc-drop-at 26" $(SD) bbs 29 $(BBSSHOTS); \
+	  kill $$spid 2>/dev/null; wait $$spid 2>/dev/null; true
+	@if diff -u tests/pictures/$(call REV7IF,bbs) $(B)/bbs.md5; then echo "PASS  0.22 the BBS terminal: an ATASCII screen, the ASCII mode (ANSI / VT52), the remote close, the Connect dialog, the link lost"; \
+	else echo "FAIL  0.22 BBS pictures (look at $(B)/bbs*.ppm, then make pictures-net)"; exit 1; fi
+	@if grep -v '^server' build/bbs.got | diff -u tests/bbs.log -; then echo "PASS  0.22 the BBS terminal: telnet answers (TERMINAL-TYPE ATASCII / ANSI, ECHO, SGA, NAWS refused) and the bytes typed"; \
+	else echo "FAIL  0.22 the BBS terminal: what the server got (build/bbs.got)"; exit 1; fi
+	@if grep -l 'emu816: blitter:' $(B)/netshell.err $(B)/netshell2.err $(B)/netshell3.err $(B)/download.err $(B)/bbs.err; \
+	then echo "FAIL  blitter rules (the internet sessions)"; exit 1; \
+	else echo "PASS  blitter rules: the internet sessions"; fi
+
+pictures-net:
+	cp $(B)/download.md5 tests/pictures/$(call REV7,download)
+	cp $(B)/bbs.md5 tests/pictures/$(call REV7IF,bbs)
+	python3 -c "from PIL import Image; import glob; [Image.open(f).save('tests/pictures/' + f.split('/')[-1][:-4] + '.png') for f in sorted(glob.glob('$(B)/download[0-9]*.ppm') + glob.glob('$(B)/bbs[0-9]*.ppm'))]"
+
 pictures-pc:
 	cp $(B)/pcdesk.md5 tests/pictures/$(call REV7,pcdesk)
 	cp $(B)/pccopy.md5 tests/pictures/$(call REV7,pccopy)
@@ -568,7 +650,7 @@ pictures-games:
 	cp $(B)/quabrick.md5 tests/pictures/$(call REV7,quabrick)
 	python3 -c "from PIL import Image; import glob; [Image.open(f).save('tests/pictures/' + f.split('/')[-1][:-4] + '.png') for f in sorted(glob.glob('$(B)/calc[0-9]*.ppm') + glob.glob('$(B)/solitair[0-9]*.ppm') + glob.glob('$(B)/quabrick[0-9]*.ppm'))]"
 
-.PHONY: test-games pictures-games test-pc pictures-pc
+.PHONY: test-games pictures-games test-pc pictures-pc test-net pictures-net
 
 clean:
 	rm -rf build

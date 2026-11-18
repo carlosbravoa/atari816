@@ -41,9 +41,25 @@ uint32_t host_ms(void)
 }
 
 #include "../../firmware/pclink.c"
+#include "../../firmware/pcnet.c"
+
+// ---- what pcnet.c needs: a model of the 65C816's memory and the response ring ----
+static uint8_t mem816[1 << 20];
+static uint8_t answers[16][16];
+static int     nanswers, nevents, lastevent;
+int ns_put816(uint32_t dst, const uint8_t *src, uint32_t n)
+{
+    if (dst + n > sizeof mem816) return 0;
+    memcpy(mem816 + dst, src, n);
+    return 1;
+}
+const volatile uint8_t *ns_ptr816(uint32_t a, uint32_t n) { return a + n <= sizeof mem816 ? mem816 + a : 0; }
+uint32_t ns_fattime(void) { return 0x5D724CC0; }
+int ns_answer(uint8_t *m16) { if (nanswers < 16) memcpy(answers[nanswers++], m16, 16); return 1; }
+void ns_event(int handle) { nevents++; lastevent = handle; }
 
 static int sessions;
-void pl_session(int up) { if (up) sessions++; printf("session %s\n", up ? "up" : "down"); fflush(stdout); }
+void pl_session(int up) { ns_session(up); if (up) sessions++; printf("session %s\n", up ? "up" : "down"); fflush(stdout); }
 void pl_idle(void) { usleep(50); }
 void pl_busy(void) { }
 
@@ -158,6 +174,106 @@ static void run_files(void)
     printf("INFO 600000 bytes written in %u ms\n", host_ms() - t0);
 }
 
+// ---- the internet (step 2): mailbox ops through pcnet.c against the gateway ----
+static uint32_t le(const uint8_t *p) { return p[0] | p[1] << 8 | p[2] << 16 | (uint32_t)p[3] << 24; }
+static void spin(uint32_t ms) { uint32_t t = host_ms(); while (host_ms() - t < ms) { pl_poll(); if (ns_work || ns_npend) ns_service(); usleep(20); } }
+// an op that may be put aside: wait for its answer (TAG = tag); *res, *val
+static int wait_answer(int later, uint8_t tag, uint32_t *res, uint32_t *val, uint32_t ms)
+{
+    if (later == NS_NOW) return 1;
+    uint32_t t = host_ms();
+    while (host_ms() - t < ms) {
+        pl_poll();
+        if (ns_work || ns_npend) ns_service();
+        for (int i = 0; i < nanswers; i++)
+            if (answers[i][1] == tag) {
+                *res = le(answers[i] + 8); *val = le(answers[i] + 12);
+                memmove(answers[i], answers[i + 1], (nanswers - i - 1) * 16); nanswers--;
+                return 1;
+            }
+        usleep(20);
+    }
+    return 0;
+}
+static int nopen(const char *path, uint8_t tag, uint32_t *res, uint32_t *val)
+{
+    uint8_t m[16] = { 1, tag };
+    return wait_answer(ns_open(path, m, res, val), tag, res, val, 45000);
+}
+static int nstat(const char *path, uint8_t tag, uint32_t *res, uint32_t *val)
+{
+    uint8_t m[16] = { 6, tag };
+    return wait_answer(ns_stat(path, 0x1000, m, res, val), tag, res, val, 45000);
+}
+static int nread(int h, uint32_t buf, uint32_t len, uint8_t tag, uint32_t *res, uint32_t *val)
+{
+    uint8_t m[16] = { 3, tag };
+    return wait_answer(ns_read(h, buf, len, m, res, val), tag, res, val, 45000);
+}
+
+static void run_net(const char *base, uint32_t size, uint32_t sum, int echo)
+{
+    char u[160];
+    uint32_t res = 0, val = 0;
+    if (!(pl_svc() & PL_SV_FETCH)) { CHECK(0, "the gateway offers FETCH"); return; }
+    // STAT, then OPEN of the same URL: one request
+    snprintf(u, sizeof u, "%s/big.bin", base);
+    int ok = nstat(u, 11, &res, &val);
+    CHECK(ok && res == 0 && val == size && mem816[0x1004] == 0x21, "stat URL: size %u (res %x)", val, res);
+    ok = nopen(u, 12, &res, &val);
+    int h = val;
+    CHECK(ok && res == 0 && h >= 4 && h < 8, "open URL: handle %d (res %x)", h, res);
+    uint32_t got = 0, s = 0, t0 = host_ms();
+    for (;;) {
+        ok = nread(h, 0x10000, 16384, 13, &res, &val);
+        if (!ok || res) break;
+        for (uint32_t i = 0; i < val; i++) s += mem816[0x10000 + i];
+        got += val;
+        if (val < 16384) break;
+    }
+    CHECK(ok && res == 0 && got == size && s == sum, "read URL to the end: %u bytes, sum %u (%u ms)", got, s, host_ms() - t0);
+    CHECK(ns_close(h) == 0, "close URL");
+    snprintf(u, sizeof u, "%s/missing.bin", base);
+    ok = nopen(u, 14, &res, &val);
+    CHECK(ok && res == 0x8F && val == 404, "open missing URL: $8F, status %u (res %x)", val, res);
+    ok = nopen("gopher://127.0.0.1/x", 15, &res, &val);
+    CHECK(ok && res == 0x8B, "unknown scheme: $8B (res %x)", res);
+    // a connection to the test's echo server
+    snprintf(u, sizeof u, "tcp://127.0.0.1:%d", echo);
+    ok = nopen(u, 16, &res, &val);
+    h = val;
+    CHECK(ok && res == 0 && h >= 4 && h < 8, "connect: handle %d (res %x)", h, res);
+    memcpy(mem816 + 0x20000, "hello, BBS", 10);
+    ns_write(h, 0x20000, 10, &res, &val);
+    CHECK(res == 0 && val == 10, "write 10 (res %x, %u)", res, val);
+    uint32_t e0 = nevents, n = 0;
+    for (int i = 0; i < 200 && n < 10; i++) {
+        spin(10);
+        nread(h, 0x30000 + n, 64, 17, &res, &val);
+        n += val;
+    }
+    CHECK(n == 10 && !memcmp(mem816 + 0x30000, "hello, BBS", 10) && nevents > e0 && lastevent == h,
+          "echo back with an event (%u bytes, %u events)", n, nevents - e0);
+    memcpy(mem816 + 0x20000, "QUIT", 4);                  // the echo server closes on QUIT
+    ns_write(h, 0x20000, 4, &res, &val);
+    res = 0;
+    for (int i = 0; i < 300 && res != NS_E_CLOSED; i++) { spin(10); nread(h, 0x30000, 64, 18, &res, &val); }
+    CHECK(res == NS_E_CLOSED, "the other end closed: $90 (res %x)", res);
+    ns_close(h);
+    ok = nopen("tcp://no-such-host.invalid:23", 19, &res, &val);
+    CHECK(ok && res == 0x8C, "unknown host: $8C (res %x)", res);
+    ok = nopen("tcp://127.0.0.1:1", 20, &res, &val);
+    CHECK(ok && res == 0x8D, "refused: $8D (res %x)", res);
+    ok = nopen("tcp://127.0.0.1", 21, &res, &val);
+    CHECK(ok && res == 0x8B, "no port: $8B (res %x)", res);
+    int hs[5];
+    for (int i = 0; i < 5; i++) { snprintf(u, sizeof u, "tcp://127.0.0.1:%d", echo); ok = nopen(u, 30 + i, &res, &val); hs[i] = res ? -1 : (int)val; }
+    CHECK(hs[3] >= 0 && hs[4] < 0 && res == 18, "a fifth stream: 18 (res %x)", res);
+    for (int i = 0; i < 4; i++) if (hs[i] >= 0) ns_close(hs[i]);
+    printf("NET DONE %d\n", fails);
+    fflush(stdout);
+}
+
 int main(int argc, char **argv)
 {
     fd = posix_openpt(O_RDWR | O_NOCTTY);
@@ -170,12 +286,16 @@ int main(int argc, char **argv)
     printf("PTY %s\n", ptsname(fd));
     fflush(stdout);
     if (argc > 1) drop_every = strtoul(argv[1], 0, 0);
+    const char *base = argc > 5 ? argv[2] : 0;                 // (step 2) URL base, size, sum, echo port
     pl_init();
     uint32_t t0 = host_ms(), done = 0;
     for (;;) {
         pl_poll();
-        if (!done && pl_files()) { run_files(); done = 1; printf("FILES DONE %d\n", fails); fflush(stdout); }
-        if (host_ms() - t0 > 120000) break;
+        if (!done && pl_files()) {
+            run_files(); done = 1; printf("FILES DONE %d\n", fails); fflush(stdout);
+            if (base) run_net(base, strtoul(argv[3], 0, 0), strtoul(argv[4], 0, 0), atoi(argv[5]));
+        }
+        if (host_ms() - t0 > 240000) break;
         usleep(20);
     }
     return fails != 0;
