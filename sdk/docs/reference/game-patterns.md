@@ -79,7 +79,7 @@ frame:  sys     SYS_VSYNC       ; a new frame (and the last list is done)
   Alt+Esc, F12, another window). Stop the samples, wait for events (`win_event` with A = 0)
   until WE_FOCUS, read `frame` again. Esc / WE_CLOSE: `fs_leave`, exit.
 - **Measured** (`deepdive`, emulator): about 1.8 ms of CPU a frame with every syscall, 0
-  missed frames.
+  missed frames; (Horizon 0.19) 1.7 ms with its tiles as a sheet (`sheet_draw`, games.md).
 
 ### A window with draw lists and sprites
 

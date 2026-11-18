@@ -15,6 +15,8 @@ typedef struct Mailbox {
     uint64_t next_poll;
     FILE    *f[MB_FILES];
     uint8_t  fmode[MB_FILES];       /* bit 0 readable, bit 1 writable */
+    uint8_t  fdirty[MB_FILES];      /* created or written: its date is set at close (SYS_TIME) */
+    char    *fhost[MB_FILES];       /* its host path */
     const char *root;               /* --sd directory, or NULL */
     uint64_t n_req, n_keyev, n_mouseev;
     /* keyboard: what the USB side holds now (4 usages + modifier bitmap), and what the
@@ -31,6 +33,9 @@ typedef struct Mailbox {
 } Mailbox;
 
 void    mailbox_reset(void);
+extern const char *mailbox_boot_cart;   /* --boot-cart PATH (FAT path on --sd) */
+#include <time.h>
+extern time_t mailbox_card_date;        /* --card-date: STAT's date of the files this run did not write */
 void    mailbox_poll(uint64_t now);
 uint8_t mailbox_read(uint32_t a);
 void    mailbox_write(uint32_t a, uint8_t v);

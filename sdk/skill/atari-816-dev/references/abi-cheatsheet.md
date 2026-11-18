@@ -130,6 +130,9 @@ it yourself (`dec5` / `digit` in `SDK/templates/game/main.s`: A -> ASCII digits)
 | $9D | SYS_LISTWAIT | A 0 wait / 1 ask | A 1 = still running |
 | $9E | SYS_FRAME | | A frame counter |
 | $9F | SYS_WINVBL | A own win, X 1/0 (REV $09) | WE_VBL each blank |
+| $A1 | SYS_SHEETNEW | X,Y {u24 address, u8 0, u16 stride, u16 width 1-4096, u16 height 1-1024} (0.19; own memory, else EFAULT) | A sheet 1-32 (EAGAIN: 32 sheets / 4096 rows in all) |
+| $A2 | SYS_SHEETFREE | A sheet / $FFFF all of yours (stops your running list) | |
+| $A3 | SYS_SHEETDRAW | A win \| count<<8 (1-128), X,Y 16-byte records SD_* {u8 sheet, u8 op SH_FILL/COPY/KEY (+SH_VBL $80), u8 colour/key, 0, sx, sy, w, h, x, y} | A drawn; returns at once; ~300 cycles a record |
 
 ## Games round (0.18): `SDK/docs/reference/games.md`
 

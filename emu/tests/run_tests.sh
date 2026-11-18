@@ -48,7 +48,8 @@ if [ $rc -eq 0 ] && [ "$got" = "$exp" ]; then ok "A816.BIN self test"; else bad 
 [ -e "$TMP/sd/A816TEST.TMP" ] && bad "A816.BIN left A816TEST.TMP behind"
 # the same with a slow console (90 us per byte, DBG_STAT polled by the program)
 out2=$($EMU --sd "$TMP/sd" --max-seconds 10 --console-us 90 $A816)
-[ "$out2" = "$out" ] && ok "A816.BIN self test with --console-us 90" || bad "A816.BIN with --console-us 90" "$out2"
+got2=$(printf '%s\n' "$out2" | sed 's/^WDOG US 001E84[0-9A-F][0-9A-F] OK$/WDOG US 001E84xx OK/')
+[ "$got2" = "$got" ] && ok "A816.BIN self test with --console-us 90" || bad "A816.BIN with --console-us 90" "$out2"
 
 # ── 2. bring-up 1: RAM test and cycle-exact benchmarks ──
 out=$($EMU --max-seconds 12 $BRINGUP1)
@@ -56,13 +57,14 @@ line() { printf '%s\n' "$out" | grep "^$1" ; }
 hexv() { printf '%d' "0x$(line "$1" | awk '{print $NF}')"; }
 if [ "$(line ID)" = "ID 81 REV $REV BANKS-1 7F" ] && [ "$(line RAM)" = "RAM ERRORS 0000" ] && line DONE >/dev/null; then
     ok "BRINGUP1.BIN identity and RAM test"; else bad "BRINGUP1.BIN identity / RAM" "$out"; fi
-# LOOP: the ideal cycle count gives $5943 (327,771 cycles between the latches, identical to
-# the RTL cycle by cycle); hardware and the RTL testbench print $5948 because of 8 SDRAM
-# write-through stalls inside the measured window, which the emulator does not model.
-[ "$(line LOOP)" = "LOOP US 00005943" ] && ok "LOOP US 00005943 (ideal cycles)" || bad "LOOP" "$(line LOOP)"
+# LOOP: 327,771 CPU cycles between the latches (identical to the RTL cycle by cycle) plus the
+# memory model's SDRAM write stalls: $5948; the board printed $5947 (2026-11-17, REV $0B),
+# the ideal count is $5943. READ and MVN (the classic machine running, Marga off): within 3 %
+# of the board's $860F and $75D3 (ideal $7CF6 and $3E7B, with --ideal-timing).
+[ "$(line LOOP)" = "LOOP US 00005948" ] && ok "LOOP US 00005948 (board 5947)" || bad "LOOP" "$(line LOOP)"
 r=$(hexv READ); m=$(hexv MVN)
-[ "$r" -ge $((0x7CF6 * 99 / 100)) ] && [ "$r" -le $((0x7CF6 * 101 / 100)) ] && ok "$(line READ) (ideal ~7CF6)" || bad "READ" "$(line READ)"
-[ "$m" -ge $((0x3E7B * 99 / 100)) ] && [ "$m" -le $((0x3E7B * 101 / 100)) ] && ok "$(line MVN) (ideal ~3E7B)" || bad "MVN" "$(line MVN)"
+[ "$r" -ge $((0x860F * 97 / 100)) ] && [ "$r" -le $((0x860F * 103 / 100)) ] && ok "$(line READ) (board 860F)" || bad "READ" "$(line READ)"
+[ "$m" -ge $((0x75D3 * 97 / 100)) ] && [ "$m" -le $((0x75D3 * 103 / 100)) ] && ok "$(line MVN) (board 75D3)" || bad "MVN" "$(line MVN)"
 
 # ── 3. emulator test programs ──
 cp -r $T/sdfix "$TMP/fix"
@@ -72,7 +74,8 @@ out=$($EMU --max-seconds 5 $T/asm/cpuirq.bin)
 [ "$out" = "$(cat $T/expected/cpuirq.txt)" ] && ok "cpuirq (COP, BRK, MVN+IRQ, WAI, NMI edge)" || bad "cpuirq" "$out"
 out=$($EMU --max-seconds 5 --shot "$TMP/nvc.ppm" $T/asm/nvcdemo.bin)
 sum=$(md5sum < "$TMP/nvc.ppm" | cut -d' ' -f1)
-[ "$out" = "$(cat $T/expected/nvcdemo.txt)" ] && ok "nvcdemo (VBLANK timing)" || bad "nvcdemo" "$out"
+# 3 frames = 49,976 us (60.03 Hz); the polling loop that reads it lands 1-3 us either side
+[ "$(printf '%s\n' "$out" | sed 's/^3 FRAMES US C33[3-9] OK$/3 FRAMES US C33x OK/')" = "$(cat $T/expected/nvcdemo.txt)" ] && ok "nvcdemo (VBLANK timing)" || bad "nvcdemo" "$out"
 if [ $REVN -lt 8 ]; then skip "nvcdemo picture (needs the blitter)"
 else [ "$sum" = "$(cat $T/expected/nvcdemo.ppm.md5)" ] && ok "nvcdemo picture (palette, blitter, pointer)" || bad "nvcdemo picture md5 $sum"; fi
 for m in 1 2; do
@@ -85,13 +88,14 @@ done
 
 # NVTEST.BIN (core/sw/a816, the hardware test of Marga): pictures in mode 0 with the pointer,
 # mode 1 (4 bpp) and mode 2 (264x180); see tests/pictures/nvtest_*.png
-out=$($EMU --max-seconds 40 --shot "$TMP/na.ppm" --shot-at 1.5 --shot "$TMP/nb.ppm" --shot-at 24 \
+# (--ideal-timing: the pictures are Marga's, taken at fixed times while the CPU sets them up)
+out=$($EMU --ideal-timing --max-seconds 40 --shot "$TMP/na.ppm" --shot-at 1.5 --shot "$TMP/nb.ppm" --shot-at 24 \
       --shot "$TMP/nc.ppm" --shot-at 29 $NVTEST)
 pics=ok
 for f in a b c; do
     [ "$(md5sum < "$TMP/n$f.ppm" | cut -d' ' -f1)" = "$(cat $T/expected/nvtest_$f.ppm.md5)" ] || pics="picture $f differs"
 done
-[ "$out" = "$(cat $T/expected/nvtest.txt)" ] && [ $pics = ok ] && ok "NVTEST.BIN (3 modes, pointer, LATE 00)" || bad "NVTEST.BIN: $pics" "$out"
+[ "$out" = "$(cat $T/expected/nvtest.txt)" ] && [ "$pics" = ok ] && ok "NVTEST.BIN (3 modes, pointer, LATE 00)" || bad "NVTEST.BIN: $pics" "$out"
 
 # ── blitter (REV $08): every op against a 65C816 reference; command lists and raster events (REV $09) ──
 if [ $REVN -ge 8 ]; then

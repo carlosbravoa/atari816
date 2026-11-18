@@ -1,9 +1,11 @@
-# Syscalls: frame sync, palette entries, sprites, full screen, draw lists
+# Syscalls: frame sync, palette entries, sprites, full screen, draw lists, sheets
 
 Horizon 0.18, "the games round": the calls a game needs to use Marga (the video chip) and
 Ali (the blitter) the way they were built for. A complete program that uses all of them:
 `sdk/examples/deepdive` (a full-screen scrolling game). Patterns: [game-patterns.md](game-patterns.md).
 The source of truth is `horizon/ABI.md` (its syscall table and "The games round (0.18)").
+Horizon 0.19 adds sheets ([below](#sheets-horizon-019)): art registered once, then cheap
+draw-list records from it.
 
 Examples assume `win`, `t0`, `t1`, `t2` in ZEROPAGE and `ev` (8 bytes) in BSS.
 
@@ -548,8 +550,10 @@ starts them one by one, without the blitter the CPU draws them: the picture is t
   scroll values and sprite changes of the same frame. A frame's whole update in one syscall,
   tear-free. (On any later record: wait for the next blank there.)
 - A program's running list is stopped (Ali's ABORT) when it ends or frees a bank.
-- Cost (emulator): about 2,000 CPU cycles a record in the call (checking and clipping), then
-  Ali's own time, while the CPU goes on: [performance.md](performance.md).
+- Cost (emulator): about 1,300 CPU cycles a record in the call (checking and clipping;
+  Horizon 0.18: 1,400), then Ali's own time, while the CPU goes on:
+  [performance.md](performance.md). Copies from art you draw again and again are about four
+  times cheaper as [sheets](#sheets-horizon-019).
 ```asm
         lda     z:win
         ora     #2 << 8         ; window | count << 8
@@ -573,4 +577,93 @@ In: A = 0 wait, 1 ask. Out: A = 1 while your list still runs (asked), 0 when don
 ```asm
         lda     #0
         sys     SYS_LISTWAIT    ; done: its sources may change now
+```
+
+## Sheets (Horizon 0.19)
+
+A draw list checks every record's source against your memory: most of its cost. A **sheet**
+moves the check to the start: you register a rectangle of your memory holding art once
+(`sheet_new`), and `sheet_draw`'s records name the sheet and a rectangle in it. The kernel
+then only compares small numbers with the sheet's size. Everything else is `draw_list`'s:
+the targets, clipping, LS_VBL (here SH_VBL), the revisions, the waiting (`list_wait`,
+`vsync`), the 460,800-pixel limit. What a sheet record cannot do (moves inside the target,
+1 bpp expands, a stride per record) stays `draw_list`'s; send one or the other each frame.
+
+Cost (emulator, `gtest m`): about **300 CPU cycles a record** (21 us) when the window is on the
+screen uncovered (or in full-screen mode), the record is a copy or keyed copy from the same
+sheet as the record before and lies wholly inside the target; other records (fills, SH_VBL,
+records cut at an edge, a covered window) about 1,100 cycles; a call about 265 us, as a
+draw_list call.
+
+### $A1 sheet_new (SYS_SHEETNEW)
+In: X, Y = a 10-byte block {u24 address, u8 0, u16 stride, u16 width, u16 height}. Out: A =
+the sheet (1-32). The pixels (8 bpp), width x height, rows stride bytes apart, must all be your
+memory (the memory rule above, EFAULT). EINVAL: width 0 or above 4096, height 0 or above 1024,
+a stride below the width. EAGAIN: 32 sheets exist (all programs together), or the rows of all
+sheets would pass 4096. A sheet is yours alone (another program's number is EINVAL); it goes
+when you free a bank it lies in, call `sheet_free`, or end. You may draw into a sheet's pixels
+whenever no list of yours is reading them.
+
+| Offset | Constant |
+| --- | --- |
+| 0 | `SHN_ADDR`: u24 address, then u8 0 |
+| 4 | `SHN_STRIDE` |
+| 6 | `SHN_W` |
+| 8 | `SHN_H` |
+
+```asm
+        ptr     tsheet          ; tiles of 16 x 16, one under the other: tile t is rows 16 t
+        sys     SYS_SHEETNEW    ; -> A = the sheet
+        bcs     @no             ; (EFAULT, EINVAL, EAGAIN: draw them with draw_list)
+        sta     t0
+@no:    rts
+tsheet: .faraddr art
+        .byte   0
+        .word   16, 16, 16 * 4  ; stride, width, height: 4 tiles
+art:    .res    16 * 16 * 4
+```
+
+### $A2 sheet_free (SYS_SHEETFREE)
+In: A = the sheet, or $FFFF: all of yours. Your running list (of either call) is stopped first
+(Ali's ABORT), as when you free a bank. EINVAL: not your sheet.
+
+### $A3 sheet_draw (SYS_SHEETDRAW)
+In: A = window | count << 8 (count 1-128), X, Y = count records of 16 bytes in your memory.
+Out: A = the records drawn (those clipped away or empty are left out). Returns at once (REV
+$09+: one command list); EINVAL a bad window, count or op, a sheet not yours, sx + w or sy + h
+past the sheet, over 460,800 pixels; EFAULT the records not wholly in your memory; then nothing
+is drawn.
+
+| Offset | Constant | Field |
+| --- | --- | --- |
+| 0 | `SD_SHEET` | u8 the sheet (a fill: 0, not used) |
+| 1 | `SD_OP` | u8 op (below) |
+| 2 | `SD_C` | u8 the fill colour, or the key colour of SH_KEY; then u8 0 |
+| 4 | `SD_SX` | u16 sx: the source's corner in the sheet |
+| 6 | `SD_SY` | u16 sy |
+| 8 | `SD_W` | u16 w: sx + w <= the sheet's width |
+| 10 | `SD_H` | u16 h: sy + h <= its height |
+| 12 | `SD_X` | i16 x: the destination (the content, or the full-screen framebuffer) |
+| 14 | `SD_Y` | i16 y |
+
+| Op | Value | |
+| --- | --- | --- |
+| `SH_FILL` | 0 | w x h of the colour (no sheet) |
+| `SH_COPY` | 1 | from the sheet |
+| `SH_KEY` | 2 | the same, pixels of the key colour skipped |
+| `SH_VBL` | $80 | added to the op: wait for the vertical blank before this record |
+
+```asm
+        lda     t0              ; the sheet from sheet_new, op SH_KEY: into the second record
+        ora     #SH_KEY << 8
+        sta     recs + 16
+        lda     win
+        ora     #2 << 8         ; window | count << 8
+        ptr     recs
+        sys     SYS_SHEETDRAW   ; -> A = the records drawn; Ali works on
+        rts
+recs:   .byte   0, SH_FILL | SH_VBL, 0, 0       ; a fill, in the vertical blank
+        .word   0, 0, 64, 32, 0, 0              ; sx, sy (not used), w, h, x, y
+        .byte   0, 0, 231, 0                    ; (sheet, op set above) key colour 231
+        .word   0, 2 * 16, 16, 16, 24, 8        ; tile 2 at (24, 8)
 ```

@@ -14,6 +14,12 @@ EMUDIR ?= ../emu
 EMU    ?= $(EMUDIR)/emu816
 # EMUFLAGS="--rev 7": test without the blitter (REV $07: the software drawing paths)
 EMUFLAGS ?=
+# (0.19) the date STAT reports for every file a test run did not write (fresh card copies
+# have meaningless host dates; files written in the run get the clock Horizon gave), and the
+# time model: the sessions and their pictures were timed for emu816's ideal cycles, and they
+# check what is drawn, not how fast, so they keep it (--ideal-timing). The board's speed
+# (emu816's default since 0.19) is measured separately: README, "Version 0.19".
+CARDDATE ?= --card-date 2026-11-01T12:00 --ideal-timing
 B      := build
 SD     := $(B)/sd
 TSD    := $(B)/tsd
@@ -167,8 +173,10 @@ kernel/palette.inc: tools/mkpalette.py
 $(SD)/SYSTEM/HORIZON.SYS: $(KSRC) user/version.inc kernel/font.inc kernel/pointer.inc kernel/pointer_drag.inc kernel/pointer_cross.inc kernel/pointer_hsize.inc kernel/pointer_vsize.inc kernel/uifont.inc kernel/palette.inc kernel/kernel.cfg | $(SD)/SYSTEM $(B)
 	$(CA65) -I kernel -I user -o $(B)/horizon.o kernel/horizon.s
 	$(CA65) -I kernel -I user -o $(B)/k2.o kernel/k2.s
-	$(LD65) -C kernel/kernel.cfg -m $(B)/horizon.map -o $(B)/horizon.sys $(B)/horizon.o $(B)/k2.o
-	@# (0.18) the I/O processor reads at most $$FF00 bytes of the file (bank $$01 image + k2.s)
+	$(CA65) -I kernel -I user -o $(B)/k3.o kernel/k3.s
+	$(LD65) -C kernel/kernel.cfg -m $(B)/horizon.map -o $(B)/horizon.sys $(B)/horizon.o $(B)/k2.o $(B)/k3.o
+	@# (0.18) the I/O processor reads at most $$FF00 bytes of the file (bank $$01 image + k2.s
+	@# + (0.19) k3.s)
 	@python3 tools/kspace.py $(B)/horizon.map $(B)/horizon.sys
 	cp $(B)/horizon.sys $@
 
@@ -259,7 +267,7 @@ run: all $(EMU)
 test: all $(EMU)
 	@set -e; for cu in $(SPEEDS); do \
 	  rm -rf build/run-sd; cp -r $(TSD) build/run-sd; \
-	  $(EMU) $(EMUFLAGS) --headless --sd build/run-sd --console-us $$cu --max-seconds 120 --keys $(TKEYS) \
+	  $(EMU) $(EMUFLAGS) $(CARDDATE) --headless --sd build/run-sd --console-us $$cu --max-seconds 120 --keys $(TKEYS) \
 	      $(TSD)/SYSTEM/HORIZON.SYS > $(B)/selftest-$$cu.out 2> $(B)/selftest-$$cu.err || echo "emu816 exit $$?" >> $(B)/selftest-$$cu.out; \
 	  if python3 tests/compare.py tests/selftest.txt $(B)/selftest-$$cu.out; then \
 	    echo "PASS  selftest, console $$cu us/byte"; \
@@ -267,7 +275,7 @@ test: all $(EMU)
 	done
 	@set -e; for cu in $(SHSPEEDS); do \
 	  rm -rf build/run-sd; cp -r $(SD) build/run-sd; touch build/run-sd/SYSTEM/NODESK; \
-	  $(EMU) $(EMUFLAGS) --headless --sd build/run-sd --console-us $$cu --max-seconds $(SHSECS) \
+	  $(EMU) $(EMUFLAGS) $(CARDDATE) --headless --sd build/run-sd --console-us $$cu --max-seconds $(SHSECS) \
 	      --keys $$(python3 tests/keyscript.py tests/shell.keys) \
 	      --mouse $$(python3 tests/keyscript.py --mouse tests/shell.keys) \
 	      $(SD)/SYSTEM/HORIZON.SYS > $(B)/shell-$$cu.out 2> $(B)/shell-$$cu.err || echo "emu816 exit $$?" >> $(B)/shell-$$cu.out; \
@@ -275,107 +283,107 @@ test: all $(EMU)
 	    echo "PASS  shell session, console $$cu us/byte"; \
 	  else echo "FAIL  shell session, console $$cu us/byte ($(B)/shell-$$cu.out)"; exit 1; fi; \
 	done
-	@sh tests/shots.sh "$(EMU) $(EMUFLAGS)" $(SD) screen 28 $(SHOTS)
+	@sh tests/shots.sh "$(EMU) $(EMUFLAGS) $(CARDDATE)" $(SD) screen 28 $(SHOTS)
 	@if diff -u tests/pictures/screen.md5 $(B)/screen.md5; then echo "PASS  screen pictures"; \
 	else echo "FAIL  screen pictures (look at $(B)/screen*.ppm, then make pictures)"; exit 1; fi
-	@sh tests/shots.sh "$(EMU) $(EMUFLAGS) --log-sound" $(SD) browse 51 $(BSHOTS)
+	@sh tests/shots.sh "$(EMU) $(EMUFLAGS) $(CARDDATE) --log-sound" $(SD) browse 51 $(BSHOTS)
 	@if diff -u tests/pictures/browse.md5 $(B)/browse.md5; then echo "PASS  browser pictures"; \
 	else echo "FAIL  browser pictures (look at $(B)/browse*.ppm, then make pictures)"; exit 1; fi
 	@if diff -u tests/browse.err $(B)/browse.err; then echo "PASS  browser: classic ops (run = start this, and only this)"; \
 	else echo "FAIL  browser: classic ops"; exit 1; fi
-	@sh tests/shots.sh "$(EMU) $(EMUFLAGS)" $(SD) wdemo 15 $(WSHOTS)
+	@sh tests/shots.sh "$(EMU) $(EMUFLAGS) $(CARDDATE)" $(SD) wdemo 15 $(WSHOTS)
 	@if diff -u tests/pictures/wdemo.md5 $(B)/wdemo.md5; then echo "PASS  window system pictures"; \
 	else echo "FAIL  window system pictures (look at $(B)/wdemo*.ppm, then make pictures)"; exit 1; fi
-	@sh tests/shots.sh "$(EMU) $(EMUFLAGS)" $(SD) wcopy 6 5.5
+	@sh tests/shots.sh "$(EMU) $(EMUFLAGS) $(CARDDATE)" $(SD) wcopy 6 5.5
 	@if diff -u tests/pictures/wcopy.md5 $(B)/wcopy.md5; then echo "PASS  window copy (WD_COPY): the same picture with and without the blitter"; \
 	else echo "FAIL  window copy (look at $(B)/wcopy1.ppm, then make pictures)"; exit 1; fi
-	@sh tests/shots.sh "$(EMU) $(EMUFLAGS)" $(SD) wdraw 9 5.5 7.5
+	@sh tests/shots.sh "$(EMU) $(EMUFLAGS) $(CARDDATE)" $(SD) wdraw 9 5.5 7.5
 	@if diff -u tests/pictures/wdraw.md5 $(B)/wdraw.md5; then echo "PASS  win_draw expand (WD_EXPAND), keyed blit with a stride (WD_KSBLIT), win_geom: the same with and without the blitter"; \
 	else echo "FAIL  win_draw expand / keyed blit / win_geom (look at $(B)/wdraw*.ppm)"; exit 1; fi
-	@DESK=1 sh tests/shots.sh "$(EMU) $(EMUFLAGS)" $(SD) desk 20 $(DSHOTS)
+	@DESK=1 sh tests/shots.sh "$(EMU) $(EMUFLAGS) $(CARDDATE)" $(SD) desk 20 $(DSHOTS)
 	@if diff -u tests/pictures/$(DMD5) $(B)/desk.md5; then echo "PASS  desktop pictures"; \
 	else echo "FAIL  desktop pictures (look at $(B)/desk*.ppm, then make pictures)"; exit 1; fi
 	@python3 -c "import os; from PIL import Image, ImageChops as C; a, b = (Image.open(('$(B)/desk%d.ppm' if os.path.exists('$(B)/desk%d.ppm' % i) else '$(B)/desk%d.png') % i).convert('RGB').crop((0, 32, 1280, 720)) for i in (4, 6)); exit(C.difference(a, b).getbbox() is not None)" \
 	&& echo "PASS  desktop: F12 to the classic machine and back leaves the desktop as it was" \
 	|| { echo "FAIL  desktop: not the same after F12"; exit 1; }
-	@PREP='cp ../../tests/system.programs SYSTEM/PROGRAMS' DESK=1 sh tests/shots.sh "$(EMU) $(EMUFLAGS)" $(SD) system 57 $(SYSSHOTS)
+	@PREP='cp ../../tests/system.programs SYSTEM/PROGRAMS' DESK=1 sh tests/shots.sh "$(EMU) $(EMUFLAGS) $(CARDDATE)" $(SD) system 57 $(SYSSHOTS)
 	@if diff -u tests/pictures/$(call REV7,system) $(B)/system.md5; then echo "PASS  Desktop: Programs list, out of memory, Force quit, single instance, Shut down, Restart, /Desktop"; \
 	else echo "FAIL  Desktop system pictures (look at $(B)/system*.ppm, then make pictures)"; exit 1; fi
 	@if grep -q 'SYS_RESTART 1 -> 00' $(B)/system.err && test -e $(B)/run-pic/Desktop/README.TXT; then echo "PASS  Desktop: SYS_SYNC, SYS_RESTART, README.TXT moved into /Desktop"; \
 	else echo "FAIL  Desktop: no restart, or README.TXT not in /Desktop ($(B)/system.err)"; exit 1; fi
-	@DESK=1 sh tests/shots.sh "$(EMU) $(EMUFLAGS)" $(SD) wins 21 $(WINSHOTS)
+	@DESK=1 sh tests/shots.sh "$(EMU) $(EMUFLAGS) $(CARDDATE)" $(SD) wins 21 $(WINSHOTS)
 	@if diff -u tests/pictures/$(call REV7,wins) $(B)/wins.md5; then echo "PASS  maximize, restore, minimize, the Windows menu, Alt+Tab"; \
 	else echo "FAIL  window buttons / Windows menu pictures (look at $(B)/wins*.ppm)"; exit 1; fi
-	@PREP='cp "disks/Caverns of Mars.atr" GAME.ATR' DESK=1 sh tests/shots.sh "$(EMU) $(EMUFLAGS)" $(SD) desk14 46 $(D14SHOTS)
+	@PREP='cp "disks/Caverns of Mars.atr" GAME.ATR' DESK=1 sh tests/shots.sh "$(EMU) $(EMUFLAGS) $(CARDDATE)" $(SD) desk14 46 $(D14SHOTS)
 	@if diff -u tests/pictures/$(call REV7,desk14) $(B)/desk14.md5; then echo "PASS  Desktop 0.14: shortcuts, the Atari panel and drops, the clock, icons, Tidy up, Delete"; \
 	else echo "FAIL  Desktop 0.14 pictures (look at $(B)/desk14*.ppm)"; exit 1; fi
 	@if grep -q 'CLASSIC_MOUNT kind 1 slot 1 /GAME.ATR -> 00' $(B)/desk14.err && test -e $(B)/run-pic/Desktop/LONG.TXT.LNK \
 	  && ! test -e $(B)/run-pic/Desktop/README.TXT.LNK && grep -q '^2026-11-17 14:05' $(B)/run-pic/SYSTEM/CLOCK; \
 	then echo "PASS  Desktop 0.14: the disk on D2:, the shortcuts, /SYSTEM/CLOCK"; \
 	else echo "FAIL  Desktop 0.14: mount, shortcuts or clock ($(B)/desk14.err, $(B)/run-pic)"; exit 1; fi
-	@PREP='cp "disks/Caverns of Mars.atr" GAME.ATR' DESK=1 sh tests/shots.sh "$(EMU) $(EMUFLAGS)" $(SD) desk15 40 $(D15SHOTS)
+	@PREP='cp "disks/Caverns of Mars.atr" GAME.ATR' DESK=1 sh tests/shots.sh "$(EMU) $(EMUFLAGS) $(CARDDATE)" $(SD) desk15 40 $(D15SHOTS)
 	@if diff -u tests/pictures/$(call REV7,desk15) $(B)/desk15.md5; then echo "PASS  Desktop 0.15: pop-up menus (the Atari icon, Files, a text field, the desktop, an icon, Edit), the dialog's filter and type-ahead"; \
 	else echo "FAIL  Desktop 0.15 pictures (look at $(B)/desk15*.ppm)"; exit 1; fi
 	@if test -d "$(B)/run-pic/Desktop/Games" && grep -q 'CLASSIC_MOUNT kind 1 slot 0 /GAME.ATR -> 00' $(B)/desk15.err; then echo "PASS  Desktop 0.15: the folder made and renamed, GAME.ATR attached and loaded"; \
 	else echo "FAIL  Desktop 0.15: /Desktop/Games or the mounts ($(B)/desk15.err, $(B)/run-pic)"; exit 1; fi
-	@DESK=1 sh tests/shots.sh "$(EMU) $(EMUFLAGS)" $(SD) desk18 27 $(D18SHOTS)
+	@DESK=1 sh tests/shots.sh "$(EMU) $(EMUFLAGS) $(CARDDATE)" $(SD) desk18 27 $(D18SHOTS)
 	@if diff -u tests/pictures/$(call REV7,desk18) $(B)/desk18.md5; then echo "PASS  Desktop 0.18: the Atari panel's Attach buttons and menu"; \
 	else echo "FAIL  Desktop 0.18 pictures (look at $(B)/desk18*.ppm)"; exit 1; fi
 	@if grep 'emu816: CLASSIC' $(B)/desk18.err | diff -u tests/desk18.err -; then echo "PASS  Desktop 0.18: a cartridge attached / ejected: the executable ejected, a cold boot each time"; \
 	else echo "FAIL  Desktop 0.18: classic ops ($(B)/desk18.err)"; exit 1; fi
-	@DESK=1 sh tests/shots.sh "$(EMU) $(EMUFLAGS)" $(SD) kmenu 33 $(KMSHOTS)
+	@DESK=1 sh tests/shots.sh "$(EMU) $(EMUFLAGS) $(CARDDATE)" $(SD) kmenu 33 $(KMSHOTS)
 	@if diff -u tests/pictures/$(call REV7,kmenu) $(B)/kmenu.md5; then echo "PASS  keyboard menus, Alt+Tab, ctrl+W, Alt+F4, menu states and shortcuts"; \
 	else echo "FAIL  keyboard menu pictures (look at $(B)/kmenu*.ppm, then make pictures)"; exit 1; fi
-	@sh tests/shots.sh "$(EMU) $(EMUFLAGS)" $(SD) edit 22 $(ESHOTS)
+	@sh tests/shots.sh "$(EMU) $(EMUFLAGS) $(CARDDATE)" $(SD) edit 22 $(ESHOTS)
 	@if diff -u tests/pictures/$(EMD5) $(B)/edit.md5; then echo "PASS  Edit pictures"; \
 	else echo "FAIL  Edit pictures (look at $(B)/edit*.ppm, then make pictures)"; exit 1; fi
-	@sh tests/shots.sh "$(EMU) $(EMUFLAGS)" $(SD) editw 34 $(EWSHOTS)
+	@sh tests/shots.sh "$(EMU) $(EMUFLAGS) $(CARDDATE)" $(SD) editw 34 $(EWSHOTS)
 	@if diff -u tests/pictures/editw.md5 $(B)/editw.md5; then echo "PASS  Edit pictures: undo, word wrap, Find, Replace"; \
 	else echo "FAIL  Edit pictures, second session (look at $(B)/editw*.ppm, then make pictures)"; exit 1; fi
 	@if cmp $(B)/run-pic/E2.TXT tests/editw.txt; then echo "PASS  Edit: the file the second session saved"; \
 	else echo "FAIL  Edit: build/run-pic/E2.TXT is not tests/editw.txt"; exit 1; fi
-	@sh tests/shots.sh "$(EMU) $(EMUFLAGS)" $(SD) paint 27 $(PSHOTS)
+	@sh tests/shots.sh "$(EMU) $(EMUFLAGS) $(CARDDATE)" $(SD) paint 27 $(PSHOTS)
 	@if diff -u tests/pictures/$(subst edit,paint,$(EMD5)) $(B)/paint.md5; then echo "PASS  Paint pictures"; \
 	else echo "FAIL  Paint pictures (look at $(B)/paint*.ppm, then make pictures)"; exit 1; fi
-	@DESK=1 sh tests/shots.sh "$(EMU) $(EMUFLAGS)" $(SD) settings 22 $(SSHOTS)
+	@DESK=1 sh tests/shots.sh "$(EMU) $(EMUFLAGS) $(CARDDATE)" $(SD) settings 22 $(SSHOTS)
 	@if diff -u tests/pictures/$(subst edit,settings,$(EMD5)) $(B)/settings.md5; then echo "PASS  Settings pictures"; \
 	else echo "FAIL  Settings pictures (look at $(B)/settings*.ppm, then make pictures)"; exit 1; fi
-	@PREP='cp ../../sdfiles/atari.ini atari.ini' DESK=1 sh tests/shots.sh "$(EMU) $(EMUFLAGS)" $(SD) classic 16 $(CLSHOTS)
+	@PREP='cp ../../sdfiles/atari.ini atari.ini' DESK=1 sh tests/shots.sh "$(EMU) $(EMUFLAGS) $(CARDDATE)" $(SD) classic 16 $(CLSHOTS)
 	@if diff -u tests/pictures/classic.md5 $(B)/classic.md5; then echo "PASS  Settings pictures: the Classic Atari page"; \
 	else echo "FAIL  Settings pictures, Classic Atari (look at $(B)/classic*.ppm, then make pictures)"; exit 1; fi
 	@if cmp $(B)/run-pic/atari.ini tests/atari-ini.txt; then echo "PASS  Settings: the /atari.ini it saved"; \
 	else echo "FAIL  Settings: build/run-pic/atari.ini is not tests/atari-ini.txt"; exit 1; fi
-	@DESK=1 sh tests/shots.sh "$(EMU) $(EMUFLAGS)" $(SD) files 46 $(FSHOTS)
+	@DESK=1 sh tests/shots.sh "$(EMU) $(EMUFLAGS) $(CARDDATE)" $(SD) files 46 $(FSHOTS)
 	@if diff -u tests/pictures/$(subst edit,files,$(EMD5)) $(B)/files.md5; then echo "PASS  Files pictures"; \
 	else echo "FAIL  Files pictures (look at $(B)/files*.ppm, then make pictures)"; exit 1; fi
 	@rm -rf build/run-sd; cp -r $(SD) build/run-sd; touch build/run-sd/SYSTEM/NODESK; cp tests/basic.bas build/run-sd/BT.BAS
-	@$(EMU) $(EMUFLAGS) --headless --sd build/run-sd --max-seconds $(BASSECS) \
+	@$(EMU) $(EMUFLAGS) $(CARDDATE) --headless --sd build/run-sd --max-seconds $(BASSECS) \
 	    --keys "$$(python3 tests/keyscript.py tests/basic-t.keys)" \
 	    $(SD)/SYSTEM/HORIZON.SYS > $(B)/basic-t.out 2> $(B)/basic-t.err || true
 	@python3 -c "L = open('$(B)/basic-t.out', encoding='latin-1').read().split('\n'); i = [k for k, l in enumerate(L) if '> basic -t /BT.BAS' in l][0]; open('$(B)/basic-t.txt', 'w', encoding='latin-1').write('\n'.join(L[i + 1:]))"
 	@if python3 tests/compare.py tests/basic.txt $(B)/basic-t.txt; then echo "PASS  BASIC: self test, errors, LIST, INPUT, SAVE / LOAD ($$(grep -h 'empty FOR' $(B)/basic-t.txt))"; \
 	else echo "FAIL  BASIC ($(B)/basic-t.out)"; exit 1; fi
-	@sh tests/shots.sh "$(EMU) $(EMUFLAGS)" $(SD) basic 39 $(BASSHOTS)
+	@sh tests/shots.sh "$(EMU) $(EMUFLAGS) $(CARDDATE)" $(SD) basic 39 $(BASSHOTS)
 	@if diff -u tests/pictures/basic.md5 $(B)/basic.md5; then echo "PASS  BASIC pictures"; \
 	else echo "FAIL  BASIC pictures (look at $(B)/basic*.ppm, then make pictures)"; exit 1; fi
 	@rm -rf build/run-sd; cp -r $(SD) build/run-sd; touch build/run-sd/SYSTEM/NODESK; cp tests/sheet.sht build/run-sd/ST.SHT
-	@$(EMU) $(EMUFLAGS) --headless --sd build/run-sd --max-seconds $(SHTSECS) \
+	@$(EMU) $(EMUFLAGS) $(CARDDATE) --headless --sd build/run-sd --max-seconds $(SHTSECS) \
 	    --keys "$$(python3 tests/keyscript.py tests/sheet-t.keys)" \
 	    $(SD)/SYSTEM/HORIZON.SYS > $(B)/sheet-t.out 2> $(B)/sheet-t.err || true
 	@python3 -c "L = open('$(B)/sheet-t.out', encoding='latin-1').read().split('\n'); i = [k for k, l in enumerate(L) if '> sheet -t /ST.SHT' in l][0]; open('$(B)/sheet-t.txt', 'w', encoding='latin-1').write('\n'.join(L[i + 1:]))"
 	@if python3 tests/compare.py tests/sheet-t.txt $(B)/sheet-t.txt; then echo "PASS  Sheet: self test ($$(grep -h 'full recalc' $(B)/sheet-t.txt | cut -c8-))"; \
 	else echo "FAIL  Sheet self test ($(B)/sheet-t.out)"; exit 1; fi
-	@sh tests/shots.sh "$(EMU) $(EMUFLAGS)" $(SD) sheet 20 $(SHTSHOTS)
+	@sh tests/shots.sh "$(EMU) $(EMUFLAGS) $(CARDDATE)" $(SD) sheet 20 $(SHTSHOTS)
 	@if diff -u tests/pictures/sheet.md5 $(B)/sheet.md5; then echo "PASS  Sheet pictures"; \
 	else echo "FAIL  Sheet pictures (look at $(B)/sheet*.ppm, then make pictures)"; exit 1; fi
 	@rm -rf build/run-sd; cp -r $(SD) build/run-sd; touch build/run-sd/SYSTEM/NODESK
-	@$(EMU) $(EMUFLAGS) --headless --sd build/run-sd --max-seconds 60 \
+	@$(EMU) $(EMUFLAGS) $(CARDDATE) --headless --sd build/run-sd --max-seconds 60 \
 	    --keys "$$(python3 tests/keyscript.py tests/leak.keys)" \
 	    $(SD)/SYSTEM/HORIZON.SYS > $(B)/leak.out 2> $(B)/leak.err || true
 	@if grep -a 'leak: 200 runs:.*: PASS' $(B)/leak.out; then echo "PASS  every resource comes back after 200 programs (exited or killed)"; \
 	else echo "FAIL  leak ($(B)/leak.out)"; exit 1; fi
 	@rm -rf build/run-sd; cp -r $(SD) build/run-sd; touch build/run-sd/SYSTEM/NODESK
-	@$(EMU) $(EMUFLAGS) --headless --log-sound --sd build/run-sd --max-seconds 19 \
+	@$(EMU) $(EMUFLAGS) $(CARDDATE) --headless --log-sound --sd build/run-sd --max-seconds 19 \
 	    --keys "$$(python3 tests/keyscript.py tests/ktest.keys)" --mouse "$$(python3 tests/keyscript.py --mouse tests/ktest.keys)" \
 	    $(SD)/SYSTEM/HORIZON.SYS > $(B)/ktest.out 2> $(B)/ktest.err || true
 	@python3 -c "L = open('$(B)/ktest.out', encoding='latin-1').read().split('\n'); i = [k for k, l in enumerate(L) if l.startswith('ktest 1')][0]; j = ([k for k, l in enumerate(L) if l.startswith('ktest: done')] + [len(L) - 1])[0]; open('$(B)/ktest.txt', 'w', encoding='latin-1').write('\n'.join(L[i:j + 1]) + '\n')"
@@ -384,7 +392,7 @@ test: all $(EMU)
 	@if grep sound $(B)/ktest.err | diff -u tests/ktest.err -; then echo "PASS  0.15 sound: the four chimes (two notes, the volume falling every tick), a task's channels silenced at its exit, a channel borrowed and given back"; \
 	else echo "FAIL  KTEST sound log ($(B)/ktest.err)"; exit 1; fi
 	@rm -rf build/run-sd; cp -r $(SD) build/run-sd; touch build/run-sd/SYSTEM/NODESK
-	@$(EMU) $(EMUFLAGS) --headless --log-lau --sd build/run-sd --max-seconds 9 \
+	@$(EMU) $(EMUFLAGS) $(CARDDATE) --headless --log-lau --sd build/run-sd --max-seconds 9 \
 	    --keys "$$(python3 tests/keyscript.py tests/stest.keys)" \
 	    $(SD)/SYSTEM/HORIZON.SYS > $(B)/stest.out 2> $(B)/stest.err || true
 	@python3 -c "L = open('$(B)/stest.out', encoding='latin-1').read().split('\n'); i = [k for k, l in enumerate(L) if l.startswith('stest 1')][0]; j = [k for k, l in enumerate(L) if k > i and l.startswith('>')][0]; open('$(B)/stest.txt', 'w').write('\n'.join(L[i:j]) + '\n')"
@@ -392,20 +400,20 @@ test: all $(EMU)
 	else echo "FAIL  STEST ($(B)/stest.out)"; exit 1; fi
 	@if grep lau $(B)/stest.err | diff -u $(STESTERR) -; then echo "PASS  0.17 Lau writes: the voices' registers, KEYOFF at bank_free, exit and kill, the master volume following the setting"; \
 	else echo "FAIL  STEST Lau log ($(B)/stest.err)"; exit 1; fi
-	@sh tests/shots.sh "$(EMU) $(EMUFLAGS)" $(SD) gtest 12 5.2
+	@sh tests/shots.sh "$(EMU) $(EMUFLAGS) $(CARDDATE)" $(SD) gtest 12 5.2 10
 	@python3 -c "L = open('$(B)/gtest.out', encoding='latin-1').read().split('\n'); i = [k for k, l in enumerate(L) if l.startswith('gtest 1')][0]; j = [k for k, l in enumerate(L) if k > i and l.startswith('gtest: done')][0]; open('$(B)/gtest.txt', 'w').write('\n'.join(L[i:j + 1]) + '\n')"
-	@if python3 tests/compare.py tests/$(GTESTTXT) $(B)/gtest.txt; then echo "PASS  0.18 games round: frame, palette entries, sprites, full screen, draw lists, WE_VBL, sound volume (foreign memory refused, cleanup at exit, kill and bank_free, ENODEV on older boards)"; \
+	@if python3 tests/compare.py tests/$(GTESTTXT) $(B)/gtest.txt; then echo "PASS  0.18 games round: frame, palette entries, sprites, full screen, draw lists, WE_VBL, sound volume, (0.19) sheets (foreign memory refused, cleanup at exit, kill and bank_free, ENODEV on older boards)"; \
 	else echo "FAIL  GTEST ($(B)/gtest.out)"; exit 1; fi
-	@if diff -u tests/pictures/gtest.md5 $(B)/gtest.md5; then echo "PASS  0.18 draw lists: the same picture by Ali's list, its single blits and the CPU"; \
-	else echo "FAIL  GTEST picture (look at $(B)/gtest1.ppm)"; exit 1; fi
+	@if diff -u tests/pictures/gtest.md5 $(B)/gtest.md5; then echo "PASS  0.18 draw lists, (0.19) sheets: the same pictures by Ali's list, its single blits and the CPU"; \
+	else echo "FAIL  GTEST pictures (look at $(B)/gtest1.ppm, gtest2.ppm)"; exit 1; fi
 	@if [ -z "$(NOSPR)$(OLD8)" ]; then \
-	  sh tests/shots.sh "$(EMU) $(EMUFLAGS)" $(SD) gtests 12 5.5 7.5 9.5; \
+	  sh tests/shots.sh "$(EMU) $(EMUFLAGS) $(CARDDATE)" $(SD) gtests 12 5.5 7.5 9.5; \
 	  if diff -u tests/pictures/gtests.md5 $(B)/gtests.md5; then echo "PASS  0.18 sprites over a window: shown while it has the focus and nothing covers it, wholly inside its content"; \
 	  else echo "FAIL  sprite pictures (look at $(B)/gtests*.ppm)"; exit 1; fi; \
-	  sh tests/shots.sh "$(EMU) $(EMUFLAGS)" $(SD) gtestf 14 5.5 7.5 9.5 11.5; \
+	  sh tests/shots.sh "$(EMU) $(EMUFLAGS) $(CARDDATE)" $(SD) gtestf 14 5.5 7.5 9.5 11.5; \
 	  if diff -u tests/pictures/gtestf.md5 $(B)/gtestf.md5; then echo "PASS  0.18 full screen: split, scrolling, sprites, raster table; Alt+Esc back to the desktop, Alt+Tab to it again, its end"; \
 	  else echo "FAIL  full-screen pictures (look at $(B)/gtestf*.ppm)"; exit 1; fi; \
-	  DESK=1 sh tests/shots.sh "$(EMU) $(EMUFLAGS)" $(SD) gtestk 22 12 14.3 20; \
+	  DESK=1 sh tests/shots.sh "$(EMU) $(EMUFLAGS) $(CARDDATE)" $(SD) gtestk 22 12 14.3 20; \
 	  if diff -u tests/pictures/gtestk.md5 $(B)/gtestk.md5; then echo "PASS  0.18 full screen under the Desktop: Alt+Esc, then killed from the Terminal: the desktop as it was"; \
 	  else echo "FAIL  full screen and kill (look at $(B)/gtestk*.ppm)"; exit 1; fi; \
 	else echo "SKIP  0.18 sprite and full-screen pictures (REV \$$0B only)"; fi
@@ -449,30 +457,30 @@ SOLSHOTS := 5.5 6.8 11.0 14.5 17.4 20.4 58
 QBSHOTS := 5 6.5 10.25 11.1 16.4 17.2 22.5 24 24.8 26.5 31.5 33 37 41 42
 test-games: all $(EMU)
 	@rm -rf build/run-sd; cp -r $(SD) build/run-sd; touch build/run-sd/SYSTEM/NODESK
-	@$(EMU) $(EMUFLAGS) --headless --sd build/run-sd --max-seconds 12 --keys "$$(python3 tests/keyscript.py tests/calc-t.keys)" \
+	@$(EMU) $(EMUFLAGS) $(CARDDATE) --headless --sd build/run-sd --max-seconds 12 --keys "$$(python3 tests/keyscript.py tests/calc-t.keys)" \
 	    $(SD)/SYSTEM/HORIZON.SYS > $(B)/calc-t.out 2> $(B)/calc-t.err || true
 	@python3 -c "L = open('$(B)/calc-t.out', encoding='latin-1').read().split('\n'); i = [k for k, l in enumerate(L) if '> calc -t' in l][0]; open('$(B)/calc-t.txt', 'w', encoding='latin-1').write('\n'.join(L[i + 1:]))"
 	@if python3 tests/compare.py tests/calc-t.txt $(B)/calc-t.txt; then echo "PASS  Calculator: self test ($$(grep -h 'CALC TEST END' $(B)/calc-t.txt | cut -c16-))"; \
 	else echo "FAIL  Calculator self test ($(B)/calc-t.out)"; exit 1; fi
-	@sh tests/shots.sh "$(EMU) $(EMUFLAGS)" $(SD) calc 21 $(CALCSHOTS)
+	@sh tests/shots.sh "$(EMU) $(EMUFLAGS) $(CARDDATE)" $(SD) calc 21 $(CALCSHOTS)
 	@if diff -u tests/pictures/calc.md5 $(B)/calc.md5; then echo "PASS  Calculator pictures"; \
 	else echo "FAIL  Calculator pictures (look at $(B)/calc*.ppm, then make pictures-games)"; exit 1; fi
 	@rm -rf build/run-sd; cp -r $(SD) build/run-sd; touch build/run-sd/SYSTEM/NODESK
-	@$(EMU) $(EMUFLAGS) --headless --sd build/run-sd --max-seconds 70 --keys "$$(python3 tests/keyscript.py tests/solitair-t.keys)" \
+	@$(EMU) $(EMUFLAGS) $(CARDDATE) --headless --sd build/run-sd --max-seconds 70 --keys "$$(python3 tests/keyscript.py tests/solitair-t.keys)" \
 	    $(SD)/SYSTEM/HORIZON.SYS > $(B)/solitair-t.out 2> $(B)/solitair-t.err || true
 	@python3 -c "L = open('$(B)/solitair-t.out', encoding='latin-1').read().split('\n'); i = [k for k, l in enumerate(L) if '> solitair -t' in l][0]; open('$(B)/solitair-t.txt', 'w', encoding='latin-1').write('\n'.join(L[i + 1:]))"
 	@if python3 tests/compare.py tests/solitair-t.txt $(B)/solitair-t.txt; then echo "PASS  Solitaire: self test ($$(grep -h 'random play' $(B)/solitair-t.txt | cut -c19-))"; \
 	else echo "FAIL  Solitaire self test ($(B)/solitair-t.out)"; exit 1; fi
-	@sh tests/shots.sh "$(EMU) $(EMUFLAGS)" $(SD) solitair 60 $(SOLSHOTS)
+	@sh tests/shots.sh "$(EMU) $(EMUFLAGS) $(CARDDATE)" $(SD) solitair 60 $(SOLSHOTS)
 	@if diff -u tests/pictures/solitair.md5 $(B)/solitair.md5; then echo "PASS  Solitaire pictures"; \
 	else echo "FAIL  Solitaire pictures (look at $(B)/solitair*.ppm, then make pictures-games)"; exit 1; fi
 	@rm -rf build/run-sd; cp -r $(SD) build/run-sd; touch build/run-sd/SYSTEM/NODESK
-	@$(EMU) $(EMUFLAGS) --headless --sd build/run-sd --max-seconds 30 --keys "$$(python3 tests/keyscript.py tests/quabrick-t.keys)" \
+	@$(EMU) $(EMUFLAGS) $(CARDDATE) --headless --sd build/run-sd --max-seconds 30 --keys "$$(python3 tests/keyscript.py tests/quabrick-t.keys)" \
 	    $(SD)/SYSTEM/HORIZON.SYS > $(B)/quabrick-t.out 2> $(B)/quabrick-t.err || true
 	@python3 -c "L = open('$(B)/quabrick-t.out', encoding='latin-1').read().split('\n'); i = [k for k, l in enumerate(L) if '> quabrick -t' in l][0]; open('$(B)/quabrick-t.txt', 'w', encoding='latin-1').write('\n'.join(L[i + 1:]))"
 	@if python3 tests/compare.py tests/quabrick-t.txt $(B)/quabrick-t.txt; then echo "PASS  Quabricks: self test (turns and kicks, the bag, points, spins, back-to-back, combos, the lock delay, Time Attack, levels)"; \
 	else echo "FAIL  Quabricks self test ($(B)/quabrick-t.out)"; exit 1; fi
-	@sh tests/shots.sh "$(EMU) $(EMUFLAGS)" $(SD) quabrick 46 $(QBSHOTS)
+	@sh tests/shots.sh "$(EMU) $(EMUFLAGS) $(CARDDATE)" $(SD) quabrick 46 $(QBSHOTS)
 	@if diff -u tests/pictures/$(call REV7,quabrick) $(B)/quabrick.md5; then echo "PASS  Quabricks pictures"; \
 	else echo "FAIL  Quabricks pictures (look at $(B)/quabrick*.ppm, then make pictures-games)"; exit 1; fi
 	@if grep -q '^QBK1' $(B)/run-pic/BIN/QUABRICK.DAT && grep -q 'TESTER' $(B)/run-pic/BIN/QUABRICK.DAT; then echo "PASS  Quabricks: the high score saved in /BIN/QUABRICK.DAT"; \
@@ -496,16 +504,16 @@ test: write-test
 write-test: all $(EMU)
 	@rm -rf build/run-sd; cp -r $(SD) build/run-sd; touch build/run-sd/SYSTEM/NODESK; cp tests/write.wt build/run-sd/WT.WT
 	@cp tests/write-rt.md build/run-sd/WRT.MD; cp tests/write-rt2.md build/run-sd/WRT2.MD; cp tests/write-ex.txt build/run-sd/WEX.TXT; cp tests/write-new.md build/run-sd/WNEWX.MD
-	@$(EMU) $(EMUFLAGS) --headless --sd build/run-sd --max-seconds $(WRSECS) \
+	@$(EMU) $(EMUFLAGS) $(CARDDATE) --headless --sd build/run-sd --max-seconds $(WRSECS) \
 	    --keys "$$(python3 tests/keyscript.py tests/write-t.keys)" \
 	    $(SD)/SYSTEM/HORIZON.SYS > $(B)/write-t.out 2> $(B)/write-t.err || true
 	@python3 -c "L = open('$(B)/write-t.out', encoding='latin-1').read().split('\n'); i = [k for k, l in enumerate(L) if '> write -t /WT.WT' in l][0]; open('$(B)/write-t.txt', 'w', encoding='latin-1').write('\n'.join(L[i + 1:]))"
 	@if python3 tests/compare.py tests/write-t.txt $(B)/write-t.txt; then echo "PASS  Write: self test (Markdown, format commands, styles armed, toolbar state, round trip, save as, export)"; \
 	else echo "FAIL  Write self test ($(B)/write-t.out)"; exit 1; fi
-	@sh tests/shots.sh "$(EMU) $(EMUFLAGS)" $(SD) write 38 $(WRSHOTS)
+	@sh tests/shots.sh "$(EMU) $(EMUFLAGS) $(CARDDATE)" $(SD) write 38 $(WRSHOTS)
 	@if diff -u tests/pictures/write.md5 $(B)/write.md5; then echo "PASS  Write pictures"; \
 	else echo "FAIL  Write pictures (look at $(B)/write*.ppm, then make pictures)"; exit 1; fi
-	@sh tests/shots.sh "$(EMU) $(EMUFLAGS)" $(SD) writee 45 $(WESHOTS)
+	@sh tests/shots.sh "$(EMU) $(EMUFLAGS) $(CARDDATE)" $(SD) writee 45 $(WESHOTS)
 	@if diff -u tests/pictures/writee.md5 $(B)/writee.md5; then echo "PASS  Write pictures: an editing session"; \
 	else echo "FAIL  Write pictures, editing session (look at $(B)/writee*.ppm, then make pictures)"; exit 1; fi
 	@if cmp $(B)/run-pic/W1.MD tests/write-w1.md; then echo "PASS  Write: the file the editing session saved"; \
@@ -541,7 +549,7 @@ test: basic2-test
 basic2-test: all $(EMU)
 	@rm -rf build/run-sd; cp -r $(SD) build/run-sd; touch build/run-sd/SYSTEM/NODESK; cp tests/basic2.bas build/run-sd/B2.BAS
 	@python3 tests/mkwav.py build/run-sd
-	@$(EMU) $(EMUFLAGS) --headless --log-lau --sd build/run-sd --max-seconds $(BAS2SECS) \
+	@$(EMU) $(EMUFLAGS) $(CARDDATE) --headless --log-lau --sd build/run-sd --max-seconds $(BAS2SECS) \
 	    --keys "$$(python3 tests/keyscript.py tests/basic2-t.keys)" \
 	    $(SD)/SYSTEM/HORIZON.SYS > $(B)/basic2-t.out 2> $(B)/basic2-t.err || true
 	@python3 -c "L = open('$(B)/basic2-t.out', encoding='latin-1').read().split('\n'); i = [k for k, l in enumerate(L) if '> basic -t /B2.BAS' in l][0]; open('$(B)/basic2-t.txt', 'w', encoding='latin-1').write('\n'.join(L[i + 1:]))"
@@ -550,7 +558,7 @@ basic2-test: all $(EMU)
 	@if grep lau $(B)/basic2-t.err | diff -u $(BAS2ERR) -; then echo "PASS  BASIC 2.0 Lau writes: WAVE and file samples played, voices, pitch, volume and pan, PLAY OFF, END"; \
 	else echo "FAIL  BASIC 2.0 Lau log ($(B)/basic2-t.err)"; exit 1; fi
 	@if [ -z "$(NOSPR)$(OLD8)" ]; then \
-	  sh tests/shots.sh "$(EMU) $(EMUFLAGS)" $(SD) basic2s 38 $(BAS2SHOTS); \
+	  sh tests/shots.sh "$(EMU) $(EMUFLAGS) $(CARDDATE)" $(SD) basic2s 38 $(BAS2SHOTS); \
 	  if diff -u tests/pictures/basic2s.md5 $(B)/basic2s.md5; then echo "PASS  BASIC 2.0 pictures: SPRITES.BAS, DRIFT.BAS, SCROLLER.BAS, Break, Alt+Tab, CONT, the BASIC window back"; \
 	  else echo "FAIL  BASIC 2.0 pictures (look at $(B)/basic2s*.ppm, then make basic2-pictures)"; exit 1; fi; \
 	else echo "SKIP  BASIC 2.0 pictures (REV \$$0B only)"; fi

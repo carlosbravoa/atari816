@@ -360,7 +360,10 @@ HIT looks at BASIC's table: after a break it still sees the sprites CONT will sh
 - Every drawing statement works in it (the drawing area is BASIC's framebuffer: w is rounded
   up to a multiple of 16; there are 64 more rows for the panel below it). PUT, COPY, FRECT and
   GCLS go to the blitter as a list that starts at the next VSYNC; PLOT, LINE, RECT, CIRCLE,
-  TEXT, GET and POINT first wait for it. PALETTE sets all 256 colours (0-15 too).
+  TEXT, GET and POINT first wait for it. PALETTE sets all 256 colours (0-15 too). (Horizon
+  0.19) Each bank of pictures is a sheet for the kernel, so PUT, FRECT and GCLS are sheet_draw
+  records, which the kernel checks for a quarter of a draw_list record's time; COPY stays a
+  draw_list record (a COPY between PUTs sends the list so far, as a full list does).
 - The way back is always open (the kernel's): Alt+Tab or Alt+Esc show the desktop, F12 the
   classic machine; the graphics window, as a normal window, shows the top left of the
   drawing area; Alt+Tab (or a click on it) brings the full screen back. Esc stops the
@@ -510,6 +513,7 @@ EXP, LOG and ATN 2.5 to 2.9 ms, against 5 to 10 us for an integer `+`.
 | `H=HIT(0)` | 0.16 ms |
 | `S=STICK(0)` | 0.2 ms (it reads the events first) |
 | `PUT p, x, y` of 16 x 16, full screen (queued for the blitter) | 0.27 ms |
+| the same with the kernel's part of the list (2,400 PUT, lists sent when full; Horizon 0.19) | 0.375 ms (0.446 ms on Horizon 0.18) |
 | `PUT p, x, y` of 16 x 16 in a window (the CPU) | 0.7 ms |
 | `PLAY s, n` | 0.4 ms |
 | status line of two numbers (FRECT, TEXT of 5 characters) | 2.9 ms |

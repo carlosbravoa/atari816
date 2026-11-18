@@ -41,11 +41,24 @@ static uint32_t r16(int i) { return M.bl.r[i] | M.bl.r[i + 1] << 8; }
 static uint64_t blit_cost(uint32_t w, uint32_t h, uint8_t op)
 {
     uint64_t px = (uint64_t)w * h;
-    uint32_t clk10;                                     /* clk_core x 10 per pixel */
-    if (op == 0) clk10 = 20;
-    else if (op == 1 || op == 2) clk10 = (M.sys.sv_ctrl & 0x04 ? 29 : 35) + (M.nvc.ctrl & 1 ? 8 : 0);
-    else clk10 = 22;
-    return 8 + 2 * (uint64_t)h + px * clk10 / 20;
+    if (M.fr.ideal) {                                   /* the model before Horizon 0.19 */
+        uint32_t clk10;                                 /* clk_core x 10 per pixel */
+        if (op == 0) clk10 = 20;
+        else if (op == 1 || op == 2) clk10 = (M.sys.sv_ctrl & 0x04 ? 29 : 35) + (M.nvc.ctrl & 1 ? 8 : 0);
+        else clk10 = 22;
+        return 8 + 2 * (uint64_t)h + px * clk10 / 20;
+    }
+    /* clk_core x 100 per pixel, measured on the board (core/sw/a816/timing.s), by the classic
+     * machine's state (frozen / running), Marga's mode (off, 0, 1, 2) and the operation (fill,
+     * copy and keyed copy, expand). Measured: frozen off / mode 0 / mode 2 and running mode 0;
+     * the rest interpolated. Copies have no per-line cost. */
+    static const uint16_t clk[2][4][3] = {
+        { { 190, 275, 209 }, { 295, 420, 325 }, { 263, 378, 290 }, { 231, 335, 254 } },
+        { { 256, 361, 282 }, { 630, 975, 693 }, { 536, 821, 590 }, { 443, 668, 488 } } };
+    int k = op == 0 ? 0 : (op == 1 || op == 2) ? 1 : 2, v = 0;
+    if (M.nvc.ctrl & 1) { v = 1 + ((M.nvc.ctrl >> 1) & 3); if (v > 3) v = 3; }
+    uint32_t clk100 = clk[!(M.sys.sv_ctrl & 0x04)][v][k];
+    return 8 + (k == 1 ? 0 : 2 * (uint64_t)h) + px * clk100 / 200;
 }
 
 #define STALE_BYTES (RAM_SIZE / 8 / 8)

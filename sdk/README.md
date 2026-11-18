@@ -14,7 +14,7 @@ complete, cycle-exact Atari 8-bit inside it.
 
 | | |
 | --- | --- |
-| CPU | 65C816 at 14.3 MHz, native mode (CPU-heavy code runs about half as fast on the board as in the emulator: memory stalls) |
+| CPU | 65C816 at 14.3 MHz, native mode (memory stalls make CPU-heavy code run at about half the ideal speed; emu816 models them since Horizon 0.19, so its timings are the board's within about 5 %) |
 | Memory | 8 MB (banks of 64 KB); hardware memory protection between programs |
 | Video | Marga, the video chip: 640 x 360, 256 colours (8 bpp), shown 2 x 2 on 1280 x 720 HDMI at 60 Hz; a 32 x 32 hardware pointer; also 640 x 360 x 4 bpp and 320 x 180 x 8 bpp (programs get all three in full-screen mode, Horizon 0.18); 16 hardware sprites and fine scrolling with wrap and a split (REV $0B) |
 | Blitter | Ali, the blitter: fill, copy, keyed (transparent) copy, 1-to-8 bpp expansion: about 14 million pixels a second filled, 7.7 million copied; command lists (programs: draw lists, Horizon 0.18) |

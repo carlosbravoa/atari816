@@ -115,6 +115,7 @@ start:  sta     argl
         bcs     :+                      ; one by one; REV $07: the CPU) for more CPU time
         inc     a                       ; than the win_draw calls of 1.0 (measured: 765 vs
 :       sta     lhw                     ; 685 us a frame on REV $08, 4305 vs 2985 on $07)
+        jsr     lsheets                 ; (1.2) the tiles as sheets (sheet_draw)
         jsr     pal_set
         jsr     to_title
         jmp     loop

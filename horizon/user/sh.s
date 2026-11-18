@@ -723,6 +723,95 @@ b_ps:   print   " ID STATE  PRI BANKS PARENT NAME\n"
         bcc     @slot
         rts
 
+; (0.19) after an ls line: "  YYYY-MM-DD HH:MM", the entry's modification time (STAT of
+; path/name; the entry at dbuf + t1, its name t3 characters), and the newline
+ldate:  ldx     #0
+:       lda     fname,x
+        and     #$00FF
+        beq     :+
+        sta     fname2,x
+        inx
+        bra     :-
+:       lda     #'/'
+        sta     fname2,x
+        inx
+        ldy     z:t1
+        lda     z:t3
+        sta     z:t4
+:       lda     dbuf+6,y
+        sta     fname2,x
+        inx
+        iny
+        dec     z:t4
+        bne     :-
+        stz     fname2,x
+        lda     #.loword(fname2)
+        sta     sblk
+        lda     #.loword(info)
+        sta     sblk+3
+        sep     #$20
+        .a8
+        lda     #^fname2
+        sta     sblk+2
+        lda     #^info
+        sta     sblk+5
+        rep     #$20
+        .a16
+        ldx     #.loword(sblk)
+        ldy     #^sblk
+        sys     SYS_STAT
+        bcs     @nl
+        print   "  "
+        lda     info+7                  ; FAT date: year - 1980 << 9 | month << 5 | day
+        xba
+        lsr     a
+        and     #$007F
+        clc
+        adc     #1980
+        jsr     put_dec
+        lda     #'-'
+        jsr     out_char
+        lda     info+7
+        lsr     a
+        lsr     a
+        lsr     a
+        lsr     a
+        lsr     a
+        and     #$000F
+        jsr     put2
+        lda     #'-'
+        jsr     out_char
+        lda     info+7
+        and     #$001F
+        jsr     put2
+        lda     #' '
+        jsr     out_char
+        lda     info+5                  ; FAT time: hour << 11 | minute << 5 | second / 2
+        xba
+        lsr     a
+        lsr     a
+        lsr     a
+        and     #$001F
+        jsr     put2
+        lda     #':'
+        jsr     out_char
+        lda     info+5
+        lsr     a
+        lsr     a
+        lsr     a
+        lsr     a
+        lsr     a
+        and     #$003F
+        jsr     put2
+@nl:    jmp     put_nl
+put2:   cmp     #10                     ; A as two digits
+        bcs     :+
+        pha
+        lda     #'0'
+        jsr     out_char
+        pla
+:       jmp     put_dec
+
 ; ls / dir [path]: one entry per line, the name column as wide as the screen allows, sizes
 ; right-aligned; a page at a time (any key: next page, q / Esc / ctrl-C: stop)
 b_dir:  jsr     getword
@@ -731,9 +820,9 @@ b_dir:  jsr     getword
         sta     fname
 :       stz     z:t2                    ; entries to skip
         stz     z:lines
-        lda     z:cols                  ; name column
+        lda     z:cols                  ; name column ((0.19) the date takes 18)
         sec
-        sbc     #12
+        sbc     #30
         sta     z:namew
 @call:  lda     #.loword(fname)         ; block: path, buffer, length, skip
         sta     blk
@@ -806,7 +895,8 @@ b_dir:  jsr     getword
         lda     dbuf+4,x
         and     #$10
         beq     :+
-        print   "     <DIR>\n"
+        print   "     <DIR>"
+        jsr     ldate
         bra     @nx
 :       lda     dbuf,x                  ; size: 24 bits as KB above 65535 bytes
         sta     z:t4
@@ -818,12 +908,13 @@ b_dir:  jsr     getword
         lsr     a
         ldx     #9
         jsr     put_decw
-        print   "K\n"
+        print   "K"
+        jsr     ldate
         bra     @nx
 :       lda     z:t4
         ldx     #10
         jsr     put_decw
-        jsr     put_nl
+        jsr     ldate
 @nx:    inc     z:lines
         lda     z:t1
         clc

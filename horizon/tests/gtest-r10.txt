@@ -45,4 +45,49 @@ gtest 5: draw lists
 gtest 6: WE_VBL
   three WE_VBL: ok
 gtest 7: the sound volume (setting 4): 8
+gtest 8: sheets
+  new (32 x 32 in the window): 1
+  width 0: error 01
+  width 4097: error 01
+  height 1025: error 01
+  stride below the width: error 01
+  in the kernel's bank: error 04
+  in the framebuffer: error 04
+  in a bank nobody owns: error 04
+  past the window: error 04
+  out of an own bank: error 04
+  16 x 16 in an own bank: 2
+  draw 100 keyed copies: 100
+  sx + w past the sheet: error 01
+  sy + h past the sheet: error 01
+  sx + w overflowing: error 01
+  sheet 0 for a copy: error 01
+  sheet 33: error 01
+  op 3: error 01
+  a window not ours: error 01
+  count 0: error 01
+  records past the window: error 04
+  all clipped away or empty: 0
+  over two screens (12 fills of the content): error 01
+  free sheet 3 (none): error 01
+  child: the parent's sheet 1: error 01
+  child: free it: error 01
+  child: new until the table is full: 30, then error 06
+  after the child's exit, new: 3
+  child: the parent's sheet 1: error 01
+  child: free it: error 01
+  child: new until the table is full: 30, then error 06
+  after the child's kill, new: 3
+  1 x 1024 sheets until the rows run out: 3, then error 06
+  16 x 16 in a new bank: 3
+  its bank freed: the list asked: 0
+  its sheet: error 01
+  free it: error 01
+  the picture, on the screen: 23
+  in the bitmap: 10
+  free sheet 1: ok
+  sheet 2 again (its rows moved): 3
+  sheet 1 again: error 01
+  free all: ok
+  sheet 2 then: error 01
 gtest: done

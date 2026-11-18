@@ -288,6 +288,63 @@ cart_room:
 cart_ext:
         .byte   "CAR", "ROM", "BIN"
 
+; (0.19) a cartridge the I/O processor loaded by itself (boot=ash in /atari.ini, at power-on
+; or a full restart): asked for once, by the first task's loader before anything allocates
+; (CLASSIC_STATE, op $1E); its banks are taken as classic_mount takes them and classic_query
+; reports its path. An older firmware answers $82: nothing then. The task's I/O buffer holds
+; the program's path meanwhile: it is kept in the buffer's second half.
+cart_boot:
+        jsr     iobuf_of
+        tax
+        ldy     #64
+:       lda     a:0,x
+        sta     a:128,x
+        inx
+        inx
+        dey
+        bne     :-
+        lda     #MBOP_CSTATE
+        jsr     msg_new
+        jsr     msg_buf_iobuf
+        lda     #128
+        sta     t_msg+2,y
+        lda     #5
+        sta     t_msg+8,y
+        jsr     mb_call
+        bne     @back
+        jsr     rsp_of                  ; banks: size / 64 KB, rounded up (at most CART_NB)
+        lda     t_rsp+14,y
+        ldx     t_rsp+12,y
+        beq     :+
+        inc     a
+:       cmp     #0
+        beq     @back
+        cmp     #CART_NB + 1
+        bcc     :+
+        lda     #CART_NB
+:       sta     cart_nb
+        tay
+        ldx     #CART_B0
+:       lda     #BK_KERNEL
+        phy
+        jsr     bank_set
+        ply
+        inx
+        dey
+        bne     :-
+        lda     #5
+        jsr     cl_set
+@back:  jsr     iobuf_of                ; the path back
+        tax
+        ldy     #64
+:       lda     a:128,x
+        sta     a:0,x
+        inx
+        inx
+        dey
+        bne     :-
+        rts
+
 ; (eject of the cartridge) its banks back to the pool
 cart_free:
         ldx     #CART_B0

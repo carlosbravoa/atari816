@@ -1,4 +1,4 @@
-# Horizon ABI (version 0.18)
+# Horizon ABI (version 0.19)
 
 This file describes the interface between Horizon and user programs. `user/horizon.inc`
 holds the same definitions for ca65.
@@ -43,7 +43,7 @@ PBR:PC-1.
 | $0C | sysreq | A = 1 shut down, 2 restart, 3 full restart | - | (0.13) Asks the Desktop: the backdrop window gets WE_SYSREQ (a = A, c = the caller's task id); the Desktop asks every program to close, then restarts or shuts down (no confirmation: the asker confirmed). EINVAL without the window system or a backdrop. The shell's `restart` and `shutdown` use it |
 | $0D | time_get | - | A = seconds low, X = seconds high, Y = state | (0.14) The clock: seconds since 2000-01-01 00:00, counted by the 10 ms tick from the value time_set gave (the board has no battery clock). Y: 0 CLK_NONE never set (it counts from 0 since the start), 1 CLK_SAVED a provisional value (the last one saved, loaded at start by the Desktop or the shell), 2 CLK_SET set in this session. The controls library turns it into a date (ui_clk*, ui.inc) |
 | $0F | vsync | - | A = the frame counter (as frame, $9E) | (0.15) Blocks until the next vertical blank begins (NV_LINE 360; 60.03 a second), for games that draw once a frame. (0.18) From REV $09 Marga's VBLANK interrupt ends the wait and A is NV_FRAME, so a program sees the frames it missed (a difference above 1); before REV $09 the moment is derived from the raster line with a one-shot TIMER1 (the VBLANK interrupt as well) and A counts the vertical blanks waited for by any task. (0.18) Then it also waits until the caller's draw list is done and makes the CPU see what Ali wrote. Interruptible by kill |
-| $0E | time_set | A = seconds low, X = high, Y = 1 CLK_SAVED or 2 CLK_SET | - | (0.14) The clock counts from there (the second starts now). EINVAL for another Y. Programs keep the value across restarts themselves: the Desktop and the shell save it to `/SYSTEM/CLOCK` (one line `YYYY-MM-DD HH:MM:SS`) when it is set and before a restart or shut down, and load it at start (ui_clkload / ui_clksave). The I/O processor stamps files with a fixed date (its FatFs has no clock: FF_FS_NORTC), so file dates do not follow this clock |
+| $0E | time_set | A = seconds low, X = high, Y = 1 CLK_SAVED or 2 CLK_SET | - | (0.14) The clock counts from there (the second starts now). EINVAL for another Y. Programs keep the value across restarts themselves: the Desktop and the shell save it to `/SYSTEM/CLOCK` (one line `YYYY-MM-DD HH:MM:SS`) when it is set and before a restart or shut down, and load it at start (ui_clkload / ui_clksave). (0.19) The kernel also gives the time to the I/O processor (op $1D SYS_TIME), which counts on from it and stamps the files it writes with it (STAT's FAT time; `ls` in the shell and Files' footer show it); until a time is given, files get the firmware's build date (an older firmware: a fixed date) |
 | $10 | bank_alloc | - | A = bank | A fresh 64 KB bank owned by the task (VALID + WRITE). Contents undefined. ENOMEM when none is left |
 | $11 | bank_free | A = bank | - | Only a bank from bank_alloc: not the window or code bank, else EINVAL |
 | $12 | mem_info | - | A = free banks, X = total banks | Total = free + owned by tasks + kernel banks taken from the pool: 92 on 8 MB, of which the kernel keeps 4 for the screen ($7C-$7F) |
@@ -77,7 +77,7 @@ PBR:PC-1.
 | $61 | classic_mount | X, Y = path, A = kind \| slot << 8 | A = kind mounted (1 disk, 2 executable, 3 cartridge) | Kind 0 = by extension (.ATR .XFD disk; .XEX .COM .EXE executable; .CAR .ROM .BIN cartridge), 1 disk, 2 executable, 3 cartridge. Slot 0-3 = D1:-D4: (disks only; an executable is the virtual boot disk on D1:). Mount only, no reset: the classic machine is frozen while the desktop is shown. Errors: $44 no file, $C3 bad kind, slot or extension, $C4 not a valid image, $C5 the firmware menu is open, $C2 the firmware does not know the op. A large cartridge can take seconds (the caller blocks; other tasks run). (0.18) A cartridge: the I/O processor loads its image into banks $70 and up (its SDRAM from $400000), so the kernel first takes those banks out of the pool (size / 64 KB, at most 12: 768 KB) and keeps them until the cartridge is ejected; ENOMEM if one of them is in use (then nothing is mounted). The kernel allocates its own runs of banks (the screen, window bitmaps) below $70 first |
 | $62 | classic_eject | A = kind \| slot << 8 | - | Kind 1 disk (slot 0 also ejects the executable), 2 executable, 3 cartridge. Ejecting an empty slot is OK |
 | $63 | classic_boot | - | - | Keyboard holder only (else EINVAL). In order: lets the classic machine run, routes the keyboard to it, sends CLASSIC_BOOT and waits (0.2-0.8 s), then shows it exactly as classic_show does (F12 returns, the machine is frozen again). On a failed boot, freeze and keyboard are put back (held keys swallowed) and the error is returned. (0.18) A = CB_STAY ($C01D): the same cold boot, then the classic machine is frozen again and not shown (the call returns at once after the boot): what the Desktop does when a cartridge is attached or ejected, as switching a real machine off and on |
-| $64 | classic_query | A = item: 0-3 D1:-D4:, 4 executable, 5 cartridge; X, Y = 128-byte buffer | A = length (0 = nothing mounted) | The absolute path mounted there, as recorded by classic_mount / classic_eject (mounts made by the firmware's own menu are not seen) |
+| $64 | classic_query | A = item: 0-3 D1:-D4:, 4 executable, 5 cartridge; X, Y = 128-byte buffer | A = length (0 = nothing mounted) | The absolute path mounted there, as recorded by classic_mount / classic_eject (mounts made by the firmware's own menu are not seen). (0.19) A cartridge the I/O processor loaded by itself at power-on (`boot=ash` in /atari.ini) is asked for at start (op $1E CLASSIC_STATE): its banks are reserved as classic_mount reserves them, and item 5 reports its path |
 | $65 | beep | A = pitch (POKEY AUDF1), X = duration in 10 ms ticks, Y = volume 0-15 | - | REV $07+: channel 1 of POKEY 2, pure tone, stopped by the timer tick; a new beep replaces the one playing; X = 0 silences channel 1. Ignored on older boards and while the classic machine runs. (0.15) Channel 1 counts as the caller's (see sound_write). The user interface's own sound is the chime ($67) |
 | $66 | sound_write | A = register $00-$13, X = value | - | REV $07+: raw write to $00:DB00 + A ($00-$0F POKEY 2, $10-$13 the DACs: 0, 1 left, 2, 3 right). EINVAL above $13. The hardware takes these only while the classic machine is frozen; the kernel silences AUDC1-4 and the DACs before every unfreeze. (0.15) The kernel keeps a copy of every register written and who wrote it last: a channel (AUDFn / AUDCn), a DAC, or the rest (AUDCTL, SKCTL, ...). When that task ends (exit, kill, crash) its channels and DACs are silenced, and AUDCTL / SKCTL go back to 0 / 3 if it wrote them. While the chime borrows a channel, writes to it go only to the copy and reach the hardware when the chime ends |
 | $67 | sound_chime | A = kind: 0 CH_INFO, 1 CH_WARN, 2 CH_QUESTION, 3 CH_ERROR; X = volume 0-15 ($FFFF: the beep volume setting) | - | (0.15) The chime of the user interface (the alerts, the error beep): two soft notes, pure tone, the volume falling every 10 ms tick: the first note 60 ms (16, 14, 12, 11, 10, 9 sixteenths of the peak) and 10 ms of silence, the second 150 ms (16, 14, 12, 10, 9, 8, 7, 6, 5, 4, 3, 2, 2, 1, 1 sixteenths), 0.22 s in all; peak = (volume * 3 + 2) / 4. Notes (AUDF at the 64 kHz clock): information A5, E5 (35, 47); warning A5, A5; question E5, A5; error E5, C5 (47, 60). It takes a channel no task owns (4, 3, 2, 1, one whose AUDCTL bits are clear); when all four are owned it borrows channel 4 (its AUDCTL bits cleared meanwhile) and gives the owner's values back at the end. A new chime replaces the one playing. Volume 0 or a board without the sound page: nothing. EINVAL for kind > 3 |
@@ -134,6 +134,9 @@ PBR:PC-1.
 | $9E | frame | - | A = the frame counter | (0.18) NV_FRAME: + 1 at every vertical blank since the start, wraps at 65536 (REV $09); before REV $09 the vertical blanks waited for (vsync) |
 | $9F | win_vbl | A = own window, X = 1 on, 0 off | - | (0.18) WE_VBL (16) at every vertical blank while the window's event queue is empty, for event-loop programs that draw once a frame. ENODEV before REV $09 |
 | $A0 | win_front | A = own window | - | (BASIC 2.0) The window comes back if minimized, is raised to the top of its class and gets the keyboard focus (with a WF_MODAL dialog of its program over it, as the Windows menu does). For a program that must show a window again by itself: the sprites of a window show only while it has the focus, and a full-screen window shows its screen only then (BASIC's SCREEN, CONT and the end of INPUT use it). EINVAL: not the caller's window |
+| $A1 | sheet_new | X, Y = {u24 address, u8 0, u16 stride, u16 width, u16 height} | A = the sheet (1-32) | (0.19) Registers a sheet: width x height 8 bpp pixels from the address, rows stride bytes apart, all of it the caller's own memory (its window, its code bank, banks it allocated, across consecutive banks it owns; not the kernel's, another program's or a shared bank: EFAULT). Checked once here; sheet_draw's records then name the sheet and a rectangle in it. EINVAL: width 0 or above 4096, height 0 or above 1024, a stride below the width; EAGAIN: 32 sheets exist (all programs together), or the rows of all sheets would pass 4096. See "Sheets" |
+| $A2 | sheet_free | A = sheet, $FFFF: every sheet of the caller's | - | (0.19) The caller's running list (draw_list's or sheet_draw's) is stopped first (Ali's ABORT). EINVAL: not the caller's sheet. A sheet also goes when the program frees a bank it lies in (bank_free) and when the program ends |
+| $A3 | sheet_draw | A = window \| count << 8 (1-128), X, Y = count records of 16 bytes | A = records drawn | (0.19) Copies and keyed copies from the caller's sheets, and fills, as one of Ali's command lists: the targets, the clipping, the revisions and the waiting of draw_list, at a fraction of its cost (the kernel only compares a record's numbers with the sheet's size). See "Sheets". EINVAL: a bad window, count or op, a sheet not the caller's, sx + w or sy + h past the sheet, more than 460,800 pixels; EFAULT: the records not wholly in the caller's memory; then nothing is drawn |
 
 Any other number returns ENOSYS.
 
@@ -339,6 +342,65 @@ screen (`fs_leave`, the framebuffer kept for CONT, which calls `fs_enter` again 
 
 (BASIC 2.0) A fix: `fs_raster` with A = 0 (the table off) returned EINVAL (its count test read
 the flags of the `cmp #17` before it); it now turns the table off as documented.
+
+### Sheets (0.19)
+
+`draw_list` checks every record's source against the caller's memory, which costs about 1,300
+CPU cycles a record. A **sheet** moves that check to the start: a program registers a rectangle
+of its own memory holding art once (`sheet_new`: address, stride, width, height, 8 bpp), and
+`sheet_draw`'s records then name the sheet and a rectangle in it. The kernel only compares
+those small numbers with the sheet's size, and finds the source's address in a table of the
+sheet's rows that `sheet_new` made.
+
+| Offset | Field |
+| --- | --- |
+| 0 | u8 the sheet (1-32; a fill: 0, not used) |
+| 1 | u8 op: SH_FILL 0, SH_COPY 1, SH_KEY 2 (pixels of the key colour skipped); + SH_VBL $80: wait for the vertical blank before this record |
+| 2 | u8 the fill colour or the key colour |
+| 3 | u8 0 |
+| 4, 6 | u16 sx, sy: the source's top left corner in the sheet |
+| 8, 10 | u16 w, h: sx + w <= its width, sy + h <= its height (else EINVAL) |
+| 12, 14 | i16 x, y: the destination |
+
+(`horizon.inc`: SH_*, SD_* offsets, SHN_* for sheet_new's block.)
+
+Everything else is `draw_list`'s: the target is the window's content (on the screen itself while
+nothing lies over it and no repaint over it is pending, else its bitmap) or its full-screen
+framebuffer, each record is clipped to it (the source moves with the cut), empty and clipped-away
+records are left out (A = the records drawn), a call covers at most 460,800 pixels (records up to
+16 x 16 counted as 256), SH_VBL works as LS_VBL (on the first record: the whole update in the
+vertical blank), and Ali runs the records as one command list (REV $09+; the call returns at
+once), or the kernel starts them one by one (REV $08), or the CPU draws them (REV $07): the same
+picture. **While the list runs its sources are being read and its target written** (`list_wait`,
+`vsync` or the next call wait for it).
+
+**The fast path.** A record costs about 300 CPU cycles (emulated: 21 us) when the window is drawn
+on the screen directly or is in full-screen mode, the record is a copy or a keyed copy from the
+same sheet and op as the record before it, and it lies wholly inside the content; others (fills,
+SH_VBL, clipped records, a covered window's bitmap) take the full path, about 1,100 cycles, still
+less than draw_list's. A call itself costs about 3,800 cycles (265 us), as draw_list's.
+
+**Rules.** A sheet is the program's that made it: another program's handle is EINVAL. 32 sheets
+for all programs together, at most 1024 rows each and 4096 rows in all (EAGAIN). The kernel
+keeps the physical address of every row: the memory must stay the program's and in place, and
+it does, since a sheet goes (and the program's running list is stopped) when the program frees
+a bank the sheet lies in, calls `sheet_free`, or ends (exit, kill, crash). Writing new pixels
+into a sheet is allowed at any time a list is not reading them (a sheet can be an arena drawn
+into by the CPU). Fills need no sheet. There is no move, expand or stride per record: those stay
+`draw_list`'s (one call a frame either way: a frame that needs both sends one `draw_list`).
+
+```
+tiles:  .faraddr art            ; sheet_new's block: 16 x 16 tiles, one under the other
+        .byte   0
+        .word   16, 16, 16 * 8  ; stride, width, height: 8 tiles
+        ...
+        ptr     tiles
+        sys     SYS_SHEETNEW    ; A = the sheet
+        sta     sheet
+        ...                     ; a record: tile 3 at (40, 20), colour 0 left out
+        .byte   1, SH_KEY, 0, 0 ; (the sheet's number in byte 0)
+        .word   0, 3 * 16, 16, 16, 40, 20
+```
 
 ## Window system
 

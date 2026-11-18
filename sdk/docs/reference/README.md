@@ -131,6 +131,9 @@ the kernel's syscall table, and assembles every example.
 | $9D | list_wait | SYS_LISTWAIT | [games](games.md) |
 | $9E | frame | SYS_FRAME | [games](games.md) |
 | $9F | win_vbl | SYS_WINVBL | [games](games.md) |
+| $A1 | sheet_new | SYS_SHEETNEW | [games](games.md) |
+| $A2 | sheet_free | SYS_SHEETFREE | [games](games.md) |
+| $A3 | sheet_draw | SYS_SHEETDRAW | [games](games.md) |
 
 This table is checked too: `make check` fails if a number, a name or a constant here
 disagrees with the sources.

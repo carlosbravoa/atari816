@@ -11,16 +11,16 @@ other words run <WORD>.PRG from /BIN, /SYSTEM or /SYSTEM/TESTS (or a .PRG path);
   the rest of the line is its argument; a trailing & runs it in the background
 names with spaces: "in quotes"; ctrl-C stops the foreground job
 > dir
-  BIN                                                                    <DIR>
-  BLUE.XEX                                                                  20
-  LONG.TXT                                                                9635
-  README.TXT                                                               110
-  SYSTEM                                                                 <DIR>
-  carts                                                                  <DIR>
-  disks                                                                  <DIR>
-  docs                                                                   <DIR>
-  many                                                                   <DIR>
-  programs                                                               <DIR>
+  BIN                                                  <DIR>  2026-11-01 12:00
+  BLUE.XEX                                                20  2026-11-01 12:00
+  LONG.TXT                                              9635  2026-11-01 12:00
+  README.TXT                                             110  2026-11-01 12:00
+  SYSTEM                                               <DIR>  2026-11-01 12:00
+  carts                                                <DIR>  2026-11-01 12:00
+  disks                                                <DIR>  2026-11-01 12:00
+  docs                                                 <DIR>  2026-11-01 12:00
+  many                                                 <DIR>  2026-11-01 12:00
+  programs                                             <DIR>  2026-11-01 12:00
 > cat readme.txt
 This is /README.TXT on the Horizon SD card.
 CAT reads it through open, read and close,
@@ -115,70 +115,68 @@ usage: run file
 /
 > cd many
 > ls
-  A very long name that goes on and on beyond the width of the name>        20
-  Alpha delta 000 (Demo) [!].xex                                            20
-  Alpha delta 016 (Demo) [!].xex                                            20
-  Alpha delta 032 (Demo) [!].xex                                            20
-  Alpha delta 048 (Demo) [!].xex                                            20
-  Alpha delta 064 (Demo) [!].xex                                            20
-  Alpha delta 080 (Demo) [!].xex                                            20
-  Alpha delta 096 (Demo) [!].xex                                            20
-  Alpha delta 112 (Demo) [!].xex                                            20
-  Alpha delta 128 (Demo) [!].xex                                            20
-  Alpha delta 144 (Demo) [!].xex                                            20
-  Alpha delta 160 (Demo) [!].xex                                            20
-  Alpha delta 176 (Demo) [!].xex                                            20
-  Alpha delta 192 (Demo) [!].xex                                            20
-  Alpha delta 208 (Demo) [!].xex                                            20
-  Alpha delta 224 (Demo) [!].xex                                            20
-  Charlie november 014 (Demo) [!].xex                                       20
-  Charlie november 030 (Demo) [!].xex                                       20
-  Charlie november 046 (Demo) [!].xex                                       20
-  Charlie november 062 (Demo) [!].xex                                       20
-  Charlie november 078 (Demo) [!].xex                                       20
-  Charlie november 094 (Demo) [!].xex                                       20
-  Charlie november 110 (Demo) [!].xex                                       20
-  Charlie november 126 (Demo) [!].xex                                       20
-  Charlie november 142 (Demo) [!].xex                                       20
-  Charlie november 158 (Demo) [!].xex                                       20
-  Charlie november 174 (Demo) [!].xex                                       20
-  Charlie november 190 (Demo) [!].xex                                       20
--- more: any key, q to stop --
-K  Charlie november 206 (Demo) [!].xex                                       20
-  Charlie november 222 (Demo) [!].xex                                       20
-  Charlie november 238 (Demo) [!].xex                                       20
-  Echo hotel 012 (Demo) [!].xex                                             20
-  Echo hotel 028 (Demo) [!].xex                                             20
-  Echo hotel 044 (Demo) [!].xex                                             20
-  Echo hotel 060 (Demo) [!].xex                                             20
-  Echo hotel 076 (Demo) [!].xex                                             20
-  Echo hotel 092 (Demo) [!].xex                                             20
-  Echo hotel 108 (Demo) [!].xex                                             20
-  Echo hotel 124 (Demo) [!].xex                                             20
-  Echo hotel 140 (Demo) [!].xex                                             20
-  Echo hotel 156 (Demo) [!].xex                                             20
-  Echo hotel 172 (Demo) [!].xex                                             20
-  Echo hotel 188 (Demo) [!].xex                                             20
-  Echo hotel 204 (Demo) [!].xex                                             20
-  Echo hotel 220 (Demo) [!].xex                                             20
-  Echo hotel 236 (Demo) [!].xex                                             20
-  Folder 00                                                              <DIR>
-  Folder 01                                                              <DIR>
-  Folder 02                                                              <DIR>
-  Folder 03                                                              <DIR>
-  Folder 04                                                              <DIR>
-  Folder 05                                                              <DIR>
-  Folder 06                                                              <DIR>
-  Folder 07                                                              <DIR>
-  Folder 08                                                              <DIR>
-  Folder 09                                                              <DIR>
--- more: any key, q to stop --
-K> cd "../disks/xex/R - Z"
+  A very long name that goes on and on beyond the>        20  2026-11-01 12:00
+  Alpha delta 000 (Demo) [!].xex                          20  2026-11-01 12:00
+  Alpha delta 016 (Demo) [!].xex                          20  2026-11-01 12:00
+  Alpha delta 032 (Demo) [!].xex                          20  2026-11-01 12:00
+  Alpha delta 048 (Demo) [!].xex                          20  2026-11-01 12:00
+  Alpha delta 064 (Demo) [!].xex                          20  2026-11-01 12:00
+  Alpha delta 080 (Demo) [!].xex                          20  2026-11-01 12:00
+  Alpha delta 096 (Demo) [!].xex                          20  2026-11-01 12:00
+  Alpha delta 112 (Demo) [!].xex                          20  2026-11-01 12:00
+  Alpha delta 128 (Demo) [!].xex                          20  2026-11-01 12:00
+  Alpha delta 144 (Demo) [!].xex                          20  2026-11-01 12:00
+  Alpha delta 160 (Demo) [!].xex                          20  2026-11-01 12:00
+  Alpha delta 176 (Demo) [!].xex                          20  2026-11-01 12:00
+  Alpha delta 192 (Demo) [!].xex                          20  2026-11-01 12:00
+  Alpha delta 208 (Demo) [!].xex                          20  2026-11-01 12:00
+  Alpha delta 224 (Demo) [!].xex                          20  2026-11-01 12:00
+  Charlie november 014 (Demo) [!].xex                     20  2026-11-01 12:00
+  Charlie november 030 (Demo) [!].xex                     20  2026-11-01 12:00
+  Charlie november 046 (Demo) [!].xex                     20  2026-11-01 12:00
+  Charlie november 062 (Demo) [!].xex                     20  2026-11-01 12:00
+  Charlie november 078 (Demo) [!].xex                     20  2026-11-01 12:00
+  Charlie november 094 (Demo) [!].xex                     20  2026-11-01 12:00
+  Charlie november 110 (Demo) [!].xex                     20  2026-11-01 12:00
+  Charlie november 126 (Demo) [!].xex                     20  2026-11-01 12:00
+  Charlie november 142 (Demo) [!].xex                     20  2026-11-01 12:00
+  Charlie november 158 (Demo) [!].xex                     20  2026-11-01 12:00
+  Charlie november 174 (Demo) [!].xex                     20  2026-11-01 12:00
+  Charlie november 190 (Demo) [!].xex                     20  2026-11-01 12:00
+-- more: any key, q to stop --K  Charlie november 206 (Demo) [!].xex                     20  2026-11-01 12:00
+  Charlie november 222 (Demo) [!].xex                     20  2026-11-01 12:00
+  Charlie november 238 (Demo) [!].xex                     20  2026-11-01 12:00
+  Echo hotel 012 (Demo) [!].xex                           20  2026-11-01 12:00
+  Echo hotel 028 (Demo) [!].xex                           20  2026-11-01 12:00
+  Echo hotel 044 (Demo) [!].xex                           20  2026-11-01 12:00
+  Echo hotel 060 (Demo) [!].xex                           20  2026-11-01 12:00
+  Echo hotel 076 (Demo) [!].xex                           20  2026-11-01 12:00
+  Echo hotel 092 (Demo) [!].xex                           20  2026-11-01 12:00
+  Echo hotel 108 (Demo) [!].xex                           20  2026-11-01 12:00
+  Echo hotel 124 (Demo) [!].xex                           20  2026-11-01 12:00
+  Echo hotel 140 (Demo) [!].xex                           20  2026-11-01 12:00
+  Echo hotel 156 (Demo) [!].xex                           20  2026-11-01 12:00
+  Echo hotel 172 (Demo) [!].xex                           20  2026-11-01 12:00
+  Echo hotel 188 (Demo) [!].xex                           20  2026-11-01 12:00
+  Echo hotel 204 (Demo) [!].xex                           20  2026-11-01 12:00
+  Echo hotel 220 (Demo) [!].xex                           20  2026-11-01 12:00
+  Echo hotel 236 (Demo) [!].xex                           20  2026-11-01 12:00
+  Folder 00                                            <DIR>  2026-11-01 12:00
+  Folder 01                                            <DIR>  2026-11-01 12:00
+  Folder 02                                            <DIR>  2026-11-01 12:00
+  Folder 03                                            <DIR>  2026-11-01 12:00
+  Folder 04                                            <DIR>  2026-11-01 12:00
+  Folder 05                                            <DIR>  2026-11-01 12:00
+  Folder 06                                            <DIR>  2026-11-01 12:00
+  Folder 07                                            <DIR>  2026-11-01 12:00
+  Folder 08                                            <DIR>  2026-11-01 12:00
+  Folder 09                                            <DIR>  2026-11-01 12:00
+-- more: any key, q to stop --K> cd "../disks/xex/R - Z"
 > pwd
 /disks/xex/R - Z
 > dir
-  River Raid (Title Version).xex                                            20
-  Star Raiders II (1986)(Atari)[!].xex                                      20
+  River Raid (Title Version).xex                          20  2026-11-01 12:00
+  Star Raiders II (1986)(Atari)[!].xex                    20  2026-11-01 12:00
 > run "River Raid (Title Version).xex"
 booting the Atari: F12 returns to Horizon
 > cd /
@@ -254,8 +252,8 @@ Line 60 of the read-me: long names, spaces and (brackets) work.
 > mv tmp/README.TXT "tmp/read me.txt"
 > cp LONG.TXT tmp/long2.txt
 > ls tmp
-  long2.txt                                                               9635
-  read me.txt                                                              110
+  long2.txt                                             9635  2026-01-01 00:00
+  read me.txt                                            110  2026-01-01 00:00
 > cat "tmp/read me.txt"
 This is /README.TXT on the Horizon SD card.
 CAT reads it through open, read and close,

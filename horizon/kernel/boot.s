@@ -36,6 +36,14 @@ boot:   sei
         inx
         cpx     #__K2CODE_SIZE__ + __K2DATA_SIZE__ + 1
         bcc     :-
+        ; (0.19) the third (k3.s) follows it in the file: to $7F:E000 (the console's last bank)
+        ldx     #0
+:       lda     f:__BSS_RUN__ + __K2CODE_SIZE__ + __K2DATA_SIZE__,x
+        sta     f:__K3CODE_RUN__,x
+        inx
+        inx
+        cpx     #__K3CODE_SIZE__ + 1
+        bcc     :-
         ; direct page and BSS: junk -> 0
         ldx     #$00FE
 :       stz     $00,x

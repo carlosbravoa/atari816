@@ -318,6 +318,7 @@ t_dname:    .res    NSLOT*16    ; per task: its display name (task_name), "" = f
 clk_sec:    .res    4           ; the clock: seconds since 2000-01-01 00:00 (time_get)
 clk_sub:    .res    2           ; ticks into the second
 clk_st:     .res    2           ; 0 not set, 1 provisional (a saved value), 2 set
+cb_done:    .res    2           ; (0.19) the boot cartridge was asked for (the first exec)
 next_id:    .res    2           ; next task id to try
 rr_pos:     .res    2           ; round robin position (slot*2)
 ; ---- 0.15 ----

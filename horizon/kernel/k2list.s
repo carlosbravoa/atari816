@@ -10,6 +10,10 @@
 ; returns at once; a record may wait for the vertical blank first (tear-free updates). Without
 ; lists (REV $08) the kernel starts them one by one, without the blitter (REV $07) the CPU draws
 ; them; the result is the same.
+; (0.19) The records go to SL_LIST ($7F:8400, kdefs.inc), in the console framebuffer's last bank
+; past its 60 cell rows (kernel memory), so they are written with long,X stores; sheet_draw
+; (k3.s, the third code segment) makes them there too and uses this file's routines through
+; the far wrappers at its end.
 ;
 ; While the list runs, its sources are still being read and its target written: the program
 ; must leave them alone until list_wait says it is done (vsync and the next draw_list wait for
@@ -25,12 +29,14 @@ LS_EXPANDK  = 4
 LS_MOVE     = 5
 LS_VBL      = 1                 ; record flags: wait for the vertical blank first
 LS_MAX      = 128               ; records a call
-MB_LIST     = $9000             ; Ali's records in the window system's bank ($9000-$9BFF)
 LS_AREA     = 460800
 
         .segment "BSS"
 ls_task:    .res    2           ; slot*2 + 1 of the task whose list Ali runs, 0 none
 ls_n:       .res    2           ; records made
+ls_o:       .res    2           ; (0.19) the next record's offset in SL_LIST (24 * ls_n)
+sl_dirty:   .res    2           ; (0.19) records below this offset may have FLAGS / RFLAGS set
+sl_init:    .res    2           ; (0.19) SL_LIST's bytes 18-23 were cleared once (k3.s)
 ls_i:       .res    2           ; (the CPU and REV $08: the one running)
 ls_cnt:     .res    2           ; records given
 ls_vbl:     .res    2           ; a WAIT_VBL for the next record made
@@ -112,16 +118,7 @@ k2_drawlist:
         and     #$00FF
         sta     ls_up+2
         jsr     ls_target
-        stz     ls_n
-        stz     ls_vbl
-        stz     ls_area
-        stz     ls_area+2
-        stz     ls_okb
-        lda     #$7FFF                  ; (no damage yet)
-        sta     ls_dmg
-        sta     ls_dmg+2
-        stz     ls_dmg+4                ; (clipped: never below 0)
-        stz     ls_dmg+6
+        jsr     ls_begin
         stz     ls_i
 @rec:   lda     ls_i                    ; each record: copied, checked, clipped, made
         cmp     ls_cnt
@@ -131,7 +128,30 @@ k2_drawlist:
         jmp     k2_err
 :       inc     ls_i
         bra     @rec
-@made:  lda     ls_n
+@made:  jsr     ls_finish
+        lda     ls_cnt
+        jsl     f_set_ok
+        rtl
+
+; a call's start: no records, no WAIT_VBL pending, no area, no bank checked, no damage
+ls_begin:
+        stz     ls_n
+        stz     ls_o
+        stz     ls_vbl
+        stz     ls_area
+        stz     ls_area+2
+        stz     ls_okb
+        lda     #$7FFF                  ; (no damage yet)
+        sta     ls_dmg
+        sta     ls_dmg+2
+        stz     ls_dmg+4                ; (clipped: never below 0)
+        stz     ls_dmg+6
+        rts
+
+; the records made run (ls_n -> ls_cnt, the result): the damage first, then Ali's one list
+; (REV $09+), its records started one by one (REV $08), or the CPU
+ls_finish:
+        lda     ls_n
         sta     ls_cnt                  ; (the result: records drawn, not the copy below)
         beq     @done
         jsr     ls_damage
@@ -141,16 +161,12 @@ k2_drawlist:
         lda     bl_on
         beq     @cpu
         jsl     f_bl_wait               ; (win_target may have started a blit)
-        lda     ws_mbank                ; one list
-        xba
-        and     #$FF00
-        sta     kt0
-        a8
-        lda     #<MB_LIST
+        a8                              ; one list
+        lda     #<SL_LIST
         sta     f:BL_LIST
-        lda     #>MB_LIST
+        lda     #>SL_LIST
         sta     f:BL_LIST+1
-        lda     kt0+1
+        lda     #^SL_LIST
         sta     f:BL_LIST+2
         a16
         lda     ls_n
@@ -162,15 +178,12 @@ k2_drawlist:
         lda     #4 | 2                  ; LIST, IRQ_EN: the BLITTER interrupt at its end
         sta     f:BL_CTRL
         a16
-        bra     @done
+        rts
 @noli:  lda     bl_on
         beq     @cpu
-        jsr     ls_single
-        bra     @done
-@cpu:   jsr     ls_cpu
-@done:  lda     ls_cnt
-        jsl     f_set_ok
-        rtl
+        jmp     ls_single
+@cpu:   jmp     ls_cpu
+@done:  rts
 
 ; ---- $9D list_wait(A = 0 wait, 1 ask) -> A = 1 while a list of the caller still runs ----
 ; Waiting also makes the CPU see what Ali wrote (CACHE_FLUSH).
@@ -275,11 +288,7 @@ ls_target:
         stz     ls_k
         rts
 @win:   stz     ls_vis
-        ldx     kg_e                    ; nothing over its content? (a repaint is pending)
-        jsl     f_win_visible
-        bcc     :+
-        inc     ls_vis
-:       jsl     f_win_target            ; kg_sf, the clip (kg_cx0 ..), wo_x, wo_y, wo_dir
+        jsl     f_win_target            ; kg_sf, the clip (kg_cx0 ..), wo_x, wo_y, wo_dir
         lda     wo_dir
         eor     #1
         sta     ls_bmp
@@ -317,7 +326,13 @@ ls_target:
         bpl     :+
         lda     #0
 :       sta     ls_k
-        rts
+        lda     ls_bmp                  ; (0.19: only for a bitmap, after win_target, which
+        beq     :+                      ; asked it too) nothing over its content? (a repaint
+        ldx     kg_e                    ; is pending: the list copies what it drew)
+        jsl     f_win_visible           ; (it sets kg_cx0 .., already taken)
+        bcc     :+
+        inc     ls_vis
+:       rts
 
 ; record ls_i: copied, checked, clipped, made into Ali's record ls_n. C set: A = the error
 ls_one: lda     ls_i                    ; copy it (20 bytes)
@@ -679,39 +694,12 @@ ls_mclip:
 @none:  sec
         rts
 
-; Ali's record ls_n from lr_* (at MB_LIST + 24 * ls_n in the window system's bank); the
-; drawn rectangle joins ls_dmg
+; Ali's record at SL_LIST + ls_o from lr_* (ls_o += 24, ls_n += 1); on a bitmap target the
+; drawn rectangle joins ls_dmg. (0.19) Long,X stores; a record whose FLAGS or RFLAGS is not 0
+; raises sl_dirty (sheet_draw's fast path leaves those bytes alone: k3.s, sl_clean).
 ls_emit:
-        lda     ls_n                    ; kp0 -> the record
-        asl     a
-        adc     ls_n
-        asl     a
-        asl     a
-        asl     a
-        adc     #MB_LIST
-        sta     kp0
-        lda     ws_mbank
-        sta     kp0+2
-        lda     ls_k                    ; the destination: base + y * stride + x (a power of two
-        beq     @mul                    ; of 256 or more: shifts)
-        tay
-        lda     lr_y
-:       dey
-        beq     :+
-        asl     a
-        bra     :-
-:       pha                             ; y << (K - 8): its high byte is the high word
-        xba
-        and     #$00FF
-        tax
-        pla
-        xba
-        and     #$FF00
-        bra     @dst
-@mul:   lda     lr_y
-        ldx     ls_str
-        jsr     mul16
-@dst:
+        lda     lr_y                    ; the destination: base + y * stride + x
+        jsr     ls_rowad
         clc
         adc     lr_x
         bcc     :+
@@ -722,13 +710,13 @@ ls_emit:
         txa
         adc     ls_base+2
         sta     lr_d+2
-        lda     lr                      ; op, the source
+        lda     lr                      ; op
         and     #$00FF
+        sta     kx1
         cmp     #LS_MOVE
         bne     @nm
         lda     lr_sy                   ; move: the source in the target too
-        ldx     ls_str
-        jsr     mul16
+        jsr     ls_rowad
         clc
         adc     lr_sx
         bcc     :+
@@ -741,50 +729,12 @@ ls_emit:
         sta     lr_s+2
         lda     ls_str
         sta     lr_ss
-@nm:    ldy     #0                      ; bytes 0-2 SRC, 3-4 SRC_STRIDE
-        lda     lr_s
-        sta     [kp0],y
-        ldy     #2
-        lda     lr_s+2
-        and     #$00FF
-        sta     [kp0],y                 ; (byte 3 is overwritten next)
-        ldy     #3
-        lda     lr_ss
-        sta     [kp0],y
-        ldy     #5                      ; 5-7 DST, 8-9 DST_STRIDE
-        lda     lr_d
-        sta     [kp0],y
-        ldy     #7
-        lda     lr_d+2
-        and     #$00FF
-        sta     [kp0],y
-        ldy     #8
-        lda     ls_str
-        sta     [kp0],y
-        ldy     #10                     ; 10-11 WIDTH, 12-13 HEIGHT
-        lda     lr_w
-        sta     [kp0],y
-        ldy     #12
-        lda     lr_h
-        sta     [kp0],y
-        ldy     #14                     ; 14 FG, 15 BG, 16 KEY
-        lda     lr+2                    ; (c1, c2)
-        sta     [kp0],y
-        ldy     #16
-        lda     lr+3
-        and     #$00FF
-        sta     [kp0],y                 ; KEY = c2 (byte 17 next)
-        lda     lr                      ; 17 OP, 18 FLAGS
-        and     #$00FF
-        tax
-        lda     f:ls_ops,x
-        and     #$00FF
-        sta     kx1
-        stz     kx2                     ; FLAGS
+@nm:    stz     kx2                     ; FLAGS
+        ldx     kx1
         cpx     #LS_EXPAND
-        bcc     :+
+        bcc     @fl
         cpx     #LS_MOVE
-        bcs     :+
+        bcs     @mv
         lda     #7                      ; SRC_BIT: 7 = the leftmost
         sec
         sbc     lr_bit
@@ -793,9 +743,8 @@ ls_emit:
         asl     a
         asl     a
         sta     kx2
-:       cpx     #LS_MOVE                ; move: BACKWARDS when the destination lies after it
-        bne     :++
-        lda     lr_d+2
+        bra     @fl
+@mv:    lda     lr_d+2                  ; move: BACKWARDS when the destination lies after it
         cmp     lr_s+2
         bne     :+
         lda     lr_d
@@ -803,22 +752,58 @@ ls_emit:
 :       lda     #0
         rol     a
         sta     kx2
-:       lda     kx2
+@fl:    lda     f:ls_ops,x              ; Ali's OP | FLAGS << 8
+        and     #$00FF
+        sta     kx1
+        lda     kx2
         xba
         ora     kx1
-        ldy     #17
-        sta     [kp0],y
-        ldy     #19                     ; 19 RFLAGS (WAIT_VBL), 20-23 0
-        lda     ls_vbl
-        sta     [kp0],y
-        ldy     #21
+        sta     kx1
+        ldx     ls_o
+        lda     lr_s                    ; 0-2 SRC, 3-4 SRC_STRIDE (each store's high byte is
+        sta     f:SL_LIST,x             ; written again by the next one)
+        lda     lr_s+2
+        sta     f:SL_LIST+2,x
+        lda     lr_ss
+        sta     f:SL_LIST+3,x
+        lda     lr_d                    ; 5-7 DST, 8-9 DST_STRIDE
+        sta     f:SL_LIST+5,x
+        lda     lr_d+2
+        sta     f:SL_LIST+7,x
+        lda     ls_str
+        sta     f:SL_LIST+8,x
+        lda     lr_w                    ; 10-11 WIDTH, 12-13 HEIGHT
+        sta     f:SL_LIST+10,x
+        lda     lr_h
+        sta     f:SL_LIST+12,x
+        lda     lr+2                    ; 14 FG, 15 BG (c1, c2), 16 KEY (c2)
+        sta     f:SL_LIST+14,x
+        lda     lr+3
+        sta     f:SL_LIST+16,x
+        lda     kx1                     ; 17 OP, 18 FLAGS
+        sta     f:SL_LIST+17,x
+        lda     ls_vbl                  ; 19 RFLAGS (WAIT_VBL), 20-23 0
+        sta     f:SL_LIST+19,x
         lda     #0
-        sta     [kp0],y
-        iny
-        sta     [kp0],y
-        stz     ls_vbl
+        sta     f:SL_LIST+21,x
+        sta     f:SL_LIST+22,x
+        txa
+        clc
+        adc     #24
+        sta     ls_o
+        lda     kx1                     ; FLAGS or RFLAGS set: sheet_draw clears them first
+        and     #$FF00
+        ora     ls_vbl
+        beq     :+
+        lda     ls_o
+        cmp     sl_dirty
+        bcc     :+
+        sta     sl_dirty
+:       stz     ls_vbl
         inc     ls_n
-        lda     lr_x                    ; the damage: the union
+        lda     ls_bmp                  ; the damage (a bitmap target): the union
+        beq     @out
+        lda     lr_x
         cmp     ls_dmg
         bpl     :+
         sta     ls_dmg
@@ -836,9 +821,29 @@ ls_emit:
         clc
         adc     lr_h
         cmp     ls_dmg+6
-        bmi     :+
+        bmi     @out
         sta     ls_dmg+6
-:       rts
+@out:   rts
+
+; A = row y of the target -> y * ls_str (A low, X high): shifts for a stride of 2^K (K >= 8:
+; ls_k = K - 7), else mul16
+ls_rowad:
+        ldy     ls_k
+        beq     @mul
+:       dey
+        beq     :+
+        asl     a
+        bra     :-
+:       pha                             ; y << (K - 8): its high byte is the high word
+        xba
+        and     #$00FF
+        tax
+        pla
+        xba
+        and     #$FF00
+        rts
+@mul:   ldx     ls_str
+        jmp     mul16
 
 ls_ops: .byte   0, 1, 2, 3, 4, 1        ; Ali's OP: FILL, COPY, COPY_KEY, EXPAND, EXPAND_KEY, COPY
 
@@ -860,8 +865,7 @@ ls_damage:
         jmi     @out
         jeq     @out
         lda     ls_dmg+2                ; the source: the bitmap at the union
-        ldx     ls_str
-        jsr     mul16
+        jsr     ls_rowad
         clc
         adc     ls_dmg
         bcc     :+
@@ -971,9 +975,9 @@ ls_recp:
         asl     a
         asl     a
         asl     a
-        adc     #MB_LIST
+        adc     #.loword(SL_LIST)
         sta     kp0
-        lda     ws_mbank
+        lda     #^SL_LIST
         sta     kp0+2
         rts
 
@@ -1187,3 +1191,28 @@ cpu_blit:
         sta     kg_s+2
         rts
 @bits:  .byte   1, 2, 4, 8, 16, 32, 64, 128
+
+; ---- (0.19) for the third code segment (k3.s, sheet_draw): this file's routines as JSL / RTL
+; wrappers (k3.s runs from bank $7F, so it cannot JSR here), and the variables it uses
+        .export f2_idle: far, f2_stop: far, f2_setup: far, f2_clip: far, f2_emit: far
+        .export f2_finish: far, f2_range: far, f2_mul: far
+        .export ls_n, ls_o, ls_cnt, ls_vbl, ls_bmp, ls_base, ls_str, ls_ox, ls_oy
+        .export ls_cx0, ls_cy0, ls_cx1, ls_cy1, lr, lr_x, lr_y, lr_w, lr_h, lr_s, lr_ss, lr_bit
+        .export sl_dirty, sl_init, hr_b0, hr_b1
+f2_idle:    jsr     ls_idle             ; until Ali is idle (blocks)
+            rtl
+f2_stop:    jsr     ls_stop             ; the caller's running list stopped
+            rtl
+f2_setup:   jsr     ls_target           ; the target of window kg_e, a call's start
+            jsr     ls_begin
+            rtl
+f2_clip:    jsr     ls_clip             ; lr_x .. cut to the clip (C set: nothing left)
+            rtl
+f2_emit:    jsr     ls_emit             ; Ali's record at ls_o
+            rtl
+f2_finish:  jsr     ls_finish           ; the records run -> ls_cnt
+            rtl
+f2_range:   jsr     hw_range            ; a range the caller owns (C set: no)
+            rtl
+f2_mul:     jsr     mul16               ; A * X -> A low, X high
+            rtl

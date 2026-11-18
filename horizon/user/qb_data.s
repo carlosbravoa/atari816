@@ -66,6 +66,10 @@ s_sound: .byte  "Sound", 0
 s_quit: .byte   "Quit", 0
 tilep:  .addr   t_e14, t_b14_0, t_b14_1, t_b14_2, t_b14_3, t_b14_4, t_b14_5, t_b14_6
         .addr   t_g14_0, t_g14_1, t_g14_2, t_g14_3, t_g14_4, t_g14_5, t_g14_6, t_s14
+; (1.2) the same tiles as rows of the tiles' sheet (t_b14_0 .. t_s14, one after the other)
+tilesy: .byte   14 * CELL, 0, CELL, 2 * CELL, 3 * CELL, 4 * CELL, 5 * CELL, 6 * CELL
+        .byte   7 * CELL, 8 * CELL, 9 * CELL, 10 * CELL, 11 * CELL, 12 * CELL, 13 * CELL, 15 * CELL
+        .assert t_e14 - t_b14_0 = 14 * CELL * CELL && t_s14 - t_b14_0 = 15 * CELL * CELL, error, "the tiles' sheet: one after the other"
 slot_y: .word   52, 104, 152, 200, 248
 stat_y: .word   STATY + 8, STATY + 34, STATY + 60
 stat_lab: .addr s_level, s_lines, s_nextlv, s_time, s_lines, s_level
@@ -345,6 +349,22 @@ lcnt:   .res    2
 lpend:  .res    2
 laren:  .res    2
 ltqn:   .res    2
+lsh:    .res    2                       ; (1.2) the sheets: tiles, erow / srow (0: none)
+lsh2:   .res    2
+lall:   .res    2                       ;   every record so far can be a sheet record
+lshn:   .res    2                       ;   the next record's sheet (1 tiles, 2 rows) | sy << 8
+lsv:    .res    LMAX * 2                ;   each record's: 0 none, 1, 2 | sy << 8, $FF a fill
+lsvt:   .res    2
+lshb:   .res    10                      ;   sheet_new's block
+lc_i:   .res    2                       ;   lconv: the record, its fields
+lc_x:   .res    2
+lc_y:   .res    2
+lc_w:   .res    2
+lc_h:   .res    2
+lc_c:   .res    2
+lc_op:  .res    2
+lc_sv:  .res    2
+lc_sh:  .res    2
 lbuf:   .res    LMAX * 20
 larena: .res    LARENA
 ltq:    .res    LTQN * LTQSZ

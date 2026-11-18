@@ -74,7 +74,8 @@ the Horizon tree, copy `horizon/` and `emu/` somewhere private, build there, and
    that takes an argument (a test or demo mode) needs `--mode shell --args ...`.
    Games: `--log-sound` / `--log-lau` and check `emu.err` for `sound $DB..` / `lau $DB..` writes.
 8. Report what you verified by running and what you did not (sound is never audible in
-   the emulator; the emulator's joysticks read 0; the board is ~2x slower on CPU work; the
+   the emulator; the emulator's joysticks read 0; emu816 runs at the board's speed since Horizon 0.19
+   (`--ideal-timing`: the old, ~2x faster model); the
    emulator is REV $0B by default: `--rev 10/9/8/7` for older boards).
 
 ## Input scripts (run816.py --script)
@@ -102,7 +103,8 @@ for `--args` and console programs) ~4 s; time 0 in the script is after that.
   (`lda z:var`). Big buffers: `SYS_BALLOC` banks + long addressing (`[ptr],y`).
 - Draw with few, large `win_draw` calls (~0.2 ms each, ~0.4 ms on the board); never
   redraw what did not change. Text with paper colour to overwrite without flicker. Many
-  blits a frame: one `draw_list` (its sources stay in use until `list_wait` / `vsync`).
+  blits a frame: one `draw_list` (its sources stay in use until `list_wait` / `vsync`), or,
+  from art registered once as a sheet (Horizon 0.19), one `sheet_draw`: four times cheaper.
 - A multi-file program: `main.s` must be linked first (the templates' Makefiles do it):
   execution starts at the first byte of CODE.
 - `SYS_UPTIME` is the same at every emulator run: a random seed from it repeats (good for

@@ -8,18 +8,24 @@ Docs/03-bringup1-log.md); the SDK author did not measure on the board.
 
 ## The CPU
 
-- 14.34 MHz, one emulated cycle per bus access. A 5-cycle loop (`dex` / `bne`) ran
-  3,276,800 cycles in 230-239 ms in the emulator (the rest is the kernel's tick and
-  interrupts: about 3 %).
-- **The board is slower than the emulator on CPU work: 1.6 to 2.3 times.** Every write goes
-  through to SDRAM, cache misses cost, and the 8 bpp video fetch shares the bus. Measured:
-  BASIC's self test 3.66 s on the board against 2.02 s emulated; the sieve 89.0 s against
-  45.2 s; an empty FOR loop of 100,000: 4.0 s against 2.4 s; CPU window drawing about 2.3
-  times. Plan with the emulator's figures x 2.
-- MVN / MVP: 7 cycles per byte (about 2 MB/s emulated; about half that measured on the
-  board in the bring-up simulation).
+- **Since Horizon 0.19 emu816 runs at the board's speed** (emu/README.md, "Memory timing"):
+  it models the 65C816's 4 KB cache (a read miss costs about 6 cycles), the SDRAM stall of
+  every write (about 4 cycles, 5 with the desktop's video on, 9 with the classic machine
+  running), Marga's line fetch, the cache sweep of every mailbox answer and Ali's measured
+  speed. Measured loops of every kind of access agree with the board within about 5 %; the
+  BASIC sieve takes 89.2 s on the board and 87.9 s in emu816. **Plan with the emulator's figures
+  as they are.** `--ideal-timing` gives the old model (one cycle per bus access, about twice as
+  fast: the sieve 45.9 s); the figures below that were measured with it are marked "ideal".
+- A 5-cycle loop (`dex` / `bne`, no memory access) runs at the same speed in both: 3,276,800
+  cycles in 230-239 ms (the rest is the kernel's tick and interrupts: about 3 %).
+- Code that writes a lot pays most: a direct-page store loop runs at 0.41 of the ideal speed
+  with the desktop's video on, a loop of long reads that always miss at 0.53, a sieve in
+  assembly at 0.80. MVN / MVP: about 13 cycles a byte on the desktop (7 ideal).
+- (Horizon 0.18 and older firmware: the board was 1.6 to 2.3 times slower than the old
+  emulator; 10-20 % of that was the I/O processor polling the mailbox from SDRAM, fixed in the
+  firmware of bring-up step 20.)
 
-## Syscalls (emulator, REV $08)
+## Syscalls (emulator, REV $08, ideal timing)
 
 | Call | Cost |
 | --- | --- |
@@ -28,12 +34,12 @@ Docs/03-bringup1-log.md); the SDK author did not measure on the board.
 | `win_draw`, any op, 1 x 1 pixel (the fixed cost of a draw call) | 170 us |
 | `ws_sync` with nothing to show | 90 us |
 
-On the board expect about twice these (CPU-bound kernel code). So: **a few hundred
-win_draw calls per second at most**, whatever their size. A 50 Hz game has 20 ms per
-frame: in the emulator about 100 small draw calls, on the board about 50; keep it under
-20-30 and the game has room for its own logic.
+On the board (and in emu816 since 0.19) expect about twice these (CPU-bound kernel code).
+So: **a few hundred win_draw calls per second at most**, whatever their size. A 50 Hz game
+has 20 ms per frame: about 50 small draw calls; keep it under 20-30 and the game has room for
+its own logic, or use sheets (games.md).
 
-## Drawing (win_draw), emulator
+## Drawing (win_draw), emulator (ideal timing: about twice as fast as the board)
 
 | Operation | With the blitter (REV $08) | CPU only (REV $07) |
 | --- | --- | --- |
@@ -70,6 +76,16 @@ Horizon's own measurement (`gtest m`, emulator, REV $0B): 100 keyed 16 x 16 blit
 | --- | --- | --- |
 | 100 `win_draw` (WD_KBLIT) | 100 | 26.6 ms: more than a frame (16.7 ms), so frames are missed |
 | one `draw_list` of 100 LS_KEY records | 1 | 14.4 ms in the call: checking and clipping, about 2,000 cycles a record |
+| (Horizon 0.19) one `draw_list` of the same | 1 | 13.8 ms (exactly, below: 1,284 cycles a record) |
+| (Horizon 0.19) one `sheet_draw` of the same, from a sheet | 1 | 4.0 ms (exactly: 318 cycles a record) |
+
+`uptime` counts in 10 ms ticks, so these per-frame figures are rough for short calls. Measured
+exactly (Horizon 0.19, `gtest m`: 500 calls of 100 records, and 2,000 calls of one, each followed
+by a loop measured alone): a `draw_list` call of 100 records takes 9.1 ms of CPU (10.0 ms in
+0.18), one of a single record 272 us; a `sheet_draw` call of 100 records 2.46 ms, one of a single
+record 265 us. So about 90 us (1,300 cycles) a draw_list record and 22 us (320 cycles) a sheet
+record, plus about 0.27 ms a call. A sheet record that is cut at an edge, a fill, or one into
+a covered window takes the full path: about 1,100 cycles.
 
 While the call returns, Ali's own blitting (about 2.3 ms for the 100 blits) runs concurrently
 with the CPU: the program computes the next frame meanwhile, and `vsync` (or `list_wait`)

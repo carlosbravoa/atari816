@@ -20,7 +20,7 @@ make sst             # downloads the SingleStepTests sample that make test uses 
 ```
 emu816 [--sd DIR] [--load FILE@ADDR]... [--max-seconds N] [--trace]
        [--keys LIST] [--mouse LIST] [--shot FILE.ppm] [--shot-at SECONDS] [--stats] [--headless] [--fast]
-       PROGRAM.BIN
+       [--ideal-timing] [--boot-cart PATH] PROGRAM.BIN
 ```
 
 | Option | Meaning |
@@ -33,13 +33,16 @@ emu816 [--sd DIR] [--load FILE@ADDR]... [--max-seconds N] [--trace]
 | `--keys LIST` | Key changes `t_ms:usage:down,...` (usage in hex) at emulated milliseconds |
 | `--mouse LIST` | Mouse input `t_ms:dx:dy:wheel:buttons,...` at emulated milliseconds: decimal motion in desktop pixels (dy > 0 = down), buttons bit 0 left, 1 right, 2 middle (`0x` allowed). Example: `--mouse 100:5:-3:0:1,200:0:0:0:0` |
 | `--console-us N` | Slow console: after each DBG_OUT byte, DBG_STAT bit 7 reads 1 for N emulated microseconds, and bytes written meanwhile are dropped, as on the hardware. The board takes about 90 us per byte while its log is read and can stall for milliseconds. Default 0: never busy |
-| `--stats` | At exit, print the emulated time, host time, emulated MHz and counters (and the dropped console bytes with `--console-us`) |
+| `--stats` | At exit, print the emulated time, host time, emulated MHz and counters (and the dropped console bytes with `--console-us`; the cache fills, RAM writes, cache sweeps and stall cycles of the memory model) |
 | `--rev N` | SYS_REV to report: 6 (no sound page, no blitter), 7 (sound page), 8 (sound and blitter), 9 (+ blitter command lists, raster events at the beam, NV_FRAME), 10 = $0A (+ Lau, the sample player, the default hardware build of bring-up step 17), 11 = $0B (default: + Marga's sprites and fine scrolling, bring-up step 19). Below 11 Marga's registers $D930-$D9FF read 0 and ignore writes; below 10 the sample player reads 0 and ignores writes; below 9 the list registers do, and the raster events come at the fetch trigger; below 8 the blitter registers read 0 and ignore writes; below 7 the sound page ignores writes |
 | `--wav FILE.wav` | Write Lau's output (48 kHz, 16-bit stereo, without the POKEY sound) |
 | `--log-sound` | Print every accepted write to the sound page ($00:DB00-$DB13) on stderr |
 | `--log-lau` | Print every write to Lau, the sample player ($00:DB20-$DBFF, REV $0A), on stderr as `lau $DBxx = $yy` (Horizon's sample-call test compares it) |
 | `--headless` | SDL builds open a window by default; this flag suppresses it (accepted and ignored in plain builds) |
 | `--fast` | SDL: keep the window but do not throttle to real time |
+| `--ideal-timing` | The time model before Horizon 0.19: every CPU cycle ideal (no cache misses, SDRAM write stalls or cache sweeps) and Ali's older per-pixel rates. Programs then run about twice as fast as on the board (see "Memory timing") |
+| `--card-date YYYY-MM-DDTHH:MM` | The date STAT reports for every file this run did not create or write (Horizon's tests run on fresh copies of the card, whose host dates mean nothing); the files the run writes keep the date SYS_TIME gives them |
+| `--boot-cart PATH` | A cartridge (a FAT path on `--sd`) that the I/O processor loaded by itself at power-on (`boot=ash` in /atari.ini): CLASSIC\_STATE ($1E) reports it, from power-on and after a full restart |
 
 Exit codes: 0 when the program executes STP, 3 at the `--max-seconds` limit, 1 on a usage
 or file error. Output written to DBG_OUT ($00:DEF0) goes to stdout.
@@ -153,9 +156,10 @@ per poll, as the firmware does. Software cannot depend on synchronous answers.
 - **IOP_READY:** MB_STATUS bit 0 is set on the first poll after both MB_REQ_BASE and
   MB_RSP_BASE are non-zero. MB_REQ_TAIL and MB_RSP_HEAD restart at 0.
 - **Reset:** clearing a base closes every file and resets the state.
-- **Errors:** an unreadable ring sets IOP_ERROR (bit 1). The emulator publishes MB_RSP_HEAD
-  at once; the RTL's cache sweep before the head becomes visible, about 18 us with the CPU
-  paused, is not modelled.
+- **Errors:** an unreadable ring sets IOP_ERROR (bit 1).
+- **Cache sweep:** every new MB_RSP_HEAD (an answer or an event) empties the 65C816's cache and
+  pauses the CPU for 256 cycles (18 us), as the RTL does before the head becomes visible; so
+  does a CACHE_FLUSH write (see "Memory timing").
 
 Responses copy the request, set OP | $80, and put the result in ARG0 and the value in ARG1.
 Result codes in ARG0 are:
@@ -166,7 +170,7 @@ Result codes in ARG0 are:
 | 1-19 | FatFs FRESULT (4 NO_FILE, 5 NO_PATH, 6 INVALID_NAME, 7 DENIED, 8 EXIST, 18 TOO_MANY_OPEN_FILES, ...). Host errno values are mapped to the FRESULT FatFs would return |
 | $80 | Bad handle |
 | $81 | Bad address: >= $80:0000, or anywhere in bank $10, which the firmware cannot reach |
-| $82 | Unsupported operation (TIME, MOUNT, UNMOUNT and anything unknown, as in the current firmware) |
+| $82 | Unsupported operation (TIME $30, MOUNT, UNMOUNT and anything unknown, as in the current firmware) |
 
 The open formats match the firmware:
 
@@ -179,6 +183,8 @@ The open formats match the firmware:
 | READDIR | ARG0 = entries to skip, for continuation. Writes packed `{u32 size, u8 attr, u8 namelen, name}` entries, with no terminator, into BUF, which first holds the path. It stops when the next entry would not fit in LEN. ARG1 = entries returned. Entries are sorted by name; "." and ".." are left out |
 | RENAME | BUF = `"old\0new"`. Answers FR_EXIST if the target exists |
 | LOAD | Whole file to ARG0. ARG1 = bytes loaded |
+| SYS_TIME ($1D) | ARG0 = seconds since 2000-01-01 00:00 (local), as Horizon gives it at start and when the clock is set. The firmware counts on from it and FatFs stamps files with it; here the count is emulated time, and a file the 65C816 created or wrote gets that time as its host modification time when it is closed (MKDIR at once), so STAT shows it and runs stay deterministic. Before it is given: 2026-01-01 00:00 (the firmware: its build date) |
+| CLASSIC_STATE ($1E) | ARG0 = 5 (the cartridge): ARG1 = its image size in bytes (a .CAR without its 16-byte header; 0 = none), BUF (LEN bytes) its path. The cartridges CLASSIC_MOUNT attached, or the `--boot-cart` one from power-on and after a full restart. $83 for another ARG0 |
 
 Mapping FAT paths to the `--sd` directory:
 
@@ -302,10 +308,14 @@ Pointer:
 Ali:
 
 - REV $08 and up (`--rev`). The pixels are written when START is written; then BUSY reads
-  1 for the RTL's measured time: clk_core cycles per pixel FILL 2.0, EXPAND 2.2, COPY
-  2.9 with the classic machine frozen or 3.5 running, plus 0.8 with the video on (a CPU
-  cycle is 2 clk_core), plus 8 + 2 per line CPU cycles. IRQ_EN raises BLITTER when BUSY
-  drops. The CPU is not slowed.
+  1 for the board's measured time (core/sw/a816/timing.s): clk_core cycles per pixel, FILL /
+  COPY and COPY_KEY / EXPAND, with the classic machine frozen 2.06 / 2.90 / 2.27 (Marga off),
+  3.41 / 4.50 / 3.77 (640x360x8), 2.56 / 3.55 / 2.82 (320x180x8), and with it running
+  7.0 / 10.7 / 7.8 in 640x360x8 (the other cases interpolated; a CPU cycle is 2 clk_core),
+  plus 8 CPU cycles a blit and, for FILL and EXPAND, 2 a line. A CPU access to RAM while Ali
+  is busy delays Ali by the access's time (and the CPU's access waits a little longer; see
+  "Memory timing"). IRQ_EN raises BLITTER when BUSY drops. `--ideal-timing` keeps the older
+  rates (FILL 2.0, EXPAND 2.2, COPY 2.9 / 3.5 + 0.8 with the video on, 8 + 2 a line).
 - The RTL's rules are enforced by counting (and printed on stderr, the first 10 of each):
   START while BUSY is ignored; a write to $DA00-$DA12 while BUSY is illegal; a CPU read
   of an 8-byte line the blitter wrote since the last cache sweep is a stale read. A
@@ -343,16 +353,76 @@ samples ahead into a FIFO, so its positions and KEYON lead the emulator's by up 
 samples (83 us); AU_LATE is always 0. Steps run only while a voice plays (or with
 `--wav`).
 
+### Memory timing (since Horizon 0.19)
+
+The board ran CPU-heavy code about twice as slow as emu816 used to (the BASIC sieve 89 s
+there, 45 s here). `core/sw/a816/timing.s` (TIMING.BIN) measured why: loops of one kind of
+access each, timed with UPTIME on the board and here, with the classic machine frozen and
+Marga off (P4), in 640x360x8 at stride 1024 (P1, the desktop), 320x180x8 (P3), and with the
+classic machine running (P2). The CPU core itself takes exactly the emulator's cycles (REG,
+DPR, IOR: 1.00); everything else is memory:
+
+- **Every RAM write waits for SDRAM** (write-through, `a816_sys.sv` S_WR): about 3.7 CPU
+  cycles extra with Marga off, 5.0 in 640x360x8, 9.3 with the classic machine running; a write
+  right after a write a little more (3.8 / 6.2 / 12.4).
+- **A read miss fills an 8-byte line** (S_FILL): 5.8 / 6.5 / 11.3 cycles extra. The cache is
+  4 KB direct-mapped (512 lines, index = address bits 11-3), so code and data that share
+  index bits evict each other; it is modelled line by line.
+- **Marga's line fetch and the classic machine** share the port (the classic machine and
+  the I/O processor come first; Marga before the CPU): the costs above by mode.
+- **Ali** fills at 1.90 clk_core a pixel (2.95 in 640x360x8) and copies at 2.8 (4.2-4.3), and
+  a CPU access to RAM while it runs delays it by the access's time.
+- **Every mailbox answer or event sweeps the cache** with the CPU paused (18 us), and so does
+  a CACHE_FLUSH write.
+- **The I/O processor's polling** (found with these loops): the firmware called its mailbox
+  routine, which runs from SDRAM, on every turn of its main loop, and the PicoRV32's
+  instruction fetches come before the 65C816, Marga and Ali. While Horizon runs (a response
+  ring with room) this took 10-20 % of the 65C816's memory time in 640x360x8. The firmware of
+  bring-up step 20 checks the mailbox registers first, in block RAM, and calls the routine
+  only when there is something to do; the tables below are with it.
+
+emu816 models all of this (`freddie.c` `stall()`, `blitter.c` `blit_cost()`), in sixteenths of
+a cycle, deterministically. `--ideal-timing` gives the old model (every cycle ideal, Ali's
+older rates). Horizon's picture sessions use it: they were timed for it and check what is
+drawn, not how fast.
+
+TIMING.BIN, microseconds (board / emu816 0.18 = ideal, and the ratio / emu816 now, and its
+error), REV $0B, bring-up step 20 firmware:
+
+| Loop | Marga off: board | ideal | now | 640x360x8: board | ideal | now | classic running: board | now |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| REG (DEX BNE) | 22,851 | 22,849 (1.00) | +0 % | 22,854 | 1.00 | -0 % | 22,856 | -0 % |
+| DPW (STA dp) | 16,585 | 8,286 (2.00) | +1 % | 20,246 | 2.44 | -3 % | 31,242 | -5 % |
+| DPW16 | 27,658 | 10,570 (2.62) | -0 % | 36,202 | 3.42 | -0 % | 60,357 | -0 % |
+| LRSEQ (long reads) | 18,540 | 16,853 (1.10) | +0 % | 19,137 | 1.14 | -2 % | 20,201 | +0 % |
+| LRMISS (every read a fill) | 3,767 | 2,110 (1.79) | +1 % | 3,962 | 1.88 | +1 % | 5,287 | +2 % |
+| LWSEQ (long writes) | 24,956 | 16,852 (1.48) | +1 % | 27,002 | 1.60 | +5 % | 36,048 | +6 % |
+| STACK (PHA PLA) | 13,700 | 9,427 (1.45) | -0 % | 15,117 | 1.60 | +0 % | 18,748 | +7 % |
+| JSR RTS | 23,647 | 15,139 (1.56) | -0 % | 28,026 | 1.85 | -0 % | 39,851 | +0 % |
+| MVN 32 KB | 26,277 | 15,997 (1.64) | -0 % | 30,252 | 1.89 | -3 % | 38,441 | +6 % |
+| ICMISS (16 KB of code) | 10,201 | 6,861 (1.49) | +1 % | 10,495 | 1.53 | +1 % | 12,974 | +4 % |
+| IRQ every 25 us | 28,661 | 26,215 (1.09) | -0 % | 30,081 | 1.15 | -0 % | 35,491 | -2 % |
+| COP RTI | 19,989 | 11,212 (1.78) | -1 % | 24,817 | 2.21 | -1 % | 37,046 | +2 % |
+| Ali fill 640 x 200 x 4 | 33,997 | 35,826 (0.95) | +0 % | 53,060 | 1.48 | -1 % | 112,234 | +0 % |
+| Ali copy 320 x 100 x 4 | 12,574 | 13,015 (0.97) | -2 % | 19,209 | 1.16 | -2 % | 43,460 | +0 % |
+| Ali 256 keyed 16 x 16 | 7,190 | 8,186 (0.88) | +2 % | 10,756 | 1.08 | +0 % | 23,455 | +1 % |
+| SIEVE (assembly) | 289,628 | 243,527 (1.19) | +0 % | 304,079 | 1.25 | +2 % | 370,391 | -0 % |
+
+320x180x8 lies between (all within 2 %). The remaining spread (up to 7 % with the classic
+machine running, 5-8 % for some loops whose period beats against the SDRAM's) is the phase of
+a loop against the memory's own cadence, which the model averages. BRINGUP1.BIN (classic
+machine running, Marga off): LOOP $5947 board / $5948 here, READ $860F / $8676, MVN $75D3 /
+$72FE. Under Horizon (the desktop, a program in the Terminal, 0.19 card, step 20 firmware;
+TBENCH, the same loops as a Horizon program, ms): REG 250 / 240, DPW 210 / 210, DPW16 376 / 367,
+LRMISS 90 / 89, LWSEQ 350 / 330, JSR 287 / 310, WRFILL 98 / 100, SIEVE 790 / 807. The BASIC
+sieve (SIEVE.BAS, `basic -t` in the Terminal): see Horizon's README, "Version 0.19".
+
+Not measured: the mailbox's round trip (the PC link that reads the board's log keeps the
+I/O processor busy meanwhile: 500 us there against 72 here); the I/O processor still polls
+every 512 CPU cycles here.
+
 ### Not modelled
 
-- **Memory timing:** the cache, SDRAM latency and write-through stalls are not modelled.
-  Every CPU cycle is ideal, so timings measured by programs are the pure cycle counts.
-  Horizon's window bench ran about 2.3x slower on the board (stage 1, CPU drawing: full
-  repaint 434 ms there, 189 ms here). Most of the gap is likely writes (every write goes
-  through to SDRAM; the bring-up simulation saw MVN at about half speed) and the 8 bpp
-  video fetch sharing the bus. A first correction: a few stall cycles per RAM write and
-  per cache-line read miss, and bus time taken by Marga's line fetch, calibrated against
-  the board's bench figures.
 - **Audio:** the sound page is write only and makes no sound.
 - **Classic side:** the supervisor ($00:DC00) and the chipset window ($00:D000-$D7FF) read
   0, and the classic map ($00:D810-) is not implemented.
@@ -366,7 +436,7 @@ samples (83 us); AU_LATE is always 0. Steps run only while a voice plays (or wit
 | Test | Checks |
 | --- | --- |
 | A816.BIN | The self test (FREDDIE II, timers, preemption, watchdog, mailbox), run with `--sd` pointing at a copy of itself. Uses `core/sw/a816/A816.BIN` when it exists |
-| BRINGUP1.BIN | RAM test, LOOP (exact), READ and MVN (within 1 % of the ideal values) |
+| BRINGUP1.BIN | RAM test, LOOP ($5948, the board $5947), READ and MVN (within 3 % of the board's values) |
 | tests/asm/mbdemo | Mailbox: open/read/close, LOAD, READDIR (and with skip), create/write/STAT/DELETE, error codes $80/$81/$82/6/5. Waits with WAI on the IOP interrupt |
 | tests/asm/cpuirq | COP and BRK frames, an MVN interrupted 88 times by a 50 us timer, WAI with I clear, the NMI edge rule |
 | tests/asm/nvcdemo | Palette writes, every blitter operation, the pointer, 3 VBLANKs = 49,975 us (60.03 Hz). Picture checked by md5 |
@@ -384,11 +454,11 @@ samples (83 us); AU_LATE is always 0. Steps run only while a voice plays (or wit
 | tests/sprsceneN.bin | `core/sw/a816/sprscene.s` with SEED 1-10: a random scene each (9 and 10 crowded, so the line limit drops sprites) (all modes, scrolling, wrap, split, pointer, 16 sprites with every option). The pictures must be identical to the frames the RTL simulation gave (`expected/sprsceneN.ppm.md5`), REV $0B and up |
 | SingleStepTests | 102,000 tests, with `tests/fetch_sst.py` / `make sst` to download them |
 
-LOOP prints `00005943`, while the hardware and the RTL testbench print `00005948`. The
+LOOP prints `00005948` (`00005943` with `--ideal-timing`); the board printed `00005947`. The
 emulator's cycle count for that window is the RTL's own: both have 327,771 CPU cycles
 between the two UPTIME latches, compared instruction by instruction against a Verilator
-trace. The remaining 4-5 us are the 8 SDRAM write-through stalls inside the measured window
-(stores to t0, the JSR and PHX pushes). The emulator does not model these stalls.
+trace; the rest are the SDRAM write stalls inside the measured window (stores to t0, the JSR
+and PHX pushes), which the memory model now adds.
 
 ## RTL issues found (now fixed in the RTL, and in emu816)
 

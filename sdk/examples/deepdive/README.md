@@ -37,6 +37,7 @@ log and ends. Verified in the emulator (REV $0B); not run on the board.
 | Two consecutive banks from `bank_alloc` | `getfb` | [games.md: the framebuffer](../../docs/reference/games.md#the-framebuffer) |
 | Fine scrolling in both directions with wrap, a fixed panel by the split | `setscroll`, `scroll`, `scrolltiles` | [games.md: scrolling](../../docs/reference/games.md#98-fs_scroll-sys_fsscroll) |
 | One draw list a frame, LS_VBL on its first record | `rec_tile`, `rec_glyph`, `flush` | [games.md: draw lists](../../docs/reference/games.md#draw-lists) |
+| (Horizon 0.19) The tiles as a sheet: a frame of tiles is one `sheet_draw` (SH_VBL on its first record); a frame that also changes the panel one `draw_list` | `tsblk`, `rec_tile`, `rec_snew`, `flush`, `sflush`, `s2l` | [games.md: sheets](../../docs/reference/games.md#sheets-horizon-019) |
 | Text with LS_EXPAND records from a 1 bpp font | `text`, `rec_glyph`, `art/font.txt` | |
 | The frame loop on `vsync`, missed frames counted | `frame` | [games.md: frame sync](../../docs/reference/games.md#frame-sync) |
 | 15 sprites, one `spr_set` a frame, SPR_BEHIND, SPR_HFLIP | `setsprites`, `sprent` | [games.md: sprites](../../docs/reference/games.md#sprites) |
@@ -53,7 +54,14 @@ banks in a row (the kernel gives the lowest free bank, so normally the first two
 gives back any it put aside. The sprite images are copied to `$1000` of the window (bank 0:
 the program's own memory, and 16-byte aligned, which Marga needs); the tiles and the font
 stay in the code bank, where Ali reads them. The map (64 x 24 bytes), the draw list (128 x
-20 bytes), the spr_set table and the two samples are in BSS.
+20 bytes), (0.19) the sheet records (128 x 16), the spr_set table and the two samples are in
+BSS. (0.19) The tiles are registered as a sheet at the start (`tsblk`: 16 wide, the four
+tiles one under the other: tile t is rows 16 t), so a tile is a 16-byte `sheet_draw` record
+that the kernel checks against the sheet's size only: about 300 CPU cycles instead of about
+1,300 for a `draw_list` record. The panel's letters (1 bpp: LS_EXPAND) stay draw_list
+records; a frame that has both sends its tiles as draw_list copies after them (`s2l`), so a
+frame is still one call. Measured with test.script: 1.73 ms of CPU a frame (1.83 ms with
+draw_list only), the same pictures.
 
 ```
 fbb:0000  rows 0-191: the ring of 21 x 12 tile slots (336 bytes a row)

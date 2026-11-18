@@ -1,5 +1,5 @@
 /*
- * Linker script for the PicoRV32 I/O processor firmware (Atari 816 branch).
+ * Linker script for the PicoRV32 I/O processor firmware (Atari816 branch).
  *
  * HOT  : 32 KB block RAM at 0 (reset vector). Boot code, the cold-image loader and the
  *        time-critical paths listed below, plus ALL .data/.bss and the stack.
@@ -76,6 +76,8 @@ SECTIONS
         fatfs/ff.o(.text.dir_clear .text.dir_clear.* .rodata.dir_clear .rodata.dir_clear.*)
         firmware.o(.text.bridge_poll .text.bridge_poll.* .rodata.bridge_poll .rodata.bridge_poll.*)
         firmware.o(.text.a816_poll .text.a816_poll.* .rodata.a816_poll .rodata.a816_poll.*)
+        firmware.o(.text.a816_mb_wanted .text.a816_mb_wanted.* .rodata.a816_mb_wanted .rodata.a816_mb_wanted.*)
+        firmware.o(.text.get_fattime .text.get_fattime.* .rodata.get_fattime .rodata.get_fattime.*)
         firmware.o(.text.prn_flush .text.prn_flush.* .rodata.prn_flush .rodata.prn_flush.*)
         firmware.o(.text.blrx_getc .text.blrx_getc.* .rodata.blrx_getc .rodata.blrx_getc.*)
         firmware.o(.text.sio_hdd .text.sio_hdd.* .rodata.sio_hdd .rodata.sio_hdd.*)

@@ -59,5 +59,7 @@ MBOP_MKDIR   = $08
 MBOP_DELETE  = $09
 MBOP_RENAME  = $0A
 MBOP_LOAD    = $10
+MBOP_STIME   = $1D           ; (0.19) the time for file dates (ARG0 = seconds since 2000)
+MBOP_CSTATE  = $1E           ; (0.19) ARG0 = 5: the cartridge's size (ARG1) and path (BUF)
 MBEV_KEY     = $E0
 MBEV_MOUSE   = $E1

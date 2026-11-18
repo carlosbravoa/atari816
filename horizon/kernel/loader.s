@@ -30,7 +30,11 @@ ld_end   = $88                  ; end of text+data in the code bank
 ld_type  = $8A
 
 exec_entry:
-        ; STAT a copy of the path (the answer overwrites its buffer)
+        lda     cb_done                 ; (0.19) the first task: a cartridge the I/O processor
+        bne     :+                      ; loaded by itself at power-on keeps its banks
+        inc     cb_done
+        jsr     cart_boot
+:       ; STAT a copy of the path (the answer overwrites its buffer)
         jsr     iobuf_of
         tax
         ldy     #64

@@ -10,7 +10,7 @@
 ;   k2pal.s   palette entries of programs (who holds which, shown while in front)
 ;   k2spr.s   sprites
 ;   k2fs.s    full-screen mode, scrolling, the raster table
-;   k2list.s  draw lists (Ali's command lists)
+;   k2list.s  draw lists (Ali's command lists); (0.19) the routines sheet_draw shares (k3.s)
         .p816
         .smart  -
         .feature string_escapes
@@ -18,6 +18,7 @@
         .include "hw.inc"
         .include "kdefs.inc"
         .include "k2.inc"
+        .import k3_task_exit: far, k3_bank_gone: far    ; (0.19) the third code segment, k3.s
 
 ; Marga (Docs/02-register-spec.md) and the rest of the hardware this unit uses
 NV_CTRL     = $00D900
@@ -178,10 +179,12 @@ hw_range:
 ; ---- hooks called from bank $01 ----
 
 ; (do_exit, before its banks are freed) what the task holds here goes: its list stopped, its
-; palette entries back to the system, its sprites freed, its full screen ended
+; palette entries back to the system, its sprites freed, its full screen ended, (0.19) its
+; sheets freed (k3.s)
         .export k2_task_exit: far
 k2_task_exit:
         jsr     ls_stop
+        jsl     k3_task_exit
         jsr     pal_drop
         jsr     fs_mine
         bcc     :+
@@ -190,11 +193,13 @@ k2_task_exit:
         rtl
 
 ; (bank_free, bank A) its list stopped; sprites reading the bank lose their image; a
-; full-screen framebuffer there ends the full screen (keeps A)
+; full-screen framebuffer there ends the full screen; (0.19) its sheets there are freed (keeps A)
         .export k2_bank_gone: far
 k2_bank_gone:
         pha
         jsr     ls_stop
+        lda     1,s
+        jsl     k3_bank_gone
         lda     1,s
         jsr     spr_bank
         jsr     fs_mine

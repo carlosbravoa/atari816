@@ -44,10 +44,15 @@ sys_tab:
         .word   .loword(sys_k2)
         .endrepeat
         .word   .loword(sys_wfront)     ; $A0 (BASIC 2.0)
+        .word   .loword(sys_k3), .loword(sys_k3), .loword(sys_k3)   ; $A1-$A3 (0.19): sheets, k3.s
+        .assert (* - sys_tab) / 2 = K3_NSYS, error, "syscall table: K3_SYS0 .. K3_NSYS - 1 go to k3.s"
 NSYS = (* - sys_tab) / 2
 
 ; (0.18) $91-: k2.s dispatches them (X = number * 2)
 sys_k2: jsl     k2_sys
+        rts
+; (0.19) $A1-: k3.s (the third code segment) dispatches them (X = number * 2)
+sys_k3: jsl     k3_sys
         rts
 
 ; ---- result helpers ----

@@ -22,8 +22,14 @@ Long version: `SDK/docs/reference/game-patterns.md`; the calls: `SDK/docs/refere
 - One `draw_list` replaces many `win_draw` calls: 100 keyed blits cost 100 syscalls and 26.6
   ms CPU a frame as win_draw, one call and 14.4 ms as a list (about 2,000 cycles a record, in
   the call), Ali's blits running alongside. Still: draw only what changed.
+- (Horizon 0.19) Art drawn again and again (tiles, sprite frames, a font in colour): register
+  it once as a **sheet** (`SYS_SHEETNEW`: address, stride, width, height in your memory) and
+  send `SYS_SHEETDRAW` records {sheet, op, key, 0, sx, sy, w, h, x, y}: about 300 cycles a
+  record instead of ~1,300 (copies, keyed copies, fills; no moves or 1 bpp expands: those stay
+  draw_list's, one call a frame either way).
 - Sprites cost nothing per frame: one `spr_set` for all of them (or `spr_move`).
-- CPU 14.3 MHz in the emulator, effectively ~half of that on the board for CPU-heavy code.
+- CPU 14.3 MHz, effectively ~half of that for CPU-heavy code (memory stalls); emu816 models
+  them since Horizon 0.19, so its timings are the board's.
 - Input: keys (down / up events), the mouse, the joysticks (SYS_JOY: A bits 0-3 port 1, 4-7
   port 2, X the triggers). Map the keys to the same joystick-style bit mask (1 up, 2 down,
   4 left, 8 right, 16 fire) and OR the stick in. On WE_UNFOCUS forget the held keys.

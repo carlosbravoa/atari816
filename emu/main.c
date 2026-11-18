@@ -271,6 +271,12 @@ static void usage(void)
         "  --shot FILE.ppm      write the 1280x720 output frame (at exit, or at --shot-at); repeatable\n"
         "  --shot-at SECONDS    emulated time for the preceding --shot (first VBLANK at or after it)\n"
         "  --stats              print speed and counters on stderr at exit\n"
+        "  --boot-cart PATH     a cartridge (FAT path on --sd) the I/O processor loaded at power-on\n"
+        "                       (boot=ash): CLASSIC_STATE ($1E) reports it\n"
+        "  --card-date YYYY-MM-DDTHH:MM  the date STAT reports for every file this run did not write\n"
+        "                       (the tests: a fresh copy of the card has no meaningful dates)\n"
+        "  --ideal-timing       every CPU cycle ideal: no cache misses, SDRAM write or sweep stalls,\n"
+        "                       the blitter's older speed model (the timing before Horizon 0.19)\n"
         "  --console-us N       DBG_OUT busy for N us after each byte; bytes written while busy are dropped\n"
         "  --keys LIST          inject keys: \"t_ms:usage:down,...\" (usage in hex, e.g. 100:04:1,150:04:0)\n"
         "  --mouse LIST         inject mouse: \"t_ms:dx:dy:wheel:buttons,...\" (e.g. 100:5:-3:0:1)\n"
@@ -309,6 +315,14 @@ int main(int argc, char **argv)
         }
         else if (!strcmp(a, "--shot-at") && i + 1 < argc && nshots) shot_at[nshots - 1] = atof(argv[++i]);
         else if (!strcmp(a, "--stats")) stats = 1;
+        else if (!strcmp(a, "--ideal-timing")) M.fr.ideal = 1;
+        else if (!strcmp(a, "--boot-cart") && i + 1 < argc) mailbox_boot_cart = argv[++i];
+        else if (!strcmp(a, "--card-date") && i + 1 < argc) {
+            struct tm tm = { 0 };
+            if (sscanf(argv[++i], "%d-%d-%dT%d:%d", &tm.tm_year, &tm.tm_mon, &tm.tm_mday, &tm.tm_hour, &tm.tm_min) != 5) usage();
+            tm.tm_year -= 1900; tm.tm_mon -= 1; tm.tm_isdst = -1;
+            mailbox_card_date = mktime(&tm);
+        }
         else if (!strcmp(a, "--console-us") && i + 1 < argc) console_us = atof(argv[++i]);
         else if (!strcmp(a, "--keys") && i + 1 < argc) parse_keys(argv[++i]);
         else if (!strcmp(a, "--mouse") && i + 1 < argc) parse_mouse(argv[++i]);
@@ -431,6 +445,11 @@ int main(int argc, char **argv)
         fprintf(stderr, "emu816: %llu blitter lists (%llu records), %llu audio samples, %llu KEYON writes\n",
                 (unsigned long long)M.bl.n_lists, (unsigned long long)M.bl.n_records,
                 (unsigned long long)M.au.n_samples, (unsigned long long)M.au.n_keyon);
+        fprintf(stderr, "emu816: memory timing%s: %llu cache fills, %llu RAM writes, %llu cache sweeps, "
+                "%llu stall cycles (%.1f%%)\n", M.fr.ideal ? " off (--ideal-timing)" : "",
+                (unsigned long long)M.fr.n_fills, (unsigned long long)M.fr.n_wrs,
+                (unsigned long long)M.fr.n_sweeps, (unsigned long long)M.fr.n_stall,
+                c->cycles ? 100.0 * M.fr.n_stall / c->cycles : 0.0);
         if (M.sys.console_cycles)
             fprintf(stderr, "emu816: %llu DBG_OUT bytes dropped (console busy)\n", (unsigned long long)M.sys.dbg_dropped);
     }

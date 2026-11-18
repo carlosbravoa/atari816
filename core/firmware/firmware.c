@@ -26,7 +26,7 @@ int option_stereo = 0;                      // 1 = dual-POKEY stereo (POKEY2 @ $
 int option_kbd_layout = 0;                  // 0 = Atari-positional keys (default), 1 = US-PC symbolic
 
 // Classic machine RAM sizes (/atari.ini "ram"). code = core RAM_SELECT; kb = the ini value.
-// The core has only these two (Atari 816: capped at 320 KB, the larger RAMBO/Compy schemes
+// The core has only these two (Atari816: capped at 320 KB, the larger RAMBO/Compy schemes
 // were removed). No key = 128 KB; any other value = 320 KB, with a log line.
 static const struct { unsigned char code; int kb; } ram_opts[] = {
     {1, 128}, {3, 320}
@@ -103,7 +103,7 @@ uint32_t dbg_sio_err_count = 0;
 // (2026-10-13: the never-displayed SIO counters / command history / rx capture
 // buffers were removed for image size — only the four shown on the OSD triage
 // line and in bridge STATUS remain.)
-// The on-screen menu (OSD) is gone (Atari 816): what it used to show in a pop-up or on its
+// The on-screen menu (OSD) is gone (Atari816): what it used to show in a pop-up or on its
 // status line goes to the serial log instead. Never waits for a key.
 void status(char *msg) { uart_printf("%s\n", msg); }
 void message(char *msg, int center) { (void)center; uart_printf("msg: %s\n", msg); }
@@ -181,7 +181,7 @@ load_option_close:
 
 // CAR header type -> core CartLogic mode (see rtl/common/a8core/cart_logic.vhd).
 // Pairs of {CAR type, mode}; unknown types are rejected with an error message.
-// Atari 816: the core keeps only the common schemes (standard 8/16 KB, OSS, XEGS and
+// Atari816: the core keeps only the common schemes (standard 8/16 KB, OSS, XEGS and
 // switchable XEGS, Atarimax, SIC, MegaCart); raw .rom 2/4 KB use modes 0x16 / 0x17.
 static const uint8_t car_type_map[][2] = {
     {1,0x01},  {2,0x21},                                              // standard 8K, 16K
@@ -196,6 +196,8 @@ static const uint8_t car_type_map[][2] = {
 };
 
 // returns 0 on success (reg_cart_mode set, data in SDRAM), nonzero on error
+uint32_t cart_bytes;                         // the image loaded last (valid while reg_cart_mode != 0)
+char     cart_path[128];
 int load_cartridge(char *filepath) {
     FIL f;
     unsigned int br;
@@ -267,6 +269,9 @@ int load_cartridge(char *filepath) {
     }
     reg_cart_mode = mode;
     cart_sclust = sclust;                   // phase 2b guard: never write the attached image
+    cart_bytes = data_size;                 // CLASSIC_STATE ($1E) tells Horizon
+    strncpy(cart_path, filepath, sizeof cart_path - 1);
+    cart_path[sizeof cart_path - 1] = 0;
     uart_printf("cart: '%s' loaded, %d bytes, CAR type %d, mode 0x%b\n", filepath, (int)data_size, car_type, mode);   // printf has no %u/%02x: %d + %b
     return 0;
 }
@@ -553,7 +558,7 @@ int atr_format(int slot) {
 // PC Link PUT guard: never overwrite a file the firmware holds open (a mounted ATR, the
 // virtual .xex, the attached cart image), compared by FAT START CLUSTER so every spelling
 // of a path (case, 8.3 alias) is caught. p = scratch FIL for the probe.
-// (The H: device and the ASH sd: XIOs that also used this were removed, Atari 816.)
+// (The H: device and the ASH sd: XIOs that also used this were removed, Atari816.)
 static int sd_guarded_p(const char *path, FIL *p) {
     if (f_open(p, path, FA_READ)) return 0;    // missing, or a directory: nothing open on it
     uint32_t c = p->obj.sclust;
@@ -871,7 +876,7 @@ void sio_process_command(void) {
         return;
     }
     
-    // (H: 0x72 and P1: 0x40 were removed, Atari 816: like every other unknown device
+    // (H: 0x72 and P1: 0x40 were removed, Atari816: like every other unknown device
     // they now stay silent.)
     // Respond to D1:-D4: (Device IDs 0x31-0x34; D3/D4 = config/bridge drives)
     if (device < 0x31 || device > 0x30 + ATR_DRIVES) {
@@ -1618,7 +1623,7 @@ static void bridge_cmd_poke(void) {
     bridge_putc('K');
 }
 
-// ── Atari 816 bring-up 1 ─────────────────────────────────────────────────────
+// ── Atari816 bring-up 1 ─────────────────────────────────────────────────────
 // The 65C816's native $00:0000-$0F:FFFF sits at firmware address 0x100000 + native
 // (physical SDRAM 0x300000). Its cache is only flushed while RUN = 0, so every write
 // to that memory from here must happen with the CPU held.
@@ -1664,11 +1669,12 @@ static void a816_start(int test) {   // test: /A816.BIN only (run816)
     reg_a816_ctrl = 1;
 }
 
-// ── Atari 816 I/O processor mailbox (register spec, "I/O processor mailbox") ──
+// ── Atari816 I/O processor mailbox (register spec, "I/O processor mailbox") ──
 // Two rings of 16-byte messages in the 65C816's RAM. One request is served per call.
 // Result codes: 0 OK, 1..19 FatFs FRESULT, $80 bad handle, $81 bad address, $82 unsupported,
 // $83-$85 see ops $18-$1A, $86 refused: the card was synced (SYS_SYNC) and not mounted again.
-// Ops: $01-$0A files, $10 LOAD, $18-$1A classic machine, $1B SYS_RESTART, $1C SYS_SYNC.
+// Ops: $01-$0A files, $10 LOAD, $18-$1A classic machine, $1B SYS_RESTART, $1C SYS_SYNC,
+// $1D SYS_TIME, $1E CLASSIC_STATE.
 // When data reaches the card (FatFs, FF_FS_TINY, one shared 512-byte sector window): a WRITE
 // sends every whole 512-byte sector it covers straight to the card; a partial last sector and
 // the FAT changes stay in the window until FatFs needs it for another sector (any later access)
@@ -1683,11 +1689,14 @@ static void a816_start(int test) {   // test: /A816.BIN only (run816)
 // Mouse movement waiting to be sent to Horizon as a MOUSE event ($E1)
 static int16_t ms_dx, ms_dy, ms_wheel;
 static uint8_t ms_btn, ms_btn_sent;
+static uint32_t mb_km_seen = 0xFFFFFFFF, mb_kk_seen;
+static uint32_t clk_base, clk_ms;       // SYS_TIME ($1D): seconds since 2000 at time_millis() clk_ms
+static uint8_t  clk_set;   // keys a816_mailbox found nothing new in
 volatile uint32_t a816_dbg[4];        // debug (fwpeek): last keymod, keys, poll count, mbi
 static FIL     mb_fil[MB_FILES];
 static uint8_t mb_open;                 // bit n = mb_fil[n] in use
 
-static uint32_t rd2(volatile uint32_t *r) {         // a register clocked by the 65C816
+static inline __attribute__((always_inline)) uint32_t rd2(volatile uint32_t *r) {   // a register clocked by the 65C816
     uint32_t a, b = *r;
     do { a = b; b = *r; } while (a != b);
     return a;
@@ -1857,6 +1866,7 @@ static void a816_mailbox(void) {
             for (int j = 0; j < 4; j++) { if (held[j] == now[i]) known = 1; if (!held[j]) slot = j; }
             if (now[i] > 3 && !known && slot >= 0) { usage = now[i]; down = 1; held[slot] = usage; }
         }
+        if (!usage) { mb_km_seen = km; mb_kk_seen = kk; }   // a816_mb_wanted: nothing new
         if (usage) {
             uint8_t e[16] = { 0xE0, 0, 0, 0, 0, 0, 0, 0, usage, 0, 0, 0, mods, down, 0, 0 };
             if (mb_put(rbase + rhead * 16, e, 16))
@@ -2080,6 +2090,33 @@ static void a816_mailbox(void) {
         mb_synced = 1;
         uart_printf("sys: sync, %d files closed, result %d\n", (int)val, (int)res);
         break;
+    // ── $1D-$1E ──
+    //   $1D SYS_TIME     ARG0 = the time Horizon knows, in seconds since 2000-01-01 00:00:00
+    //                    (local time: the clock the user set, or the last one saved plus the
+    //                    uptime). The firmware counts on from it with its own millisecond
+    //                    timer, and FatFs stamps files with it (get_fattime). Until it is given
+    //                    files get the build date. Horizon sends it at start and when the clock
+    //                    is set. Response: 0.
+    //   $1E CLASSIC_STATE ARG0 = 5: the cartridge. ARG1 = the size of the cartridge image in
+    //                    bytes (0 = none), BUF (LEN bytes, LEN 0 = none) <- its path, zero
+    //                    terminated (cut to LEN - 1). Also a cartridge the firmware loaded by
+    //                    itself (boot=ash at power-on or at a full restart): Horizon reserves
+    //                    its banks at start. $83 for another ARG0.
+    case 0x1D:
+        clk_base = arg0;
+        clk_ms = time_millis();
+        clk_set = 1;
+        break;
+    case 0x1E:
+        if (arg0 != 5) { res = 0x83; break; }
+        if ((reg_cart_mode & 0xFF) == 0) break;
+        val = cart_bytes;
+        if (len) {
+            uint32_t n = strlen(cart_path);
+            if (n > len - 1) n = len - 1;
+            if (!mb_put(buf, (const uint8_t *)cart_path, n) || !mb_put(buf + n, (const uint8_t *)"", 1)) res = 0x81;
+        }
+        break;
     default:
         res = 0x82;
     }
@@ -2166,12 +2203,56 @@ static void bridge_cmd_peek816(void) {
     bridge_quiet = 0;
 }
 
+// ── The clock for file dates (SYS_TIME, $1D) ─────────────────────────────────────────────
+// FatFs (FF_FS_NORTC = 0) asks get_fattime() whenever it stamps a file. Before Horizon has
+// given the time: the build date, 00:00.
+DWORD get_fattime(void) {
+    static const uint8_t mdays[12] = { 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31 };
+    uint32_t y, mo, d, h, mi, sec;
+    if (!clk_set) {                                      // __DATE__ = "Nov 17 2026"
+        static const char mn[] = "JanFebMarAprMayJunJulAugSepOctNovDec";
+        const char *b = __DATE__;
+        mo = 1;
+        for (int i = 0; i < 12; i++)
+            if (b[0] == mn[i * 3] && b[1] == mn[i * 3 + 1] && b[2] == mn[i * 3 + 2]) mo = i + 1;
+        d = (b[4] == ' ' ? 0 : b[4] - '0') * 10 + b[5] - '0';
+        y = (b[7] - '0') * 1000 + (b[8] - '0') * 100 + (b[9] - '0') * 10 + b[10] - '0';
+        return (y - 1980) << 25 | mo << 21 | d << 16;
+    }
+    uint32_t t = clk_base + (time_millis() - clk_ms) / 1000;
+    sec = t % 60; t /= 60; mi = t % 60; t /= 60; h = t % 24; t /= 24;   // t = days since 2000
+    for (y = 2000;; y++) {
+        uint32_t n = (y & 3) ? 365 : 366;
+        if (t < n) break;
+        t -= n;
+    }
+    for (mo = 0; mo < 11; mo++) {
+        uint32_t n = mdays[mo] + (mo == 1 && !(y & 3));
+        if (t < n) break;
+        t -= n;
+    }
+    return (y - 1980) << 25 | (mo + 1) << 21 | (t + 1) << 16 | h << 11 | mi << 5 | sec / 2;
+}
+
+// Is there anything for a816_mailbox to do? It runs from SDRAM (cold), and the PicoRV32's
+// accesses there come before the 65C816's, Marga's and Ali's: calling it on every loop of
+// the main loop took 10-20 % of the 65C816's memory time while Horizon ran (measured with
+// core/sw/a816/timing.s). This check is hot and reads only registers.
+static int a816_mb_wanted(void) {
+    uint32_t q = rd2(&reg_a816_mbq), r = rd2(&reg_a816_mbr), iop = reg_a816_mbi;
+    if (sys_restart || !(q & 0xFFFFFF) || !(r & 0xFFFFFF) || !(iop & 0x10000)) return 1;
+    if ((uint8_t)(q >> 24) != (uint8_t)iop) return 1;                 // a request waits
+    if ((uint8_t)((iop >> 8) + 1) == (uint8_t)(r >> 24)) return 0;    // no room for an event
+    if (rd2(&reg_a816_keymod) != mb_km_seen || rd2(&reg_a816_keys) != mb_kk_seen) return 1;
+    return ms_dx || ms_dy || ms_wheel || ms_btn != ms_btn_sent;
+}
+
 static void bridge_poll(void) {
     static int busy = 0;             // re-entry guard: bridge_poll is called from
     uint32_t v = reg_blrx;           // many wait loops, incl. ones a command's own
     if (busy) return;                // helpers may reach (e.g. message())
     a816_poll();
-    if (reg_a816_mbq | reg_a816_mbi) a816_mailbox();
+    if ((reg_a816_mbq | reg_a816_mbi) && a816_mb_wanted()) a816_mailbox();
     if (!(v & 0x100)) return;
     busy = 1;
     reg_blrx = 0;                    // ack (clears valid + overrun)
@@ -2232,7 +2313,7 @@ extern char _ebss[];
 static inline void stack_canary_arm(void)  { *(volatile uint32_t *)_ebss = STACK_CANARY_MAGIC; }
 static inline int  stack_canary_dead(void) { return *(volatile uint32_t *)_ebss != STACK_CANARY_MAGIC; }
 
-// ── Hot/cold split (Atari 816) ───────────────────────────────────────────────
+// ── Hot/cold split (Atari816) ───────────────────────────────────────────────
 // Only boot code and the time-critical paths (SIO, SD, FatFs read/write, UART) live in
 // the 32 KB block RAM; baremetal.ld lists them. Everything else is the "cold" image:
 // it sits in SPI flash at COLD_FLASH_ADDR and is copied to SDRAM at 0x10000 here, before
@@ -2347,7 +2428,7 @@ int main_app() {
     }
     bridge_boot_stage = 3;
     bridge_rom_ok = rom_ok;
-    a816_start(0);                // Atari 816 bring-up: no-op without /A816.BIN
+    a816_start(0);                // Atari816 bring-up: no-op without /A816.BIN
     uart_printf("boot: roms %d\n", rom_ok);
    
     if (rom_ok != 0) {

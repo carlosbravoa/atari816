@@ -112,8 +112,10 @@ mkrows: sep     #$20
 ; ---------------------------------------------------------------- primitives
 ; win_draw with the block db; (1.1) in a frame (lon): a record of the frame's draw list
 wd:     lda     lon
-        beq     wdnow
-        jmp     ladd
+        bne     :+
+        stz     lshn                    ; (1.2: a sheet's record only in a list)
+        bra     wdnow
+:       jmp     ladd
 wdnow:  lda     win
         ldx     #.loword(db)
         ldy     pbank
@@ -759,6 +761,8 @@ well_full:
         sta     z:rw
         lda     #CELL
         sta     z:rh
+        lda     #2                      ; (1.2) the rows' sheet, row 0
+        sta     lshn
         ldx     #.loword(erow)
         jsr     blit
         lda     #CELL                   ; 1 -> 2 -> 4 -> 8 -> 16 rows, then 4 more
@@ -901,6 +905,14 @@ diffcell:
         ; fall through
 ; tile A at cell Y
 blitcell:
+        tax                             ; (1.2) the tiles' sheet, its row
+        pha
+        lda     tilesy,x
+        and     #$00FF
+        xba
+        ora     #1
+        sta     lshn
+        pla
         asl     a
         tax
         lda     tilep,x
@@ -968,6 +980,8 @@ diffall0:
         sta     z:rw
         lda     #CELL
         sta     z:rh
+        lda     #2                      ; (1.2) the rows' sheet, row 0
+        sta     lshn
         ldx     #.loword(erow)
         jsr     blit
         bra     @nextr
@@ -1278,6 +1292,8 @@ draw_anims:
         rts
 @strip: lda     #SW * CELL              ; (the source stride)
         sta     db+1
+        lda     #2 | (12 << 8)          ; (1.2) the rows' sheet, row 12
+        sta     lshn
         lda     #.loword(erow + 12 * SW * CELL)
         sta     db+12
         sep     #$20
@@ -1846,6 +1862,8 @@ draw_sweep:
         sta     z:rw
         lda     #CELL
         sta     z:rh
+        lda     #2 | (CELL << 8)        ; (1.2) the rows' sheet, row 14
+        sta     lshn
         ldx     #.loword(srow)
         jmp     blit
 @out:   rts
@@ -2513,6 +2531,8 @@ lbegin: lda     lhw                     ; (with Ali's command lists only)
         stz     lcnt
         stz     lpend
         stz     laren
+        lda     #1
+        sta     lall
         rts
 ; the frame's end: its list sent (not waited for: the next vsync does)
 lfin:   jsr     lsend
@@ -2525,19 +2545,148 @@ lend:   lda     lon
         stz     lon
         jsr     ltexts
 :       rts
-; the records made so far sent
+; the records made so far sent: (1.2) as sheet records (sheet_draw) when every one is a fill
+; or comes from the tiles or erow / srow, else as they are (draw_list)
 lsend:  lda     lcnt
-        beq     :+
+        beq     @out
+        lda     lall
+        beq     @dl
+        lda     lsh
+        beq     @dl
+        jsr     lconv
+        lda     lcnt
+        xba
+        ora     win
+        ldx     #.loword(lbuf)
+        ldy     pbank
+        qsys    SYS_SHEETDRAW
+        bra     @sent
+@dl:    lda     lcnt
         xba
         ora     win
         ldx     #.loword(lbuf)
         ldy     pbank
         qsys    SYS_DRAWLIST
-        stz     lcnt
+@sent:  stz     lcnt
         stz     laren
         lda     #1
         sta     lpend
+        sta     lall
+@out:   rts
+; (1.2) lbuf's records as sheet_draw's (16 bytes, in place: record i is read whole before it is
+; written at 16 i, and 16 i + 16 <= 20 (i + 1))
+lconv:  stz     lc_i
+        ldx     #0                      ; X: record i (20 bytes), Y: its sheet record (16)
+        ldy     #0
+@r:     lda     lbuf+LR_X,x
+        sta     lc_x
+        lda     lbuf+LR_Y,x
+        sta     lc_y
+        lda     lbuf+LR_W,x
+        sta     lc_w
+        lda     lbuf+LR_H,x
+        sta     lc_h
+        lda     lbuf+LR_C1,x            ; c1 | c2 << 8
+        sta     lc_c
+        lda     lbuf+LR_OP,x            ; op | flags << 8
+        sta     lc_op
+        phx
+        lda     lc_i
+        asl     a
+        tax
+        lda     lsv,x                   ; sheet | sy << 8, $FF a fill
+        plx
+        sta     lc_sv
+        lda     lc_op
+        and     #$00FF
+        beq     @fill
+        lda     lc_sv                   ; copy, keyed copy: 1 the tiles, 2 the rows; the key c2
+        and     #$00FF
+        cmp     #2
+        lda     lsh
+        bcc     :+
+        lda     lsh2
+:       sta     lc_sh
+        lda     lc_c
+        xba
+        bra     @w
+@fill:  stz     lc_sh                   ; a fill: no sheet, the colour c1
+        stz     lc_sv
+        lda     lc_c
+@w:     and     #$00FF
+        sta     lbuf+SD_C,y
+        lda     lc_op                   ; the op (the same numbers), LS_VBL -> SH_VBL
+        bit     #LS_VBL << 8
+        beq     :+
+        ora     #SH_VBL
+:       xba
+        and     #$FF00
+        ora     lc_sh
+        sta     lbuf+SD_SHEET,y
+        lda     #0
+        sta     lbuf+SD_SX,y
+        lda     lc_sv
+        xba
+        and     #$00FF
+        sta     lbuf+SD_SY,y
+        lda     lc_w
+        sta     lbuf+SD_W,y
+        lda     lc_h
+        sta     lbuf+SD_H,y
+        lda     lc_x
+        sta     lbuf+SD_X,y
+        lda     lc_y
+        sta     lbuf+SD_Y,y
+        txa
+        clc
+        adc     #20
+        tax
+        tya
+        clc
+        adc     #16
+        tay
+        inc     lc_i
+        lda     lc_i
+        cmp     lcnt
+        bcs     :+
+        jmp     @r
 :       rts
+; (1.2) with command lists: the tiles (14 x 14 each, one after the other: 14 wide, 224 rows)
+; and erow / srow (140 wide, 28 rows) as sheets, for lsend (none if either is refused)
+lsheets:
+        stz     lsh
+        stz     lsh2
+        lda     lhw
+        beq     @out
+        lda     #.loword(t_b14_0)
+        ldx     #CELL
+        ldy     #16 * CELL
+        jsr     @new
+        bcs     @out
+        sta     lsh2                    ; (for the moment)
+        lda     #.loword(erow)
+        ldx     #SW * CELL
+        ldy     #2 * CELL
+        jsr     @new
+        bcc     :+
+        lda     lsh2
+        sys     SYS_SHEETFREE
+        stz     lsh2
+        rts
+:       ldx     lsh2
+        stx     lsh
+        sta     lsh2
+@out:   rts
+@new:   sta     lshb                    ; {address, stride, width, height}: X, X, Y
+        lda     pbank
+        sta     lshb+2
+        stx     lshb+4
+        stx     lshb+6
+        sty     lshb+8
+        ldx     #.loword(lshb)
+        ldy     pbank
+        sys     SYS_SHEETNEW
+        rts
 ; (the list sent in this frame has run: its records and arena may be written again)
 lwait:  lda     #0
         qsys    SYS_LISTWAIT
@@ -2576,7 +2725,10 @@ lbig:   lda     z:bk
         rts
 
 ; db as a record of the list
-ladd:   lda     db
+ladd:   lda     lshn                    ; (1.2) the sheet it comes from, if any
+        sta     lsvt
+        stz     lshn
+        lda     db
         and     #$00FF
         cmp     #WD_TEXT
         bne     :+
@@ -2696,9 +2848,28 @@ ladd:   lda     db
         inc     a
         sta     lbuf+LR_H,y
         lda     #LS_FILL
-@op:    ora     z:lfl
+@op:    pha
+        ora     z:lfl
         sta     lbuf+LR_OP,y
-        rts
+        pla                             ; (1.2) a sheet record too? a fill; a copy or keyed
+        beq     @fill                   ; copy from one of the sheets
+        cmp     #LS_KEY + 1
+        bcs     @nosh
+        lda     lsvt
+        bra     @sv
+@fill:  lda     #$00FF
+        bra     @sv
+@nosh:  lda     #0
+@sv:    pha
+        lda     lcnt
+        dec     a
+        asl     a
+        tax
+        pla
+        sta     lsv,x
+        bne     :+
+        stz     lall
+:       rts
 
 ; a text for after the list: x, y, colours, the string (up to 47 characters) into ltq
 ltext:  lda     ltqn

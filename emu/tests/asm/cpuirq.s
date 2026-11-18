@@ -132,10 +132,10 @@ t_mvn:  print   m_mvn
         inx
         cpx     #LEN
         bne     :-
-        lda     ticks                   ; 8192 bytes x 7 cycles = 4 ms: ~79 ticks
-        cmp     #70
-        bcc     mvn_bad16
-        cmp     #90
+        lda     ticks                   ; 8192 bytes x 7 cycles + a write and 1/8 fill each (the
+        cmp     #150                    ; classic machine runs: about 17 cycles a byte, 10 ms):
+        bcc     mvn_bad16               ; ~180 ticks (79 with ideal cycles, --ideal-timing)
+        cmp     #210
         bcs     mvn_bad16
         sep     #$20
         .a8

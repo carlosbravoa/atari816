@@ -13,7 +13,15 @@
 ;      the raster table checked against the framebuffer, the framebuffer's bank freed
 ;   5. draw lists: refused records (EINVAL, EFAULT), 100 keyed blits as one list, list_wait
 ;   6. WE_VBL; 7. the sound volume setting
-; "gtest m": the measurement of 100 16x16 keyed blits a frame, per call and as one list.
+;   8. (0.19) sheets: refused sheets (sizes EINVAL; the kernel's bank, the framebuffer, a bank
+;      nobody owns, past the window, out of an own bank: EFAULT), refused records (past the
+;      sheet, overflowing, no such sheet, a bad op, records not ours, the area limit), another
+;      program's sheet (EINVAL), the table full (EAGAIN: 32 sheets, 4096 rows), a child's sheets
+;      freed at its exit and kill, a bank freed (its sheet gone, the running list stopped), and
+;      a picture: fast records, clipped ones, fills, a bitmap target, rows moved by a free
+;      (tests/gtest.keys takes it: gtest2, the same at every revision)
+; "gtest m": the measurement of 100 16x16 keyed blits a frame, per call, as one list and (0.19)
+; as one sheet_draw (and of one record, for the cost of a record).
 ; "gtest s": sprites over a window, for the pictures (tests/gtests.keys).
 ; "gtest f": a full-screen picture: scrolling with a split, sprites, a raster table; it waits
 ; for events (tests/gtestf.keys leaves it with Alt+Esc, ends it).
@@ -490,9 +498,381 @@ gt7:    print   "gtest 7: the sound volume (setting 4): "
         sys     SYS_SETTING
         jsr     put_dec
         jsr     put_nl
+        jsr     gt8
         print   "gtest: done\n"
         sys     SYS_WSSTOP
         exit    0
+
+; ---------------------------------------------------------------- 8. sheets (0.19)
+gt8:    print   "gtest 8: sheets\n"
+        jsr     mksheet                 ; 32 x 32 at $3000 of the window, 16 x 16 at bank:$0100
+        print   "  new (32 x 32 in the window): "
+        ptr     shn_ok
+        sys     SYS_SHEETNEW
+        sta     z:sh1
+        jsr     resv
+        print   "  width 0: "
+        lda     #0
+        ldx     #SHN_W
+        jsr     shbad
+        print   "  width 4097: "
+        lda     #4097
+        ldx     #SHN_W
+        jsr     shbad
+        print   "  height 1025: "
+        lda     #1025
+        ldx     #SHN_H
+        jsr     shbad
+        print   "  stride below the width: "
+        lda     #31
+        ldx     #SHN_STRIDE
+        jsr     shbad
+        print   "  in the kernel's bank: "
+        lda     #$0100
+        ldx     #1
+        jsr     shbad
+        print   "  in the framebuffer: "
+        lda     #$7C00
+        ldx     #1
+        jsr     shbad
+        print   "  in a bank nobody owns: "
+        lda     #$7B00
+        ldx     #1
+        jsr     shbad
+        print   "  past the window: "
+        lda     #$7C40
+        ldx     #0
+        jsr     shbad
+        print   "  out of an own bank: "
+        lda     z:bank
+        xba
+        ora     #$00FD
+        ldx     #1
+        jsr     shbad
+        print   "  16 x 16 in an own bank: "
+        lda     z:bank
+        sep     #$20
+        .a8
+        sta     shn_bk+2
+        rep     #$20
+        .a16
+        ptr     shn_bk
+        sys     SYS_SHEETNEW
+        sta     z:sh2
+        jsr     resv
+        jsr     mkslist                 ; 100 keyed copies of sheet 1's first quarter
+        print   "  draw 100 keyed copies: "
+        lda     z:wina
+        ora     #100 << 8
+        ptr     slst
+        sys     SYS_SHEETDRAW
+        jsr     resv
+        lda     #0
+        sys     SYS_LISTWAIT
+        print   "  sx + w past the sheet: "
+        ldx     #0
+        jsr     sdbad
+        print   "  sy + h past the sheet: "
+        ldx     #16
+        jsr     sdbad
+        print   "  sx + w overflowing: "
+        ldx     #32
+        jsr     sdbad
+        print   "  sheet 0 for a copy: "
+        ldx     #48
+        jsr     sdbad
+        print   "  sheet 33: "
+        ldx     #64
+        jsr     sdbad
+        print   "  op 3: "
+        ldx     #80
+        jsr     sdbad
+        print   "  a window not ours: "
+        lda     #15 | (1 << 8)
+        ptr     slst
+        sys     SYS_SHEETDRAW
+        jsr     resv
+        print   "  count 0: "
+        lda     z:wina
+        ptr     slst
+        sys     SYS_SHEETDRAW
+        jsr     resv
+        print   "  records past the window: "
+        lda     z:wina
+        ora     #1 << 8
+        ldx     #$7FF8
+        ldy     #0
+        sys     SYS_SHEETDRAW
+        jsr     resv
+        print   "  all clipped away or empty: "
+        lda     z:wina
+        ora     #2 << 8
+        ptr     sd_out
+        sys     SYS_SHEETDRAW
+        jsr     resv
+        print   "  over two screens (12 fills of the content): "
+        lda     z:wina
+        ora     #12 << 8
+        ptr     sd_fills
+        sys     SYS_SHEETDRAW
+        jsr     resv
+        print   "  free sheet 3 (none): "
+        lda     #3
+        sys     SYS_SHEETFREE
+        jsr     res
+        lda     #'H'                    ; the child: our sheet refused, then the table full
+        jsr     kid
+        print   "  after the child's exit, new: "
+        ptr     shn_ok
+        sys     SYS_SHEETNEW
+        jsr     resv
+        lda     #3
+        sys     SYS_SHEETFREE
+        lda     #'J'                    ; the same, killed while it waits
+        jsr     kidk
+        print   "  after the child's kill, new: "
+        ptr     shn_ok
+        sys     SYS_SHEETNEW
+        jsr     resv
+        lda     #3
+        sys     SYS_SHEETFREE
+        print   "  1 x 1024 sheets until the rows run out: "
+        stz     z:t0
+:       ptr     shn_tall
+        sys     SYS_SHEETNEW
+        bcs     :+
+        inc     z:t0
+        bra     :-
+:       pha
+        lda     z:t0
+        jsr     put_dec
+        print   ", then "
+        pla
+        jsr     err
+        lda     #3                      ; (they are 3-5)
+:       pha
+        sys     SYS_SHEETFREE
+        pla
+        inc     a
+        cmp     #6
+        bcc     :-
+        sys     SYS_BALLOC              ; a sheet in a new bank, a list from it running
+        sta     z:bank2
+        sep     #$20
+        .a8
+        sta     shn_b2+2
+        rep     #$20
+        .a16
+        print   "  16 x 16 in a new bank: "
+        ptr     shn_b2
+        sys     SYS_SHEETNEW
+        sta     z:t1
+        jsr     resv
+        ldx     #0                      ; slst from it, the first waiting for the vertical blank
+:       sep     #$20
+        .a8
+        lda     z:t1
+        sta     slst+SD_SHEET,x
+        rep     #$20
+        .a16
+        txa
+        clc
+        adc     #16
+        tax
+        cpx     #100 * 16
+        bcc     :-
+        lda     #SH_KEY | SH_VBL
+        sep     #$20
+        .a8
+        sta     slst+SD_OP
+        rep     #$20
+        .a16
+        lda     z:wina
+        ora     #100 << 8
+        ptr     slst
+        sys     SYS_SHEETDRAW
+        lda     z:bank2
+        sys     SYS_BFREE
+        print   "  its bank freed: the list asked: "
+        lda     #1
+        sys     SYS_LISTWAIT
+        jsr     resv
+        print   "  its sheet: "
+        lda     z:wina
+        ora     #1 << 8
+        ptr     slst
+        sys     SYS_SHEETDRAW
+        jsr     resv
+        print   "  free it: "
+        lda     z:t1
+        sys     SYS_SHEETFREE
+        jsr     res
+        print   "  the picture, on the screen: "
+        lda     z:wina
+        ora     #PIC1N << 8
+        ptr     sd_pic1
+        sys     SYS_SHEETDRAW
+        jsr     resv
+        lda     #4                      ; (no direct drawing: into the window's bitmap)
+        sys     SYS_WSCONFIG
+        print   "  in the bitmap: "
+        lda     z:wina
+        ora     #PIC2N << 8
+        ptr     sd_pic2
+        sys     SYS_SHEETDRAW
+        jsr     resv
+        lda     #0
+        sys     SYS_LISTWAIT
+        lda     #0
+        sys     SYS_WSCONFIG
+        print   "  free sheet 1: "
+        lda     z:sh1
+        sys     SYS_SHEETFREE
+        jsr     res
+        print   "  sheet 2 again (its rows moved): "
+        lda     z:wina
+        ora     #PIC3N << 8
+        ptr     sd_pic3
+        sys     SYS_SHEETDRAW
+        jsr     resv
+        print   "  sheet 1 again: "
+        lda     z:wina
+        ora     #1 << 8
+        ptr     sd_pic1c
+        sys     SYS_SHEETDRAW
+        jsr     resv
+        print   "  free all: "
+        lda     #$FFFF
+        sys     SYS_SHEETFREE
+        jsr     res
+        print   "  sheet 2 then: "
+        lda     z:wina
+        ora     #1 << 8
+        ptr     sd_pic3
+        sys     SYS_SHEETDRAW
+        jsr     resv
+        lda     #0
+        sys     SYS_LISTWAIT
+        lda     #3000                   ; (tests/gtest.keys takes the second picture now)
+        sys     SYS_SLEEP
+        rts
+
+; the art: 32 x 32 at $3000 of the window (img in four quarters, each in other colours), img
+; at $0100 of the own bank
+mksheet:
+        ldy     #0                      ; y * 32 + x
+@p:     tya
+        and     #$000F                  ; img[(y & 15) * 16 + (x & 15)]
+        sta     z:t0
+        tya
+        lsr     a
+        and     #$00F0
+        ora     z:t0
+        tax
+        lda     img,x
+        and     #$00FF
+        beq     @put
+        sta     z:t0
+        tya                             ; + 24 * (x / 16 + 2 * (y / 16))
+        and     #$0010
+        lsr     a
+        lsr     a
+        lsr     a
+        lsr     a
+        sta     z:t1
+        tya
+        and     #$0200
+        xba
+        asl     a
+        ora     z:t1
+        sta     z:t1
+        asl     a
+        adc     z:t1
+        asl     a
+        asl     a
+        asl     a
+        adc     z:t0
+@put:   tyx
+        sep     #$20
+        .a8
+        sta     f:$003000,x             ; (the window: DBR is the code bank)
+        rep     #$20
+        .a16
+        iny
+        cpy     #32 * 32
+        bcc     @p
+        lda     z:bank
+        sta     z:p+2
+        lda     #$0100
+        sta     z:p
+        ldy     #0
+:       lda     img,y
+        sta     [p],y
+        iny
+        iny
+        cpy     #256
+        bcc     :-
+        rts
+
+; sheet_new with shn_ok's word at + X changed to A: the result (a sheet made is freed)
+shbad:  phx
+        pha
+        ldx     #8
+:       lda     shn_ok,x
+        sta     shn_t,x
+        dex
+        dex
+        bpl     :-
+        pla
+        plx
+        sta     shn_t,x
+        ptr     shn_t
+        sys     SYS_SHEETNEW
+        bcs     :+
+        pha
+        sys     SYS_SHEETFREE
+        pla
+        clc
+:       jmp     resv
+
+; one record of sd_bad (+ X): the result
+sdbad:  txa
+        clc
+        adc     #.loword(sd_bad)
+        tax
+        ldy     #^sd_bad
+        lda     z:wina
+        ora     #1 << 8
+        sys     SYS_SHEETDRAW
+        jmp     resv
+
+; slst: 100 records, keyed copies of sheet 1's top left 16 x 16 in a 10 x 10 grid (as mklist)
+mkslist:
+        ldx     #0
+        ldy     #0
+@r:     lda     #1 | (SH_KEY << 8)
+        sta     slst+SD_SHEET,x
+        stz     slst+SD_C,x
+        stz     slst+SD_SX,x
+        stz     slst+SD_SY,x
+        lda     #16
+        sta     slst+SD_W,x
+        sta     slst+SD_H,x
+        lda     lst+LR_X,y
+        sta     slst+SD_X,x
+        lda     lst+LR_Y,y
+        sta     slst+SD_Y,x
+        tya
+        clc
+        adc     #20
+        tay
+        txa
+        clc
+        adc     #16
+        tax
+        cpx     #100 * 16
+        bcc     @r
+        rts
 
 fail:   print   "gtest: no window system\n"
         exit    1
@@ -725,7 +1105,45 @@ child:  cmp     #'P'
         lda     #10000
         sys     SYS_SLEEP
 :       exit    0
-@f:     ptr     wc
+@f:     cmp     #'H'
+        beq     @h
+        cmp     #'J'
+        jne     @fs
+@h:     ptr     wc                      ; (0.19) sheets: the parent's refused, then the table
+        sys     SYS_WOPEN               ; filled; 'J' then waits to be killed
+        sta     z:wina
+        print   "  child: the parent's sheet 1: "
+        lda     z:wina
+        ora     #1 << 8
+        ptr     sd_good
+        sys     SYS_SHEETDRAW
+        jsr     resv
+        print   "  child: free it: "
+        lda     #1
+        sys     SYS_SHEETFREE
+        jsr     res
+        print   "  child: new until the table is full: "
+        stz     z:t0
+:       ptr     shn_ok
+        sys     SYS_SHEETNEW
+        bcs     :+
+        inc     z:t0
+        bra     :-
+:       pha
+        lda     z:t0
+        jsr     put_dec
+        print   ", then "
+        pla
+        jsr     err
+        ldx     z:argp
+        lda     f:0,x
+        and     #$00FF
+        cmp     #'J'
+        bne     :+
+        lda     #10000
+        sys     SYS_SLEEP
+:       exit    0
+@fs:    ptr     wc
         sys     SYS_WOPEN
         sta     z:wina
         print   "  child: enter: "
@@ -800,8 +1218,188 @@ measure:
         print   "list with LS_VBL: 1 draw_list a frame, in the call "
         lda     z:busy
         jsr     put_us60
+        ptr     shn_m                   ; (0.19) the same as sheet_draw records (sheet 1: the
+        sys     SYS_SHEETNEW            ; image at $2000)
+        jsr     mkslist
+        lda     #1 | (SH_KEY << 8)
+        ldx     #100
+        jsr     msheet
+        print   "sheets: 1 sheet_draw a frame, CPU "
+        lda     z:busy
+        jsr     put_us60
+        lda     #1 | ((SH_KEY | SH_VBL) << 8)
+        ldx     #100
+        jsr     msheet
+        print   "sheets with SH_VBL: 1 sheet_draw a frame, in the call "
+        lda     z:busy
+        jsr     put_us60
+        lda     #1 | (SH_KEY << 8)      ; one record a call: a call's own cost (the difference
+        ldx     #1                      ; to 100 is 99 records')
+        jsr     msheet
+        print   "sheets, 1 record: 1 sheet_draw a frame, CPU "
+        lda     z:busy
+        jsr     put_us60
+        lda     #LS_KEY
+        sta     lst+LR_OP
+        lda     #1
+        jsr     mlistn
+        print   "list, 1 record: 1 draw_list a frame, CPU "
+        lda     z:busy
+        jsr     put_us60
+        ldx     #0                      ; (0.19) the CPU's part exactly (uptime counts in 10 ms
+:       lda     #1                      ; steps): 1 x 1 records (Ali's part next to nothing),
+        sta     lst+LR_W,x              ; 500 calls, each followed by a loop of 0.5 ms (Ali
+        sta     lst+LR_H,x              ; done meanwhile), less 500 loops alone
+        txa
+        clc
+        adc     #20
+        tax
+        cpx     #100 * 20
+        bcc     :-
+        ldx     #0
+:       lda     #1
+        sta     slst+SD_W,x
+        sta     slst+SD_H,x
+        txa
+        clc
+        adc     #16
+        tax
+        cpx     #100 * 16
+        bcc     :-
+        lda     #1 | (SH_KEY << 8)
+        sta     slst+SD_SHEET
+        print   "500 calls of 100 records 1 x 1: draw_list "
+        lda     #100
+        ldx     #0
+        jsr     mexact
+        print   " us a call, sheet_draw "
+        lda     #100
+        ldx     #1
+        jsr     mexact
+        print   " us a call\n2000 calls of 1 record: draw_list "
+        lda     #1
+        ldx     #$8000
+        jsr     mexact
+        print   " us a call, sheet_draw "
+        lda     #1
+        ldx     #$8001
+        jsr     mexact
+        print   " us a call\n"
         sys     SYS_WSSTOP
         exit    0
+; 500 calls (X bit 15: 2000) of A records (X bit 0 = 0: draw_list of lst, 1: sheet_draw of
+; slst), each followed by the loop: the microseconds a call takes (printed): (time - the
+; loops' time) * 1000 / calls
+mexact: xba
+        ora     z:wina
+        sta     z:t1
+        stx     z:t3
+        lda     #500
+        cpx     #$8000
+        bcc     :+
+        lda     #2000
+:       sta     z:t4
+        lda     #0
+        sys     SYS_LISTWAIT
+        jsr     mloops                  ; the loops alone
+        sta     z:busy
+        sys     SYS_UPTIME
+        sta     z:t0
+        lda     z:t4
+        sta     z:t2
+@c:     lda     z:t3
+        and     #1
+        bne     @s
+        lda     z:t1
+        ptr     lst
+        sys     SYS_DRAWLIST
+        bra     @w
+@s:     lda     z:t1
+        ptr     slst
+        sys     SYS_SHEETDRAW
+@w:     jsr     mloop
+        dec     z:t2
+        bne     @c
+        sys     SYS_UPTIME
+        sec
+        sbc     z:t0
+        sec
+        sbc     z:busy
+        ldx     z:t3                    ; us a call: * 2 (500 calls), / 2 (2000)
+        bmi     :+
+        asl     a
+        jmp     put_dec
+:       lsr     a
+        jmp     put_dec
+; z:t4 loops -> A = ms
+mloops: sys     SYS_UPTIME
+        sta     z:t0
+        lda     z:t4
+        sta     z:t2
+:       jsr     mloop
+        dec     z:t2
+        bne     :-
+        sys     SYS_UPTIME
+        sec
+        sbc     z:t0
+        rts
+mloop:  ldx     #1435                   ; about 0.5 ms (5 cycles a turn)
+:       dex
+        bne     :-
+        rts
+; 60 frames of one sheet_draw of X records (A: the first record's sheet | op << 8): z:busy = ms
+; in sheet_draw
+msheet: sta     slst+SD_SHEET
+        txa
+        xba
+        ora     z:wina
+        sta     z:t1
+        lda     #60
+        sta     z:t2
+        stz     z:busy
+        sys     SYS_VSYNC
+@ls:    lda     #0
+        sys     SYS_LISTWAIT
+        sys     SYS_UPTIME
+        sta     z:t0
+        lda     z:t1
+        ptr     slst
+        sys     SYS_SHEETDRAW
+        sys     SYS_UPTIME
+        sec
+        sbc     z:t0
+        clc
+        adc     z:busy
+        sta     z:busy
+        sys     SYS_VSYNC
+        dec     z:t2
+        bne     @ls
+        rts
+; 60 frames of one draw_list of A records: z:busy = ms in draw_list
+mlistn: xba
+        ora     z:wina
+        sta     z:t1
+        lda     #60
+        sta     z:t2
+        stz     z:busy
+        sys     SYS_VSYNC
+@ls:    lda     #0
+        sys     SYS_LISTWAIT
+        sys     SYS_UPTIME
+        sta     z:t0
+        lda     z:t1
+        ptr     lst
+        sys     SYS_DRAWLIST
+        sys     SYS_UPTIME
+        sec
+        sbc     z:t0
+        clc
+        adc     z:busy
+        sta     z:busy
+        sys     SYS_VSYNC
+        dec     z:t2
+        bne     @ls
+        rts
 ; 60 frames of one list (A: the first record's op and flags): z:busy = ms in draw_list
 mlist:  sta     lst+LR_OP
         lda     #60
@@ -1070,6 +1668,58 @@ lst3:   .byte   LS_FILL, 0, C_RED, 0
         .word   2, 0
 expd:   .byte   $3C, $00, $42, $00, $81, $00, $FF, $C0, $81, $40, $81, $40, $42, $80, $3C, $00
 
+; (0.19) sheets: sheet_new blocks; sheet_draw records
+.macro  srec    p_sh, p_op, p_c, p_sx, p_sy, p_w, p_h, p_x, p_y
+        .byte   p_sh, p_op, p_c, 0
+        .word   p_sx, p_sy, p_w, p_h, (p_x) & $FFFF, (p_y) & $FFFF
+.endmacro
+shn_ok: .faraddr $003000                ; 32 x 32 in the window
+        .byte   0
+        .word   32, 32, 32
+shn_tall: .faraddr $003000              ; 1 x 1024 (rows: 4096 for all sheets)
+        .byte   0
+        .word   1, 1, 1024
+sd_bad: srec    1, SH_COPY, 0, 20, 0, 16, 16, 0, 0          ; sx + w past
+        srec    1, SH_COPY, 0, 0, 17, 16, 16, 0, 0          ; sy + h past
+        srec    1, SH_COPY, 0, $FFF8, 0, 16, 16, 0, 0       ; overflowing
+        srec    0, SH_KEY, 0, 0, 0, 16, 16, 0, 0            ; sheet 0
+        srec    33, SH_COPY, 0, 0, 0, 16, 16, 0, 0          ; sheet 33
+        srec    1, 3, 0, 0, 0, 16, 16, 0, 0                 ; op 3
+sd_good: srec   1, SH_COPY, 0, 0, 0, 16, 16, 0, 0           ; (a good one: the child's)
+sd_out: srec    1, SH_COPY | SH_VBL, 0, 0, 0, 16, 16, 300, 0 ; right of the content
+        srec    1, SH_COPY, 0, 0, 0, 16, 0, 0, 0            ; empty
+sd_fills: .repeat 12
+        srec    0, SH_FILL, 21, 0, 0, 640, 360, -50, -50    ; (clipped: 40,000 pixels each)
+        .endrepeat
+; the picture: the background (it waits for the vertical blank), 16 copies and keyed copies of
+; the quarters (the fast path), a 32 x 32 one, three cut at the edges, a fill, the own bank's
+; sheet, an empty one
+sd_pic1: srec   0, SH_FILL | SH_VBL, 20, 0, 0, 200, 200, 0, 0
+sd_pic1c:
+        .repeat 16, I
+        srec    1, 1 + (I / 4) .mod 2, 0, (I .mod 2) * 16, ((I / 2) .mod 2) * 16, 16, 16, 8 + (I .mod 4) * 20, 8 + (I / 4) * 20
+        .endrepeat
+        srec    1, SH_COPY, 0, 0, 0, 32, 32, 100, 8
+        srec    1, SH_KEY, 0, 0, 0, 32, 32, -10, 100
+        srec    1, SH_KEY, 0, 8, 8, 24, 24, 185, 100
+        srec    1, SH_COPY, 0, 16, 16, 16, 16, 60, 192
+        srec    0, SH_FILL, 40, 0, 0, 30, 6, 140, 60
+        srec    2, SH_KEY, 0, 0, 0, 16, 16, 140, 70
+        srec    1, SH_COPY, 0, 0, 0, 0, 16, 10, 10
+PIC1N = (* - sd_pic1) / 16
+; into the bitmap (no direct drawing): a row of keyed copies, one cut, a fill
+sd_pic2: .repeat 8, I
+        srec    1, SH_KEY, 0, (I .mod 2) * 16, ((I / 2) .mod 2) * 16, 16, 16, 8 + I * 24, 130
+        .endrepeat
+        srec    1, SH_KEY, 0, 0, 16, 16, 16, -4, 150
+        srec    0, SH_FILL, 50, 0, 0, 40, 4, 100, 155
+PIC2N = (* - sd_pic2) / 16
+; after sheet 1 was freed: sheet 2's rows moved down in the kernel's table
+sd_pic3: srec   2, SH_KEY, 0, 0, 0, 16, 16, 20, 170
+        srec    2, SH_COPY, 0, 4, 4, 8, 8, 44, 174
+        srec    2, SH_KEY, 0, 0, 8, 16, 8, 60, 178
+PIC3N = (* - sd_pic3) / 16
+
         .segment "DATA"
 fsb:    .byte   FS_320X8, 0
         .word   320, 204
@@ -1102,11 +1752,22 @@ wd_sw:  .byte   WD_FILL, 0, 0, 0
 wdb:    .byte   WD_KBLIT, 0, 0, 0
         .word   0, 0, 16, 16
         .faraddr $002000
+shn_t:  .res    10                      ; (0.19) a sheet_new block being changed
+shn_bk: .faraddr $000100                ; 16 x 16 in the own bank (its bank at run time)
+        .byte   0
+        .word   16, 16, 16
+shn_b2: .faraddr $000100                ; the same in a second bank
+        .byte   0
+        .word   16, 16, 16
+shn_m:  .faraddr $002000                ; gtest m: the image, 16 x 16
+        .byte   0
+        .word   16, 16, 16
 
         .segment "BSS"
 ev:     .res    8
 lst:    .res    100 * 20
 lst1:   .res    20 * 13
+slst:   .res    100 * 16                ; (0.19) sheet_draw records
 
         .segment "ZEROPAGE"
 alen:   .res    2
@@ -1119,4 +1780,9 @@ busy:   .res    2
 t0:     .res    2
 t1:     .res    2
 t2:     .res    2
+t3:     .res    2
+t4:     .res    2
 p:      .res    4
+sh1:    .res    2                       ; (0.19) sheets
+sh2:    .res    2
+bank2:  .res    2

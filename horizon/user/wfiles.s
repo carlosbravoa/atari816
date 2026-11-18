@@ -98,7 +98,8 @@ start:  sta     argl
 :       jsr     redraw
 
 ; ---------------------------------------------------------------- events
-loop:   lda     #0
+loop:   jsr     fdcheck                 ; (0.19) the selected entry's date on the footer
+        lda     #0
         jsr     ui_getev
         bcs     loop
         ldx     #6
@@ -1092,20 +1093,7 @@ ontick: lda     z:win                   ; (back to the slow period)
         inx
         cpx     #200
         bcc     :-
-        lda     #.loword(fbuf)          ; (built as footer does)
-        sta     z:bp
-        ldx     #.loword(s_d1)
-        jsr     app
-        lda     #0
-        jsr     item
-        ldx     #.loword(s_xex)
-        jsr     app
-        lda     #4
-        jsr     item
-        ldx     #.loword(s_cart)
-        jsr     app
-        lda     #5
-        jsr     item
+        jsr     fbuild                  ; (built as footer does)
         ldx     #0
 :       lda     fbuf,x
         cmp     fbuf2,x
@@ -1590,6 +1578,125 @@ delete: lda     z:n
         jsr     reload
         jmp     loop
 
+; ---------------------------------------------------------------- the footer's date
+; (0.19) when the selection changed: STAT the selected entry (not "..") and put
+; "Modified YYYY-MM-DD HH:MM" after what is mounted (cut where the window is narrow)
+fdcheck:
+        lda     z:sel
+        cmp     fdsel
+        bne     :+
+        rts
+:       sta     fdsel
+        stz     fdtxt
+        lda     z:n
+        jeq     @draw
+        ldx     z:sel
+        jsr     isup
+        jcs     @draw
+        ldx     z:sel
+        jsr     rec
+        jsr     recname
+        jsr     fullname                ; (this window's folder: not the task's current one)
+        jcs     @draw
+        lda     #.loword(pth)
+        sta     fdblk
+        lda     #.loword(fdst)
+        sta     fdblk+3
+        sep     #$20
+        .a8
+        lda     #^pth
+        sta     fdblk+2
+        lda     #^fdst
+        sta     fdblk+5
+        rep     #$20
+        .a16
+        ptr     fdblk
+        sys     SYS_STAT
+        jcs     @draw
+        ldx     #0
+:       lda     s_mod,x                 ; "Modified "
+        sta     fdtxt,x
+        inx
+        inx
+        cpx     #10
+        bcc     :-
+        ldx     #9
+        lda     fdst+7                  ; FAT date: year - 1980 << 9 | month << 5 | day
+        xba
+        lsr     a
+        and     #$007F
+        sec
+        sbc     #20                     ; (years 2000-2099: "20" and two digits)
+        bcs     :+
+        lda     #0
+:       pha
+        lda     #'2' | ('0' << 8)
+        sta     fdtxt,x
+        inx
+        inx
+        pla
+        jsr     fd2
+        lda     #'-'
+        jsr     fdc
+        lda     fdst+7
+        lsr     a
+        lsr     a
+        lsr     a
+        lsr     a
+        lsr     a
+        and     #$000F
+        jsr     fd2
+        lda     #'-'
+        jsr     fdc
+        lda     fdst+7
+        and     #$001F
+        jsr     fd2
+        lda     #' '
+        jsr     fdc
+        lda     fdst+5                  ; FAT time: hour << 11 | minute << 5 | second / 2
+        xba
+        lsr     a
+        lsr     a
+        lsr     a
+        and     #$001F
+        jsr     fd2
+        lda     #':'
+        jsr     fdc
+        lda     fdst+5
+        lsr     a
+        lsr     a
+        lsr     a
+        lsr     a
+        lsr     a
+        and     #$003F
+        jsr     fd2
+        stz     fdtxt,x
+@draw:  lda     z:msg                   ; (a message stays until the next key or click)
+        bne     :+
+        jsr     footer
+:       rts
+; A (0-99) as two digits at fdtxt + X
+fd2:    ldy     #'0'
+:       cmp     #10
+        bcc     :+
+        sbc     #10
+        iny
+        bra     :-
+:       pha
+        tya
+        jsr     fdc
+        pla
+        clc
+        adc     #'0'
+; the character A at fdtxt + X
+fdc:    sep     #$20
+        .a8
+        sta     fdtxt,x
+        rep     #$20
+        .a16
+        inx
+        rts
+
 ; ---------------------------------------------------------------- selection
 ; A = signed step: move the selection, clamped
 move:   clc
@@ -1971,7 +2078,9 @@ geom:   lda     z:ch
 
 ; ---------------------------------------------------------------- the directory
 ; read the current folder into the bank, sorted
-load:   stz     z:n
+load:   lda     #$FFFF                  ; (0.19) the footer's date: looked at again
+        sta     fdsel
+        stz     z:n
         stz     z:heap
         stz     z:sel
         stz     z:top
@@ -2341,7 +2450,10 @@ redraw: jsr     header
         jsr     list
         ; fall through
 footer: stz     z:msg                   ; what is mounted (it replaces a message)
-        lda     #.loword(fbuf)
+        jsr     fbuild
+        bra     footer_draw
+; fbuf <- what is mounted, and (0.19) the selected entry's modification time if it fits
+fbuild: lda     #.loword(fbuf)
         sta     z:bp
         ldx     #.loword(s_d1)
         jsr     app
@@ -2355,7 +2467,31 @@ footer: stz     z:msg                   ; what is mounted (it replaces a message
         jsr     app
         lda     #5
         jsr     item
-        ; fall through
+        lda     fdtxt
+        and     #$00FF
+        beq     @r
+        lda     z:bp                    ; (left out when it does not fit whole)
+        sta     fdcut
+        ldx     #.loword(s_gap)
+        jsr     app
+        ldx     #.loword(fdtxt)
+        jsr     app
+        ldx     #.loword(fbuf)
+        ldy     #^fbuf
+        lda     #0
+        sys     SYS_WTWIDTH
+        clc
+        adc     #8
+        cmp     z:cw
+        bcc     @r
+        beq     @r
+        ldx     fdcut
+        sep     #$20
+        .a8
+        stz     a:0,x
+        rep     #$20
+        .a16
+@r:     rts
 footer_draw:
         lda     z:ch                    ; a line, the bar, the text (red for a message)
         sec
@@ -2901,6 +3037,8 @@ app_dec:
         rts
 
         .segment "RODATA"
+s_mod:  .byte   "Modified ", 0
+s_gap:  .byte   "   ", 0
 wopen:  .word   WX, WY, WW, WH
         .faraddr t_files
         .byte   WF_RESIZE
@@ -3085,6 +3223,11 @@ prefix: .res    32
 tbuf:   .res    130
 hbuf:   .res    220
 fbuf:   .res    200
+fdsel:  .res    2                       ; (0.19) the entry the footer's date is of
+fdcut:  .res    2                       ; where the date starts in fbuf
+fdtxt:  .res    32                      ; (0.19) "Modified YYYY-MM-DD HH:MM"
+fdst:   .res    10                      ; its STAT
+fdblk:  .res    6
 fbuf2:  .res    200
 sbuf:   .res    16
 pth:    .res    PMAX

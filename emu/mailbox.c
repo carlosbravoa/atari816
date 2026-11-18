@@ -15,6 +15,7 @@
 #include <sys/stat.h>
 #include <time.h>
 #include <unistd.h>
+#include <fcntl.h>
 
 enum { FR_OK, FR_DISK_ERR, FR_INT_ERR, FR_NOT_READY, FR_NO_FILE, FR_NO_PATH, FR_INVALID_NAME,
        FR_DENIED, FR_EXIST, FR_INVALID_OBJECT, FR_WRITE_PROTECTED, FR_INVALID_DRIVE,
@@ -24,9 +25,74 @@ enum { MB_BAD_HANDLE = 0x80, MB_BAD_ADDR = 0x81, MB_UNSUPPORTED = 0x82 };
 
 #define MAXPATH 128                 /* the firmware's path buffer */
 
+/* ── The firmware's clock for file dates (SYS_TIME, $1D) ──────────────────────────────────
+ * Horizon gives the time (seconds since 2000-01-01 00:00, local); the I/O processor counts on
+ * from it and FatFs stamps files with it (get_fattime). Here the count is emulated time, and
+ * a file the 65C816 created or wrote gets that time as its host modification time when it
+ * is closed (FatFs writes the date at f_close / f_sync), so runs are deterministic. Before
+ * the time is given: EMU_BUILD_DATE (the firmware uses its build date). It survives restarts
+ * of the 65C816, as the I/O processor's does. */
+#define EMU_BUILD_DATE 820540800u           /* 2026-01-01 00:00, in seconds since 2000-01-01 */
+static int host_path(const char *fat, char *out, size_t n);
+static int      clk_set;
+static uint32_t clk_base;
+static uint64_t clk_cyc;
+/* the cartridge (CLASSIC_STATE, $1E): survives restarts of the 65C816 as the firmware's does */
+static char     cart_path[MAXPATH];
+static uint32_t cart_size;
+const char     *mailbox_boot_cart;          /* --boot-cart: loaded "by the firmware" at power-on */
+
+static time_t fw_now(void)
+{
+    uint32_t s = clk_set ? clk_base + (uint32_t)((M.cpu.cycles - clk_cyc) / CPU_HZ) : EMU_BUILD_DATE;
+    struct tm tm = { .tm_year = 100, .tm_mon = 0, .tm_mday = 1, .tm_isdst = -1 };
+    time_t t0 = mktime(&tm);               /* 2000-01-01 00:00 local */
+    tm = (struct tm){ 0 };
+    localtime_r(&t0, &tm);
+    tm.tm_sec += s;                        /* normalised by mktime, local time */
+    tm.tm_isdst = -1;
+    return mktime(&tm);
+}
+
+/* --card-date: the date STAT reports for every file not created or written in this run (the
+ * test cards are fresh copies, so their host dates say nothing); the files this run stamped */
+time_t        mailbox_card_date;
+static char **stamped;
+static int    nstamped;
+
+static int was_stamped(const char *host)
+{
+    for (int i = 0; i < nstamped; i++) if (!strcmp(stamped[i], host)) return 1;
+    return 0;
+}
+
+static void stamp(const char *host)
+{
+    if (mailbox_card_date && !was_stamped(host) && nstamped < 4096) {
+        char **n = realloc(stamped, (nstamped + 1) * sizeof *n);
+        if (n) { stamped = n; stamped[nstamped++] = strdup(host); }
+    }
+    struct timespec ts[2];
+    ts[0].tv_sec = ts[1].tv_sec = fw_now();
+    ts[0].tv_nsec = ts[1].tv_nsec = 0;
+    utimensat(AT_FDCWD, host, ts, 0);
+}
+
+static void close_file(Mailbox *m, int i)
+{
+    if (!m->f[i]) return;
+    int bad = fclose(m->f[i]);
+    m->f[i] = NULL;
+    if (m->fdirty[i] && m->fhost[i]) stamp(m->fhost[i]);
+    free(m->fhost[i]);
+    m->fhost[i] = NULL;
+    m->fdirty[i] = 0;
+    (void)bad;
+}
+
 static void close_all(Mailbox *m)
 {
-    for (int i = 0; i < MB_FILES; i++) if (m->f[i]) { fclose(m->f[i]); m->f[i] = NULL; }
+    for (int i = 0; i < MB_FILES; i++) close_file(m, i);
 }
 
 void mailbox_reset(void)
@@ -45,6 +111,18 @@ void mailbox_reset(void)
     m->kb_now_mods = nm;
     m->ms_btn = m->ms_btn_sent = btn;
     m->next_poll = M.cpu.cycles + MB_POLL;
+    /* power-on, or a full restart: the firmware loads the boot cartridge (boot=ash) */
+    if (!M.cpu.cycles || restart == 2) {
+        cart_size = 0; cart_path[0] = 0;
+        char host[4096];
+        struct stat st;
+        if (mailbox_boot_cart && root && !host_path(mailbox_boot_cart, host, sizeof host) && !stat(host, &st)) {
+            snprintf(cart_path, sizeof cart_path, "%s", mailbox_boot_cart);
+            cart_size = (uint32_t)st.st_size;
+            const char *e = strrchr(cart_path, '.');
+            if (e && !strcasecmp(e, ".CAR") && cart_size >= 16) cart_size -= 16;
+        }
+    }
 }
 
 int mailbox_pending(void) { return M.mb.rsp_head != M.mb.rsp_tail; }
@@ -204,18 +282,21 @@ static void serve(Mailbox *m, uint8_t *msg)
         FILE *nf = fopen(host, mode[fl]);
         if (!nf) { res = errno_fr(errno, host); break; }
         m->f[h] = nf; m->fmode[h] = rw[fl]; val = h;
+        m->fhost[h] = strdup(host);
+        m->fdirty[h] = fl >= 2;                          /* created (or appended): dated at close */
         break;
     }
     case 0x02:                                           /* CLOSE */
         if (!f) { res = MB_BAD_HANDLE; break; }
-        if (fclose(f)) res = FR_DISK_ERR;
-        m->f[arg0] = NULL;
+        if (ferror(f)) res = FR_DISK_ERR;
+        close_file(m, arg0);
         break;
     case 0x03: case 0x04:                                /* READ, WRITE */
         if (!f) { res = MB_BAD_HANDLE; break; }
         if (!(m->fmode[arg0] & (msg[0] == 0x04 ? 2 : 1))) { res = FR_DENIED; break; }
         fseek(f, 0, SEEK_CUR);                           /* allow switching read/write */
         val = xfer(f, buf, len, msg[0] == 0x04, &res);
+        if (msg[0] == 0x04 && val) m->fdirty[arg0] = 1;
         break;
     case 0x05:                                           /* SEEK */
         if (!f) { res = MB_BAD_HANDLE; break; }
@@ -234,7 +315,8 @@ static void serve(Mailbox *m, uint8_t *msg)
         const char *q = path; while (*q == '/') q++;
         if (!*q) { res = FR_INVALID_NAME; break; }       /* FatFs cannot stat the root */
         if (stat(host, &st)) { res = errno_fr(errno, host); break; }
-        uint32_t sz = S_ISDIR(st.st_mode) ? 0 : (uint32_t)st.st_size, t = fat_time(st.st_mtime);
+        uint32_t sz = S_ISDIR(st.st_mode) ? 0 : (uint32_t)st.st_size;
+        uint32_t t = fat_time(mailbox_card_date && !was_stamped(host) ? mailbox_card_date : st.st_mtime);
         o[0] = sz; o[1] = sz >> 8; o[2] = sz >> 16; o[3] = sz >> 24;
         o[4] = fat_attr(host, &st);
         o[5] = t; o[6] = t >> 8; o[7] = t >> 16; o[8] = t >> 24;
@@ -278,7 +360,7 @@ static void serve(Mailbox *m, uint8_t *msg)
     case 0x08: case 0x09:                                /* MKDIR, DELETE */
         if (!mb_path(buf, path, sizeof path)) { res = MB_BAD_ADDR; break; }
         if ((res = host_path(path, host, sizeof host))) break;
-        if (msg[0] == 0x08) { if (mkdir(host, 0777)) res = errno_fr(errno, host); }
+        if (msg[0] == 0x08) { if (mkdir(host, 0777)) res = errno_fr(errno, host); else stamp(host); }
         else if (!lstat(host, &st) && S_ISDIR(st.st_mode)) { if (rmdir(host)) res = errno_fr(errno, host); }
         else if (unlink(host)) res = errno_fr(errno, host);
         break;
@@ -289,6 +371,14 @@ static void serve(Mailbox *m, uint8_t *msg)
         if (lstat(host, &st)) { res = errno_fr(errno, host); break; }
         if (!lstat(hto, &st)) { res = FR_EXIST; break; }
         if (rename(host, hto)) res = errno_fr(errno, hto);
+        else if (mailbox_card_date && was_stamped(host)) {   /* FatFs keeps the date */
+            struct stat s2;
+            if (!stat(hto, &s2)) {
+                struct timespec ts[2] = { s2.st_atim, s2.st_mtim };
+                stamp(hto);
+                utimensat(AT_FDCWD, hto, ts, 0);
+            }
+        }
         break;
     }
     case 0x10: {                                         /* LOAD whole file to ARG0 */
@@ -326,7 +416,7 @@ static void serve(Mailbox *m, uint8_t *msg)
             }
             if (kind < 1 || kind > 3 || s >= 4) { res = 0x83; goto cl_log; }
             if (msg[0] == 0x19) {                        /* EJECT */
-                if (kind == 3) m->cl_cart = 0;
+                if (kind == 3) { m->cl_cart = 0; cart_size = 0; cart_path[0] = 0; }
                 else {
                     if (!s) m->cl_xex = 0;
                     if (kind == 1) m->cl_disk[s] = 0;
@@ -338,7 +428,13 @@ static void serve(Mailbox *m, uint8_t *msg)
             if (S_ISDIR(st.st_mode)) { res = FR_NO_FILE; goto cl_log; }
             if (kind == 1) { m->cl_disk[s] = 1; if (!s) m->cl_xex = 0; }
             else if (kind == 2) { m->cl_xex = 1; m->cl_disk[0] = 0; }
-            else m->cl_cart = 1;
+            else {
+                m->cl_cart = 1;
+                snprintf(cart_path, sizeof cart_path, "%s", path);
+                cart_size = (uint32_t)st.st_size;          /* (.CAR: the firmware leaves out its 16-byte header) */
+                const char *e = strrchr(path, '.');
+                if (e && !strcasecmp(e, ".CAR") && cart_size >= 16) cart_size -= 16;
+            }
             val = kind;
         }
     cl_log:
@@ -358,6 +454,21 @@ static void serve(Mailbox *m, uint8_t *msg)
         /* the firmware flushes and closes everything on the card: here, close the files */
         close_all(m);
         fprintf(stderr, "emu816: SYS_SYNC -> 00\n");
+        break;
+    case 0x1D:                                           /* SYS_TIME: the clock for file dates */
+        clk_set = 1;
+        clk_base = arg0;
+        clk_cyc = M.cpu.cycles;
+        break;
+    case 0x1E:                                           /* CLASSIC_STATE: ARG0 5 = the cartridge */
+        if (arg0 != 5) { res = 0x83; break; }
+        if (!cart_size) break;
+        val = cart_size;
+        if (len) {
+            uint32_t n = (uint32_t)strlen(cart_path);
+            if (n > len - 1) n = len - 1;
+            if (!mb_put(buf, (const uint8_t *)cart_path, n) || !mb_put(buf + n, (const uint8_t *)"", 1)) res = MB_BAD_ADDR;
+        }
         break;
     default:                                             /* MOUNT, UNMOUNT, TIME, ... */
         res = MB_UNSUPPORTED;
@@ -398,7 +509,7 @@ static int mouse_event(Mailbox *m)
     int dx = clamp127(m->ms_dx), dy = clamp127(m->ms_dy), dw = clamp127(m->ms_wheel);
     uint8_t e[16] = { 0xE1, 0, 0, 0, 0, 0, 0, 0, (uint8_t)dx, (uint8_t)dy, (uint8_t)dw, 0, m->ms_btn, 0, 0, 0 };
     if (mb_put(m->rsp_base + m->rsp_head * 16u, e, 16)) {
-        m->rsp_head++;
+        m->rsp_head++; memtime_sweep();
         m->ms_dx -= dx; m->ms_dy -= dy; m->ms_wheel -= dw; m->ms_btn_sent = m->ms_btn;
         m->n_mouseev++;
         machine_update_irq();
@@ -427,7 +538,7 @@ static int key_event(Mailbox *m)
     }
     if (!usage) return 0;
     uint8_t e[16] = { 0xE0, 0, 0, 0, 0, 0, 0, 0, usage, 0, 0, 0, m->kb_mods, down, 0, 0 };
-    if (mb_put(m->rsp_base + m->rsp_head * 16u, e, 16)) m->rsp_head++;
+    if (mb_put(m->rsp_base + m->rsp_head * 16u, e, 16)) { m->rsp_head++; memtime_sweep(); }
     m->n_keyev++;
     machine_update_irq();
     return 1;
@@ -455,7 +566,7 @@ void mailbox_poll(uint64_t now)
     if (!mb_get(m->req_base + m->req_tail * 16u, msg, 16)) { m->error = 1; return; }
     serve(m, msg);
     if (!mb_put(m->rsp_base + m->rsp_head * 16u, msg, 16)) { m->error = 1; return; }
-    m->rsp_head++;
+    m->rsp_head++; memtime_sweep();
     m->req_tail++;
     machine_update_irq();
 }

@@ -21,6 +21,10 @@
 ; There PUT, COPY, FRECT and GCLS become draw list records for Ali (WIN_DL), sent at VSYNC
 ; (the first record waits for the vertical blank), when the list is full, and before the CPU
 ; draws (dl_sync: a drawing statement of the CPU waits for Ali's list).
+; (Horizon 0.19) Each picture bank is also a sheet (64 x 1024, made with the bank): PUT and the
+; fills become sheet_draw records (16 bytes), which the kernel checks and makes far cheaper;
+; COPY stays a draw_list record (LS_MOVE). The list holds one kind at a time: a record of the
+; other kind sends the records before it first (as a full list does).
 
         .segment "CODE"
         .a16
@@ -79,6 +83,7 @@ pic_addr:
         pla
         err     E_MEM
 @got:   sta     pbk,x
+        jsr     pb_sheet                ; (0.19) the bank as a sheet
 :       sta     z:cp+2
         pla
         and     #$000F
@@ -88,6 +93,26 @@ pic_addr:
         asl     a
         asl     a
         sta     z:cp
+        rts
+
+; (0.19) bank A (picture bank X / 2) as a sheet for PUT in full screen: 64 wide, stride 64,
+; 1024 rows (16 pictures of 64); pbsh = 0 if the kernel refuses (PUT then uses draw_list)
+pb_sheet:
+        phx
+        stz     pb_blk
+        sta     pb_blk+2                ; (the bank, then 0)
+        lda     #64
+        sta     pb_blk+4
+        sta     pb_blk+6
+        lda     #1024
+        sta     pb_blk+8
+        ptr     pb_blk
+        sys     SYS_SHEETNEW
+        bcc     :+
+        lda     #0
+:       plx
+        sta     pbsh,x
+        lda     pbk,x
         rts
 
 ; picture A emptied (z:cp its pixels)
@@ -459,7 +484,44 @@ st_put:
 @done:  jsr     blk_dirty
         jmp     stmt_end
 @fs:    jsr     blk_dirty               ; full screen: a record for Ali
-        lda     #LS_COPY
+        lda     gt_p                    ; (0.19) from its bank's sheet: a sheet_draw record
+        lsr     a
+        lsr     a
+        lsr     a
+        lsr     a
+        asl     a
+        tax
+        lda     pbsh,x
+        beq     @dlr
+        sta     pt_sh
+        lda     #SH_COPY
+        ldx     pt_key
+        bmi     :+
+        lda     #SH_KEY
+:       xba
+        ora     pt_sh
+        sta     dl_rec                  ; sheet, op
+        lda     pt_key                  ; the key, 0
+        and     #$00FF
+        sta     dl_rec+SD_C
+        stz     dl_rec+SD_SX
+        lda     gt_p                    ; its first row in the bank: (p mod 16) * 64
+        and     #$000F
+        xba
+        lsr     a
+        lsr     a
+        sta     dl_rec+SD_SY
+        lda     bw
+        sta     dl_rec+SD_W
+        lda     bh
+        sta     dl_rec+SD_H
+        lda     bx
+        sta     dl_rec+SD_X
+        lda     by
+        sta     dl_rec+SD_Y
+        jsr     dl_pushs
+        jmp     stmt_end
+@dlr:   lda     #LS_COPY
         ldx     pt_key
         bmi     :+
         lda     #LS_KEY
@@ -712,8 +774,22 @@ blk_cdirty:
 
 ; ---------------------------------------------------------------- the draw list
 ; dl_rec (20 bytes) -> the list; a full list, or one over 460,800 pixels, is sent first
+; (0.19: dl_pushs, a sheet_draw record of 16 bytes; records of the other kind are sent first)
 dl_push:
-        lda     dl_rec+LR_W
+        lda     #1                      ; draw_list's
+        bra     dl_pushk
+dl_pushs:
+        lda     #2                      ; sheet_draw's
+dl_pushk:
+        sta     dl_k
+        lda     dl_n
+        beq     :+
+        lda     dl_kind
+        cmp     dl_k
+        beq     :+
+        lda     #0
+        jsr     dl_submit
+:       lda     dl_rec+LR_W             ; (w and h at the same places in both)
         ldx     dl_rec+LR_H
         jsr     umul16
         sta     dl_pa
@@ -735,7 +811,9 @@ dl_push:
         bcc     :+
         lda     #0
         jsr     dl_submit
-:       ldx     dl_off
+:       lda     dl_k
+        sta     dl_kind
+        ldx     dl_off
         ldy     #0
 :       lda     dl_rec,y
         sta     f:WIN_DL,x
@@ -743,9 +821,20 @@ dl_push:
         inx
         iny
         iny
-        cpy     #20
+        cpy     #16
         bcc     :-
-        stx     dl_off
+        lda     dl_k                    ; (draw_list's: 20 bytes)
+        cmp     #2
+        beq     :+
+        lda     dl_rec+16
+        sta     f:WIN_DL,x
+        lda     dl_rec+18
+        sta     f:WIN_DL+2,x
+        inx
+        inx
+        inx
+        inx
+:       stx     dl_off
         inc     dl_n
         lda     dl_px
         clc
@@ -760,7 +849,13 @@ dl_push:
 dl_submit:
         ldx     dl_n
         beq     @out
-        a8
+        ldx     dl_kind                 ; (0.19) sheet records: SH_VBL in the op byte
+        cpx     #2
+        bne     :+
+        cmp     #0
+        beq     :+
+        lda     #SH_VBL
+:       a8
         ora     f:WIN_DL+LR_FLAGS
         sta     f:WIN_DL+LR_FLAGS
         a16
@@ -769,8 +864,15 @@ dl_submit:
         ora     gwin
         ldx     #WIN_DL
         ldy     #0
+        pha
+        lda     dl_kind
+        cmp     #2
+        pla
+        bcs     @sh
         sys     SYS_DRAWLIST
-        php
+        bra     :+
+@sh:    sys     SYS_SHEETDRAW
+:       php
         stz     dl_n
         stz     dl_off
         stz     dl_px
@@ -820,28 +922,26 @@ fs_fill:
         cmp     #200
         bcc     :+
         lda     #200
-:       sta     dl_rec+LR_H
-        lda     #LS_FILL
+:       sta     dl_rec+SD_H             ; (0.19) a sheet_draw fill: no sheet
+        lda     #SH_FILL << 8
         sta     dl_rec
         lda     gc_col
         and     #$00FF
-        sta     dl_rec+LR_C1
+        sta     dl_rec+SD_C
+        stz     dl_rec+SD_SX
+        stz     dl_rec+SD_SY
         lda     z:t0
-        sta     dl_rec+LR_X
+        sta     dl_rec+SD_X
         lda     ff_y
-        sta     dl_rec+LR_Y
+        sta     dl_rec+SD_Y
         lda     z:t2
         sec
         sbc     z:t0
-        sta     dl_rec+LR_W
-        stz     dl_rec+12
-        stz     dl_rec+14
-        stz     dl_rec+16
-        stz     dl_rec+18
-        jsr     dl_push
+        sta     dl_rec+SD_W
+        jsr     dl_pushs
         lda     ff_y
         clc
-        adc     dl_rec+LR_H
+        adc     dl_rec+SD_H
         sta     ff_y
         bra     @band
 @out:   rts
@@ -2135,9 +2235,10 @@ game_reset:
 :       lda     pbk,x
         beq     :+
         phx
-        sys     SYS_BFREE
+        sys     SYS_BFREE               ; (its sheet goes with it)
         plx
         stz     pbk,x
+        stz     pbsh,x
 :       inx
         inx
         cpx     #8
@@ -2178,6 +2279,11 @@ sp_first: .word $FFFF                   ; the first of our 16 sprites ($FFFF: no
 
         .segment "BSS"
 pbk:    .res    8                       ; the picture banks (16 pictures each)
+pbsh:   .res    8                       ; (0.19) their sheets (0: none)
+pb_blk: .res    10                      ; (0.19) sheet_new's block
+pt_sh:  .res    2
+dl_kind: .res   2                       ; (0.19) the list's records: 1 draw_list's, 2 sheet_draw's
+dl_k:   .res    2
 picw:   .res    NPIC * 2
 pich:   .res    NPIC * 2
 pick:   .res    NPIC * 2                ; PK_*

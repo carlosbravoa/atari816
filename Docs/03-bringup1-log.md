@@ -424,3 +424,18 @@ Module view from synthesis: Marga 831 LUT + 124 ALU, 702 registers, 2 block RAMs
 **Files:** `core/impl/rev0b_default/` (b2 bitstream, report, the unchanged `cold.bin`). The board runs b2 from SRAM; the flash still holds REV $0A.
 
 **Room left:** logic 16,438 of 20,736 (79%), CLS 91%, block RAM 43 / 46, DSP 4 / 24. The keyboard translator (about 300 cells) is still the first candidate if room is needed.
+
+## Step 20: file dates, the boot cartridge, the I/O processor's polling (2026-11-17, firmware only)
+
+No RTL change; the firmware is embedded in the bitstream, so the bitstream was rebuilt.
+
+- **Mailbox $1D SYS\_TIME** (ARG0 = seconds since 2000-01-01 00:00, local): Horizon gives the firmware the time it knows (the clock the user set, or the last one saved, counting from start) whenever `time_set` is called. The firmware counts on with its millisecond timer, and FatFs now stamps files with it (`FF_FS_NORTC = 0`, `get_fattime()`, hot); before a time is given, files get the build date. Horizon 0.19 shows the dates in `ls` and on Files' footer.
+- **Mailbox $1E CLASSIC\_STATE** (ARG0 = 5): the cartridge's image size and path, also for a cartridge the firmware loaded by itself (`boot=ash`). Horizon asks at start and reserves its banks as classic\_mount does.
+- **The mailbox poll is now hot.** `a816_mailbox()` runs from SDRAM (cold) and was called on every turn of the main loop whenever the rings were set up; the PicoRV32's instruction fetches have priority over the 65C816's port (CPU, Marga, Ali). Found while calibrating the emulator (`sw/a816/timing.s`): with Horizon running, the 65C816 lost 10-20 % of its memory time to it with the desktop's video on (a pure write loop 25.2 ms instead of 21.2 ms; the BASIC sieve 103.4 s). A small hot check (`a816_mb_wanted`, inlined into `bridge_poll`: a request waiting, a key or mouse change, room for an event) now calls it only when there is something to do. Sieve 103.4 s -> 89.2 s; DPW16 under Horizon 500 -> 376 ms.
+- "Atari 816" -> "Atari816" in the firmware's comments.
+
+**Build** (place\_option 1, same RTL as step 19's b2): logic 16,438 / 20,736 (80%), CLS 9,411 / 10,368 (91%), registers 8,274, block RAM 43 / 46; **clk\_core 34.45 MHz** (rule 29.7), clk\_pix 92.31, sys\_clk 36.82. Hot firmware 21,140 bytes of 32,768; cold image 18,480 bytes.
+
+**Board** (loaded to SRAM first, with its `cold.bin` in flash): self test 11 lines OK (REV 0B); TIMING.BIN; BRINGUP1 LOOP $5947, READ $860F, MVN $75D3; Horizon 0.19 boots to the desktop; `date 2026-11-17 23:55` then a file copied in the Terminal shows `2026-11-17 23:55` in `ls` (files from before show the old fixed date 2024-01-21) and on Files' footer; after a Horizon restart the provisional clock is given again and a new file gets 23:55; the classic machine runs BLUE.XEX from `run` (COLOR4 = $94) and F12 comes back; PC link send (the 43 files of the card's Horizon); SYSTEST (SYNC, restart 0) and SYSTEST1 (restart 1) pass. Not tested on the board: the boot cartridge (no /ASH.CAR on the card; tested in emu816 with `--boot-cart`), the PC link's listing (it has no listing command).
+
+**Flash:** the board-tested pair is in flash (`cold.bin` at 0x500000, then the bitstream); the FPGA reloaded from flash after the write and came up to the Horizon desktop. Files: `core/impl/rev0b_fw2/` (this build: bitstream, report, timing, `cold.bin`), `core/impl/fallback_rev0b/` (step 19's bitstream with the earlier `cold.bin`).

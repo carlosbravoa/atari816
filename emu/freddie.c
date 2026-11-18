@@ -16,9 +16,12 @@ void freddie_reset(void)
 {
     Freddie *f = &M.fr;
     uint8_t pt[256];
+    uint8_t ideal = f->ideal;
     memcpy(pt, f->pt, sizeof pt);           /* the table is block RAM: not reset */
     memset(f, 0, sizeof *f);
     memcpy(f->pt, pt, sizeof pt);
+    f->ideal = ideal;
+    memset(f->ctag, 0xFF, sizeof f->ctag);  /* swept while the CPU is held in reset */
 }
 
 static inline int is_io(uint32_t a) { return (a & 0xFFF000) == 0x00D000; }
@@ -85,6 +88,58 @@ static void io_write(uint32_t a, uint8_t v)
     machine_update_irq();
 }
 
+/* ── Memory timing ───────────────────────────────────────────────────────────
+ * a816_sys.sv: a direct-mapped cache of 512 lines of 8 bytes (index = CPU address bits 11-3,
+ * tag = the physical 4 KB page), no write allocation, write-through. A hit, an I/O access or
+ * an internal cycle takes the ideal 2 clk_core; a read miss fills the line with one burst and
+ * every RAM write waits for SDRAM. The stall cycles are the board's, measured with
+ * core/sw/a816/timing.s (TIMING.BIN; README, "Memory timing"), in CPU cycles x 16, by the
+ * classic machine's state (frozen: Marga's line fetch uses 16-byte bursts, running: 8-byte
+ * bursts and the classic machine's own accesses) and Marga's mode (off, 640x360x8, 640x360x4,
+ * 320x180x8). Mode 1 and the running machine's modes 1 and 2 are interpolated. While Ali is
+ * busy a CPU access also waits for its access in flight (fill +11, +40 with the video on;
+ * write +22), and Ali loses the time of the CPU's access. */
+static const uint8_t t_w0[2][4] = { { 59, 80, 74, 68 }, { 78, 149, 131, 113 } };   /* a write */
+static const uint8_t t_w1[2][4] = { { 60, 99, 88, 77 }, { 84, 198, 170, 141 } };   /* right after a write */
+static const uint8_t t_f[2][4]  = { { 94, 103, 100, 98 }, { 125, 181, 167, 153 } }; /* a line fill */
+
+static void stall(int w)
+{
+    Freddie *f = &M.fr;
+    int run = !(M.sys.sv_ctrl & 0x04), v = 0, c;
+    if (M.nvc.ctrl & 1) { v = 1 + ((M.nvc.ctrl >> 1) & 3); if (v > 3) v = 3; }
+    if (w) { c = (M.cpu.cycles - 1 == f->lastw) ? t_w1[run][v] : t_w0[run][v]; f->n_wrs++; }
+    else   { c = t_f[run][v]; f->n_fills++; }
+    uint64_t now = M.cpu.cycles;
+    if (M.bl.list || now < M.bl.busy_until) {
+        uint32_t d = (uint32_t)(c + (w ? 11 : 0)) >> 4;  /* Ali waits for the CPU's access */
+        c += w ? 22 : (v ? 40 : 11);
+        if (now < M.bl.busy_until) {
+            if (M.bl.list && !M.bl.lphase && M.bl.list_next == M.bl.busy_until) M.bl.list_next += d;
+            M.bl.busy_until += d;
+        }
+    }
+    c += f->tfrac;
+    M.cpu.cycles += (uint32_t)c >> 4;
+    f->n_stall += (uint32_t)c >> 4;
+    f->tfrac = c & 15;
+    if (w) f->lastw = M.cpu.cycles;
+}
+
+void memtime_sweep(void)
+{
+    Freddie *f = &M.fr;
+    if (f->ideal) return;
+    memset(f->ctag, 0xFF, sizeof f->ctag);
+    f->tpend += 256;                        /* 512 clk_core with the CPU paused */
+    f->n_sweeps++;
+}
+
+static inline void tpend(Freddie *f)
+{
+    if (f->tpend) { M.cpu.cycles += f->tpend; f->n_stall += f->tpend; f->tpend = 0; }
+}
+
 static inline uint32_t phys(Freddie *f, uint32_t a)
 {
     if (f->b0win_en && a < 0x8000) return (uint32_t)(f->b0win & 0x7F) << 16 | a;
@@ -120,6 +175,11 @@ uint8_t bus_read(void *ctx, uint32_t a, int flags)
         else if (a >= RAM_SIZE) v = 0;
         else {
             uint32_t pa = phys(f, a);
+            if (!f->ideal) {
+                tpend(f);
+                uint16_t *t = &f->ctag[(a >> 3) & 511];
+                if (*t != pa >> 12) { stall(0); *t = (uint16_t)(pa >> 12); }
+            }
             if (M.bl.stale) blitter_stale_read(pa);
             v = M.ram[pa];
         }
@@ -154,7 +214,10 @@ void bus_write(void *ctx, uint32_t a, uint8_t v, int flags)
     if (cause) { refused(f, a, cause, flags, f->wr_block); return; }
     if (f->wr_block) return;
     if (is_io(a)) io_write(a, v);
-    else if (a < RAM_SIZE) M.ram[phys(f, a)] = v;
+    else if (a < RAM_SIZE) {
+        if (!f->ideal) { tpend(f); stall(1); }
+        M.ram[phys(f, a)] = v;
+    }
 }
 
 uint8_t freddie_io_read(uint32_t a)
@@ -192,6 +255,6 @@ void freddie_io_write(uint32_t a, uint8_t v)
     case 0x803: f->cur_task = v & 0x3F; break;
     case 0x807: f->abort_cause &= ~v & 0x1F; break;
     case 0x808: f->b0win = v; break;
-    case 0x80A: blitter_flush(); break;     /* CACHE_FLUSH: only the blitter's stale lines are modelled */
+    case 0x80A: blitter_flush(); memtime_sweep(); break;     /* CACHE_FLUSH */
     }
 }

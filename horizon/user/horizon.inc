@@ -166,6 +166,9 @@ SYS_LISTWAIT  = $9D   ; A = 0: wait until the caller's list is done (and seen by
 SYS_FRAME     = $9E   ; -> A = the frame counter (NV_FRAME: + 1 at every vertical blank; REV $09)
 SYS_WINVBL    = $9F   ; A = own window, X = 1 on / 0 off: WE_VBL at each vertical blank while its queue is empty (REV $09)
 SYS_WFRONT    = $A0   ; (BASIC 2.0) A = own window: back if minimized, raised, the focus (full screen: shown again)
+SYS_SHEETNEW  = $A1   ; (0.19) X, Y = {u24 address, u8 0, u16 stride, u16 width, u16 height} (SHN_*): art in own memory -> A = the sheet (1-32)
+SYS_SHEETFREE = $A2   ; (0.19) A = sheet ($FFFF: all of the caller's)
+SYS_SHEETDRAW = $A3   ; (0.19) A = window | count << 8 (1-128), X, Y = count 16-byte records (SD_*) -> A = records drawn
 SPR_EN    = $01       ; sprite ctrl (Marga's record CTRL): shown
 SPR_HFLIP = $02
 SPR_VFLIP = $04
@@ -204,6 +207,23 @@ LR_H      = 10
 LR_SRC    = 12        ;   u24 (copy, keyed copy, expand); move: i16 sx at 12, i16 sy at 14
 LR_STRIDE = 16        ;   u16 (0: the width; expand: the bytes a row needs)
 WE_VBL    = 16        ; (0.18) the vertical blank (SYS_WINVBL)
+SHN_ADDR  = 0         ; (0.19) sheet_new block offsets (10 bytes): u24 address, u8 0
+SHN_STRIDE = 4        ;   u16 bytes from a row to the next (at least the width)
+SHN_W     = 6         ;   u16 width 1-4096
+SHN_H     = 8         ;   u16 height 1-1024
+SH_FILL   = 0         ; (0.19) sheet_draw ops (the sheet byte is not used: 0)
+SH_COPY   = 1
+SH_KEY    = 2         ;   pixels of the key colour skipped
+SH_VBL    = $80       ;   + wait for the vertical blank first
+SD_SHEET  = 0         ; (0.19) sheet_draw record offsets (16 bytes): u8 sheet (1-32)
+SD_OP     = 1         ;   u8 op (SH_*)
+SD_C      = 2         ;   u8 the fill colour or the key, u8 0
+SD_SX     = 4         ;   u16 sx, sy: the source in the sheet
+SD_SY     = 6
+SD_W      = 8         ;   u16 w, h
+SD_H      = 10
+SD_X      = 12        ;   i16 x, y: the destination (the window's content, or its full-screen framebuffer)
+SD_Y      = 14
 POP_HERE = $8000      ; win_popup x: at the pointer
 POP_KEY  = 1          ; win_popup flags
 ; menus (win_menu): an item may start with a state byte MS_STATE | bits (MS_CHECK: a check mark,

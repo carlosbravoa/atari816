@@ -252,10 +252,10 @@ the blitter: the software drawing paths; both must pass):
    a child's sprites freed at its exit and kill), full screen (bad blocks, foreign memory
    EFAULT, another program EAGAIN, every scroll set and raster table checked against the
    framebuffer, its bank freed), draw lists (EINVAL, EFAULT, the area limit, 100 keyed blits,
-   list_wait) and WE_VBL; its console must equal `tests/gtest.txt` (`gtest-r10.txt` on REV
-   $09-$0A, `gtest-r8.txt` below), and one picture (`gtest.md5`: the lists' result, palette
-   entries back at the system's colours) is the same at every revision (Ali's list, single
-   blits, the CPU). On REV $0B also: `tests/gtests.keys` (sprites over a window: shown, hidden
+   list_wait), WE_VBL and (0.19) sheets (Version 0.19); its console must equal
+   `tests/gtest.txt` (`gtest-r10.txt` on REV $09-$0A, `gtest-r8.txt` below), and two pictures
+   (`gtest.md5`: the lists' result, palette entries back at the system's colours; (0.19) the
+   sheets' picture) are the same at every revision (Ali's list, single blits, the CPU). On REV $0B also: `tests/gtests.keys` (sprites over a window: shown, hidden
    by the focus going elsewhere, back, one moved past the content's edge), `tests/gtestf.keys`
    (a full-screen 320x180 screen with a split status panel, wrapped scrolling, sprites and two
    raster colours; Alt+Esc back to the desktop; Alt+Tab to it again; its end) and
@@ -434,8 +434,9 @@ names with spaces: "in quotes"; ctrl-C stops the foreground job
 | `kernel/sys17.s` | (0.17) Lau, the sample player: sample_play / stop / stat / set, the range checks, voice ownership, the voices stopped at a task's end, at bank_free and before the classic machine runs, the master volume |
 | `user/stest.s` | (0.17) STEST, the test of the sample calls |
 | `kernel/k2.s`, `kernel/k2*.s`, `kernel/k2.inc`, `kernel/kfar.s` | (0.18) the second code segment (bank 0): frame sync and the vertical blank (`k2vbl.s`), palette entries (`k2pal.s`), sprites (`k2spr.s`), full-screen mode, scrolling and the raster table (`k2fs.s`), draw lists (`k2list.s`); its imports and the bank $01 wrappers |
+| `kernel/k3.s` | (0.19) the third code segment (bank $7F): sheets (sheet_new, sheet_free, sheet_draw: the fast path and the full one), their cleanup at bank_free and at a task's end |
 | `tools/kspace.py` | (0.18) the kernel's space at every build |
-| `user/gtest.s` | (0.18) GTEST, the test of the games round's calls (`gtest m`: the measurement; `gtest s`, `gtest f`: pictures) |
+| `user/gtest.s` | (0.18) GTEST, the test of the games round's calls, (0.19) and of sheets (`gtest m`: the measurement; `gtest s`, `gtest f`: pictures) |
 | `user/quabrick.s`, `user/qb_*.s` | (0.17) Quabricks, the falling-block game (its files are listed at the top of quabrick.s) |
 | `tools/mkqbart.py`, `tools/mkqbsfx.py` | (0.17) Quabricks' art (`user/qb_art.inc`: its colours in local entries (1.1), the block tiles with rounded corners, the logo, the big fonts) and its samples (`/BIN/QUABRICK.SFX`) |
 | `user/uipop.s` | (0.15) ui_popup, ui_popat, ui_menukey, ui_chime, ui_beep, the text field's pop-up menu |
@@ -523,7 +524,9 @@ interrupts off while printing.
   - glyphs up to 6 pixels wide;
   - row 11 is kept for the cursor.
 - **Framebuffer.** It sits in banks $7C-$7F (kernel owned) and holds 60 cell rows
-  (720 lines, 230,400 bytes). The pointer image is at $7F:F000, past them.
+  (720 lines, 230,400 bytes). The pointer image is at $7F:F000, past them. (0.19) Between them,
+  $7F:8400-$7F:EFFF: the blitter's command lists, the sheets' row tables and the kernel's third
+  code segment (Version 0.19).
 - **Scrolling.** The screen shows 30 cell rows from `scr_top`. A new line at the bottom
   moves NV_BASE down one cell row. It clears the cell row that comes into view (3.8 KB)
   and the 6 border lines at the top (1.9 KB), which still hold the lower half of the row
@@ -855,6 +858,143 @@ bus time (see emu/README.md, "Memory timing"). Expect the same factor on the CPU
   `user/uidate.s`), shortcuts (ui_lnkread, ui_mklink), program and file icons (ui_prog,
   ui_ficon). See ABI.md and ui.inc.
 
+## Version 0.19 (sheets)
+
+Cheaper queued drawing. In 0.18 a `draw_list` record cost the kernel about 1,400 CPU cycles,
+most of it checking that the record's source lies in the program's own memory. **Sheets**
+(ABI.md, "Sheets (0.19)") move that check to the start: a program registers a rectangle of its
+memory holding art once (`sheet_new`, $A1: address, stride, width, height; the rules of every
+address Ali reads), and the 16-byte records of `sheet_draw` ($A3) name a sheet and a rectangle
+in it: the kernel compares small numbers with the sheet's size and finds the source in a table
+of the sheet's rows. `sheet_free` ($A2); a sheet also goes when its bank is freed and when the
+program ends, and stops the program's running list then, as draw_list's do.
+
+- **The fast path** (`kernel/k3.s`, `sh_fast`): the window drawn on the screen directly (or in
+  full-screen mode), a copy or keyed copy from the sheet and op of the record before, wholly
+  inside the content. Then the record's destination comes from a table of the target's rows
+  (made again only when the window moved), and only the bytes of Ali's 24-byte record that
+  change are written (FLAGS, RFLAGS and the reserved bytes stay 0; the records an earlier
+  list gave flags are cleared first). **305 CPU cycles a record** (emu816 trace, the loop from
+  one record to the next; 318 with the calls' share: below). Other records (fills, SH_VBL,
+  records cut at the edges, a covered window's bitmap) take the full path, `sh_one`, which
+  shares draw_list's clipping and record making: about 1,100 cycles.
+- **Revisions**: as draw_list (one command list on REV $09+, the records started one by one on
+  REV $08, the CPU on REV $07); GTEST's new picture is the same on all of them.
+- **draw_list itself** got cheaper too, without changing what it does: the records now go to
+  a fixed place, $7F:8400 (below), written with long,X stores; a record's damage rectangle is
+  only kept when the target is the window's bitmap (it is not used otherwise); the target's
+  overlap test (`win_visible`) runs once a call instead of twice (it is only needed for a
+  bitmap, after `win_target` asked it already); the pending-repaint case finds the bitmap's
+  row address with shifts instead of a multiplication. 1,284 cycles a record (was 1,407), a
+  call 272 us (was 303).
+- **Measurement** (emulator; `gtest m`, 100 keyed 16 x 16 blits a frame, 60 frames; new in
+  `gtest m`: the CPU's part exactly, 500 calls of 100 1 x 1 records each and 2,000 calls of
+  one record, each call followed by a 0.5 ms loop that is measured alone and taken off;
+  `uptime` advances with the 10 ms tick, so the per-frame figures, as in 0.18, are only
+  rough for calls of a few ms):
+
+  | 100 records a frame | REV $0B / $09 | REV $08 | REV $07 (the CPU draws) |
+  | --- | --- | --- | --- |
+  | 100 win_draw calls | 26.6 ms | 26.4 ms | 96 ms |
+  | one draw_list, 0.18 | 14.4 ms | 21.7 ms | 80 ms |
+  | one draw_list, 0.19 | 13.8 ms | 16.7 ms | 79 ms |
+  | one sheet_draw | 4.0 ms | 13.6 ms | 71 ms |
+
+  | The CPU's part exactly, a call | draw_list 0.18 | draw_list 0.19 | sheet_draw |
+  | --- | --- | --- | --- |
+  | 100 records, REV $0B / $09 | 10,016 us | 9,136 us | 2,460 us |
+  | 1 record, REV $0B / $09 | 303 us | 272 us | 265 us |
+  | a record (the difference / 99) | 98.1 us: 1,407 cycles | 89.5 us: 1,284 cycles | 22.2 us: 318 cycles |
+  | 100 records, REV $08 (started one by one) | 12,820 us | 11,938 us | 5,280 us |
+  | 100 records, REV $07 (1 x 1: the CPU's drawing is small) | 12,746 us | 11,862 us | 5,194 us |
+
+  (A call's own cost, about 3,800 cycles, is the syscall, the window and target checks, the
+  list's start and its end-of-list interrupt; `gtest m4`, the bitmap target: sheet_draw's full
+  path, about 1,100 cycles a record in the trace.)
+- **Converted** (REV $09+ paths; the pictures did not change):
+
+  | | before | after |
+  | --- | --- | --- |
+  | Quabricks 1.2, `quabrick -m` (tests/quabrick.keys, 695 frames of play) | 290 us of CPU a frame, 2.62 syscalls | 257 us, 2.62 syscalls |
+  | the same, all CPU (every task and the kernel: the emu816 trace less the idle loop's WAI, 9-16 s) | 1,311 us a frame | 1,290 us a frame |
+  | Deep Dive (sdk/examples/deepdive, its test.script) | 1.83 ms of CPU a frame (833 ms, 456 frames) | 1.73 ms (792 ms, 457 frames) |
+  | BASIC, full screen: 20 `PUT` of 16 x 16 and VSYNC a frame (all CPU, trace, 7-13 s) | 10.1 ms a frame, 2 syscalls | 8.8 ms, 2 syscalls |
+  | BASIC, 2,400 `PUT` without VSYNC (lists sent when full) | 446 us a PUT | 375 us |
+
+  Quabricks sends a frame that only blits its tiles and erow / srow and fills as one
+  `sheet_draw` (its records are made as before and turned into sheet records in place;
+  frames with moves or the big font's expands stay one `draw_list`); its frames draw only a
+  few cells, so little changes. Deep Dive sends its tiles as sheet records (one `sheet_draw`
+  a frame; a frame that also writes the panel's letters, which are 1 bpp, one `draw_list` as
+  before). BASIC makes each picture bank a sheet (64 x 1024: 16 pictures) and sends PUT, FRECT
+  and GCLS in full screen as sheet records; COPY stays a draw_list record (a record of the
+  other kind sends the list first, as a full list does).
+- **Kernel space: a third code segment.** Sheets live in `kernel/k3.s`, its own assembly unit
+  run from $7F:E000-$7F:EFFF: the console framebuffer's last bank ($7C-$7F, kernel owned)
+  holds 60 cell rows up to $7F:83FF and the pointer images from $7F:F000; the space between
+  was unused. In the file it follows k2.s; boot copies it there, after k2.s. Bank $01 pays 71
+  bytes in all (the copy at boot, the syscall entries, 42 bytes of variables of k2.s and k3.s).
+  Bank $01 reaches it with JSL (`sys_k3`, the syscalls $A1-$A3); it uses
+  k2list.s through the f2_* wrappers. The same free part holds the command lists (SL_LIST,
+  $7F:8400-$8FFF, 128 x 24: draw_list's and sheet_draw's; the window system's bank no longer
+  holds them), the fast path's table of the target's rows ($9000-$9FFF, 1024 rows) and the
+  sheets' rows ($A000-$DFFF, 4096 rows). The sheet table (32 sheets) is in k2's bank 0
+  variables. After 0.19 (`tools/kspace.py`): bank $01 2,256 bytes left below $F000 (2,327
+  before), the second segment 711 of 7,680 bytes left (746), its bank 0 variables 928 of
+  3,328 (1,376), the third segment 2,386 of 4,096 left; the file 47,105 bytes (loader limit
+  65,280).
+- **Tests**: GTEST's part 8 (`tests/gtest*.txt`): refused sheets (sizes; the kernel's bank, the
+  framebuffer, a bank nobody owns, past the window, out of an own bank: EFAULT), refused
+  records (past the sheet, overflowing, no such sheet, op 3, records outside the window, the
+  area limit), another program's sheet, the table full (32 sheets, 4096 rows), a child's sheets
+  freed at its exit and at its kill, a bank freed (its sheet gone, the running list stopped),
+  rows moved by a free; and a second picture (`gtest2`, the same on REV $0B, $0A, $09, $08,
+  $07): fast records, clipped ones, fills, a 32 x 32 one, a bitmap target, a sheet whose rows
+  moved. Re-frozen: `basic2s3`-`8` and `basic2s10` (REV $0B). They differ by timing only:
+  draw_list is faster, so DRIFT.BAS's `RANDOMIZE` (seeded by the clock) gets another seed
+  (other ripples and river), SCROLLER.BAS has scrolled further at the shot, and Esc breaks in
+  another line ("Break in 300", was 270); 0.18's BASIC.PRG on the 0.19 kernel gives exactly
+  the new pictures, and 0.18's BASIC on 0.18's kernel the old ones. Also `files8` of
+  `files-rev7.md5` (REV $07, 26.6 s): Write still painting its first rows (the CPU draws them)
+  when the shot is taken, a little further on than before (0.18's card gives the old one).
+- **Not done**: the icon dragged on the desktop or in Files as a hardware sprite. A window's
+  sprites show only while it has the focus and nothing covers it, so a drag across windows
+  would need a sprite of the window manager's own, like the pointer; the 16 sprites are all
+  programs' to take (spr_alloc), and 32 x 32 icons at 8 bpp need two 16 x 32 sprites (or a 4
+  bpp image in one palette bank, which the icons' colours do not fit). Left for a later round.
+
+### 0.19: file dates, the boot cartridge, the board's speed
+
+- **File dates** (with the I/O processor firmware of bring-up step 20): `time_set` also gives
+  the time to the I/O processor (op $1D SYS_TIME), which counts on from it and stamps the files
+  it writes; so files get the date and time Horizon knows (the clock the user set, or the last
+  one saved in /SYSTEM/CLOCK counting from start), and the firmware's build date before a time
+  was given in this session (an older firmware keeps its fixed date: it answers $82). `ls` /
+  `dir` print each entry's date and time (`YYYY-MM-DD HH:MM`, one STAT each; the name column is
+  18 characters narrower); Files shows "Modified YYYY-MM-DD HH:MM" for the selected entry on its
+  footer after what is mounted, when it fits whole (the 2 s look at the mounts keeps it).
+- **The boot cartridge:** a cartridge the I/O processor loaded by itself at power-on
+  (`boot=ash` in /atari.ini) is asked for once, by the first task's loader (op $1E
+  CLASSIC_STATE): its banks are reserved as classic_mount reserves them, and classic_query
+  reports it (Files' footer: Cart:). 147 bytes of bank $01 (2,109 left).
+- **The emulator now runs at the board's speed** (emu/README.md, "Memory timing": cache
+  misses, SDRAM write stalls, Marga's fetch, the cache sweeps, Ali's measured rates). The
+  sessions of `make test` were timed for the ideal model and check what is drawn, not how fast,
+  so they run with `--ideal-timing` (the Makefile's `CARDDATE`, which also gives `--card-date`:
+  the date STAT reports for the files a run did not write). Board against emu816 now (BASIC
+  sieve, `basic -t` in the Terminal; step 20 firmware): board 89.2 s, emu816 87.9 s (-1.5 %),
+  the ideal model 45.9 s. With the step 19 firmware the board took 103.4 s: its I/O processor
+  polled the mailbox from SDRAM and took 10-20 % of the 65C816's memory time.
+- **Games at the board's speed** (emu816's default model): Quabricks' scripted game (`quabrick
+  -m`) 688 frames, 0 missed, 1.63 ms of CPU a frame (0.26 ms ideal); Deep Dive's test 452
+  frames, 0 missed, 3.3 ms a frame (1.7 ideal); BASIC runs at about half the ideal model's
+  speed (the sieve: 45.9 -> 87.9 s), so DRIFT.BAS's 5.5 ms a frame becomes about 11 ms, inside
+  the 16.7 ms frame (estimated, not measured frame by frame).
+- Pictures re-frozen for these: every Desktop session picture with a Files window whose footer
+  now shows the selected entry's date (desk, system, wins, desk14, desk15, desk18, kmenu, files,
+  classic, and their REV $07 sets), `ls` listings (screen1, browse7, desk4, desk6), and
+  tests/shell.txt (the `ls` lines and the paging they shift).
+
 ## BASIC 2.0 (on Horizon 0.18)
 
 BASIC (BASIC.md) gets the games hardware, in the plain style of Atari BASIC: a game of a page
@@ -952,7 +1092,8 @@ ABI.md, "The games round", has the rules; `user/gtest.s` tests them.
   | 100 win_draw calls a frame | 100 syscalls, 26.6 ms | 26.4 ms | 102 ms |
   | one draw_list a frame | 1 syscall, 14.4 ms | 21.7 ms | 80 ms |
 
-  A list's time is the kernel checking and clipping each record (about 2,000 cycles); Ali's own
+  A list's time is the kernel checking and clipping each record (about 2,000 cycles; (0.19)
+  measured exactly, 1,400: Version 0.19); Ali's own
   blitting (about 2.3 ms) then runs while the program goes on. Without command lists (REV
   $08) the kernel starts the records one by one; an LS_VBL record then waits in the call.
   Quabricks 1.1: 290 us of CPU and 2.6 syscalls a frame (1.0: 650 us, 4.3).

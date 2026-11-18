@@ -15,6 +15,9 @@
 ;   - one draw list a frame (draw_list): the new tiles and the panel's changes, with LS_VBL
 ;     on the first record, so that Ali starts in the vertical blank in which the new scroll
 ;     values and sprite positions are taken too: no tearing;
+;   - (Horizon 0.19) the tiles as a sheet (sheet_new): a frame that only draws tiles sends them
+;     as sheet_draw records, which the kernel checks and makes far cheaper; a frame that also
+;     changes the panel (1 bpp letters: draw_list's LS_EXPAND) sends one draw_list as before;
 ;   - the frame loop on vsync (missed frames counted from its result);
 ;   - Marga's sprites: the submarine, four jellyfish and ten pearls, all set with one
 ;     spr_set a frame; SPR_BEHIND, so that they pass behind rock, weed and the panel;
@@ -96,6 +99,11 @@ start:  sys     SYS_WSSTART
         ptr     wd_t2
         sys     SYS_WDRAW
         jsr     makemap                 ; the map's characters -> tiles and objects
+        ptr     tsblk                   ; (0.19) the tiles as a sheet: 16 wide, a tile under the
+        sys     SYS_SHEETNEW            ; one before (frame t is rows 16 t); 0 if refused (an
+        bcc     :+                      ; older Horizon): then every tile is a draw_list record
+        lda     #0
+:       sta     z:tsheet
         jsr     makesound               ; the samples (if there is Lau)
         jsr     getfb                   ; two consecutive banks for the framebuffer
         jcs     quit
@@ -693,9 +701,36 @@ setscroll:
 
 ; ---------------------------------------------------------------- the draw list
 ; Records are added with rec_new; flush hands them to Ali with one draw_list. A full list
-; (128 records) is flushed on the way.
+; (128 records) is flushed on the way. (0.19) Tiles go to a second list, slst, of sheet_draw
+; records (rec_snew); flush sends it with sheet_draw when lst is empty (the usual frame), else
+; turns its records into lst's first, so a frame is always one call.
 ; A tile copy: tile A into the slot at (sx, sy)
 rec_tile:
+        ldx     z:tsheet                ; (0.19) as a sheet record
+        beq     rec_tdl
+        xba                             ; frame A: rows 16 A of the sheet
+        lsr     a
+        lsr     a
+        lsr     a
+        lsr     a
+        sta     z:src
+        jsr     rec_snew
+        lda     z:tsheet                ; the sheet, SH_COPY
+        ora     #SH_COPY << 8
+        sta     slst+SD_SHEET,x
+        stz     slst+SD_C,x
+        stz     slst+SD_SX,x
+        lda     z:src
+        sta     slst+SD_SY,x
+        lda     #TS
+        sta     slst+SD_W,x
+        sta     slst+SD_H,x
+        lda     z:sx
+        sta     slst+SD_X,x
+        lda     z:sy
+        sta     slst+SD_Y,x
+        rts
+rec_tdl:
         xba                             ; * 256: a tile is 256 bytes
         clc
         adc     #.loword(tiles)
@@ -758,11 +793,13 @@ rec_glyph:
 ; -> X = the offset of a new record in lst
 rec_new:
         lda     z:nrec
+        clc
+        adc     z:nsrec
         cmp     #128
         bcc     :+
         jsr     flush
-        lda     z:nrec
-:       asl     a                       ; * 20
+:       lda     z:nrec
+        asl     a                       ; * 20
         asl     a
         sta     z:t7
         asl     a
@@ -773,8 +810,35 @@ rec_new:
         inc     z:nrec
         rts
 
-; the records so far, as one draw_list; the first one waits for the vertical blank if asked
+; (0.19) -> X = the offset of a new record in slst
+rec_snew:
+        lda     z:nrec
+        clc
+        adc     z:nsrec
+        cmp     #128
+        bcc     :+
+        jsr     flush
+:       lda     z:nsrec
+        asl     a                       ; * 16
+        asl     a
+        asl     a
+        asl     a
+        tax
+        inc     z:nsrec
+        rts
+
+; the records so far, as one draw_list; the first one waits for the vertical blank if asked.
+; (0.19) Only sheet records: one sheet_draw instead; both kinds: the sheet records become
+; draw_list records (copies from the tiles) after lst's
 flush:  lda     z:nrec
+        bne     :+
+        lda     z:nsrec
+        jne     sflush
+        rts
+:       lda     z:nsrec
+        beq     :+
+        jsr     s2l
+:       lda     z:nrec
         beq     @out
         lda     z:vblreq
         beq     :+
@@ -794,6 +858,81 @@ flush:  lda     z:nrec
         jsr     error
 :       stz     z:nrec
 @out:   rts
+
+; (0.19) slst as one sheet_draw (its first record waiting for the vertical blank if asked)
+sflush: lda     z:vblreq
+        beq     :+
+        stz     z:vblreq
+        sep     #$20
+        .a8
+        lda     slst+SD_OP
+        ora     #SH_VBL
+        sta     slst+SD_OP
+        rep     #$20
+        .a16
+:       lda     z:nsrec
+        xba
+        ora     z:win
+        ptr     slst
+        sys     SYS_SHEETDRAW           ; returns at once, as draw_list
+        bcc     :+
+        jsr     error
+:       stz     z:nsrec
+        rts
+
+; (0.19) slst's records appended to lst as copies from the tiles (there is room: rec_new and
+; rec_snew keep both together at 128 at most); z:src, sx, sy kept
+s2l:    lda     z:src                   ; (kept: the record being made when a full list is
+        pha                             ; sent by rec_new)
+        lda     z:sx
+        pha
+        lda     z:sy
+        pha
+        stz     z:soff                  ; slst's offset
+@r:     dec     z:nsrec                 ; (first: rec_new must not flush)
+        ldx     z:soff
+        lda     slst+SD_SY,x            ; the tile: tiles + 16 * its row
+        asl     a
+        asl     a
+        asl     a
+        asl     a
+        clc
+        adc     #.loword(tiles)
+        sta     z:src
+        lda     slst+SD_X,x
+        sta     z:sx
+        lda     slst+SD_Y,x
+        sta     z:sy
+        jsr     rec_new                 ; (keeps z:src, sx, sy)
+        lda     #LS_COPY
+        sta     lst+LR_OP,x
+        stz     lst+LR_C1,x
+        lda     z:sx
+        sta     lst+LR_X,x
+        lda     z:sy
+        sta     lst+LR_Y,x
+        lda     #TS
+        sta     lst+LR_W,x
+        sta     lst+LR_H,x
+        lda     z:src
+        sta     lst+LR_SRC,x
+        lda     #^tiles
+        sta     lst+LR_SRC+2,x
+        stz     lst+LR_STRIDE,x
+        stz     lst+LR_STRIDE+2,x
+        lda     z:soff
+        clc
+        adc     #16
+        sta     z:soff
+        lda     z:nsrec
+        bne     @r
+        pla
+        sta     z:sy
+        pla
+        sta     z:sx
+        pla
+        sta     z:src
+        rts
 
 ; the start: every tile slot and the whole panel
 drawall:
@@ -1440,11 +1579,15 @@ scroll: .word   0, PANY                 ; first set (lines 0-31): the panel, row
         .word   SPLIT                   ; the split line
         .byte   FSC_HWRAP | FSC_SPLIT, 0
 numbuf: .byte   "00/10", 0
+tsblk:  .faraddr tiles                  ; (0.19) sheet_new: the tiles, 16 wide, tiles_N of 16 rows
+        .byte   0
+        .word   TS, TS, TS * tiles_N
 
         .segment "BSS"
 ev:     .res    8
 map:    .res    MAPW * MAPH + 1         ; tiles, a byte each
 lst:    .res    128 * 20                ; the draw list's records
+slst:   .res    128 * 16                ; (0.19) sheet_draw's records (the tiles)
 sprtab: .res    NSPR * 10               ; the spr_set table
 black:  .res    256 * 3                 ; a black palette
 spare:  .res    16
@@ -1484,6 +1627,9 @@ ntx:    .res    2
 nty:    .res    2
 redraw: .res    2
 nrec:   .res    2
+nsrec:  .res    2                       ; (0.19) records in slst
+tsheet: .res    2                       ; (0.19) the tiles' sheet (0: none)
+soff:   .res    2                       ; (0.19) s2l: the record in slst
 vblreq: .res    2
 pandirty: .res  2
 fcount: .res    2

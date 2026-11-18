@@ -193,8 +193,9 @@ $ python3 core/tools/atari.py shot816 board.png      # the same, without sending
 `--type 'hellowin\n'` types on the machine's keyboard through the link (unverified: see
 `deploy816.py --help`). `--dry-run` shows what would be done.
 
-The board runs CPU-heavy code about half as fast as the emulator (blitter drawing is the
-same): check the speed of a game on the board.
+Since Horizon 0.19 emu816 runs at the board's speed (its memory stalls are modelled; within
+about 5 % on measured loops and the BASIC sieve), so a game that keeps its frame rate in the
+emulator should keep it on the board; still check it there.
 
 ## 7. Next
 

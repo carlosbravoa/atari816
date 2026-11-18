@@ -684,6 +684,13 @@ sys_tset:
         lda     t_x,x
         sta     clk_sec+2
         stz     clk_sub
+        lda     #MBOP_STIME             ; (0.19) the I/O processor dates files with it (an older
+        jsr     msg_new                 ; firmware answers $82: it keeps its fixed date)
+        lda     clk_sec
+        sta     t_msg+8,y
+        lda     clk_sec+2
+        sta     t_msg+10,y
+        jsr     mb_call
         lda     #0
         jmp     set_ok
 
