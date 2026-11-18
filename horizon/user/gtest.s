@@ -23,6 +23,7 @@
 ; "gtest m": the measurement of 100 16x16 keyed blits a frame, per call, as one list and (0.19)
 ; as one sheet_draw (and of one record, for the cost of a record).
 ; "gtest s": sprites over a window, for the pictures (tests/gtests.keys).
+; "gtest v": (0.25) draw lists with LS_VBL while a child draws (the REV $08 one-by-one path).
 ; "gtest f": a full-screen picture: scrolling with a split, sprites, a raster table; it waits
 ; for events (tests/gtestf.keys leaves it with Alt+Esc, ends it).
         .include "horizon.inc"
@@ -43,6 +44,8 @@ start:  sta     z:alen
         jeq     sprpic
         cmp     #'f'
         jeq     fspic
+        cmp     #'v'
+        jeq     vbltest
         jmp     child
 
 main:   sys     SYS_WSSTART
@@ -1064,7 +1067,22 @@ kidk:   sep     #$20
 :       rts
 
 ; ---------------------------------------------------------------- the children
-child:  cmp     #'P'
+child:  cmp     #'B'                    ; (0.25) gtest v's child: draws until it is killed
+        bne     @p
+        ptr     wvb
+        sys     SYS_WOPEN
+        sta     z:wina
+:       sep     #$20                    ; its whole window filled, the colour changed each time
+        .a8
+        inc     wd_big+1
+        rep     #$20
+        .a16
+        lda     z:wina
+        ptr     wd_big
+        sys     SYS_WDRAW
+        sys     SYS_YIELD               ; (the fill left running)
+        bra     :-
+@p:     cmp     #'P'
         bne     @s
         print   "  child: set 77: "     ; parent's entry: refused
         lda     #77
@@ -1151,6 +1169,58 @@ child:  cmp     #'P'
         ptr     fsb
         sys     SYS_FSENTER
         jsr     res
+        exit    0
+
+; ---------------------------------------------------------------- gtest v (0.25)
+; Draw lists whose first record waits for the vertical blank (LS_VBL) while a child keeps the
+; blitter busy with large fills. On REV $08 the kernel starts the records one by one: it must
+; wait for the blitter again after the vertical blank (the child may have started a fill
+; meanwhile); emu816 reports "register written while BUSY" if it does not (make test-25).
+vbltest:
+        sys     SYS_WSSTART
+        jcs     fail
+        ptr     wm
+        sys     SYS_WOPEN
+        sta     z:wina
+        lda     #'B'
+        sep     #$20
+        .a8
+        sta     karg
+        rep     #$20
+        .a16
+        lda     #.loword(karg)
+        sta     z:u_arg
+        lda     #^karg
+        sta     z:u_arg+2
+        ptr     p_self
+        lda     #2                      ; (the priority of a program started by the shell)
+        jsr     spawn
+        jcs     fail
+        sta     z:t0
+        lda     #20                     ; (its window open, drawing)
+        sys     SYS_SLEEP
+        lda     #120
+        sta     z:t2
+@l:     sep     #$20                    ; two fills, the first in the vertical blank
+        .a8
+        inc     vl_list+LR_C1
+        rep     #$20
+        .a16
+        lda     z:wina
+        ora     #2 << 8
+        ptr     vl_list
+        sys     SYS_DRAWLIST
+        dec     z:t2
+        bne     @l
+        lda     #0
+        sys     SYS_LISTWAIT
+        lda     z:t0
+        sys     SYS_KILL
+        lda     z:t0
+        sys     SYS_WAIT
+        print   "gtest v: 120 lists with LS_VBL while another program draws: done\n"
+        jsr     out_flush
+        sys     SYS_WSSTOP
         exit    0
 
 ; ---------------------------------------------------------------- gtest m: the measurement
@@ -1588,6 +1658,9 @@ wc:     .word   100, 250, 120, 60
 wm:     .word   20, 30, 200, 200
         .faraddr t_a
         .byte   0
+wvb:    .word   250, 30, 360, 300       ; (0.25) gtest v's child
+        .faraddr t_c
+        .byte   0
 rgb4:   .byte   255, 0, 0,  0, 255, 0,  0, 0, 255,  255, 255, 0
         .res    150, 0                  ; (pal_set's "too many" reads up to here)
 img:    .repeat 256, I                  ; 16 x 16: a ring of colours, 0 outside (transparent)
@@ -1746,6 +1819,17 @@ se_ok:  .byte   0, SPR_EN
         .faraddr $000100                ; (the bank at run time; 16 x 32: 512 bytes)
         .byte   0
 karg:   .byte   0, 0
+wd_big: .byte   WD_FILL, 0, 0, 0        ; (0.25) gtest v's child: its whole window
+        .word   0, 0, 360, 300
+        .faraddr 0
+vl_list: .byte  LS_FILL, LS_VBL, 0, 0   ; (0.25) gtest v: two fills, the first after the blank
+        .word   0, 0, 200, 180
+        .faraddr 0
+        .res    5
+        .byte   LS_FILL, 0, 7, 0
+        .word   10, 10, 60, 40
+        .faraddr 0
+        .res    5
 wd_sw:  .byte   WD_FILL, 0, 0, 0
         .word   0, 186, 7, 10
         .faraddr 0

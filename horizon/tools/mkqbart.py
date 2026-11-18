@@ -3,17 +3,19 @@
 
 Everything is made here, at build time, from numbers: the game's colours (local entries 1 ..
 NCOLS: the program takes that many palette entries with pal_alloc, wherever the kernel has
-them, and translates the art and its drawing colours; 1.1), the beveled pastel
-blocks with rounded corners as 8 bpp tiles (the corners show the background they are drawn
+them, and translates the art and its drawing colours; 1.1), the pastel blocks (1.2: one
+flat face, a 1-pixel lighter edge top and left, a 1-pixel darker edge bottom and right, one
+pixel cut at each corner) as 8 bpp tiles (the corners show the background they are drawn
 on: the well's empty cell, a panel, or transparent) (the well's 14 x 14, the previews' 12 x 12 and 10 x 10, dimmed ones for
-a hold that cannot be used, the ghost's outline, the empty cell with its grid, the grey block
+a hold that cannot be used, the ghost's outline (1 pixel, the block's silhouette), the empty cell with its grid, the grey block
 of the game-over sweep), the logo (QUABRICKS in little bricks, one pastel per letter, with a
 drop shadow; 0 = transparent) and two bold big fonts (1 bpp, made from Horizon's console font
 kernel/font8x12.txt, scaled 2x and 3x).
 
 The colours follow the SDL2 Quabricks (graphics.c, tetris.c): the navy gradient, the panels,
-the board, the seven pastels and their bevel (grout 0.42, highlight lightened 0.5, shadow
-0.72, a 16 % gloss on the top third). Which pastel goes with which piece is this game's own."""
+the board, the seven pastels and their edges (highlight lightened 0.5, shadow 0.72; grout
+0.42 for the dimmed hold). 1.2 dropped the gloss and the wide bevel: at 14 pixels they read
+as noise. Which pastel goes with which piece is this game's own."""
 import sys
 
 FONT, OUT = sys.argv[1], sys.argv[2]
@@ -64,13 +66,12 @@ for i, p in enumerate(PIECE):
     col(f'P{i}GROUT', scale(b, 0.42))
     col(f'P{i}HI', lighten(b, 0.5))
     col(f'P{i}FACE', b)
-    col(f'P{i}GLOSS', blend(WHITE, b, 0.16))
     col(f'P{i}LO', scale(b, 0.72))
-    col(f'P{i}GHOST', blend(lighten(b, 0.1), BOARD, 110 / 255))
+    col(f'P{i}GHOST', blend(lighten(b, 0.1), BOARD, 150 / 255))
     col(f'P{i}GFILL', blend(b, BOARD, 26 / 255))
 g = h(0x3A3F5A)
 col('SWGROUT', scale(g, 0.42)); col('SWHI', lighten(g, 0.5)); col('SWFACE', g)
-col('SWGLOSS', blend(WHITE, g, 0.16)); col('SWLO', scale(g, 0.72))
+col('SWLO', scale(g, 0.72))
 # (1.1) local indices 1 .. NCOLS (0: transparent / none, $FF: no paper): the program takes
 # NCOLS palette entries with pal_alloc wherever the kernel has them and translates (cmap):
 # the art in place at its start (qb_art0 .. qb_art1), the colours of its drawing calls
@@ -79,46 +80,20 @@ IDX = {n: i + 1 for i, (n, _, _) in enumerate(cols)}
 RGB = {n: c for n, c, _ in cols}
 
 def piece_shades(i):
-    return {k: IDX[f'P{i}{k}'] for k in ('GROUT', 'HI', 'FACE', 'GLOSS', 'LO')}
-SWEEP = {k: IDX['SW' + k] for k in ('GROUT', 'HI', 'FACE', 'GLOSS', 'LO')}
+    return {k: IDX[f'P{i}{k}'] for k in ('GROUT', 'HI', 'FACE', 'LO')}
+SWEEP = {k: IDX['SW' + k] for k in ('GROUT', 'HI', 'FACE', 'LO')}
 
 # ---------------------------------------------------------------- tiles
-def rounded(x, y, w, hh, r):
-    """the pixels of a rounded rectangle"""
-    px = set()
-    for yy in range(y, y + hh):
-        for xx in range(x, x + w):
-            dx = max(x + r - 1 - xx, xx - (x + w - r), 0)
-            dy = max(y + r - 1 - yy, yy - (y + hh - r), 0)
-            if dx * dx + dy * dy <= (r - 0.5) ** 2 + 0.6 or dx == 0 or dy == 0:
-                px.add((xx, yy))
-    return px
-
 def block(size, s):
-    """the owner's beveled block (graphics.c draw_block_direct) in shades s"""
-    t = [[s['GROUT']] * size for _ in range(size)]
-    r = max(3, size // 8) if size >= 12 else 2
-    ins = max(1, size // 16)
-    bev = max(2, size // 9) if size >= 12 else 1
-    fx = fy = ins
-    fw = fh = size - 2 * ins
-    for (x, y) in rounded(fx, fy, fw, fh, r):
-        t[y][x] = s['FACE']
-    for x in range(fx + r, fx + fw - r):            # bottom, right: shadow
-        for k in range(bev):
-            t[fy + fh - 1 - k][x] = s['LO']
-    for y in range(fy + r, fy + fh - r):
-        for k in range(bev):
-            t[y][fx + fw - 1 - k] = s['LO']
-    for x in range(fx + r, fx + fw - r):            # top, left: highlight
-        for k in range(bev):
-            t[fy + k][x] = s['HI']
-    for y in range(fy + r, fy + fh - r):
-        for k in range(bev):
-            t[y][fx + k] = s['HI']
-    for (x, y) in rounded(fx + bev, fy + bev, fw - 2 * bev, max(1, fh // 3), max(1, r - 1)):
-        if t[y][x] == s['FACE']:
-            t[y][x] = s['GLOSS']
+    """(1.2) a clean block: one flat face, a 1-pixel lighter edge on the top and left, a
+    1-pixel darker edge on the bottom and right (the corners are cut by over())"""
+    t = [[s['FACE']] * size for _ in range(size)]
+    for i in range(size):
+        t[size - 1][i] = s['LO']
+        t[i][size - 1] = s['LO']
+    for i in range(size - 1):
+        t[0][i] = s['HI']
+        t[i][0] = s['HI']
     return t
 
 def empty(size):
@@ -129,22 +104,18 @@ def empty(size):
     return t
 
 def ghost(size, i):
-    """the outline of a block (its rounded silhouette, 1 pixel in), 2 pixels wide, and a
-    faint fill"""
-    t = empty(size)
-    inner = rounded(2, 2, size - 3, size - 3, 2)
-    outer = rounded(1, 1, size - 2, size - 2, 4)
-    ring = outer - rounded(3, 3, size - 6, size - 6, 2)
-    for (x, y) in inner:
-        t[y][x] = IDX[f'P{i}GFILL']
-    for (x, y) in ring:
-        t[y][x] = IDX[f'P{i}GHOST']
-    return t
+    """(1.2) the block's silhouette: a 1-pixel outline and a faint fill (corners as a block's)"""
+    t = [[IDX[f'P{i}GFILL']] * size for _ in range(size)]
+    for k in range(size):
+        for (x, y) in ((k, 0), (k, size - 1), (0, k), (size - 1, k)):
+            t[y][x] = IDX[f'P{i}GHOST']
+    return over(t, empty(size))
 
 # (1.1) rounded corners: the pixels cut off each corner of a block (R = 2: the corner pixel
 # and its two neighbours, R = 1: the corner pixel) show what lies behind the tile there: the
-# well's empty cell (its grid line on the top and left), a panel, or nothing (0: keyed blits)
-R = 2
+# well's empty cell (its grid line on the top and left), a panel, or nothing (0: keyed blits).
+# (1.2) R = 1: exactly one pixel at each of the four corners
+R = 1
 def corners(size, r=R):
     cut = set()
     pat = [(0, 0)] if r == 1 else [(0, 0), (1, 0), (0, 1)]
@@ -161,7 +132,7 @@ def over(t, back, r=R):
     return t
 
 def dimmed(s):
-    return {'GROUT': s['GROUT'], 'HI': s['FACE'], 'FACE': s['LO'], 'GLOSS': s['LO'], 'LO': s['GROUT']}
+    return {'GROUT': s['GROUT'], 'HI': s['FACE'], 'FACE': s['LO'], 'LO': s['GROUT']}
 
 tiles = []                      # (name, size, rows)
 E14 = empty(14)

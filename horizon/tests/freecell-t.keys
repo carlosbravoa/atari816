@@ -1,0 +1,6 @@
+# FreeCell self test (text shell, NODESK): "freecell -t" deals games 1 and 65535, prints the
+# run limits, checks the rules on made positions, the safe rule, the test position (-w) and
+# plays random moves on ten deals, all undone. The output after the command is compared with
+# tests/freecell-t.txt.
+1500 {esc}
++1500 freecell -t\n

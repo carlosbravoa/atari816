@@ -1,0 +1,27 @@
+# (0.25) Files reads its folder again (DESK=1; tests/mousegen.py makes tests/files25.keys from
+# this). The card gets tests/mk23.py's additions (a clock) and an empty /Printouts; emu816 with
+# --classic-print tests/p23.atascii@16 --no-pc-print (a job in /Printouts at about 19 s), --pc-folder (a copy
+# of tests/pc) and --pc-drop-at 30. Files is at (24, 24). Shots (s):
+#   1  README.TXT selected in Files; the Terminal (in front) has copied it to /NEW.TXT: Files,
+#      behind, does not show it yet
+#   2  Alt+Tab: Files in front reads / again: NEW.TXT shows, README.TXT still selected
+#   3  Files in /Printouts (empty); the classic Atari's job has arrived (the notice): not shown
+#   4  F5: the job shows
+#   5  Files in /PC:
+#   6  the link dropped (30 s), View > Reload: "The PC link was lost" on the footer, no entries
+6000 move 100 217
+6400 click
+7000 move 105 8
+7100 click
+7600 move 105 66
+7700 click
+10000 key cp /README.TXT /NEW.TXT\n
+13000 key {dE2}{d2B}{u2B}{uE2}
+15000 key pri\n
+21500 key {d3E}{u3E}
+23000 key \b
+24000 key pc\n
+31000 move 355 8
+31100 click
+31600 move 355 65
+31700 click

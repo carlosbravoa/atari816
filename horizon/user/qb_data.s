@@ -190,7 +190,7 @@ h15:    .byte   "A Quad or spin right after another: back-to-back, x 1.5", 0
 h16:    .byte   "Pieces clearing lines in a row: a combo, + 50 x combo", 0
 h17:    .byte   " ", 0
 h18:    .byte   "*Any key: back", 0
-s_about: .byte  "Quabricks for the Atari816, version 1.1", 10
+s_about: .byte  "Quabricks for the Atari816, version 1.2", 10
         .byte   "A falling-block game after the SDL2 Quabricks (MIT).", 10
         .byte   "Sound: Lau samples, or POKEY 2 without Lau.", 0
 s_aboutt: .byte "About Quabricks", 0

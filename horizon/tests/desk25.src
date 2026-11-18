@@ -1,0 +1,26 @@
+# (0.25) The folder disk after a restart of Horizon (DESK=1; tests/mousegen.py makes
+# tests/desk25.keys from this; the card gets tests/mk23.py's additions and an /atari.ini that
+# says "folder=/Atari", "folderdrive=2", as the I/O processor writes it when the folder disk is
+# mounted: emu816 does not write it). Shots (s):
+#   1  the folder disk mounted from the panel: D2: "/Atari (folder)", Refresh
+#   2  Horizon restarted (Shut down, Restart), the panel again: the kernel no longer knows the
+#      folder, the Desktop takes it from /atari.ini: "/Atari (folder)", Refresh not dimmed
+# (the pointer: the new kernel starts it at the centre: moved to the corner first)
+#   3  Refresh clicked (mounted again: the second CLASSIC_MOUNT kind 5 in the log)
+6000 move 596 100
+6400 click
+7500 move 229 313
+7900 click
+9500 key \n
+12000 move 40 8
+12100 click
+12500 move 40 136
+12600 click
+14000 key \n
+17000 move 320 206
+17100 click
+21000 move 0 0
+25000 move 596 100
+25400 click
+29000 move 442 127
+29400 click

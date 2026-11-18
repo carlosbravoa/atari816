@@ -1,0 +1,75 @@
+FREECELL TEST START
+game 1:
+  6D 5C TD 9C 7S 8D TH
+  QD 5D 3C 5H 8H 4D KC
+  2D 7H 6C 5S JS 6S 2C
+  TS 8S KS KD TC 7D AC
+  QS 7C 2S QH 9S 4S
+  JH 4H KH AD 9D AS
+  JD AH 9H 3S 2H 3H
+  JC 3D 4C QC 6H 8C
+game 65535:
+  4D AD 7S QC 9D TD QD
+  KH 2D JD 8S KS 2H 6D
+  4C QS 4S 3S JH 9H 6S
+  7D 2C 9C 7C AC 5S 5H
+  6H KC 8D 8C 4H 3C
+  AS JS 2S 9S QH JC
+  KD 3H 5D 7H TC 3D
+  5C 8H AH TH 6C TS
+run limit (free cells, empty columns: to a column, to an empty one):
+  0, 0: 1
+  0, 1: 2, 1
+  0, 2: 4, 2
+  0, 3: 8, 4
+  1, 0: 2
+  1, 1: 4, 2
+  1, 2: 8, 4
+  1, 3: 16, 8
+  2, 0: 3
+  2, 1: 6, 3
+  2, 2: 12, 6
+  2, 3: 24, 12
+  3, 0: 4
+  3, 1: 8, 4
+  3, 2: 16, 8
+  3, 3: 32, 16
+  4, 0: 5
+  4, 1: 10, 5
+  4, 2: 20, 10
+  4, 3: 40, 20
+PASS nothing to move from an empty column
+PASS a red 7 onto a black 8
+PASS a black 7 onto a black 8: refused
+PASS a red 6 onto a black 8: refused
+PASS a red 9 onto a black 8: refused
+PASS a card into an empty free cell
+PASS a card into a full free cell: refused
+PASS an ace onto its foundation
+PASS an ace onto another suit's foundation: refused
+PASS a two onto an empty foundation: refused
+PASS a two onto its ace
+PASS a card back from a foundation: refused
+PASS a run of 3 into an empty column (4 cells, 6 columns free)
+PASS not a run (two black cards): refused
+PASS the top two cards of a run
+PASS a run of 3 onto a red 10
+PASS no free cell, no other empty column: a run of 2 into the empty one refused
+PASS no free cell: a single card into an empty column
+PASS one free cell, no empty column: a run of 3 refused
+PASS one free cell, no empty column: a run of 2 allowed
+PASS safe rule: AH with foundations C0 D0 H0 S0: goes home
+PASS safe rule: 2C with foundations C1 D0 H0 S0: goes home
+PASS safe rule: 3C with foundations C2 D0 H0 S0: stays
+PASS safe rule: 3C with foundations C2 D2 H1 S0: stays
+PASS safe rule: 3C with foundations C2 D2 H2 S2: goes home
+PASS safe rule: 5D with foundations C5 D4 H4 S5: goes home
+PASS safe rule: 5D with foundations C5 D4 H3 S5: goes home
+PASS safe rule: 5D with foundations C5 D4 H4 S3: stays
+PASS safe rule: QS with foundations C11 D11 H11 S11: goes home
+PASS safe rule: KD with foundations C11 D11 H11 S12: stays
+PASS safe rule: KD with foundations C12 D12 H12 S12: goes home
+PASS test position: one move, then 8 cards home by themselves: won
+PASS random play: 10 games, 346 moves, 2654 refused, all undone back to the deal
+FREECELL TEST END: 0 failed
+> 

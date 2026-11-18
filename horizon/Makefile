@@ -47,6 +47,9 @@ UISRC  := $(wildcard user/ui*.s)
 # the console font (tools/mkwfont.py)
 PROGS  += write
 UIPROGS += write
+# FreeCell (the patience game: user/freecell.s, fc_*.s)
+PROGS  += freecell
+UIPROGS += freecell
 
 # self test keys: 'a' 1.0-1.2 s with F12 (system key NMI) in between. SELFTEST holds the
 # keyboard from its start, so they queue up whenever they come; KEYS reads them at the end.
@@ -157,7 +160,8 @@ OLD89   = $(or $(findstring --rev 9,$(EMUFLAGS)),$(findstring --rev 8,$(EMUFLAGS
 REV7    = $(if $(findstring --rev 7,$(EMUFLAGS)),$(1)-rev7.md5,$(call REV9F,$(1)))
 DMD5    = $(call REV7,desk)
 # (0.22) REV $08-$0A where a picture differs from the default one (a moment's free memory on
-# the Desktop's status line: Files' session): $(1)-rev10.md5 when it exists, else $(2)
+# the Desktop's status line: Files' session; (0.25) the PC volume's): $(1)-rev10.md5 when it
+# exists, else $(2)
 # (0.22) $(1)-rev7.md5 without the blitter when it exists, else $(1).md5 (the Classic Atari
 # page: the free memory on the status line)
 REV7IF  = $(if $(and $(findstring --rev 7,$(EMUFLAGS)),$(wildcard tests/pictures/$(1)-rev7.md5)),$(1)-rev7.md5,$(1).md5)
@@ -284,6 +288,14 @@ user/qb_art.inc: kernel/font8x12.txt tools/mkqbart.py
 all: $(SD)/BIN/QUABRICK.SFX
 $(SD)/BIN/QUABRICK.SFX: tools/mkqbsfx.py | $(SD)/BIN
 	python3 tools/mkqbsfx.py $@
+# FreeCell: one assembly unit; its art (tools/mkfcart.py) and its samples (tools/mkfcsfx.py:
+# /BIN/FREECELL.SFX) are made here
+$(SD)/BIN/FREECELL.PRG: $(wildcard user/fc_*.s) user/fc_art.inc
+user/fc_art.inc: tools/mkfcart.py
+	python3 tools/mkfcart.py $@
+all: $(SD)/BIN/FREECELL.SFX
+$(SD)/BIN/FREECELL.SFX: tools/mkfcsfx.py | $(SD)/BIN
+	python3 tools/mkfcsfx.py $@
 
 $(SD)/README.TXT: sdfiles/README.TXT
 	cp $< $@
@@ -422,6 +434,7 @@ test: all $(EMU)
 	@$(MAKE) --no-print-directory test-print
 	@$(MAKE) --no-print-directory test-23
 	@$(MAKE) --no-print-directory test-24
+	@$(MAKE) --no-print-directory test-25
 	@rm -rf build/run-sd; cp -r $(SD) build/run-sd; touch build/run-sd/SYSTEM/NODESK; cp tests/basic.bas build/run-sd/BT.BAS
 	@$(EMU) $(EMUFLAGS) $(CARDDATE) --headless --sd build/run-sd --max-seconds $(BASSECS) \
 	    --keys "$$(python3 tests/keyscript.py tests/basic-t.keys)" \
@@ -562,6 +575,34 @@ test-games: all $(EMU)
 	@if grep -l 'emu816: blitter:' $(B)/calc-t.err $(B)/calc.err $(B)/solitair-t.err $(B)/solitair.err $(B)/quabrick-t.err $(B)/quabrick.err; \
 	then echo "FAIL  blitter rules (Calculator, Solitaire, Quabricks)"; exit 1; \
 	else echo "PASS  blitter rules: Calculator, Solitaire, Quabricks"; fi
+	@$(MAKE) --no-print-directory test-freecell
+
+# FreeCell: its self test (tests/freecell-t.keys, compared with tests/freecell-t.txt) and its
+# picture session (tests/freecell.keys; the shot times are explained there: the same pictures
+# on every revision); the statistics it saved in /BIN/FREECELL.DAT (two games played, one won)
+FCSHOTS := 5.8 6.9 9.3 10.7 12 14 15.5 20.5 23 24.9 26.5 28.4 33 35.3 44 46.5
+test-freecell: all $(EMU)
+	@rm -rf build/run-sd; cp -r $(SD) build/run-sd; touch build/run-sd/SYSTEM/NODESK
+	@$(EMU) $(EMUFLAGS) $(CARDDATE) --headless --sd build/run-sd --max-seconds 25 --keys "$$(python3 tests/keyscript.py tests/freecell-t.keys)" \
+	    $(SD)/SYSTEM/HORIZON.SYS > $(B)/freecell-t.out 2> $(B)/freecell-t.err || true
+	@python3 -c "L = open('$(B)/freecell-t.out', encoding='latin-1').read().split('\n'); i = [k for k, l in enumerate(L) if '> freecell -t' in l][0]; open('$(B)/freecell-t.txt', 'w', encoding='latin-1').write('\n'.join(L[i + 1:]))"
+	@if python3 tests/compare.py tests/freecell-t.txt $(B)/freecell-t.txt; then echo "PASS  FreeCell: self test (deals, the run limit, the rules, the safe rule, the test position, random play and undo)"; \
+	else echo "FAIL  FreeCell self test ($(B)/freecell-t.out)"; exit 1; fi
+	@sh tests/shots.sh "$(EMU) $(EMUFLAGS) $(CARDDATE)" $(SD) freecell 50 $(FCSHOTS)
+	@if diff -u tests/pictures/freecell.md5 $(B)/freecell.md5; then echo "PASS  FreeCell pictures"; \
+	else echo "FAIL  FreeCell pictures (look at $(B)/freecell*.ppm, then make pictures-freecell)"; exit 1; fi
+	@if python3 -c "import struct, sys; d = open('$(B)/run-pic/BIN/FREECELL.DAT', 'rb').read(); sys.exit(not (d[:4] == b'FCS1' and struct.unpack('<5H', d[4:14])[:4] == (2, 1, 1, 1)))"; \
+	then echo "PASS  FreeCell: the statistics saved in /BIN/FREECELL.DAT (two games played, one won)"; \
+	else echo "FAIL  FreeCell: /BIN/FREECELL.DAT"; exit 1; fi
+	@if grep -l 'emu816: blitter:' $(B)/freecell-t.err $(B)/freecell.err; \
+	then echo "FAIL  blitter rules (FreeCell)"; exit 1; \
+	else echo "PASS  blitter rules: FreeCell"; fi
+
+pictures-freecell:
+	cp $(B)/freecell.md5 tests/pictures/freecell.md5
+	python3 -c "from PIL import Image; import glob; [Image.open(f).save('tests/pictures/' + f.split('/')[-1][:-4] + '.png') for f in sorted(glob.glob('$(B)/freecell[0-9]*.ppm'))]"
+
+.PHONY: test-freecell pictures-freecell
 
 # (0.20) the PC volume: run by make test (see PCFLAGS); make pictures-pc freezes its pictures
 test-pc: all $(EMU)
@@ -586,7 +627,7 @@ test-pc: all $(EMU)
 	else echo "FAIL  without the PC volume ($(B)/pcshell2.out)"; exit 1; fi
 	@rm -rf build/run-pc; cp -r tests/pc build/run-pc
 	@DESK=1 sh tests/shots.sh "$(EMU) $(EMUFLAGS) $(CARDDATE) $(PCFLAGS) --pc-drop-at 27.5 --pc-back-at 35.5" $(SD) pcdesk 54 $(PCSHOTS)
-	@if diff -u tests/pictures/$(call REV7,pcdesk) $(B)/pcdesk.md5; then echo "PASS  PC volume, Desktop: the PC icon (it goes and comes with the link), drops on it, Files at /PC:, copy and paste both ways, a move, the file dialog"; \
+	@if diff -u tests/pictures/$(call REV10,pcdesk,$(call REV7,pcdesk)) $(B)/pcdesk.md5; then echo "PASS  PC volume, Desktop: the PC icon (it goes and comes with the link), drops on it, Files at /PC:, copy and paste both ways, a move, the file dialog"; \
 	else echo "FAIL  PC volume, Desktop pictures (look at $(B)/pcdesk*.ppm, then make pictures-pc)"; exit 1; fi
 	@if cmp -s build/run-pc/BLUE.XEX $(SD)/BLUE.XEX && cmp -s "build/run-pc/docs/Read me first.txt" "$(SD)/docs/Read me first.txt" \
 	  && cmp -s build/run-pic/Notes.txt tests/pc/Notes.txt && cmp -s build/run-pc/README.TXT $(SD)/README.TXT && ! test -e build/run-pic/README.TXT \
@@ -746,13 +787,48 @@ pictures-24:
 	@# (an older revision: only the pictures that differ from the default ones)
 	python3 -c "from PIL import Image; import glob; d = {l.split()[1]: l.split()[0] for l in open('tests/pictures/saver.md5')}; n = {l.split()[1]: l.split()[0] for l in open('$(B)/saver.md5')}; [Image.open(f).save('tests/pictures/' + f.split('/')[-1][:-4] + '$(SVSFX).png') for f in sorted(glob.glob('$(B)/saver[0-9]*.ppm')) if not '$(SVSFX)' or n[f.split('/')[-1]] != d[f.split('/')[-1]]]"
 
+# (0.25) GTEST v (text shell, tests/gtestv.keys): draw lists whose first record waits for the
+# vertical blank while a child keeps the blitter busy (on REV $08 the kernel starts the records
+# one by one: no register written while BUSY). The Desktop: tests/desk25.src (the folder disk
+# mounted, Horizon restarted: the panel takes the folder from /atari.ini, Refresh mounts it
+# again) and tests/files25.src (Files reads its folder again: in front again, F5, View >
+# Reload; /PC: after the link dropped). make pictures-25 freezes the pictures.
+D25SHOTS := 11 27 31
+F25SHOTS := 12.5 14.5 20.5 23 27 33
+F25FLAGS = --classic-print tests/p23.atascii@16 --no-pc-print --pc-folder build/run-pc --pc-time 2026-03-04T05:06 --pc-drop-at 30
+test-25: all $(EMU)
+	@rm -rf build/run-sd; cp -r $(SD) build/run-sd; touch build/run-sd/SYSTEM/NODESK
+	@$(EMU) $(EMUFLAGS) $(CARDDATE) --headless --sd build/run-sd --max-seconds 20 --keys "$$(python3 tests/keyscript.py tests/gtestv.keys)" \
+	    $(SD)/SYSTEM/HORIZON.SYS > $(B)/gtestv.out 2> $(B)/gtestv.err || true
+	@if grep -q 'gtest v: 120 lists with LS_VBL while another program draws: done' $(B)/gtestv.out && ! grep -q 'emu816: blitter:' $(B)/gtestv.err; \
+	then echo "PASS  0.25 draw lists with LS_VBL while another program draws: no blitter register written while BUSY"; \
+	else echo "FAIL  0.25 GTEST v ($(B)/gtestv.out, $(B)/gtestv.err)"; exit 1; fi
+	@PREP='python3 ../../tests/mk23.py && printf "folder=/Atari\nfolderdrive=2\n" > atari.ini' DESK=1 sh tests/shots.sh "$(EMU) $(EMUFLAGS) $(CARDDATE)" $(SD) desk25 32 $(D25SHOTS)
+	@if diff -u tests/pictures/$(call REV7IF,desk25) $(B)/desk25.md5 && [ "$$(grep -c 'CLASSIC_MOUNT kind 5 slot 1 /Atari -> 00' $(B)/desk25.err)" = 2 ]; \
+	then echo "PASS  0.25 the folder disk after a restart of Horizon: its folder from /atari.ini, Refresh"; \
+	else echo "FAIL  0.25 folder disk after a restart (look at $(B)/desk25*.ppm, $(B)/desk25.err; make pictures-25)"; exit 1; fi
+	@rm -rf build/run-pc; cp -r tests/pc build/run-pc
+	@PREP='python3 ../../tests/mk23.py && mkdir Printouts' DESK=1 sh tests/shots.sh "$(EMU) $(EMUFLAGS) $(CARDDATE) $(F25FLAGS)" $(SD) files25 34 $(F25SHOTS)
+	@if diff -u tests/pictures/$(call REV7IF,files25) $(B)/files25.md5; \
+	then echo "PASS  0.25 Files reads its folder again: in front again (the selection kept), F5, View > Reload, /PC: after the link dropped"; \
+	else echo "FAIL  0.25 Files reload pictures (look at $(B)/files25*.ppm, then make pictures-25)"; exit 1; fi
+	@if grep -l 'emu816: blitter:' $(B)/desk25.err $(B)/files25.err; then echo "FAIL  blitter rules (the 0.25 sessions)"; exit 1; \
+	else echo "PASS  blitter rules: the 0.25 sessions"; fi
+
+pictures-25:
+	cp $(B)/desk25.md5 tests/pictures/$(call REV7IF,desk25)
+	cp $(B)/files25.md5 tests/pictures/$(call REV7IF,files25)
+	python3 -c "from PIL import Image; import glob; [Image.open(f).save('tests/pictures/' + f.split('/')[-1][:-4] + '.png') for f in sorted(glob.glob('$(B)/desk25[0-9]*.ppm') + glob.glob('$(B)/files25[0-9]*.ppm'))]"
+
+.PHONY: test-25 pictures-25
+
 pictures-net:
 	cp $(B)/download.md5 tests/pictures/$(call REV7,download)
 	cp $(B)/bbs.md5 tests/pictures/$(call REV7IF,bbs)
 	python3 -c "from PIL import Image; import glob; [Image.open(f).save('tests/pictures/' + f.split('/')[-1][:-4] + '.png') for f in sorted(glob.glob('$(B)/download[0-9]*.ppm') + glob.glob('$(B)/bbs[0-9]*.ppm'))]"
 
 pictures-pc:
-	cp $(B)/pcdesk.md5 tests/pictures/$(call REV7,pcdesk)
+	cp $(B)/pcdesk.md5 tests/pictures/$(call REV10,pcdesk,$(call REV7,pcdesk))
 	cp $(B)/pccopy.md5 tests/pictures/$(call REV7,pccopy)
 	python3 -c "from PIL import Image; import glob; [Image.open(f).save('tests/pictures/' + f.split('/')[-1][:-4] + '.png') for f in sorted(glob.glob('$(B)/pcdesk[0-9]*.ppm') + glob.glob('$(B)/pccopy[0-9]*.ppm'))]"
 

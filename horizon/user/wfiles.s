@@ -8,8 +8,8 @@
 ;   first (it goes up; it cannot be dragged, deleted, renamed or copied). Hidden unless
 ;   View > Show system files is on: /SYSTEM, and entries with the FAT hidden or system
 ;   attribute.
-;   Content: a header bar (an Up button, the folder's full path cut at the left, the number
-;   of entries), the list (one 12-pixel row per entry: an icon, the name, the size of files
+;   Content: a header bar (an Up button, (0.25) a Reload button, the folder's full path cut
+;   at the left, the number of entries), the list (one 12-pixel row per entry: an icon, the name, the size of files
 ;   right-aligned), a footer bar (what is mounted: D1:, XEX:, Cart:; messages until the
 ;   next key or click; 0.14: looked at again every 2 s, so a disk mounted elsewhere shows).
 ;   Keys: up/down, PgUp/PgDn, Home/End move; typing jumps to the first name starting with
@@ -17,6 +17,11 @@
 ;   Delete deletes; ctrl-C / ctrl-V copy / paste; ctrl-N a new window; Esc closes.
 ;   Mouse: a click selects, a double click (0.5 s) opens, the wheel scrolls 3 rows a step;
 ;   the Up button goes to the parent folder.
+;   (0.25) Reload: the folder read again by F5, View > Reload, the Reload button, and whenever
+;   the window comes to the front (WE_FOCUS), so a file another program saved there shows.
+;   Nothing is drawn when the listing is the same (its entries' names, sizes and attributes,
+;   their number); else the selected entry stays selected (by its name) and the scroll stays.
+;   A folder that cannot be read (the PC link lost) says its error on the footer.
 ;   Drag and drop: a press on a row moved more than 4 pixels drags it (the drag pointer).
 ;   Released on a folder row of the same window (".." too): moved into it. On another
 ;   window: that window gets the full path (SYS_WDROP; this one reloads 0.6 s later). A path
@@ -29,7 +34,7 @@
 ;          file named on the clipboard into this folder, 32 KB at a time through a bank;
 ;          "Copy of NAME" when NAME is there already; (0.20) a folder is copied with
 ;          everything in it; between the card and the PC both ways: ui_cptree).
-;          View: Show system files (a check mark), Parent folder.
+;          View: Show system files (a check mark), Parent folder, (0.25) Reload (F5).
 ;   Open: a folder is entered (and becomes the current directory); a file goes to ui_open
 ;   (the controls library: its program by its type, a .PRG started, refused under /SYSTEM;
 ;   an alert when nothing opens it or the program cannot start).
@@ -51,6 +56,7 @@ NSLOT   = 8                             ; places: 4 down the diagonal, twice
 PMAX    = 400                           ; path buffers (a path itself: 127 at most)
 NAMEMAX = 100                           ; a name typed in the name dialog
 UPW     = 18                            ; the Up button in the header: (2, 1), UPW x 12
+RLX     = 2 + UPW + 2                   ; (0.25) the Reload button next to it: (RLX, 1), UPW x 12
 TICKP   = 200                           ; (0.14) the timer: the footer looked at every 2 s
 
         .segment "CODE"
@@ -129,6 +135,8 @@ loop:   jsr     fdcheck                 ; (0.19) the selected entry's date on th
         jeq     ondrop
         cmp     #WE_TICK
         jeq     ontick
+        cmp     #WE_FOCUS               ; (0.25) in front again: the folder read again
+        jeq     onfocus
         cmp     #WE_MENU
         jne     loop
         jsr     unmsg
@@ -136,10 +144,12 @@ loop:   jsr     fdcheck                 ; (0.19) the selected entry's date on th
         beq     :+
         cmp     #2
         bne     @edit
-        lda     ev+4                    ; View: 0 Show system files, (1 -), 2 Parent folder
-        jeq     togsys
+        lda     ev+4                    ; View: 0 Show system files, (1 -), 2 Parent folder,
+        jeq     togsys                  ; (0.25) 3 Reload
         cmp     #2
         jeq     parent
+        cmp     #3
+        jeq     doreload
         jmp     loop
 :       lda     ev+4                    ; File: 0 Open, 1 New window, 2 New folder...,
         asl     a                       ;   3 Rename..., 4 Delete, 5 Add to desktop, (6 -), 7 Close
@@ -158,6 +168,14 @@ onkey:  jsr     ui_menukey              ; (0.15) the menu key: the selected row'
         jsr     unmsg
         lda     #1
         jmp     ctxmenu
+:       lda     ev+4                    ; (0.25) F5 (pressed): Reload
+        cmp     #$0100
+        bcc     :+
+        lda     ev+2
+        cmp     #$3E
+        bne     :+
+        jsr     unmsg
+        jmp     doreload
 :       lda     ev+2
         ldx     ev+4
         jsr     key_ascii
@@ -285,7 +303,9 @@ togsys: lda     z:showsys
         jmp     loop
 
 ; error A: beep, and say it on the footer until the next key or click
-oops:   sta     z:err
+oops:   jsr     oopsr
+        jmp     loop
+oopsr:  sta     z:err
         ldx     #0
 @t:     lda     errtab,x
         beq     @num
@@ -298,8 +318,7 @@ oops:   sta     z:err
         bra     @t
 @hit:   lda     errtab+2,x
         tax
-        jsr     say
-        jmp     loop
+        jmp     say
 @num:   jsr     ui_beep
         lda     #.loword(fbuf)
         sta     z:bp
@@ -309,8 +328,7 @@ oops:   sta     z:err
         jsr     app_dec
         lda     #1
         sta     z:msg
-        jsr     footer_draw
-        jmp     loop
+        jmp     footer_draw
 
 ; the path too long: say so
 long:   ldx     #.loword(m_long)
@@ -422,28 +440,113 @@ keepsel:
         jmp     ui_strcpy
 :       rts
 
+; (0.25) F5, View > Reload, the Reload button; the window in front again (WE_FOCUS)
+doreload:
+        jsr     refresh
+        jmp     loop
+onfocus:
+        lda     z:dragging              ; (not in the middle of a drag, nor while the footer
+        ora     z:msg                   ; says something: an operation's error stays; F5)
+        jne     loop
+        jsr     refresh
+        jmp     loop
+
+; (0.25) the folder read again; nothing drawn when it is the same as before (its entries'
+; names, sizes and attributes, their number); else the selected entry kept by its name and
+; the scroll kept (reload). A folder that cannot be read: its error on the footer.
+refresh:
+        jsr     lhash
+        sta     rf_h
+        lda     z:n
+        sta     rf_n
+        lda     z:heap
+        sta     rf_heap
+        lda     fdsel
+        sta     rf_fd
+        jsr     keepsel
+        lda     z:sel
+        sta     rf_sel
+        lda     z:top
+        sta     rf_top
+        inc     rf_q                    ; (the title stays: the same folder)
+        jsr     load
+        stz     rf_q
+        lda     z:n
+        cmp     rf_n
+        bne     @chg
+        lda     z:heap
+        cmp     rf_heap
+        bne     @chg
+        jsr     lhash
+        cmp     rf_h
+        bne     @chg
+        lda     rf_top                  ; the same: as it was, nothing drawn
+        sta     z:top
+        lda     rf_sel
+        sta     z:sel
+        lda     rf_fd
+        sta     fdsel
+        bra     @err
+@chg:   jsr     rl_2
+@err:   lda     ld_err                  ; (a link lost, ...: its message, the list as read)
+        beq     :+
+        jmp     oopsr
+:       rts
+
+; a check value of the listing: every record's bytes, in their order -> A
+lhash:  lda     #$1D0F
+        sta     rf_x
+        lda     z:hbank
+        sta     z:pb+2
+        lda     z:n
+        asl     a
+        sta     rf_e
+        ldx     #0
+@r:     cpx     rf_e
+        bcs     @out
+        lda     idx,x
+        sta     z:pb
+        ldy     #4
+        lda     [pb],y
+        and     #$00FF
+        clc
+        adc     #5
+        sta     rf_l
+        ldy     #0
+:       lda     [pb],y
+        and     #$00FF
+        eor     rf_x
+        asl     a                       ; (rotated left by one)
+        adc     #0
+        sta     rf_x
+        iny
+        cpy     rf_l
+        bcc     :-
+        inx
+        inx
+        bra     @r
+@out:   lda     rf_x
+        rts
+
 ; read the folder again: the entry named in came selected, else the same place
 reload: lda     z:sel
-        pha
+        sta     rf_sel
         lda     z:top
-        pha
+        sta     rf_top
         jsr     load
-        pla
+rl_2:   lda     rf_top                  ; (refresh: after its load)
         sta     z:top
         jsr     findcame
         bcc     @sel
-        pla
+        lda     rf_sel
         cmp     z:n
-        bcc     :+
+        bcc     @sel
         lda     z:n
         dec     a
-        bpl     :+
+        bpl     @sel
         lda     #0
-:       sta     z:sel
-        bra     @show
 @sel:   sta     z:sel
-        pla
-@show:  jsr     showsel
+        jsr     showsel
         jmp     redraw
 
 quit:   lda     z:dragging              ; (the pointer as it was)
@@ -1796,7 +1899,7 @@ mouse:  lda     ev+6
         bcs     :+
         lda     ev+2
         cmp     #2 + UPW
-        bcs     :+
+        bcs     @rlb
         lda     z:atroot
         jne     loop
         lda     #1
@@ -1805,6 +1908,18 @@ mouse:  lda     ev+6
         lda     #80
         sys     SYS_SLEEP
         jmp     parent
+@rlb:   cmp     #RLX                    ; (0.25) the Reload button
+        bcc     :+
+        cmp     #RLX + UPW
+        bcs     :+
+        lda     #1
+        jsr     rlbtn
+        sys     SYS_WSSYNC
+        lda     #80
+        sys     SYS_SLEEP
+        lda     #0
+        jsr     rlbtn
+        jmp     doreload
 :       jsr     rowat
         jcs     loop
         sta     z:tmp
@@ -2030,6 +2145,7 @@ load:   lda     #$FFFF                  ; (0.19) the footer's date: looked at ag
         stz     z:trunc
         stz     z:hasup
         stz     z:atroot
+        stz     ld_err
         ptr     tbuf                    ; at the root?
         lda     #128
         sys     SYS_GETCWD
@@ -2053,8 +2169,10 @@ load:   lda     #$FFFF                  ; (0.19) the footer's date: looked at ag
         ldx     #.loword(rblk)
         ldy     #^rblk
         sys     SYS_READDIR
-        bcs     @out
-        cmp     #0
+        bcc     :+
+        sta     ld_err                  ; (0.25) (refresh says it)
+        bra     @out
+:       cmp     #0
         beq     @out
         sta     z:cnt
         clc
@@ -2136,7 +2254,10 @@ load:   lda     #$FFFF                  ; (0.19) the footer's date: looked at ag
         bcc     @sel
         lda     #1
         sta     z:sel
-@sel:   jmp     settitle
+@sel:   lda     rf_q                    ; (0.25) (refresh: the title stays)
+        bne     :+
+        jmp     settitle
+:       rts
 
 ; dbuf entry at dpos hidden? (View > Show system files off: the hidden or system attribute,
 ; /SYSTEM) -> C set
@@ -2547,7 +2668,7 @@ header: ldx     #.loword(hbuf+3)
         sys     SYS_WTWIDTH
         plx
         clc
-        adc     #UPW + 10
+        adc     #RLX + UPW + 8
         cmp     z:cw
         bcc     @draw
         beq     @draw
@@ -2581,16 +2702,32 @@ header: ldx     #.loword(hbuf+3)
         jsr     rect
         lda     #0
         jsr     upbtn
-        ldx     #UPW + 6
+        lda     #0
+        jsr     rlbtn
+        ldx     #RLX + UPW + 4
         ldy     #2
         lda     #C_BLACK
         jmp     text
 
 ; the Up button at (2, 1): A = 0 raised, 1 pressed; dimmed at the root
-upbtn:  pha
+upbtn:  ldx     #2
+        stx     tbx
+        ldx     #.loword(uparrow)
+        stx     tgl
+        ldx     z:atroot
+        bra     tbtn
+; (0.25) the Reload button at (RLX, 1): A = 0 raised, 1 pressed
+rlbtn:  ldx     #RLX
+        stx     tbx
+        ldx     #.loword(rlglyph)
+        stx     tgl
+        ldx     #0
+; a header button at (tbx, 1) with the picture tgl: A = 0 raised, 1 pressed; X = 1 dimmed
+tbtn:   stx     tdim
+        pha
         lda     z:win
         sta     z:ui_win
-        lda     #2
+        lda     tbx
         sta     z:ui_x
         lda     #1
         sta     z:ui_y
@@ -2611,8 +2748,8 @@ upbtn:  pha
         pla
         pha
         jsr     ui_bevel
-        lda     #C_BLACK                ; the arrow
-        ldx     z:atroot
+        lda     #C_BLACK                ; the picture
+        ldx     tdim
         beq     :+
         lda     #C_MID
 :       xba
@@ -2620,19 +2757,21 @@ upbtn:  pha
         sta     z:tmp
         pla                             ; (pressed: one pixel down right)
         sta     z:tmp2
-        ldx     #0
-:       lda     uparrow,x               ; {w, h, dx, dy} from (9, 3), w = 0: the end
+        ldx     tgl
+:       lda     a:0,x                   ; {w, h, dx, dy} from (tbx + 7, 3), w = 0: the end
         beq     :+
         sta     z:ui_w
-        lda     uparrow+2,x
+        lda     a:2,x
         sta     z:ui_h
-        lda     uparrow+4,x
+        lda     a:4,x
         clc
         adc     z:tmp2
         clc
-        adc     #9
+        adc     tbx
+        clc
+        adc     #7
         sta     z:ui_x
-        lda     uparrow+6,x
+        lda     a:6,x
         clc
         adc     z:tmp2
         clc
@@ -3092,8 +3231,11 @@ pow10:  .word   10000, 1000, 100, 10, 1
 KUP     = 9                             ; kind: the ".." entry (after the FT_* types)
 icons:  .addr   ic_blank, ic_folder, ic_atari, ic_prg, ic_page, ic_page, ic_pic, ic_page
         .addr   ic_page, ic_up
-; the Up button's arrow: {w, h, dx, dy} from (9, 3) (centred in it), 0
+; the Up button's arrow: {w, h, dx, dy} from (tbx + 7, 3) (centred in it), 0
 uparrow: .word  2, 1, 1, 0,  4, 1, 0, 1,  6, 1, $FFFF, 2,  8, 1, $FFFE, 3,  2, 4, 1, 4,  0
+; (0.25) the Reload button's arrow going round (the same {w, h, dx, dy})
+rlglyph: .word  4, 1, 0, 0,  1, 3, 5, 0,  1, 1, 4, 1,  2, 1, 3, 2,  1, 1, $FFFF, 1
+        .word   1, 4, $FFFE, 2,  1, 1, 5, 5,  1, 1, $FFFF, 6,  1, 1, 4, 6,  4, 1, 0, 7,  0
 .define IR(op, col, dx, dy, w, h) .word op | (col << 8), dx, dy, w, h
 ic_folder:
         IR      WD_FRAME, C_BLACK, 4, 1, 6, 3       ; the tab
@@ -3153,11 +3295,26 @@ menus:  .byte   "File", 0, "Open", 9, "Enter", 0, "New window", 9, "Ctrl+N", 0
         .byte   "Close", 9, "Esc", 0, 0
         .byte   "Edit", 0, "Copy", 9, "Ctrl+C", 0, "Paste", 9, "Ctrl+V", 0, 0
         .byte   "View", 0
-m_show: .byte   MS_STATE, "Show system files", 0, "-", 0, "Parent folder", 9, "Backspace", 0, 0
+m_show: .byte   MS_STATE, "Show system files", 0, "-", 0, "Parent folder", 9, "Backspace", 0
+        .byte   "Reload", 9, "F5", 0, 0
         .byte   0
         .res    256 - (* - menus)
 
         .segment "BSS"
+tbx:    .res    2                       ; (0.25) tbtn: the button's x, its picture, dimmed
+rf_h:   .res    2                       ; (0.25) refresh: the listing before (check value,
+rf_n:   .res    2                       ; entries, heap), the footer's entry, sel and top;
+rf_heap: .res   2                       ; lhash's temporaries; load's first READDIR error
+rf_fd:  .res    2
+rf_sel: .res    2
+rf_top: .res    2
+rf_q:   .res    2
+rf_x:   .res    2
+rf_e:   .res    2
+rf_l:   .res    2
+ld_err: .res    2
+tgl:    .res    2
+tdim:   .res    2
 DBUFLEN = 512
 idx:    .res    MAXENT * 2
 dbuf:   .res    DBUFLEN + 2

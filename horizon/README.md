@@ -14,7 +14,7 @@ It boots into the Desktop (or, with `/SYSTEM/NODESK` on the card, into the text 
 | --- | --- |
 | `/SYSTEM` | `HORIZON.SYS` (the kernel), `INIT.PRG`, the system programs `DESK.PRG` (the Desktop), `SH.PRG` (the shell), `ABOUT.PRG`, (0.23) `PRINTD.PRG` (sends a print job to the PC), (0.24) `SAVER.PRG` (the screen saver), the settings files `CONFIG` (Settings), `PROGRAMS` (the Desktop's Programs menu) and `NODESK` (optional: boot into the text shell), and (0.14) `ICONS` (the Desktop's icons, made from `sdfiles/icons.txt`), `CLOCK` (the last time set, written by the Desktop and the shell) and `LAYOUT` (where the desktop icons are), (0.22) `URLS` (the Downloader's last addresses) and `BBS.TXT` (the BBS terminal's address book). Files hides it and refuses to start its programs |
 | `/SYSTEM/TESTS` | Test and demo programs: SELFTEST, HELLO, COUNT, SPIN, TICK, REGS, CRASH, FTEST, PING, PONG, KEYS, MOUSE, MTEST, BENCH, WDEMO, LEAK, HOG, (0.15) KTEST, (0.17) STEST, (0.18) GTEST |
-| `/BIN` | The applications: WFILES (Files), TERM (Terminal), EDIT, WRITE, SHEET, PAINT, BASIC, CALC, SOLITAIR, (0.17) QUABRICK (Quabricks; its samples QUABRICK.SFX, its high scores QUABRICK.DAT), SETTINGS, (0.22) DOWNLOAD (the Downloader), BBS (the BBS terminal), (0.23) PRINTER (Printer), and the shell's tools FILES (the text browser), CAT, DIR, MEM |
+| `/BIN` | The applications: WFILES (Files), TERM (Terminal), EDIT, WRITE, SHEET, PAINT, BASIC, CALC, SOLITAIR, (0.17) QUABRICK (Quabricks; its samples QUABRICK.SFX, its high scores QUABRICK.DAT), SETTINGS, (0.22) DOWNLOAD (the Downloader), BBS (the BBS terminal), (0.23) PRINTER (Printer), (0.25) FREECELL (FreeCell; its sounds FREECELL.SFX, its statistics FREECELL.DAT), and the shell's tools FILES (the text browser), CAT, DIR, MEM |
 | `/Desktop` | Created by the Desktop if missing: what is in it shows as icons on the desktop (0.14: shortcuts are `.LNK` files, below) |
 | `/atari.ini` | The classic machine's settings, read by the I/O processor at boot (Settings > Classic Atari edits it; 0.23: also the folder disk, `folder=` and `folderdrive=`) |
 | `/Printouts` | (0.23) The print jobs, made by the I/O processor at the first one (see "Version 0.23") |
@@ -330,6 +330,22 @@ the blitter: the software drawing paths; both must pass):
    basicp-test`, and the Edit, Write and Sheet sessions `editp`, `writep`, `sheetp`): see
    "Version 0.23", Tests.
 
+29. **FreeCell** (in `make test-games`; `make test-freecell` alone): `freecell -t`
+   (`tests/freecell-t.keys`) deals games 1 and 65535 (every card once), prints the run limit
+   for 0-4 free cells and 0-3 empty columns, checks 20 moves on made positions (colours,
+   ranks, free cells, foundations, runs, the limit), the safe rule in 11 cases, the test
+   position (one move, then everything home) and 3,000 random tries on ten deals, all undone
+   back to the deal; compared with `tests/freecell-t.txt`. `tests/freecell.keys` plays game 1
+   and the test position (`freecell -w`): a drag (held, then auto moves home), a right click
+   into a free cell, a click to select and a click to move, undo, a drop that is refused,
+   the statistics, How to play, the game number dialog, About, the win. Sixteen pictures
+   (`freecell*.png`), the same on every revision (REV $07-$0B); /BIN/FREECELL.DAT must then
+   hold two games played, one won.
+
+30. **0.25** (`make test-25`): `gtest v` (REV $08: draw lists with LS_VBL while another
+   program draws), the folder disk after a restart of Horizon (tests/desk25.src), Files'
+   Reload (tests/files25.src); see "Version 0.25", Tests.
+
 The Desktop sessions (`DESK=1` in `tests/shots.sh`) get `tests/desk.programs` as their
 Programs menu (the order of 0.12), so programs added to `sdfiles/PROGRAMS` do not change
 their pictures. `PREP=command` runs a command on the session's copy of the card first.
@@ -581,7 +597,9 @@ names with spaces: "in quotes"; ctrl-C stops the foreground job
 | `tools/kspace.py` | (0.18) the kernel's space at every build |
 | `user/gtest.s` | (0.18) GTEST, the test of the games round's calls, (0.19) and of sheets (`gtest m`: the measurement; `gtest s`, `gtest f`: pictures) |
 | `user/quabrick.s`, `user/qb_*.s` | (0.17) Quabricks, the falling-block game (its files are listed at the top of quabrick.s) |
-| `tools/mkqbart.py`, `tools/mkqbsfx.py` | (0.17) Quabricks' art (`user/qb_art.inc`: its colours in local entries (1.1), the block tiles with rounded corners, the logo, the big fonts) and its samples (`/BIN/QUABRICK.SFX`) |
+| `tools/mkqbart.py`, `tools/mkqbsfx.py` | (0.17) Quabricks' art (`user/qb_art.inc`: its colours in local entries (1.1), the block tiles with rounded corners (1.2: a flat face, 1-pixel edges, one pixel cut at each corner), the logo, the big fonts) and its samples (`/BIN/QUABRICK.SFX`) |
+| `user/freecell.s`, `user/fc_*.s` | FreeCell, the patience game (its files are listed at the top of freecell.s) |
+| `tools/mkfcart.py`, `tools/mkfcsfx.py` | FreeCell's art (`user/fc_art.inc`: its colours, the card and place templates, the rank and suit masks) and its samples (`/BIN/FREECELL.SFX`) |
 | `user/uipop.s` | (0.15) ui_popup, ui_popat, ui_menukey, ui_chime, ui_beep, the text field's pop-up menu |
 | `user/ktest.s` | (0.15) KTEST, the test of the kernel's 0.15 additions |
 | `user/uidate.s` | (0.14) the date: seconds to a calendar date and back, `/SYSTEM/CLOCK` (also linked by the shell); (0.20) the clock from the PC (ui_clkpc) |
@@ -935,7 +953,8 @@ bus time (see emu/README.md, "Memory timing"). Expect the same factor on the CPU
 - **Single instance** (`task_single`, ABI.md): the Desktop never runs twice; About and
   Settings started again raise the open window.
 - **Files** hides /SYSTEM (View > Show system files) and refuses to start its programs; Up
-  button, "..", the full path; menus with shortcuts; Rename / New folder with `ui_ask`.
+  button, "..", the full path; menus with shortcuts; Rename / New folder with `ui_ask`; (0.25)
+  Reload (F5, a button next to Up, and whenever its window comes to the front).
 - **When a program cannot start**, whoever started it says why (an alert from `ui_launch` /
   `ui_spawnerr` in the Desktop and Files, a sentence in the shell): not enough memory, too
   many programs, not on the card, not a program. The menu bar shows the free memory
@@ -1006,6 +1025,58 @@ bus time (see emu/README.md, "Memory timing"). Expect the same factor on the CPU
   source stride), SYS_WGEOM, SYS_TNAME, WE_DROP's modifiers, the date routines (ui_clk*,
   `user/uidate.s`), shortcuts (ui_lnkread, ui_mklink), program and file icons (ui_prog,
   ui_ficon). See ABI.md and ui.inc.
+
+## Version 0.25 (FreeCell, Files' Reload, the folder disk after a restart)
+
+- **FreeCell** (`/BIN/FREECELL.PRG`, Programs > FreeCell, its own icon): a new patience game
+  (see "FreeCell" below). **Quabricks 1.2**: clean blocks (a flat face, 1-pixel edges, one
+  pixel cut at each corner). The card's Welcome.md names the games.
+- **Files: Reload.** View > Reload (F5) and a Reload button next to the Up button read the
+  folder again; Files also reads it whenever its window comes to the front (WE_FOCUS), so a
+  file another program saved there (Write, the Terminal, the PC link) shows. Nothing is drawn
+  when the listing is the same (the entries' names, sizes and attributes and their number;
+  READDIR gives no dates); else the selected entry stays selected (by its name) and the
+  scroll stays where it was. A folder that cannot be read (the PC link dropped) shows its
+  error on the footer and an empty list. The Desktop's folder windows are Files windows. The
+  Desktop's own icons (/Desktop) were already read again every 5 s, and the file dialog reads
+  its folder each time it opens: neither needed a change.
+- **The Atari panel after a restart of Horizon.** A restart loses the kernel's record of the
+  folder disk's path, so the panel showed "(folder)" alone and Refresh was dimmed. When
+  classic_query does not know the path, the Desktop now reads it from /atari.ini (`folder=`,
+  `folderdrive=`: the I/O processor writes both while a folder disk is mounted): the row says
+  "PATH (folder)" again and Refresh works. No firmware change. The folder disk dialog got no
+  Choose... button: the controls library has no folder chooser (the file dialog returns files).
+- **Kernel (REV $08).** draw_list and sheet_draw start their records one by one on REV $08
+  (`ls_single`, kernel/k2list.s). For a record that waits for the vertical blank (LS_VBL,
+  SH_VBL) the kernel waited for the blitter to be idle and then slept until the vertical
+  blank; meanwhile another program could start the blitter, and the record's registers were
+  then written while it was busy (emu816: "blitter: register written while BUSY"). Now the
+  wait for the blitter comes after the vertical blank. Same size: the kernel's space is
+  unchanged (bank $01 1,795 bytes left, k2 580, k3 2,386). FreeCell still asks for the
+  vertical blank only on REV $09+: asking on every revision changes the timing of its win
+  display on REV $08 (one test picture differs), so it was left as it is.
+- **Tests** (`make test-25`, part of `make test`): `gtest v` (text shell, tests/gtestv.keys):
+  120 lists whose first record has LS_VBL while a child fills a large window and yields; no
+  blitter report at any revision (before the fix: 20 reports at `--rev 8`).
+  tests/desk25.src (Desktop; the card's /atari.ini says `folder=/Atari`, `folderdrive=2`,
+  as the I/O processor writes it: emu816 does not write it): the folder disk mounted from the
+  panel, Shut down, Restart, the panel again ("/Atari (folder)", Refresh not dimmed), Refresh
+  clicked; three pictures, and emu816's log must show the folder mounted twice.
+  tests/files25.src (Desktop, `--pc-folder`, `--classic-print`, `--pc-drop-at 30`): a file
+  copied by the Terminal shows when Files comes to the front (README.TXT stays selected, one
+  row lower); a print job arriving while Files is in front at /Printouts does not show until
+  F5; View > Reload at /PC: after the link dropped: "No PC link: the PC is not connected" on
+  the footer, no entries; six pictures.
+- **Changed pictures.** Every picture with a Files window (its header: the Reload button; the
+  path 20 pixels further right); the About pictures (the version); files2-7 (Welcome.md's
+  size: one line more); classic4 (/atari.ini's new size: Files reads / again when it is in
+  front after Settings saved it); desk23 (/Printouts, made by the first print job, shows in
+  Files: the session's clicks on README.TXT and HELLO.LST moved one row down); Write's
+  pictures and its self test (Welcome.md: 38 lines, 323 words; tests/write-ex.txt); saver5
+  (the saver a few frames further); the free memory on the bar at a few moments (desk1,
+  system12-13, desk15 1-4, files1; pcdesk9 at REV $08-$0A: tests/pictures/pcdesk-rev10.md5).
+  Files' refresh at the focus is left out while its footer shows a message, so an operation's
+  error ("The PC link was lost" in pccopy6) stays until the next key or click.
 
 ## Version 0.24 (the screen saver)
 
@@ -1729,6 +1800,66 @@ ABI.md, "The games round", has the rules; `user/gtest.s` tests them.
   original).
 - **Tests**: KTEST and the pop-up menu session (tests 19 and 20); `tests/mousegen.py` no
   longer lets a click overtake the move before it.
+
+## FreeCell
+
+`/BIN/FREECELL.PRG`, in the Programs menu (with its own icon in Files and on the desktop): the
+classic patience game. 52 cards are dealt face up into eight columns. Four free cells (top
+left) hold one card each; the four foundations (top right) are built up by suit from the
+ace to the king; in the columns a card goes on a card one rank higher of the other colour,
+and any card may go into an empty column. A run in order moves as a whole when there is room
+for it: (free cells + 1) x 2 for each empty column (one column less when the run goes into
+an empty column). The game is won when all 52 cards are home.
+
+- **Mouse:** drag a card or a run to its place (the cards follow the pointer; they slide back
+  when the move is not allowed), or click a card (a gold frame shows it) and then click its
+  place (an empty column takes as many cards as may go). A double click or a right click sends
+  a card home, or else into a free cell. Cards that are safe go home by themselves (an ace or
+  a two always; another card when both foundations of the other colour hold the rank below
+  it, so nothing can need it any more).
+- **Keys:** U or ctrl-Z undo (every move back to the deal; a move and the cards that went home
+  after it are one step), N a new game, R this game again, G a game number, Esc lets go of the
+  selection, F2 a new game.
+- **Menus:** Game (New game, Restart this game, Select game..., Undo, Statistics..., Quit),
+  Help (How to play..., About FreeCell...).
+- **Game numbers** 1-65535: the same number is always the same deal (this game's own shuffle:
+  a xorshift32 generator seeded from the number, then Fisher-Yates). A new game takes a number
+  at random; the status line shows it, with the moves, the time and the cards left. The clock
+  starts with the first move and stops while the window is not in front or one of its
+  dialogs is open. When no move is left (every free cell and column full, no card can go
+  anywhere) the status line says "No moves left" (U undoes).
+- **Statistics** in `/BIN/FREECELL.DAT` (14 bytes: "FCS1", games played, won, the current
+  streak, the best streak, the best time): a game counts as played at its first move; one left
+  unfinished (a new game, a restart, quitting) counts as lost and ends the streak.
+- **The win:** the 52 cards fly from the foundations to a display of the four suits, ace to
+  king, with a little run of bells; a key or a click shows the end at once.
+- **Sounds:** a tick when a card is taken, a snap when it is put down, a bell when it goes
+  home, two low notes when a move is refused, the bells of the win, a riffle for a new deal:
+  samples on Lau (`/BIN/FREECELL.SFX`, 36 KB of 16 kHz 8-bit sound made at build time by
+  `tools/mkfcsfx.py`; Lau's volume follows the sound volume setting), else short POKEY 2 tones
+  at the sound volume setting.
+
+How it draws. The cards are 40 x 56. At its start the program takes 11 palette entries for
+its colours (pal_alloc; without free ones it uses the nearest system colours) and composes
+the 52 faces with the CPU from small masks (`tools/mkfcart.py`: its own rank figures and suit
+shapes, no font) into two banks, 26 cards side by side in each (1040 x 56), and the six empty
+places (a free cell, a foundation of each suit, an empty column) into a third bank, which
+also holds the move history (4 bytes a move, 12,000 moves). Each bank is a sheet, so every
+card on the window is one sheet_draw record. A change redraws only the region it touched (the
+felt, then every place and card that lies in it, each record cut to the region by the
+program), in one list that starts in the vertical blank (REV $09+). Dragged cards are drawn
+on top; each new pointer position is one list: the strips of the old rectangle that the new
+one leaves (up to four regions) and the cards at the new place: what lies under the old
+place comes back and the cards move in the same list, so nothing flickers. Measured (`freecell -m`, two loops over the table with a card held, the
+board's timing model of emu816): about 2.0 ms of CPU a frame while dragging on REV $09-$0B
+(0.95 ms with `--ideal-timing`), 2.4-2.6 ms on REV $08 (the kernel starts the records one by
+one), 11-13 ms on REV $07 (the CPU draws). The program is 37 KB (the controls library 9 KB
+of it); it needs four banks (cards 2, places and history 1, samples 1 with Lau).
+
+Found while writing it: on REV $08 a `sheet_draw` or `draw_list` whose first record has
+SH_VBL / LS_VBL made emu816 report "blitter: register written while BUSY" (the kernel did
+not wait for the blitter again after the vertical blank; fixed in 0.25, see "Version 0.25").
+FreeCell asks for the vertical blank only on REV $09+ (where WE_VBL exists), as Quabricks does.
 
 ## Current limits
 

@@ -940,14 +940,14 @@ ls_single:
         cmp     ls_n
         bcs     @out
         jsr     ls_recp
-        jsl     f_bl_wait
         ldy     #19
         lda     [kp0],y
         lsr     a
         bcc     :+
-        jsr     ls_vwait
-        jsr     ls_recp
-:       ldy     #0
+        jsr     ls_vwait                ; (another task may start the blitter meanwhile:
+        jsr     ls_recp                 ; the wait for idle comes after it)
+:       jsl     f_bl_wait
+        ldy     #0
         ldx     #0
 :       lda     [kp0],y
         sta     f:BL_SRC,x

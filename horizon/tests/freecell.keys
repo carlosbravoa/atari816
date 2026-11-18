@@ -1,0 +1,130 @@
+# FreeCell (FREECELL.PRG) session on the text shell: sh tests/shots.sh EMU SD freecell 50 T1 ...
+# made by hand from absolute places (the content is at 104, 36 on the screen; the pointer
+# starts in the bottom right corner). Shot times (s):
+#   5.8   game 1 as dealt (freecell -g 1)    6.9   the three of hearts carried
+#   9.3   dropped; three cards went home     10.7  a right click: the eight of clubs to a cell
+#   12    the six of spades selected         14    clicked onto the seven of diamonds
+#   15.5  U: undone                          20.5  Game > Statistics (one game played)
+#   23    Help > How to play                 24.9  G: the game number dialog, 123 typed
+#   26.5  game 123                           28.4  Help > About FreeCell
+#   33    the test position (freecell -w)    35.3  the queen of spades carried
+#   44    the win: the display, the banner   46.5  Game > Statistics (two played, one won)
+1000 M 127:127:0:0
++20 M 127:127:0:0
++20 M 127:127:0:0
+1500 {esc}
++1500 freecell -g 1\n
+# game 1 as dealt (shot 1). The three of hearts dragged near the four of spades (shot 2:
+# held), let go: it goes there; the aces of clubs and spades and the two of clubs go home
+# by themselves (shot 3)
+5500 M -40:-40:0:0
++20 M -40:-40:0:0
++20 M -40:-40:0:0
++20 M -40:-35:0:0
++20 M -29:0:0:0
++100 M 0:0:0:1
+6000 M -5:5:0:1
++20 M -5:5:0:1
++20 M -5:5:0:1
++20 M -5:5:0:1
++20 M -5:2:0:1
++20 M -5:0:0:1
++20 M -5:0:0:1
++20 M -5:0:0:1
++20 M -5:0:0:1
++20 M -5:0:0:1
++20 M -5:0:0:1
++20 M -5:0:0:1
++20 M -5:0:0:1
++20 M -5:0:0:1
++20 M -5:0:0:1
++20 M -5:0:0:1
++20 M -5:0:0:1
++20 M -5:0:0:1
++20 M -5:0:0:1
++20 M -1:0:0:1
+7200 M 0:0:0:0
+# a right click: the eight of clubs into a free cell (shot 4)
+9500 M 40:-22:0:0
++20 M 40:0:0:0
++20 M 40:0:0:0
++20 M 28:0:0:0
++80 M 0:0:0:2
++80 M 0:0:0:0
+# the six of spades selected (shot 5), then the seven of diamonds clicked: it goes there
+11000 M -40:0:0:0
++20 M -40:0:0:0
++20 M -40:0:0:0
++20 M -40:0:0:0
++20 M -40:0:0:0
++20 M -40:0:0:0
++20 M -20:0:0:0
++80 M 0:0:0:1
++80 M 0:0:0:0
+12500 M 40:0:0:0
++20 M 12:0:0:0
++80 M 0:0:0:1
++80 M 0:0:0:0
+# shot 6; U: undone (shot 7)
+14500 u
+# the two of hearts dragged onto the nine of diamonds: not allowed, it slides back
+16000 M 40:-16:0:0
++20 M 40:0:0:0
++20 M 40:0:0:0
++20 M 36:0:0:0
++100 M 0:0:0:1
+16500 M -12:12:0:1
++20 M -12:12:0:1
++20 M -12:0:0:1
++20 M -12:0:0:1
++20 M -4:0:0:1
+17300 M 0:0:0:0
+# Game > Statistics... (shot 8: one game played), OK; Help > How to play (shot 9), OK
+19000 {dE2}g{uE2}
+19500 {down}{down}{down}{down}\n
+21000 \n
+21500 {dE2}h{uE2}
+22000 \n
+23500 \n
+# G: the game number dialog, 123 typed (shot 10), Enter: game 123 (shot 11)
+24000 g
+24500 123
+25500 \n
+# Help > About FreeCell (shot 12), OK
+27000 {dE2}h{uE2}
+27500 {down}\n
+28900 \n
+# Game > Quit (game 1 counts as played and lost); "freecell -w": the test position
+29000 {dE2}g{uE2}
+29500 {down}{down}{down}{down}{down}\n
+30500 freecell -w\n
+# the test position (shot 13); the queen of spades carried near the king of diamonds (shot
+# 14: held), let go: the rest goes home by itself, the win: the cards fly to their display
+# (shot 15: the end)
+34000 M 0:-40:0:0
++20 M 0:-30:0:0
++100 M 0:0:0:1
+34500 M -12:12:0:1
++20 M -12:10:0:1
++20 M -12:0:0:1
++20 M -12:0:0:1
++20 M -12:0:0:1
++20 M -12:0:0:1
++20 M -12:0:0:1
++20 M -12:0:0:1
++20 M -12:0:0:1
++20 M -12:0:0:1
++20 M -12:0:0:1
++20 M -12:0:0:1
++20 M -12:0:0:1
++20 M -12:0:0:1
++20 M -12:0:0:1
++20 M -12:0:0:1
++20 M -8:0:0:1
+35600 M 0:0:0:0
+# Game > Statistics (shot 16: two played, one won), OK; Game > Quit
+45000 {dE2}g{uE2}
+45500 {down}{down}{down}{down}\n
+47000 \n
+47500 {dE2}g{uE2}
+48000 {down}{down}{down}{down}{down}\n

@@ -841,6 +841,7 @@ pg_tab: .byte   "EDIT", 0, ICO_EDIT, "Edit", 0, "WRITE", 0, ICO_WRITE, "Write", 
         .byte   "BASIC", 0, ICO_BASIC, "BASIC", 0, "CALC", 0, ICO_CALC, "Calculator", 0
         .byte   "SOLITAIR", 0, ICO_SOLITAIRE, "Solitaire", 0, "TERM", 0, ICO_TERMINAL, "Terminal", 0
         .byte   "WFILES", 0, ICO_FILES, "Files", 0, "SETTINGS", 0, ICO_SETTINGS, "Settings", 0
+        .byte   "FREECELL", 0, ICO_FREECELL, "FreeCell", 0
         .byte   "ABOUT", 0, ICO_ABOUT, "About", 0, 0
 ; the icon of each type (FT_* order)
 ft_icon: .byte  ICO_DOC, ICO_FOLDER, ICO_DISK, ICO_PROGRAM, ICO_TEXT, ICO_BASDOC, ICO_PICTURE

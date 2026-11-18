@@ -2,7 +2,8 @@
 # makes tests/desk23.keys from this; the card gets tests/mk23.py's additions: a clock, /Atari,
 # /Desktop/PROG.BAS, /HELLO.LST; emu816 --classic-print tests/p23.atascii@6: the classic
 # Atari prints at 6 s, the job is finished 3 s later). Files is at (24, 24); its rows:
-# HELLO.LST y 169, README.TXT 193. Shots (s):
+# HELLO.LST y 181, README.TXT 205 ((0.25) Files reads / again when it comes to the front: the
+# /Printouts folder the first job made shows, one row above them). Shots (s):
 #   1  10.5  the notice "Printed: Atari" (the job finished at 9 s) instead of the clock
 #   2  13.0  the notice clicked: Printer with the job
 #   3  16.0  the Atari icon clicked: the panel, "Folder disk..." and "No folder disk" at its bottom
@@ -71,7 +72,7 @@
 32900 M 0:0:0:1
 32980 M 0:0:0:0
 33500 M -78:100:0:0
-33550 M 0:16:0:0
+33550 M 0:28:0:0
 33600 M 0:0:0:2
 33680 M 0:0:0:0
 35500 M 28:51:0:0

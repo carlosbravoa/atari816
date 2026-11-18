@@ -1,0 +1,53 @@
+# (0.25) The folder disk after a restart of Horizon (DESK=1; tests/mousegen.py makes
+# tests/desk25.keys from this; the card gets tests/mk23.py's additions and an /atari.ini that
+# says "folder=/Atari", "folderdrive=2", as the I/O processor writes it when the folder disk is
+# mounted: emu816 does not write it). Shots (s):
+#   1  the folder disk mounted from the panel: D2: "/Atari (folder)", Refresh
+#   2  Horizon restarted (Shut down, Restart), the panel again: the kernel no longer knows the
+#      folder, the Desktop takes it from /atari.ini: "/Atari (folder)", Refresh not dimmed
+# (the pointer: the new kernel starts it at the centre: moved to the corner first)
+#   3  Refresh clicked (mounted again: the second CLASSIC_MOUNT kind 5 in the log)
+6000 M 100:-80:0:0
+6050 M 100:0:0:0
+6100 M 76:0:0:0
+6400 M 0:0:0:1
+6480 M 0:0:0:0
+7500 M -100:100:0:0
+7550 M -100:100:0:0
+7600 M -100:13:0:0
+7650 M -67:0:0:0
+7900 M 0:0:0:1
+7980 M 0:0:0:0
+9500 \n
+12000 M -100:-100:0:0
+12050 M -89:-100:0:0
+12100 M 0:-100:0:0
+12150 M 0:-5:0:0
+12200 M 0:0:0:1
+12280 M 0:0:0:0
+12500 M 0:100:0:0
+12550 M 0:28:0:0
+12600 M 0:0:0:1
+12680 M 0:0:0:0
+14000 \n
+17000 M 100:70:0:0
+17050 M 100:0:0:0
+17100 M 80:0:0:0
+17150 M 0:0:0:1
+17230 M 0:0:0:0
+21000 M -100:-100:0:0
+21050 M -100:-100:0:0
+21100 M -100:-6:0:0
+21150 M -20:0:0:0
+25000 M 100:100:0:0
+25050 M 100:0:0:0
+25100 M 100:0:0:0
+25150 M 100:0:0:0
+25200 M 100:0:0:0
+25250 M 96:0:0:0
+25400 M 0:0:0:1
+25480 M 0:0:0:0
+29000 M -100:27:0:0
+29050 M -54:0:0:0
+29400 M 0:0:0:1
+29480 M 0:0:0:0

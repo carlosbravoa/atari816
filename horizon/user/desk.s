@@ -3220,14 +3220,9 @@ atfold: jsr     atfind
         adc     z:t
         adc     #.loword(at_nm)
         sta     z:r
-        lda     fdslot                  ; the folder (as recorded by classic_mount)
-        ptr     qbuf
-        sys     SYS_CQUERY
-        bcs     :+
-        cmp     #0
-        bne     :++
-:       stz     qbuf                    ; (not known: after a restart of Horizon)
-:       ldy     #0                      ; (32 characters at most)
+        lda     fdslot                  ; the folder (as recorded by classic_mount; (0.25)
+        jsr     fdqry                   ; after a restart of Horizon: /atari.ini's)
+        ldy     #0                      ; (32 characters at most)
 :       lda     qbuf,y
         and     #$00FF
         beq     :+
@@ -3354,10 +3349,8 @@ fdlg:   jsr     atfind
         lda     fdslot
         cmp     #$FFFF
         beq     :+
-        ptr     qbuf
-        sys     SYS_CQUERY
+        jsr     fdqry
         ldx     #.loword(t_fddef)
-        bcs     :+
         cmp     #0
         beq     :+
         ldx     #.loword(qbuf)
@@ -3406,10 +3399,7 @@ fdref:  lda     fdslot
         cmp     #$FFFF
         beq     @out
         sta     fdnew
-        ptr     qbuf
-        sys     SYS_CQUERY
-        bcs     @out
-        cmp     #0
+        jsr     fdqry
         beq     @out
         ldx     #.loword(qbuf)
         ldy     #.loword(fdpath)
@@ -3439,6 +3429,162 @@ fdmount:
         ldx     #.loword(al_nofd)
         jsr     ui_alert
 :       jmp     atupdate
+
+; (0.25) the folder of drive A (0-3) -> qbuf, A = its first character (0: not known, Z set):
+; classic_query (the kernel's record of the mount), else (after a restart of Horizon the
+; kernel has none) /atari.ini's "folder=" when its "folderdrive=" is that drive (the I/O
+; processor keeps both there while the folder disk is mounted)
+fdqry:  sta     in_drv
+        ptr     qbuf
+        sys     SYS_CQUERY
+        bcs     :+
+        cmp     #0
+        jne     @ok
+:       stz     qbuf
+        stz     in_fd
+        stz     in_fold
+        stz     in_ll
+        ptr     p_ini
+        lda     #O_READ
+        sys     SYS_OPEN
+        jcs     @ok
+        sta     in_h
+@rd:    lda     in_h                    ; a piece of it (the lines put together in in_ln)
+        sta     rwblk
+        lda     #.loword(fbuf)
+        sta     rwblk+1
+        lda     #^fbuf
+        sta     rwblk+3
+        lda     #FBUFL
+        sta     rwblk+4
+        ptr     rwblk
+        sys     SYS_READ
+        bcs     @eof
+        cmp     #0
+        beq     @eof
+        sta     in_n
+        ldx     #0
+@ch:    lda     fbuf,x
+        and     #$00FF
+        cmp     #10
+        bne     :+
+        phx
+        jsr     inline
+        plx
+        bra     @nx
+:       ldy     in_ll                   ; (a longer line: the rest left out)
+        cpy     #126
+        bcs     @nx
+        sep     #$20
+        .a8
+        sta     in_ln,y
+        rep     #$20
+        .a16
+        iny
+        sty     in_ll
+@nx:    inx
+        cpx     in_n
+        bcc     @ch
+        bra     @rd
+@eof:   jsr     inline                  ; (the last line, without its LF)
+        lda     in_h
+        sys     SYS_CLOSE
+        lda     in_fd
+        dec     a
+        cmp     in_drv
+        bne     @ok
+        ldx     #.loword(in_fold)
+        ldy     #.loword(qbuf)
+        jsr     ui_strcpy
+@ok:    lda     qbuf
+        and     #$00FF
+        rts
+
+; one line of /atari.ini (in_ln, in_ll long; then empty): "folder" or "folderdrive", spaces,
+; "=", spaces, the value (spaces and a CR at its end left out)
+inline: ldy     in_ll
+        stz     in_ll
+:       cpy     #0                      ; (the end: CR, spaces, tabs left out)
+        beq     :+
+        lda     in_ln-1,y
+        and     #$00FF
+        cmp     #13
+        beq     @cut
+        cmp     #' '
+        beq     @cut
+        cmp     #9
+        bne     :+
+@cut:   dey
+        bra     :-
+:       lda     #0
+        sep     #$20
+        .a8
+        sta     in_ln,y
+        rep     #$20
+        .a16
+        ldx     #0
+        jsr     inspc
+        ldy     #0                      ; "folder"
+:       lda     t_inkey,y
+        and     #$00FF
+        beq     :+
+        sta     in_t
+        lda     in_ln,x
+        and     #$00FF
+        cmp     in_t
+        bne     @no
+        inx
+        iny
+        bra     :-
+:       stz     in_t                     ; "drive" after it?
+        ldy     #0
+:       lda     t_indrv,y
+        and     #$00FF
+        beq     :+
+        sta     in_c
+        lda     in_ln,x
+        and     #$00FF
+        cmp     in_c
+        bne     @eq
+        inx
+        iny
+        bra     :-
+:       inc     in_t
+@eq:    lda     in_t                     ; ("folderd..." that is not "folderdrive": no key)
+        bne     :+
+        cpy     #0
+        bne     @no
+:       jsr     inspc
+        lda     in_ln,x
+        and     #$00FF
+        cmp     #'='
+        bne     @no
+        inx
+        jsr     inspc
+        lda     in_t
+        bne     @drv
+        txa                             ; folder=: the path
+        clc
+        adc     #.loword(in_ln)
+        tax
+        ldy     #.loword(in_fold)
+        jmp     ui_strcpy
+@drv:   lda     in_ln,x                 ; folderdrive=: 1-4
+        and     #$00FF
+        sec
+        sbc     #'0'
+        sta     in_fd
+@no:    rts
+; X past the spaces and tabs at in_ln + X
+inspc:  lda     in_ln,x
+        and     #$00FF
+        cmp     #' '
+        beq     :+
+        cmp     #9
+        bne     :++
+:       inx
+        bra     inspc
+:       rts
 
 ; the drive list's rows (ui list callback: A = row -> X = its text)
 fd_row: asl     a
@@ -4817,6 +4963,9 @@ d_progs: .byte  "Edit=/BIN/EDIT.PRG", 10, "Write=/BIN/WRITE.PRG", 10, "Sheet=/BI
         .byte   "Solitaire=/BIN/SOLITAIR.PRG", 10, "Terminal=/BIN/TERM.PRG", 10
         .byte   "Files=/BIN/WFILES.PRG", 10, "Printer=/BIN/PRINTER.PRG", 10, 0
 p_progs: .byte  "/SYSTEM/PROGRAMS", 0
+p_ini:  .byte   "/atari.ini", 0         ; (0.25) the folder disk after a restart: fdqry
+t_inkey: .byte  "folder", 0
+t_indrv: .byte  "drive", 0
 p_icons: .byte  "/SYSTEM/ICONS", 0
 p_layout: .byte "/SYSTEM/LAYOUT", 0
 p_files: .byte  "/BIN/WFILES.PRG", 0
@@ -5218,6 +5367,15 @@ fdslot: .res    2                       ; (0.23) the folder disk's drive ($FFFF:
 fdold:  .res    2                       ;   (its Refresh button drawn there)
 fdnew:  .res    2                       ;   the drive to mount on
 fdpath: .res    130                     ;   the folder
+in_drv: .res    2                       ; (0.25) fdqry: the drive, /atari.ini's handle, the
+in_h:   .res    2                       ; bytes of a piece, a line's length, folderdrive=,
+in_n:   .res    2                       ; the line, folder=
+in_ll:  .res    2
+in_fd:  .res    2
+in_t:   .res    2
+in_c:   .res    2
+in_ln:  .res    128
+in_fold: .res   128
 fdnum:  .res    64                      ;   its numbers' line
 fdtmp:  .res    64
 
