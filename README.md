@@ -17,6 +17,26 @@ original 8-bit software runs on its own hardware; F12 switches between it and th
 
 *The Horizon desktop, captured from a Tang Nano 20K (640 x 360, 256 colours).*
 
+## How it works
+
+![Architecture of the Atari816](Docs/images/architecture.svg)
+
+- **One FPGA holds two computers.** The 16-bit machine is a 65C816 with 8 MB of RAM and its
+  own chips: Marga draws the picture, Ali moves pixels fast, Lau and POKEY 2 make the sound.
+  Next to it is a complete classic Atari 8-bit that runs original software unchanged.
+- **FREDDIE II** decides who may use which memory. It protects programs from each other and
+  gives the classic Atari its own 64 KB view of the same RAM.
+- **A small I/O processor** does the slow work: files on the SD card, the keyboard and mouse,
+  the link to the PC, and the classic Atari's disk drives and printer. The 65C816 asks it
+  for things through a mailbox in memory and keeps running while it waits.
+- **Horizon** is the software on the 65C816: a kernel, a desktop with windows, and the
+  programs. F12 switches the screen between the desktop and the classic Atari.
+- **The PC link** is optional. With the gateway running on a PC, the Atari816 gets a shared
+  folder, the time and the internet through the same USB cable that powers the board.
+
+More detail: [`Docs/01-architecture-design.md`](Docs/01-architecture-design.md) (the design),
+[`Docs/02-register-spec.md`](Docs/02-register-spec.md) (every register).
+
 ## Status
 
 Work in progress. The hardware, Horizon, the emulator and the SDK all work and are under

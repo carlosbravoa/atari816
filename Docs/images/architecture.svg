@@ -1,0 +1,141 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 650" width="1000" height="650" font-family="Helvetica, Arial, sans-serif" role="img" aria-labelledby="t d">
+  <title id="t">Atari816 architecture</title>
+  <desc id="d">Inside the FPGA: a 65C816 with the FREDDIE II memory manager and 8 MB of RAM, the custom chips Marga, Ali, Lau and POKEY 2, a complete classic Atari 8-bit, and an I/O processor. Outside: keyboard and mouse, SD card, a PC running the link gateway, and an HDMI monitor.</desc>
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0L10 5L0 10z" fill="#44506a"/>
+    </marker>
+    <style>
+      .bg{fill:#f6f4ee}
+      .fpga{fill:#e9edf5;stroke:#2f4a8a;stroke-width:2}
+      .cpu{fill:#dfe8fb;stroke:#2f4a8a;stroke-width:1.5}
+      .chip{fill:#fdeccf;stroke:#b7791f;stroke-width:1.5}
+      .classic{fill:#e3f3e1;stroke:#3d7a3a;stroke-width:1.5}
+      .io{fill:#efe4f7;stroke:#6b3fa0;stroke-width:1.5}
+      .ext{fill:#ffffff;stroke:#44506a;stroke-width:1.5}
+      .sw{fill:#ffffff;stroke:#2f4a8a;stroke-width:1.5}
+      .bus{fill:#2f4a8a}
+      .w{stroke:#44506a;stroke-width:1.6;fill:none}
+      .h{font-size:15px;font-weight:700;fill:#1c2333}
+      .s{font-size:12px;fill:#3a4358}
+      .n{font-size:11px;fill:#44506a;font-style:italic}
+      .big{font-size:14px;font-weight:700;fill:#2f4a8a;letter-spacing:.5px}
+      text{text-anchor:middle}
+    </style>
+  </defs>
+
+  <rect class="bg" width="1000" height="650" rx="10"/>
+
+  <!-- the FPGA -->
+  <rect class="fpga" x="180" y="20" width="620" height="390" rx="10"/>
+  <text class="big" x="490" y="43">INSIDE THE FPGA (Sipeed Tang Nano 20K)</text>
+
+  <!-- row 1: the 16-bit machine -->
+  <rect class="cpu" x="200" y="58" width="180" height="70" rx="6"/>
+  <text class="h" x="290" y="86">65C816 CPU</text>
+  <text class="s" x="290" y="106">16-bit, 14.3 MHz</text>
+
+  <rect class="cpu" x="400" y="58" width="180" height="70" rx="6"/>
+  <text class="h" x="490" y="86">FREDDIE II</text>
+  <text class="s" x="490" y="106">memory manager, protection</text>
+
+  <rect class="cpu" x="600" y="58" width="180" height="70" rx="6"/>
+  <text class="h" x="690" y="86">8 MB RAM</text>
+  <text class="s" x="690" y="106">shared by everything</text>
+
+  <!-- the memory bus -->
+  <rect class="bus" x="200" y="146" width="580" height="6" rx="3"/>
+  <path class="w" d="M290 128V146M490 128V146M690 128V146"/>
+  <path class="w" d="M270 152V176M400 152V176M540 152V176M702 152V176M320 152V306"/>
+
+  <!-- row 2: the chips -->
+  <rect class="classic" x="200" y="176" width="110" height="84" rx="6"/>
+  <text class="h" x="255" y="200">Classic Atari</text>
+  <text class="s" x="255" y="218">6502, ANTIC,</text>
+  <text class="s" x="255" y="234">GTIA, POKEY</text>
+  <text class="n" x="255" y="251">cycle-exact 8-bit</text>
+
+  <rect class="chip" x="340" y="176" width="120" height="84" rx="6"/>
+  <text class="h" x="400" y="204">Ali</text>
+  <text class="s" x="400" y="224">blitter: fills,</text>
+  <text class="s" x="400" y="240">copies, lists</text>
+
+  <rect class="chip" x="475" y="176" width="130" height="84" rx="6"/>
+  <text class="h" x="540" y="200">Lau + POKEY 2</text>
+  <text class="s" x="540" y="220">8 sample voices,</text>
+  <text class="s" x="540" y="236">48 kHz, and a</text>
+  <text class="s" x="540" y="252">second POKEY</text>
+
+  <rect class="chip" x="620" y="176" width="160" height="84" rx="6"/>
+  <text class="h" x="700" y="200">Marga</text>
+  <text class="s" x="700" y="220">video: 640 x 360,</text>
+  <text class="s" x="700" y="236">256 colours, 16 sprites,</text>
+  <text class="s" x="700" y="252">scrolling, pointer</text>
+
+  <!-- row 3 -->
+  <rect class="io" x="200" y="306" width="370" height="84" rx="6"/>
+  <text class="h" x="385" y="330">I/O processor (PicoRV32)</text>
+  <text class="s" x="385" y="350">files on the SD card, keyboard and mouse, the PC link,</text>
+  <text class="s" x="385" y="366">the classic Atari's disk drives and printer</text>
+  <text class="n" x="385" y="382">talks to the 65C816 through a mailbox in memory</text>
+
+  <rect class="ext" x="600" y="306" width="180" height="84" rx="6"/>
+  <text class="h" x="690" y="334">Video and sound out</text>
+  <text class="s" x="690" y="354">F12 switches between the</text>
+  <text class="s" x="690" y="370">desktop and the classic Atari</text>
+
+  <!-- classic: SIO to the I/O processor, picture to the output -->
+  <path class="w" d="M232 260V306" marker-end="url(#a)" marker-start="url(#a)"/>
+  <path class="w" d="M285 260V292H625V306" marker-end="url(#a)"/>
+  <!-- Lau to the output -->
+  <path class="w" d="M560 260V280H660V306" marker-end="url(#a)"/>
+  <!-- Marga to the output -->
+  <path class="w" d="M720 260V306" marker-end="url(#a)"/>
+
+  <!-- outside, left -->
+  <rect class="ext" x="14" y="196" width="140" height="56" rx="6"/>
+  <text class="h" x="84" y="220">Keyboard, mouse</text>
+  <text class="s" x="84" y="238">USB adapter</text>
+
+  <rect class="ext" x="14" y="268" width="140" height="56" rx="6"/>
+  <text class="h" x="84" y="292">SD card</text>
+  <text class="s" x="84" y="310">FAT32</text>
+
+  <rect class="ext" x="14" y="340" width="140" height="110" rx="6"/>
+  <text class="h" x="84" y="362">PC</text>
+  <text class="s" x="84" y="380">(or a Raspberry Pi)</text>
+  <text class="s" x="84" y="398">running atari816-link:</text>
+  <text class="s" x="84" y="414">a shared folder,</text>
+  <text class="s" x="84" y="430">the clock, the internet</text>
+
+  <path class="w" d="M154 224H174V322H200" marker-end="url(#a)"/>
+  <path class="w" d="M154 296H164V346H200" marker-end="url(#a)" marker-start="url(#a)"/>
+  <path class="w" d="M154 395H166V370H200" marker-end="url(#a)" marker-start="url(#a)"/>
+  <text class="n" x="96" y="466">USB cable (also power)</text>
+
+  <!-- outside, right -->
+  <rect class="ext" x="826" y="306" width="160" height="84" rx="6"/>
+  <text class="h" x="906" y="334">HDMI monitor</text>
+  <text class="s" x="906" y="354">1280 x 720 at 60 Hz,</text>
+  <text class="s" x="906" y="370">with sound</text>
+  <path class="w" d="M780 348H826" marker-end="url(#a)"/>
+
+  <!-- software -->
+  <rect class="sw" x="180" y="436" width="620" height="196" rx="10"/>
+  <text class="big" x="490" y="460">SOFTWARE ON THE 65C816: HORIZON</text>
+
+  <rect class="cpu" x="200" y="474" width="580" height="42" rx="6"/>
+  <text class="h" x="490" y="492">Programs</text>
+  <text class="s" x="490" y="508">Files, Edit, Write, Sheet, Paint, BASIC, Terminal, Downloader, BBS, games</text>
+
+  <rect class="cpu" x="200" y="524" width="580" height="42" rx="6"/>
+  <text class="h" x="490" y="542">Desktop and window system</text>
+  <text class="s" x="490" y="558">windows, menus, icons, pointer; every window keeps its own picture in memory</text>
+
+  <rect class="cpu" x="200" y="574" width="580" height="42" rx="6"/>
+  <text class="h" x="490" y="592">Kernel</text>
+  <text class="s" x="490" y="608">preemptive multitasking, memory protection, files, sound, drawing, the classic Atari as a session</text>
+
+  <path class="w" d="M290 436V410" marker-end="url(#a)" stroke-dasharray="5 4"/>
+  <text class="n" x="300" y="428" style="text-anchor:start">runs on the 65C816</text>
+</svg>
