@@ -9,6 +9,7 @@ When the machine starts, Horizon shows the *desktop*: a menu bar at the top, the
 - **Files** shows the card's folders; a double click opens a file in the program that reads it.
 - The **Programs** menu starts *Edit*, *Write*, *Paint*, *BASIC*, *Sheet* and the `Terminal`.
 - For a break it has games: *Solitaire*, *FreeCell* and *Quabricks*.
+- **Music** plays songs: open `/Music` and double-click *HORIZON.MOD*. It keeps playing while you work.
 - Windows move by their title bar and grow by the grip at their bottom right.
     - Several programs run at once, each in windows of its own.
     - The **blitter** does the copying, so a window moves smoothly.

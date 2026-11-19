@@ -1,0 +1,6 @@
+# Music's self test (text shell, NODESK): "music -t" prints the names shown for paths and
+# URLs, arguments made absolute, which folder entries are songs, times, the load errors' texts,
+# a settings file read and written again, a playlist sorted and a song removed. The output after
+# the command is compared with tests/music-t.txt.
+1500 {esc}
++1500 music -t\n

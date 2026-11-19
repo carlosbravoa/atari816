@@ -1,0 +1,14 @@
+# (0.26) Music without its engine (DESK=1; tests/mousegen.py makes tests/music26b.keys; the
+# card has no /SYSTEM/MUSICD.PRG and its Programs menu gets Music). Shots (s):
+#   1   9.0  Programs > Music: "Music cannot start: its engine, /SYSTEM/MUSICD.PRG, is not on
+#            the card." (--rev 9 and older: "Music needs Lau")
+#   2  11.0  OK: Music ended, nothing else left
+6000 M -100:-100:0:0
+6050 M -100:-72:0:0
+6100 M -15:0:0:0
+6400 M 0:0:0:1
+6480 M 0:0:0:0
+6800 M -8:99:0:0
+7200 M 0:0:0:1
+7280 M 0:0:0:0
+10000 \n

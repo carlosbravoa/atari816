@@ -5,9 +5,9 @@
 # 2. File > Open... (ctrl+O): the file dialog, centred, shows the card's root
 +200 ^O
 +1500 shot
-# a double click on LONG.TXT (its row is at screen 170, 225) opens it (the pointer
+# a double click on LONG.TXT (its row is at screen 170, 239; 0.26: below /Music) opens it (the pointer
 # then moves out of the way, for screenshot.png)
-+200 move 170 225
++200 move 170 239
 +300 dclick
 +300 move 560 346
 +900 shot
@@ -17,12 +17,12 @@
 +200 {end}
 +500 shot
 # 4. drag and drop: Programs > Files (the 11th item, 0.22) opens a Files window over ours; drag README.TXT
-# (its row at screen 100, 205) and release it on Hex View's box (at 520, 200)
+# (its row at screen 100, 217; 0.26: below /Music) and release it on Hex View's box (at 520, 200)
 +300 move 110 6
 +200 click
 +400 move 100 177
 +200 click
-+2000 move 100 205
++2000 move 100 217
 +200 press
 +100 drag 520 200
 +800 release

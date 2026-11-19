@@ -8,6 +8,8 @@ emu=$1 sd=$2 name=$3 secs=$4
 shift 4
 rm -rf build/run-pic
 cp -r "$sd" build/run-pic
+# (0.26) without /Music unless KEEPMUSIC=1 (the root listings stay as in the frozen pictures)
+[ -n "$KEEPMUSIC" ] || rm -rf build/run-pic/Music
 [ -n "$DESK" ] || touch build/run-pic/SYSTEM/NODESK   # the text shell (DESK=1: the Desktop)
 # the Desktop sessions get a fixed Programs menu (tests/desk.programs), so programs added
 # to the card do not change their pictures; PREP: a command run on the card copy first

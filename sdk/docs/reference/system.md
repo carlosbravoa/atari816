@@ -367,11 +367,20 @@ In: A = port, X, Y = 16-byte message. EAGAIN if its queue is full, EINVAL if not
 
 ### $42 recv (SYS_RECV)
 In: A = your port, X, Y = 16-byte buffer. Blocks while the queue is empty. EINVAL if the
-port is not yours.
+port is not yours. Horizon 0.26: A = port | `RV_POLL` ($8000) never waits: EAGAIN when the
+queue is empty (a window program reads its port at every event or vertical blank).
 ```asm
         lda     z:n
         ptr     buf
         sys     SYS_RECV        ; buf = the message
+:       lda     z:n             ; (0.26) everything queued, without waiting
+        ora     #RV_POLL
+        ptr     buf
+        sys     SYS_RECV
+        bcs     :+              ; EAGAIN: nothing more
+        ; ... use buf
+        bra     :-
+:
 ```
 
 ### $43 port_close (SYS_PCLOSE)

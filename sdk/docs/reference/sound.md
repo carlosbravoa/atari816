@@ -195,6 +195,76 @@ voice.
         sys     SYS_SSET
 ```
 
+### $6C sample_timer (SYS_STIMER)
+In: A = one of your ports ($FFFF: off), X = the period's low 16 bits, Y = its high 8 bits, in
+microseconds (1,000 or more). Out: A = the generation. Horizon 0.26: **the music timer**
+(TIMER1, REV $0A+). At every period the kernel puts {u8 $FF, u8 the generation, u16 the
+count of periods since the start, 12 x 0} into the port (when there is room; the count goes on
+anyway and follows the microsecond clock: a jump means periods passed, run that many ticks) and wakes you in `recv`. Called again while it runs, the
+new period counts from the next one on: a tempo change without a gap. Each start from off is a
+new generation, so messages queued before a restart can be ignored. One owner at a time
+(EAGAIN); ENODEV without Lau; it stops at your end. Run the task that waits for it at
+**priority 0** (spawn's priority byte) and its ticks come within a fraction of a millisecond,
+whatever other programs do. 1 ms is the shortest period.
+```asm
+        sys     SYS_PCREATE
+        sta     z:n                     ; the port
+        ldx     #.loword(20000)         ; 20 ms: 125 BPM
+        ldy     #^20000
+        sys     SYS_STIMER
+:       lda     z:n
+        ptr     buf
+        sys     SYS_RECV                ; buf = {$FF, generation, count}
+        ; ... one tick
+        bra     :-
+```
+`SPF_KEEP` (4, Horizon 0.26) in sample_play's flags marks a voice as music: it plays on while
+the classic Atari is shown (the others stop).
+
+## Music: modules and WAV files (Horizon 0.26)
+
+Two ways to have music in a program.
+
+**The engine**, `/SYSTEM/MUSICD.PRG`: start it with `spawn` at **priority 0** with the
+arguments `-p PORT` (a port you created). It answers `MS_HELLO` with its own port, then takes
+16-byte commands: `MC_PATH` (the file's path, 14 characters a message) and `MC_LOAD`,
+`MC_PLAY`, `MC_PAUSE`, `MC_STOP`, `MC_SEEK`, `MC_VOL`, `MC_SEP`, `MC_LOOP`, `MC_READ` (bytes of
+the module or of its info block), `MC_QUIT`; it sends `MS_STATUS` (state, order, row,
+pattern, time, the level of each channel) after every tick. `horizon/user/music.inc` has the
+whole protocol; `horizon/user/music.s` (the Music program) uses all of it. It plays MOD files
+(4-8 channels, 15 or 31 samples) and WAV files (PCM 8/16-bit, mono or stereo, read whole into
+memory), from the card, `/PC:` or an `http(s)://` / `ftp://` URL. It ends with your program.
+Nothing to link; your program keeps its own loop.
+
+**The replayer library**, `horizon/build/modplay.o` (`horizon/user/modplay.s`, API in
+`horizon/user/modplay.inc`): link it and play a module that lies in your memory yourself.
+Put its address and length in `mp_mod` / `mp_mlen`, call `mp_open` (C set: not a module),
+`mp_play` (A = the first order; the first tick runs at once), then `mp_tick` every
+`mp_tickus` microseconds: the music timer above gives you exactly that. `mp_tick` returns
+`MPF_TEMPO` (give the timer the new `mp_tickus`) and `MPF_END` (the song ended; with
+`mp_loop` = 1 it goes on from the start). `mp_pause`, `mp_resume`, `mp_stop`, `mp_seek` (A =
+order), `mp_setvol` (0-64), `mp_setsep` (stereo separation 0-64, default 32). State to show:
+`mp_order`, `mp_row`, `mp_pat`, `mp_speed`, `mp_bpm`, `mp_tenths` (time played), `mp_lev`
+(8 bytes: the level of each channel 0-64, when `mp_meter` is 1).
+
+- **Voices:** a module of N channels takes Lau's voices 8 - N .. 7: a 4-channel module leaves
+  voices 0-3 to your sound effects (`SP_ANY` takes the lowest free voice, so effects and
+  music never meet). Set `mp_keep` to `SPF_KEEP` for music that plays on while the classic
+  Atari is shown.
+- **Timing:** tick the music from a task at priority 0 that waits for the music timer
+  (as `/SYSTEM/MUSICD.PRG` does): steady whatever the rest does. A game that calls `mp_tick`
+  from its frame loop instead (60 frames, 50 ticks a second at 125 BPM: count microseconds
+  and tick when one is due) is late by up to a frame now and then: fine for simple tunes.
+- **Cost:** about 0.3 ms of CPU a tick for the library (4 channels), plus the kernel's wake-up.
+- `mp_cbuf` (u24, a 64 KB bank you allocated, or 0) is only for a sample offset (9xx) that
+  lands inside a sample's loop.
+
+`sdk/examples/tune` plays a module in 30 lines of code: read the file into a bank, `mp_open`,
+`mp_play`, then wait for the timer and `mp_tick` until `MPF_END`.
+
+More modules: copy `.MOD` files to the card, or fetch one in the shell with
+`get http://... /Music/NAME.MOD`; double-click it in Files to play it in Music.
+
 ## BASIC
 
 `SOUND v, f, vol`, `SOUND v, pitch, distortion, vol` (Atari BASIC's form), `SOUND`, `BEEP`:

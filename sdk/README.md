@@ -69,6 +69,7 @@ run in **emu816**, the machine's emulator, with scripted input and screenshots.
 | [examples/hexview](examples/hexview) | A hex viewer: the controls library, a file loaded into a bank, scrolling with the blitter, resizing, drag and drop |
 | [examples/fetch](examples/fetch) | Fetch (Horizon 0.22): prints a URL on the console; a URL opened as a read-only file, a message for every error |
 | [examples/echo](examples/echo) | Echo (Horizon 0.22): a TCP client; connect, send a line, poll for the answer |
+| [examples/tune](examples/tune) | Tune (Horizon 0.26): play a ProTracker module with the replayer library and the music timer |
 | [examples/deepdive](examples/deepdive) | Deep Dive, a full-screen scrolling game skeleton (Horizon 0.18): its own framebuffer in two banks, fine scrolling with wrap and a split panel, one draw list a frame, 15 hardware sprites, its own palette and a raster table, Lau samples, pause on focus loss |
 | [tools/](tools) | `run816.py` (run in the emulator: input scripts, screenshots, checks, sound logs), `inputscript.py`, `contact.py` (screenshots on one sheet), `img2inc.py` (PNG or text art to sprites / tiles / palettes), `font2inc.py` (1 bpp fonts), `deploy816.py` (the real machine over the PC link), `abicheck.py` and `snippets.py` (`make check`), `probe/` (the performance measurements) |
 | [skill/atari-816-dev](skill/atari-816-dev/SKILL.md) | A Claude skill: the workflow and condensed references for writing Atari816 programs |

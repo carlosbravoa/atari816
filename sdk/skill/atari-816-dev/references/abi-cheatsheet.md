@@ -87,6 +87,7 @@ it yourself (`dec5` / `digit` in `SDK/templates/game/main.s`: A -> ASCII digits)
 | $69 | SYS_SSTOP | A voice, $FFFF all of the caller's (0.17) | |
 | $6A | SYS_SSTAT | - (0.17) | A own voices playing, X all |
 | $6B | SYS_SSET | A voice, X pitch, Y vol L \| R << 8 (0.17) | |
+| $6C | SYS_STIMER | A own port ($FFFF off), X/Y period us (0.26 music timer) | A generation; port gets {$FF, gen, u16 count} each period |
 | $70 | SYS_WSSTART | | A 1 started (stop it at the end) / 0 running |
 | $71 | SYS_WSSTOP | | |
 | $72 | SYS_WOPEN | X,Y {i16 x, y, u16 w, h, u24 title, u8 flags} | A window |

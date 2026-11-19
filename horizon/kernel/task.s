@@ -219,6 +219,7 @@ do_exit:
         jsr     snd_task_exit           ; (0.15) its sound channels and DACs silenced
         jsr     au_task_exit            ; (0.17) its sample voices stop (before its banks go)
         jsl     k2_task_exit            ; (0.18) its list, palette entries, sprites, full screen
+        jsr     mt_task_exit            ; (0.26) its music timer stops
         jsr     ports_close_cur
         ldx     cur
         lda     t_id,x

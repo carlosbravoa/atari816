@@ -1,0 +1,49 @@
+# (0.26) Music on the Desktop (DESK=1; tests/mousegen.py makes tests/music26.keys from this;
+# the card's Programs menu gets "Music=/BIN/MUSIC.PRG"). Music's window: content at about
+# (120, 71). Shots (s):
+#   1   9.0  Programs > Music: the empty player (--rev 9 and older: the alert "Music needs Lau")
+#   2  15.0  Files: /Music, HORIZON.MOD opened (typed, Enter): it reaches the running Music
+#            (/SYSTEM/OPEN.REQ) and plays: title, format, position, time, the meters
+#   3  16.5  a moment later: the meters and the position moved
+#   4  21.5  LAU.MOD opened in Files: the playlist has two songs, LAU.MOD plays
+#   5  23.5  the Pause button: paused (the meters fall)
+#   6  26.5  Play, then a click at 40% of the position bar: a seek (order 2 of 3)
+#   7  29.0  the Samples tab: the module's sample names
+#   8  32.0  the Playlist tab again; HORIZON.MOD double clicked in the playlist: it plays
+#   9  40.0  Programs > Edit in front, text typed from 35 s to 39.5 s: Music plays on behind it
+#            (the run's stderr, build/music26.err, has every Lau write with its time:
+#            emu816 --log-lau-us; Edit is in front from about 33.5 s to 40.5 s)
+#  10  42.0  a click on Music's status line: in front again, the time went on (no gap)
+6000 move 105 8
+6400 click
+6800 move 97 107
+7200 click
+10000 move 60 31
+10200 click
+11000 key music\n
+12500 key hor\n
+18000 move 60 31
+18200 click
+18800 key lau\n
+22500 move 211 160
+22700 click
+24500 move 177 160
+24700 click
+25500 move 282 137
+25700 click
+27500 move 210 185
+27700 click
+29500 move 160 185
+29700 click
+30500 move 200 205
+30700 dclick
+32500 move 105 8
+32700 click
+33000 move 97 23
+33200 click
+35000 key The music plays on while Edit is in front.\n
+38000 key Typing here does not stop it.\n
+40500 move 400 345
+40700 click
+41500 move 630 350
+42500 key {esc}

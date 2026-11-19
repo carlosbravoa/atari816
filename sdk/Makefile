@@ -17,7 +17,7 @@ HORIZON ?= $(abspath ../horizon)
 export HORIZON
 PROJECTS := templates/console templates/window-app templates/game templates/basic-game \
             examples/lantern examples/slider examples/hexview examples/deepdive \
-            examples/fetch examples/echo
+            examples/fetch examples/echo examples/tune
 REV     ?= 8
 
 all: check

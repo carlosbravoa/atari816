@@ -1,0 +1,61 @@
+music -t: the self test
+names:
+  /Music/HORIZON.MOD -> HORIZON.MOD
+  LAU.MOD -> LAU.MOD
+  http://example.com/mods/space%20debris.mod?x=1#top -> space%20debris.mod
+  ftp://ftp.example.org/ -> ftp.example.org
+  https://music.example.net -> music.example.net
+  /PC:/songs/Song one.wav -> Song one.wav
+arguments:
+  ["/Music/A B.MOD"] -> [/Music/A B.MOD]
+  [   /x.mod  ] -> [/x.mod]
+  [http://h/a.mod] -> [http://h/a.mod]
+  [songs/b.wav] -> [/songs/b.wav]
+songs in a folder:
+  HORIZON.MOD -> /Music/HORIZON.MOD
+  lau.mod -> /Music/lau.mod
+  Voice.Wav -> /Music/Voice.Wav
+  mod.tune -> /Music/mod.tune
+  notes.txt: not a song
+  .mod: not a song
+  modern.mo: not a song
+times: 0=0:00 9=0:00 10=0:01 600=1:00 1925=3:12 65535=109:13
+errors:
+  $44 File not found.
+  $47 The file cannot be read (access denied).
+  $C7 No PC link: start the gateway on the PC.
+  $C8 The PC link was lost.
+  $CF The server answered with an error (not found?).
+  $02 Not enough memory for this song.
+  $FE Not a module (MOD) or a WAV file Music can play.
+  $C2 This cannot be opened here.
+  $99 Error $99.
+settings read:
+  volume 48, separation 20, repeat 2, shuffle 1, current 1
+  1: /Music/LAU.MOD
+  2: /Music/HORIZON.MOD
+  3: http://example.com/x.mod
+  4: /PC:/a.wav
+settings written:
+# Music: the settings and the playlist (one path or address a line)
+volume=48
+separation=20
+repeat=one
+shuffle=on
+current=2
+/Music/LAU.MOD
+/Music/HORIZON.MOD
+http://example.com/x.mod
+/PC:/a.wav
+sorted:
+  1: /F/a.wav
+  2: /F/b.mod
+  3: /F/B2.mod
+  4: /F/C.MOD
+removed the second:
+  1: /F/a.wav
+  2: /F/B2.mod
+  3: /F/C.MOD
+  current 1
+music -t: done
+> 

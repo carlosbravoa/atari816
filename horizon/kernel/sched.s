@@ -193,10 +193,23 @@ irq_service:
         ldy     #0
         jsr     k_wake_all
         a8
+:       a16                             ; (0.26) the music timer (TIMER1, REV $0A+)
+        lda     mt_own
+        a8
+        beq     :+
+        lda     f:IRQ_STATUS
+        bit     #IRQ_TIMER1
+        beq     :+
+        lda     #IRQ_TIMER1
+        sta     f:IRQ_STATUS
+        a16
+        jsr     mt_irq
+        a8
 :       jsr     vs_irq                  ; (0.15) a vertical blank awaited (vsync)
         lda     f:IRQ_STATUS            ; anything else that is latched: drop it (0.18: not the
-        and     #$3C & ~(IRQ_TIMER0 | IRQ_BLITTER) ; raster line or the blank that latched
-                                        ; meanwhile: their handlers take them next time)
+        and     #$3C & ~(IRQ_TIMER0 | IRQ_BLITTER | $08) ; raster line or the blank that latched
+                                        ; meanwhile: their handlers take them next time; (0.26)
+                                        ; nor TIMER1 ($08): the music timer's, taken next time)
         beq     :+
         sta     f:IRQ_STATUS
 :       a16

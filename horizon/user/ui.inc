@@ -233,8 +233,10 @@ AK_SIZEOF = 10
 ;                   (0: from the path, the file name without its extension, capitalised:
 ;                   "/BIN/PAINT.PRG" "Paint") -> started detached (priority 1 | SP_DETACH).
 ;                   C clear: started (also when a single-instance program ran already: spawn
-;                   answered ERUNNING, its windows were raised). C set: not started, A = the
-;                   error, after the ui_spawnerr alert.
+;                   answered ERUNNING, its windows were raised; (0.26) with an argument string
+;                   the request file /SYSTEM/OPEN.REQ is then written: two lines, the program's
+;                   path and the argument string, for the running program to read: Music does).
+;                   C set: not started, A = the error, after the ui_spawnerr alert.
 ; ui_spawnerr       A = a spawn error, X = the program's name: a warning alert "Cannot start
 ;                   NAME" saying why (ENOMEM not enough memory, EAGAIN too many programs, $44 /
 ;                   $45 not on the card, EINVAL not a Horizon program; others: the code).
@@ -262,6 +264,7 @@ FT_PICTURE = 6          ; .pic (Paint)
 FT_SHEET   = 7          ; .sht .csv (Sheet)
 FT_WRITE   = 8          ; .md (Write)
 FT_LINK    = 9          ; (0.14) .lnk: a shortcut (ui_open opens its target)
+FT_MUSIC   = 10         ; (0.26) .mod .wav (Music)
 ;
 ; (0.14) shortcuts: a .LNK file is text: the target's absolute path on a line of its own,
 ; optional "title=Name" (the label the Desktop shows) and "args=..." (a program's argument

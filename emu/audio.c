@@ -119,7 +119,9 @@ void audio_write(uint32_t a, uint8_t v)
 {
     int i = a & 0xFF;
     if (M.sys.rev < 10) return;
-    if (M.sys.snd_log & 2) fprintf(stderr, "lau $%04X = $%02X\n", 0xDB00 + i, v);
+    if (M.sys.snd_log & 4)                               /* --log-lau-us: with the emulated time */
+        fprintf(stderr, "lau %llu $%04X = $%02X\n", (unsigned long long)(M.cpu.cycles * 1e6 / CPU_HZ), 0xDB00 + i, v);
+    else if (M.sys.snd_log & 2) fprintf(stderr, "lau $%04X = $%02X\n", 0xDB00 + i, v);
     if (i >= 0x80) { A.pram[i - 0x80] = v; return; }
     switch (i) {
     case 0x20:

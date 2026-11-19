@@ -3230,7 +3230,7 @@ errtab: .word   $C3, m_unk, $C4, m_img, $44, m_nf, $45, m_nf, $C5, m_iop, $48, m
 pow10:  .word   10000, 1000, 100, 10, 1
 KUP     = 9                             ; kind: the ".." entry (after the FT_* types)
 icons:  .addr   ic_blank, ic_folder, ic_atari, ic_prg, ic_page, ic_page, ic_pic, ic_page
-        .addr   ic_page, ic_up
+        .addr   ic_page, ic_up, ic_page       ; (KUP 9; (0.26) FT_MUSIC 10)
 ; the Up button's arrow: {w, h, dx, dy} from (tbx + 7, 3) (centred in it), 0
 uparrow: .word  2, 1, 1, 0,  4, 1, 0, 1,  6, 1, $FFFF, 2,  8, 1, $FFFE, 3,  2, 4, 1, 4,  0
 ; (0.25) the Reload button's arrow going round (the same {w, h, dx, dy})

@@ -57,7 +57,8 @@ TI_IDLE    = 4        ;   waiting in win_event with nothing queued
 TI_SINGLE  = 8        ;   single instance (SYS_SINGLE)
 SYS_PCREATE   = $40   ; -> A = port
 SYS_SEND      = $41   ; A = port, X, Y = 16-byte message
-SYS_RECV      = $42   ; A = port, X, Y = 16-byte buffer (blocks)
+SYS_RECV      = $42   ; A = port, X, Y = 16-byte buffer (blocks); (0.26) A = port | RV_POLL: EAGAIN when empty
+RV_POLL       = $8000
 SYS_PCLOSE    = $43   ; A = port
 SYS_ICLAIM    = $50
 SYS_JOY       = $55   ; (0.15) A = 0 -> A = directions (JOY_*: bits 0-3 port 1, 4-7 port 2), X = triggers (bit 0 port 1, 1 port 2); 1 = pressed
@@ -88,6 +89,9 @@ SYS_SPLAY     = $68   ; X, Y = 16-byte block (SPB_* below) -> A = the voice 0-7 
 SYS_SSTOP     = $69   ; A = voice, $FFFF: every voice of the caller
 SYS_SSTAT     = $6A   ; -> A = the caller's voices still playing (bit n = voice n), X = all voices playing
 SYS_SSET      = $6B   ; A = voice (the caller's), X = pitch, Y = left volume | right volume << 8: changed while it plays
+SYS_STIMER    = $6C   ; (0.26) the music timer: A = own port ($FFFF: off), X = period low 16 bits, Y = high 8 bits (us,
+                      ;   >= 1000): at every period a message {u8 $FF, u8 0, u16 count} to the port; called again: the
+                      ;   new period from the next one on. One owner (EAGAIN); REV $0A+ (ENODEV)
 SPB_ADDR  = 0         ; u24 the first sample (16-bit samples: an even address)
 SPB_LEN   = 3         ; u24 the length in samples (1 ..)
 SPB_LOOP  = 6         ; u24 loop start in samples (SPF_LOOP: length - loop >= 4)
@@ -99,6 +103,7 @@ SPB_VOICE = 14        ; u8 the voice 0-7, SP_ANY ($FF): the first one not playin
 SPB_SIZE  = 16        ; (byte 15: 0)
 SPF_LOOP  = 1
 SPF_16    = 2         ; signed 16-bit little-endian samples (else signed 8-bit)
+SPF_KEEP  = 4         ; (0.26) music: the voice plays on while the classic Atari is shown (others stop)
 SP_ANY    = $FF
 CK_AUTO = 0
 CK_DISK = 1

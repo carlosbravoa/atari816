@@ -355,6 +355,14 @@ au_seq:     .res    8*2         ;   when it was started (au_cnt then)
 au_cnt:     .res    2
 au_t:       .res    4
 au_blk:     .res    16          ;   sample_play's block
+au_keep:    .res    2           ; (0.26) voices started with SPF_KEEP: they play on while the classic Atari shows
+mt_own:     .res    2           ; (0.26) the music timer (TIMER1): its owner (slot*2 + 1, 0 = off)
+mt_port:    .res    2           ;   the port its ticks go to (port*2)
+mt_cnt:     .res    2           ;   expiries since it started
+mt_gen:     .res    2           ;   + 1 at every start: byte 1 of its messages
+mt_per:     .res    4           ;   the period (us), its half
+mt_half:    .res    4
+mt_due:     .res    4           ;   UPTIME when the next one is due
 joy_tx:     .res    2           ; joystick test aid: directions, triggers ORed in
 joy_ty:     .res    2
 bss_end:

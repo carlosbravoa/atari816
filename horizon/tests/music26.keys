@@ -1,0 +1,73 @@
+# (0.26) Music on the Desktop (DESK=1; tests/mousegen.py makes tests/music26.keys from this;
+# the card's Programs menu gets "Music=/BIN/MUSIC.PRG"). Music's window: content at about
+# (120, 71). Shots (s):
+#   1   9.0  Programs > Music: the empty player (--rev 9 and older: the alert "Music needs Lau")
+#   2  15.0  Files: /Music, HORIZON.MOD opened (typed, Enter): it reaches the running Music
+#            (/SYSTEM/OPEN.REQ) and plays: title, format, position, time, the meters
+#   3  16.5  a moment later: the meters and the position moved
+#   4  21.5  LAU.MOD opened in Files: the playlist has two songs, LAU.MOD plays
+#   5  23.5  the Pause button: paused (the meters fall)
+#   6  26.5  Play, then a click at 40% of the position bar: a seek (order 2 of 3)
+#   7  29.0  the Samples tab: the module's sample names
+#   8  32.0  the Playlist tab again; HORIZON.MOD double clicked in the playlist: it plays
+#   9  40.0  Programs > Edit in front, text typed from 35 s to 39.5 s: Music plays on behind it
+#            (the run's stderr, build/music26.err, has every Lau write with its time:
+#            emu816 --log-lau-us; Edit is in front from about 33.5 s to 40.5 s)
+#  10  42.0  a click on Music's status line: in front again, the time went on (no gap)
+6000 M -100:-100:0:0
+6050 M -100:-72:0:0
+6100 M -15:0:0:0
+6400 M 0:0:0:1
+6480 M 0:0:0:0
+6800 M -8:99:0:0
+7200 M 0:0:0:1
+7280 M 0:0:0:0
+10000 M -37:-76:0:0
+10200 M 0:0:0:1
+10280 M 0:0:0:0
+11000 music\n
+12500 hor\n
+18200 M 0:0:0:1
+18280 M 0:0:0:0
+18800 lau\n
+22500 M 100:100:0:0
+22550 M 51:29:0:0
+22700 M 0:0:0:1
+22780 M 0:0:0:0
+24500 M -34:0:0:0
+24700 M 0:0:0:1
+24780 M 0:0:0:0
+25500 M 100:-23:0:0
+25550 M 5:0:0:0
+25700 M 0:0:0:1
+25780 M 0:0:0:0
+27500 M -72:48:0:0
+27700 M 0:0:0:1
+27780 M 0:0:0:0
+29500 M -50:0:0:0
+29700 M 0:0:0:1
+29780 M 0:0:0:0
+30500 M 40:20:0:0
+30700 M 0:0:0:1
+30780 M 0:0:0:0
+30900 M 0:0:0:1
+30980 M 0:0:0:0
+32500 M -95:-100:0:0
+32550 M 0:-97:0:0
+32700 M 0:0:0:1
+32780 M 0:0:0:0
+33000 M -8:15:0:0
+33200 M 0:0:0:1
+33280 M 0:0:0:0
+35000 The music plays on while Edit is in front.\n
+38000 Typing here does not stop it.\n
+40500 M 100:100:0:0
+40550 M 100:100:0:0
+40600 M 100:100:0:0
+40650 M 3:22:0:0
+40700 M 0:0:0:1
+40780 M 0:0:0:0
+41500 M 100:5:0:0
+41550 M 100:0:0:0
+41600 M 30:0:0:0
+42500 {esc}

@@ -99,15 +99,18 @@ sys_send:
         jmp     set_ok
 
 ; ---- $42 recv(A = port, X, Y = 16-byte buffer): blocks while the queue is empty ----
+rv_inval:
+        jmp     err_inval
 sys_recv:
         ldx     cur
         lda     t_a,x
+        and     #$7FFF                  ; (0.26) bit 15 RV_POLL
         jsr     port_check
-        bcs     @inval
+        bcs     rv_inval
         lda     cur
         inc     a
         cmp     p_owner,x
-        bne     @inval
+        bne     rv_inval
         ldy     cur                     ; buffer writable?
         lda     t_x,y
         sta     kt0
@@ -121,11 +124,14 @@ sys_recv:
         bcs     @fault
         ldx     cur
         lda     t_a,x
+        and     #$7FFF
         asl     a
         tax
         lda     p_count,x
         bne     @take
         ldy     cur
+        lda     t_a,y                   ; (0.26) RV_POLL: EAGAIN at once when it is empty
+        bmi     @again
         lda     t_killed,y
         bne     @inval
         txa
@@ -163,6 +169,8 @@ sys_recv:
         jmp     set_ok
 @inval: jmp     err_inval
 @fault: jmp     err_fault
+@again: lda     #EAGAIN
+        jmp     set_err
 
 ; ---- $43 port_close(A = port) ----
 sys_pclose:

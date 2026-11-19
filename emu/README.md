@@ -40,6 +40,7 @@ emu816 [--sd DIR] [--load FILE@ADDR]... [--max-seconds N] [--trace]
 | `--wav FILE.wav` | Write Lau's output (48 kHz, 16-bit stereo, without the POKEY sound) |
 | `--log-sound` | Print every accepted write to the sound page ($00:DB00-$DB13) on stderr |
 | `--log-lau` | Print every write to Lau, the sample player ($00:DB20-$DBFF, REV $0A), on stderr as `lau $DBxx = $yy` (Horizon's sample-call test compares it) |
+| `--log-lau-us` | The same as `--log-lau`, each line with the emulated time in microseconds: `lau 1234567 $DB89 = $12` (the music tests rebuild Lau's voice state at every tick from it) |
 | `--headless` | SDL builds open a window by default; this flag suppresses it (accepted and ignored in plain builds) |
 | `--fast` | SDL: keep the window but do not throttle to real time |
 | `--ideal-timing` | The time model before Horizon 0.19: every CPU cycle ideal (no cache misses, SDRAM write stalls or cache sweeps) and Ali's older per-pixel rates. Programs then run about twice as fast as on the board (see "Memory timing") |

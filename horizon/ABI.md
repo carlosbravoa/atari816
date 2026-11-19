@@ -1,4 +1,4 @@
-# Horizon ABI (version 0.24)
+# Horizon ABI (version 0.26)
 
 This file describes the interface between Horizon and user programs. `user/horizon.inc`
 holds the same definitions for ca65.
@@ -64,7 +64,7 @@ PBR:PC-1.
 | $34 | task_single | - | - | (0.13) One instance of the caller's program (the same absolute path) only. If another live task runs it already, that task's windows are raised (the top one gets the focus) and the call returns C set, A = ERUNNING, X = its id: the caller should exit. Otherwise the caller is marked, and a later spawn of the same path raises its windows instead and returns ERUNNING. The Desktop, About and Settings call it first thing |
 | $40 | port_create | - | A = port (0-15) | The caller owns the port. EAGAIN if all 16 are in use |
 | $41 | send | A = port, X, Y = 16-byte message | - | Any task may send. EAGAIN if the port's queue (8 messages) is full, EINVAL if the port is not open |
-| $42 | recv | A = port, X, Y = 16-byte buffer | - | Owner only (else EINVAL). Blocks while the queue is empty. Interruptible by kill |
+| $42 | recv | A = port, X, Y = 16-byte buffer | - | Owner only (else EINVAL). Blocks while the queue is empty. Interruptible by kill. (0.26) A = port \| RV_POLL ($8000): EAGAIN at once when the queue is empty (a window program reads its port at each event without waiting) |
 | $43 | port_close | A = port | - | Owner only. Queued messages are dropped |
 | $50 | input_claim | - | - | The caller receives the keyboard: KB_ROUTE = 0, the queue is emptied. If the caller already holds it (claimed or lent), nothing changes and the queue is kept. EAGAIN if another task holds it |
 | $51 | input_read | - | Key: A = HID usage ($00-$FF), X = modifiers \| down << 8. Mouse: A = $0100 \| buttons, X = x, Y = y. Wheel: A = $0200, X = wheel delta (signed) | Holder only. Blocks while the queue is empty. The system key (F12, NMI) arrives as usage $FF, down; F12's own key events are dropped. Y is set by mouse and wheel events (0 for wheel) and unchanged by keys. Interruptible by kill (see Mouse) |
@@ -81,10 +81,11 @@ PBR:PC-1.
 | $65 | beep | A = pitch (POKEY AUDF1), X = duration in 10 ms ticks, Y = volume 0-15 | - | REV $07+: channel 1 of POKEY 2, pure tone, stopped by the timer tick; a new beep replaces the one playing; X = 0 silences channel 1. Ignored on older boards and while the classic machine runs. (0.15) Channel 1 counts as the caller's (see sound_write). The user interface's own sound is the chime ($67) |
 | $66 | sound_write | A = register $00-$13, X = value | - | REV $07+: raw write to $00:DB00 + A ($00-$0F POKEY 2, $10-$13 the DACs: 0, 1 left, 2, 3 right). EINVAL above $13. The hardware takes these only while the classic machine is frozen; the kernel silences AUDC1-4 and the DACs before every unfreeze. (0.15) The kernel keeps a copy of every register written and who wrote it last: a channel (AUDFn / AUDCn), a DAC, or the rest (AUDCTL, SKCTL, ...). When that task ends (exit, kill, crash) its channels and DACs are silenced, and AUDCTL / SKCTL go back to 0 / 3 if it wrote them. While the chime borrows a channel, writes to it go only to the copy and reach the hardware when the chime ends |
 | $67 | sound_chime | A = kind: 0 CH_INFO, 1 CH_WARN, 2 CH_QUESTION, 3 CH_ERROR; X = volume 0-15 ($FFFF: the beep volume setting) | - | (0.15) The chime of the user interface (the alerts, the error beep): two soft notes, pure tone, the volume falling every 10 ms tick: the first note 60 ms (16, 14, 12, 11, 10, 9 sixteenths of the peak) and 10 ms of silence, the second 150 ms (16, 14, 12, 10, 9, 8, 7, 6, 5, 4, 3, 2, 2, 1, 1 sixteenths), 0.22 s in all; peak = (volume * 3 + 2) / 4. Notes (AUDF at the 64 kHz clock): information A5, E5 (35, 47); warning A5, A5; question E5, A5; error E5, C5 (47, 60). It takes a channel no task owns (4, 3, 2, 1, one whose AUDCTL bits are clear); when all four are owned it borrows channel 4 (its AUDCTL bits cleared meanwhile) and gives the owner's values back at the end. A new chime replaces the one playing. Volume 0 or a board without the sound page: nothing. EINVAL for kind > 3 |
-| $68 | sample_play | X, Y = 16-byte block (below) | A = the voice 0-7 | (0.17) Lau, the sample player (REV $0A): plays signed PCM from the caller's memory on a voice; the hardware then needs nothing more. Block: u24 address of the first sample (16-bit samples: an even address), u24 length in samples (1 or more), u24 loop start in samples (with the loop flag: it plays to the end, then from there again; length - loop start at least 4), u16 pitch (the step per 48 kHz output sample, 2.14 fixed point: $4000 = 48,000 samples a second, $2000 = 24,000, $1555 = 16,000; up to $FFFF), u8 left volume, u8 right volume (0-255), u8 flags (bit 0 SPF_LOOP, bit 1 SPF_16: signed 16-bit little-endian samples, else signed 8-bit), u8 voice (0-7, or SP_ANY $FF: the first voice not playing; when all eight play, the caller's voice that started first), u8 0. The whole sample must lie in memory the caller owns: its window (bank 0, $0000-$7FFF), its code bank or banks it allocated; it may run across consecutive banks it owns (8 MB at most: 16 M samples). Errors: ENODEV no Lau (REV < $0A: use POKEY 2), EFAULT any other memory (Lau reads RAM by itself, past FREDDIE II's protection, so the kernel checks the range), EINVAL no samples, an odd 16-bit address, a loop shorter than 4, voice above 7, EAGAIN the voice asked for plays for another task (or SP_ANY: all eight play and none is the caller's). See "Samples" below |
+| $68 | sample_play | X, Y = 16-byte block (below) | A = the voice 0-7 | (0.17) Lau, the sample player (REV $0A): plays signed PCM from the caller's memory on a voice; the hardware then needs nothing more. Block: u24 address of the first sample (16-bit samples: an even address), u24 length in samples (1 or more), u24 loop start in samples (with the loop flag: it plays to the end, then from there again; length - loop start at least 4), u16 pitch (the step per 48 kHz output sample, 2.14 fixed point: $4000 = 48,000 samples a second, $2000 = 24,000, $1555 = 16,000; up to $FFFF), u8 left volume, u8 right volume (0-255), u8 flags (bit 0 SPF_LOOP, bit 1 SPF_16: signed 16-bit little-endian samples, else signed 8-bit; (0.26) bit 2 SPF_KEEP: music, the voice plays on while the classic Atari is shown), u8 voice (0-7, or SP_ANY $FF: the first voice not playing; when all eight play, the caller's voice that started first), u8 0. The whole sample must lie in memory the caller owns: its window (bank 0, $0000-$7FFF), its code bank or banks it allocated; it may run across consecutive banks it owns (8 MB at most: 16 M samples). Errors: ENODEV no Lau (REV < $0A: use POKEY 2), EFAULT any other memory (Lau reads RAM by itself, past FREDDIE II's protection, so the kernel checks the range), EINVAL no samples, an odd 16-bit address, a loop shorter than 4, voice above 7, EAGAIN the voice asked for plays for another task (or SP_ANY: all eight play and none is the caller's). See "Samples" below |
 | $69 | sample_stop | A = voice, $FFFF: every voice of the caller | - | (0.17) Stops the voice at once and frees it. EINVAL: not the caller's voice (one it started and that was not stopped or taken since); ENODEV without Lau |
 | $6A | sample_stat | - | A = the caller's voices playing, X = all voices playing | (0.17) Bit n = voice n (a voice that reached its end without the loop flag no longer plays). ENODEV without Lau: a program asks this once at its start to choose between Lau and POKEY 2 |
 | $6B | sample_set | A = voice, X = pitch, Y = left volume \| right volume << 8 | - | (0.17) Changes the pitch and volumes of one of the caller's voices while it plays (slides, fades, panning): the hardware takes them at its next output sample. EINVAL: not the caller's voice |
+| $6C | sample_timer | A = own port ($FFFF: off), X = period low 16 bits, Y = high 8 bits (microseconds, 1,000 or more) | A = the generation | (0.26) The music timer (TIMER1, REV $0A+): at every period the kernel puts the message {u8 $FF, u8 the generation, u16 the count of periods since the start, 12 x 0} into the port (when the queue has room; the count goes on regardless, and it follows the microsecond clock: periods that passed while the kernel kept interrupts off count too, so a receiver that runs the difference catches up) and wakes the task waiting in recv. Called again while on: the new period counts from the next one on (a tempo change, no gap). Off (A = $FFFF), at the owner's end, and when the port is no longer the owner's. Each start from off is a new generation (+1, in A and in byte 1 of the messages), so messages of an earlier start can be told apart. One owner at a time: EAGAIN; ENODEV without Lau; EINVAL another task's port, a period below 1 ms or above 24 bits. See "Music (0.26)" |
 | $70 | ws_start | - | A = 1 started now, 0 already running | Starts the window system: 6 contiguous free banks become the 640x360 8 bpp screen (stride 1024), the system palette is loaded, the menu bar is created, the mouse and keyboard go to the window manager. The caller is its owner. ENOMEM without 6 contiguous free banks |
 | $71 | ws_stop | - | - | Its owner only (else EINVAL): every window closes, the banks are freed, the text console comes back as it was |
 | $72 | win_open | X, Y = {i16 x, i16 y, u16 width, u16 height, u24 title, u8 flags} | A = window (0-15) | Opens a window on top of its class (it gets the focus unless a backdrop). x, y = its outer top-left; width, height = its content area. It is kept fully on screen and below the menu bar (y >= 16). Flags: WF_RESIZE 1 (a bottom strip with a size grip), WF_PLAIN 2 (no frame or title: the content is the window), WF_BACK 4 (backdrop: always below the other windows; gets F12 and shows its menus first, as the system menu), WF_TERM 16 (a terminal, see ws_term), WF_MODAL 32 (a dialog: while it is open, a click on another window of the same program raises the dialog instead, with the error beep), WF_HOVER 64 (motion events also without a button, and WE_LEAVE: see win_event). The content starts C_BODY. The title is copied (31 characters). Banks are contiguous. ENOMEM: no banks; EAGAIN: no free window |
@@ -314,7 +315,8 @@ without interpolation (Docs/02-register-spec.md, "Lau"). Horizon gives programs 
   "Sound volume"; in 0.17 it was setting 1, the alert volume): volume x 17 (0 silent, the default 8 gives 136 of 255). One voice at volume 255
   reaches about a quarter of full scale at the default; louder sums are clipped.
 - **The classic machine.** When it is shown (F12, classic_show, classic_boot) every voice
-  stops, as POKEY 2 is silenced.
+  stops, as POKEY 2 is silenced; (0.26) except the voices started with SPF_KEEP (music): they
+  play on, mixed with the classic Atari's sound.
 - **No Lau** (REV < $0A): every sample call returns ENODEV. Programs fall back to POKEY 2
   (sound_write); the alert chime is always POKEY 2's.
 
@@ -330,6 +332,65 @@ spb:    .faraddr sample          ; address (a label in the program: its code ban
         ptr     spb
         sys     SYS_SPLAY        ; A = the voice, or C set: ENODEV -> use POKEY 2
 ```
+
+## Music (0.26)
+
+Horizon plays ProTracker modules and WAV files on Lau, steadily, whatever the other programs
+do. Three parts:
+
+- **The music timer** (`sample_timer`, $6C): TIMER1 sends its owner's port a message every
+  period (microseconds). A task at **priority 0** that waits in `recv` on that port runs
+  within a fraction of a millisecond of each period (the kernel is never preempted, but its
+  long jobs let interrupts in: the compositor between lines, file transfers wait for the I/O
+  processor with interrupts on). Measured in emu816 (the board's timing): the ticks of a
+  module come 1.6-2.3 ms after the first one's phase with a spread (jitter) of 0.35 ms while
+  eight CPU-bound programs run, and of 0.8 ms during a 1 MB file copy; none is lost. The
+  kernel's longest jobs with interrupts off still delay a tick: a program being loaded
+  (relocated), the text console scrolling (the shell printing a long listing): up to about
+  8-10 ms then, never lost (the count catches up). In Music's Desktop session (emu816), with Edit started
+  and typed in while the music plays, every tick but one came within 0.8 ms of its place; one
+  came 4.8 ms late while Edit was being loaded. A program never runs code in
+  interrupts.
+- **The engine**, `/SYSTEM/MUSICD.PRG` (user/musicd.s): spawned at priority 0 with the
+  arguments `-p PORT` (a port of the caller's), it loads a file (a path on the card, `/PC:`
+  or an `http://`, `https://`, `ftp://` URL), plays it and answers port messages: play,
+  pause, stop, seek, volume, separation, loop, reading the module's header and patterns, quit
+  (user/music.inc has the messages). It sends its status (state, order, row, pattern, time,
+  the level of every channel) after every tick. It ends with its parent: a program that
+  started it and ends (exit, kill, crash) takes the music with it within a second. From the
+  shell, `musicd [-l] FILE` plays a file once (or again and again) and returns at its end.
+  It needs Lau (REV $0A): without it, it says so (shell) or answers MST_ERROR with ENODEV.
+  The Music program (`/BIN/MUSIC.PRG`) is its window. Music is a single-instance program; a
+  file opened from Files while it runs reaches it through `/SYSTEM/OPEN.REQ` (two lines: the
+  program's path and the argument), which the controls library's `ui_launch` writes when the
+  kernel answers ERUNNING to a spawn with an argument, and Music reads (then deletes).
+- **The replayer library**, user/modplay.s (build/modplay.o; API in user/modplay.inc; the
+  SDK's sound reference): the engine's player, for programs that play a module themselves (a
+  game: `mp_tick` from its own timer task or frame loop).
+
+**Voices.** A module of N channels takes voices 8 - N .. 7 (4 channels: 4-7), so programs'
+sound effects (SP_ANY takes the lowest free voice) never meet the music; a voice another
+program took makes that channel take any free one. WAV: voice 7 (mono) or 6 and 7. The
+music's voices are started with SPF_KEEP: they play on while the classic Atari is shown.
+Nothing ties sound to the keyboard focus: the music plays on while another window is in front
+(the main use: music while working in Edit), while the player is minimised, during copies.
+
+**Loops on Lau.** A MOD sample plays from its start to its loop end and then repeats its loop:
+exactly Lau's LEN and LOOP (the part after the loop end is never played, as in most players).
+The one case Lau cannot start directly is a sample offset (9xx) inside a loop (the loop start
+would lie before the start): the piece to the loop end and then the loop (2 KB at most) are
+copied into a small buffer and played from there with its own loop; longer ones start at the
+loop start. (A Lau improvement that would make this exact and free: a start position
+register, KEYON starting the voice at that position instead of 0.)
+
+**Pause** sets the voices' pitch and volume to 0 (they keep their place); resume writes them
+back.
+
+**What it costs** (emu816, the board's timing): about 0.9 ms of CPU a tick in all at 125 BPM
+(50 ticks a second: 4.5 % of the CPU), of which the replayer's own work is about 0.3 ms and
+the wake-up through the kernel (interrupt, message, task switch, recv) about 0.6 ms; the
+level meters for a client (Music) add about 0.5 ms every second tick (0.25 ms a tick on
+average), plus one status message (send) a tick.
 
 ## The games round (0.18)
 

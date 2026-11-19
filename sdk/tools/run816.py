@@ -38,6 +38,7 @@ Options:
                   scrolling, 9 no Lau, 8 no command lists / raster / NV_FRAME, 7 no blitter
   --log-sound     log every write to POKEY 2 / the DACs in emu.err
   --log-lau       log every write to Lau, the sample player, in emu.err ("lau $DBxx = $yy")
+  --wav FILE      (Horizon 0.26) record Lau's output (48 kHz stereo WAV): listen on the PC
   --net           (Horizon 0.22) the internet through an emulated PC link: tcp:// URLs
                   become real connections of the PC running the emulator
   --net-root DIR  (Horizon 0.22) http://, https://, ftp:// URLs are served from the
@@ -91,7 +92,7 @@ def main():
                 die(f'{w} needs a value')
             return a[i + 1]
         if w in ('--horizon', '--emu', '--dest', '--args', '--script', '--seconds', '--out',
-                 '--rev', '--mode', '--net-root'):
+                 '--rev', '--mode', '--net-root', '--wav'):
             opt[w[2:]] = val(); i += 2
         elif w == '--shot':
             opt['shots'].append(float(val())); i += 2
@@ -188,6 +189,9 @@ def main():
         cmdl.append('--log-sound')
     if opt.get('log-lau'):
         cmdl.append('--log-lau')
+    if opt.get('wav'):
+        os.makedirs(os.path.dirname(os.path.abspath(opt['wav'])), exist_ok=True)
+        cmdl += ['--wav', os.path.abspath(opt['wav'])]
     if opt.get('net'):
         cmdl.append('--net')
     if opt.get('net-root'):

@@ -304,6 +304,7 @@ static void usage(void)
         "  --wav FILE.wav       write the sample player's output (48 kHz stereo, without the POKEY sound)\n"
         "  --log-sound          print every accepted sound write ($DB00-$DB13) on stderr\n"
         "  --log-lau            print every write to Lau, the sample player ($DB20-$DBFF, REV 10), on stderr\n"
+        "  --log-lau-us         the same, each line with the emulated time in microseconds: lau US $DBxx = $yy\n"
         "  --headless           no window (SDL builds open a 1280x720 window by default)\n"
 #ifdef HAVE_SDL
         "  --fast               window open, but do not throttle to real time\n"
@@ -362,6 +363,7 @@ int main(int argc, char **argv)
         else if (!strcmp(a, "--rev") && i + 1 < argc) M.sys.rev = (uint8_t)strtol(argv[++i], NULL, 0);
         else if (!strcmp(a, "--log-sound")) M.sys.snd_log |= 1;
         else if (!strcmp(a, "--log-lau")) M.sys.snd_log |= 2;
+        else if (!strcmp(a, "--log-lau-us")) M.sys.snd_log |= 4;
         else if (!strcmp(a, "--wav") && i + 1 < argc) wav_path = argv[++i];
 #ifdef HAVE_SDL
         else if (!strcmp(a, "--headless")) sdl_on = 0;

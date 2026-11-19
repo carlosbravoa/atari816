@@ -12,9 +12,10 @@ It boots into the Desktop (or, with `/SYSTEM/NODESK` on the card, into the text 
 
 | Folder | Contents |
 | --- | --- |
-| `/SYSTEM` | `HORIZON.SYS` (the kernel), `INIT.PRG`, the system programs `DESK.PRG` (the Desktop), `SH.PRG` (the shell), `ABOUT.PRG`, (0.23) `PRINTD.PRG` (sends a print job to the PC), (0.24) `SAVER.PRG` (the screen saver), the settings files `CONFIG` (Settings), `PROGRAMS` (the Desktop's Programs menu) and `NODESK` (optional: boot into the text shell), and (0.14) `ICONS` (the Desktop's icons, made from `sdfiles/icons.txt`), `CLOCK` (the last time set, written by the Desktop and the shell) and `LAYOUT` (where the desktop icons are), (0.22) `URLS` (the Downloader's last addresses) and `BBS.TXT` (the BBS terminal's address book). Files hides it and refuses to start its programs |
+| `/SYSTEM` | `HORIZON.SYS` (the kernel), `INIT.PRG`, the system programs `DESK.PRG` (the Desktop), `SH.PRG` (the shell), `ABOUT.PRG`, (0.23) `PRINTD.PRG` (sends a print job to the PC), (0.24) `SAVER.PRG` (the screen saver), (0.26) `MUSICD.PRG` (the music engine), the settings files `CONFIG` (Settings), `PROGRAMS` (the Desktop's Programs menu) and `NODESK` (optional: boot into the text shell), and (0.14) `ICONS` (the Desktop's icons, made from `sdfiles/icons.txt`), `CLOCK` (the last time set, written by the Desktop and the shell) and `LAYOUT` (where the desktop icons are), (0.22) `URLS` (the Downloader's last addresses) and `BBS.TXT` (the BBS terminal's address book). Files hides it and refuses to start its programs |
 | `/SYSTEM/TESTS` | Test and demo programs: SELFTEST, HELLO, COUNT, SPIN, TICK, REGS, CRASH, FTEST, PING, PONG, KEYS, MOUSE, MTEST, BENCH, WDEMO, LEAK, HOG, (0.15) KTEST, (0.17) STEST, (0.18) GTEST |
-| `/BIN` | The applications: WFILES (Files), TERM (Terminal), EDIT, WRITE, SHEET, PAINT, BASIC, CALC, SOLITAIR, (0.17) QUABRICK (Quabricks; its samples QUABRICK.SFX, its high scores QUABRICK.DAT), SETTINGS, (0.22) DOWNLOAD (the Downloader), BBS (the BBS terminal), (0.23) PRINTER (Printer), (0.25) FREECELL (FreeCell; its sounds FREECELL.SFX, its statistics FREECELL.DAT), and the shell's tools FILES (the text browser), CAT, DIR, MEM |
+| `/BIN` | The applications: WFILES (Files), TERM (Terminal), EDIT, WRITE, SHEET, PAINT, BASIC, CALC, SOLITAIR, (0.17) QUABRICK (Quabricks; its samples QUABRICK.SFX, its high scores QUABRICK.DAT), SETTINGS, (0.22) DOWNLOAD (the Downloader), BBS (the BBS terminal), (0.23) PRINTER (Printer), (0.25) FREECELL (FreeCell; its sounds FREECELL.SFX, its statistics FREECELL.DAT), (0.26) MUSIC (Music, the music player), and the shell's tools FILES (the text browser), CAT, DIR, MEM |
+| `/Music` | (0.26) Music to play: `HORIZON.MOD` (83 s) and `LAU.MOD` (13 s), original modules generated at build time by `tools/mkmod.py` |
 | `/Desktop` | Created by the Desktop if missing: what is in it shows as icons on the desktop (0.14: shortcuts are `.LNK` files, below) |
 | `/atari.ini` | The classic machine's settings, read by the I/O processor at boot (Settings > Classic Atari edits it; 0.23: also the folder disk, `folder=` and `folderdrive=`) |
 | `/Printouts` | (0.23) The print jobs, made by the I/O processor at the first one (see "Version 0.23") |
@@ -345,6 +346,24 @@ the blitter: the software drawing paths; both must pass):
 30. **0.25** (`make test-25`): `gtest v` (REV $08: draw lists with LS_VBL while another
    program draws), the folder disk after a restart of Horizon (tests/desk25.src), Files'
    Reload (tests/files25.src); see "Version 0.25", Tests.
+
+31. **0.26 music** (`make test-music`, at the board's timing): the replayer's conformance:
+   20 modules (`tests/mkmodtests.py`: every effect, 6 and 8 channels, FLT8, the 15-sample
+   format, the song's end in every way, and a long module whose sample runs across a 64 KB
+   bank) played by `musicd` from the shell with emu816 `--log-lau-us`; `tests/modcheck.py`
+   rebuilds Lau's voices tick by tick and compares them with `tests/modref.py`, a
+   ProTracker 2.3 player written separately in Python from the format's documentation
+   (note starts, sample and offset, length and loop, pitch +-1, both volumes +-1, at the
+   right tick). The tempo while eight CPU-bound SPIN programs run, and background play
+   during a 1 MB copy on a slow card: every tick present, the spread of their times (jitter)
+   at most 1 ms. WAV playback (`tests/wavrun.py`): 16-bit stereo, 8-bit mono, 16-bit mono
+   with a LIST chunk; each side's tone, their separation and the length in emu816's `--wav`
+   capture. Without Lau (`--rev 9` and below) `musicd` refuses politely. Music's own
+   sessions (`make test-26`): `music -t` (its self test), a Desktop session (ten pictures:
+   the Programs menu, files from Files, the meters, Pause, a seek, the Samples page, Edit in
+   front while the music plays on, with `--log-lau-us`), the alert when the engine is
+   missing; on REV $09 and below the polite refusal. The other sessions run on a card
+   without `/Music` (`tests/shots.sh`: KEEPMUSIC=1 keeps it).
 
 The Desktop sessions (`DESK=1` in `tests/shots.sh`) get `tests/desk.programs` as their
 Programs menu (the order of 0.12), so programs added to `sdfiles/PROGRAMS` do not change
@@ -1025,6 +1044,38 @@ bus time (see emu/README.md, "Memory timing"). Expect the same factor on the CPU
   source stride), SYS_WGEOM, SYS_TNAME, WE_DROP's modifiers, the date routines (ui_clk*,
   `user/uidate.s`), shortcuts (ui_lnkread, ui_mklink), program and file icons (ui_prog,
   ui_ficon). See ABI.md and ui.inc.
+
+## Version 0.26 (music)
+
+- **Music** (`/BIN/MUSIC.PRG`, Programs > Music, its own icon; a double click on a `.MOD` or
+  `.WAV` file in Files plays it): the music player. See "Music" below.
+- **The music engine**, `/SYSTEM/MUSICD.PRG` (`user/musicd.s`), and the **replayer
+  library** (`user/modplay.s`, `build/modplay.o`, API `user/modplay.inc`): ProTracker
+  modules (M.K. and its kin: 4, 6 or 8 channels, FLT4/FLT8, xCHN up to 8, the old
+  15-sample format) with the whole ProTracker 2.3 effect set (arpeggio, slides, tone
+  portamento with glissando, vibrato and tremolo with their waveforms, sample offset, volume
+  slides, position jump, pattern break, pattern loop, retrigger, note cut and delay, pattern
+  delay, fine slides, finetune, speed and tempo), the song's end found by itself; and WAV
+  files (PCM 8 or 16 bits, mono or stereo, any rate up to 196 kHz, read whole into memory:
+  about 3.5 MB of sound with 4 MB free, 20 s of CD-quality stereo a MB). ABI.md, "Music
+  (0.26)" explains the timing, the voices, loops on Lau and the cost. From the shell:
+  `musicd [-l] FILE`.
+- **Kernel** (+533 bytes in bank $01; 1,262 left): `sample_timer` ($6C, the music timer:
+  TIMER1 sends a port a message every period), `recv` with `RV_POLL` (no waiting), and
+  `SPF_KEEP` (music's voices play on while the classic Atari is shown). A fix found on the
+  way: the interrupt service dropped a TIMER1 interrupt that latched while it ran (harmless
+  before: only REV < $09's vsync used TIMER1, and it took it first).
+- **The demo music**: `/Music/HORIZON.MOD` ("Horizon", 1:23, a cheerful C-major tune: intro,
+  A part, B part, a slower break, a ritardando outro; arpeggio chords, vibrato, slides, tone
+  portamento, volume swells, a hat roll with retrigger, note delays, sample offsets, speed and
+  tempo changes) and `/Music/LAU.MOD` ("Lau", 13 s, in A major). Both are original: their
+  instruments are synthesised and the tunes composed by `tools/mkmod.py` at build time. More
+  modules: copy them to the card, or in the shell `get http://example.org/song.mod
+  /Music/SONG.MOD`; Music also opens a URL directly (File > Open location).
+- **emu816**: `--log-lau-us` (each Lau write with its emulated time) for the music tests.
+- **SDK**: the music timer, the engine's protocol and the library in the sound reference;
+  `examples/tune` plays a module in 30 lines; `run816.py --wav`.
+- **Tests**: item 31 of the list above and Music's sessions (`make test-26`).
 
 ## Version 0.25 (FreeCell, Files' Reload, the folder disk after a restart)
 
@@ -1800,6 +1851,31 @@ ABI.md, "The games round", has the rules; `user/gtest.s` tests them.
   original).
 - **Tests**: KTEST and the pop-up menu session (tests 19 and 20); `tests/mousegen.py` no
   longer lets a click overtake the move before it.
+
+## Music
+
+Programs > Music (`/BIN/MUSIC.PRG`), or a double click on a `.MOD` or `.WAV` file in Files.
+
+- **Playing:** Play, Pause, Stop, Previous and Next buttons; the song's title (a module's own,
+  else the file's name), its format, where it is (order, pattern, row) and the time played;
+  a position bar (click it to jump to that part of the song); one level meter per channel
+  (two for a WAV file); Volume and Stereo (separation) bars. The system's sound volume
+  (Settings) is on top; the status line says so when it is 0.
+- **The playlist:** File > Open... adds a file, Open folder... every song of a folder,
+  Open location... a URL (`http://`, `https://`, `ftp://`: through the PC link, loaded
+  straight into memory; files on `/PC:` work as on the card); Remove (Delete), Clear; Repeat
+  off / all / one and Shuffle (Play menu). Up / Down and Enter or a double click play a song.
+  The playlist and the settings are kept in `/SYSTEM/MUSIC.CFG`.
+- **Samples** (View > Samples): the module's 31 sample names, where musicians put their
+  greetings and credits.
+- **Keys:** Space play / pause, Esc stop, Left / Right one order back / forward (a WAV: 5 s),
+  PgUp / PgDn the previous / next song, + / - the volume.
+- It plays on while it is minimised or another program is in front (the engine runs on its
+  own at priority 0); closing its window stops the music. Without Lau (hardware before REV
+  $0A) it says that it needs Lau and ends.
+- A file opened from Files while Music already runs reaches it through `/SYSTEM/OPEN.REQ`
+  (`ui_launch` writes the program's path and the file there when the kernel answers that the
+  single-instance program runs; Music reads it when it gets the focus, and once a second).
 
 ## FreeCell
 

@@ -31,6 +31,9 @@ original 8-bit software runs on its own hardware; F12 switches between it and th
   for things through a mailbox in memory and keeps running while it waits.
 - **Horizon** is the software on the 65C816: a kernel, a desktop with windows, and the
   programs. F12 switches the screen between the desktop and the classic Atari.
+- **Music.** Lau plays music by itself: the Music program plays ProTracker modules (.MOD)
+  and sound files (.WAV) from the card, the PC or the internet, steadily while you work in
+  other windows. Two original songs come on the card in `/Music`.
 - **The PC link** is optional. With the gateway running on a PC, the Atari816 gets a shared
   folder, the time and the internet through the same USB cable that powers the board.
 

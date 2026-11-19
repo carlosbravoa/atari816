@@ -126,7 +126,7 @@
 
   <rect class="cpu" x="200" y="474" width="580" height="42" rx="6"/>
   <text class="h" x="490" y="492">Programs</text>
-  <text class="s" x="490" y="508">Files, Edit, Write, Sheet, Paint, BASIC, Terminal, Downloader, BBS, games</text>
+  <text class="s" x="490" y="508">Files, Edit, Write, Sheet, Paint, BASIC, Terminal, Music, Downloader, BBS, games</text>
 
   <rect class="cpu" x="200" y="524" width="580" height="42" rx="6"/>
   <text class="h" x="490" y="542">Desktop and window system</text>

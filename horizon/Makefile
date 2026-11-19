@@ -50,6 +50,10 @@ UIPROGS += write
 # FreeCell (the patience game: user/freecell.s, fc_*.s)
 PROGS  += freecell
 UIPROGS += freecell
+# (0.26) Music (the player's window: user/music.s, mu_*.s) and its engine /SYSTEM/MUSICD.PRG
+# (user/musicd.s with the replayer library user/modplay.s, build/modplay.o; protocol user/music.inc)
+PROGS  += music
+UIPROGS += music
 
 # self test keys: 'a' 1.0-1.2 s with F12 (system key NMI) in between. SELFTEST holds the
 # keyboard from its start, so they queue up whenever they come; KEYS reads them at the end.
@@ -169,7 +173,7 @@ REV10   = $(if $(and $(findstring --rev,$(EMUFLAGS)),$(if $(findstring --rev 7,$
 
 KSRC   := $(wildcard kernel/*.s kernel/*.inc)
 UPPER   = $(shell echo $(1) | tr a-z A-Z)
-BINS   := $(foreach p,$(PROGS),$(SD)/BIN/$(call UPPER,$(p)).PRG) \
+BINS   := $(SD)/SYSTEM/MUSICD.PRG $(foreach p,$(PROGS),$(SD)/BIN/$(call UPPER,$(p)).PRG) \
           $(foreach p,$(SYSPROGS),$(SD)/SYSTEM/$(call UPPER,$(p)).PRG) \
           $(foreach p,$(TESTPROGS),$(SD)/SYSTEM/TESTS/$(call UPPER,$(p)).PRG) \
           $(SD)/SYSTEM/PROGRAMS $(SD)/SYSTEM/ICONS
@@ -277,6 +281,25 @@ $(SD)/SYSTEM/BBS.TXT: sdfiles/BBS.TXT | $(SD)/SYSTEM
 $(SD)/SYSTEM/SAVER.PRG: user/saver_art.inc
 user/saver_art.inc: sdfiles/icons.txt kernel/font8x12.txt tools/mksaver.py tools/mkicons.py
 	python3 tools/mksaver.py sdfiles/icons.txt kernel/font8x12.txt $@
+# (0.26) the music engine: user/musicd.s linked with the replayer library (build/modplay.o, the
+# SDK's too) and ulib
+$(B)/modplay.o: user/modplay.s user/modplay.inc user/horizon.inc user/version.inc | $(B)
+	$(CA65) -I user -o $@ $<
+$(SD)/SYSTEM/MUSICD.PRG: user/musicd.s user/music.inc user/modplay.inc user/horizon.inc user/version.inc user/prog.cfg $(B)/modplay.o $(B)/ulib.o | $(SD)/SYSTEM
+	$(CA65) -I user -o $(B)/musicd.o $<
+	$(LD65) -C user/prog.cfg -o $@ $(B)/musicd.o $(B)/modplay.o $(B)/ulib.o
+$(SD)/BIN/MUSIC.PRG: $(wildcard user/mu_*.s) user/music.inc
+# (0.26) the demo music, original and generated here (tools/mkmod.py): /Music/HORIZON.MOD, /Music/LAU.MOD.
+# The test sessions run on a copy of the card without /Music (as before 0.26: the root's
+# listings and the Desktop's pictures stay as they were); Music's own (KEEPMUSIC=1) keep it
+all: $(SD)/Music/HORIZON.MOD $(SD)/Music/LAU.MOD
+$(TSD)/SYSTEM/INIT.PRG: $(SD)/Music/HORIZON.MOD $(SD)/Music/LAU.MOD
+$(SD)/Music/HORIZON.MOD: tools/mkmod.py
+	mkdir -p $(SD)/Music
+	python3 tools/mkmod.py $@
+$(SD)/Music/LAU.MOD: tools/mkmod.py
+	mkdir -p $(SD)/Music
+	python3 tools/mkmod.py --jingle $@
 # Calculator and Solitaire are one assembly unit each
 $(SD)/BIN/CALC.PRG: $(wildcard user/calc_*.s)
 $(SD)/BIN/SOLITAIR.PRG: $(wildcard user/sol_*.s user/sol_*.inc)
@@ -341,7 +364,7 @@ test: all $(EMU)
 	  else echo "FAIL  selftest, console $$cu us/byte ($(B)/selftest-$$cu.out)"; exit 1; fi; \
 	done
 	@set -e; for cu in $(SHSPEEDS); do \
-	  rm -rf build/run-sd; cp -r $(SD) build/run-sd; touch build/run-sd/SYSTEM/NODESK; \
+	  rm -rf build/run-sd; cp -r $(SD) build/run-sd; rm -rf build/run-sd/Music; touch build/run-sd/SYSTEM/NODESK; \
 	  $(EMU) $(EMUFLAGS) $(CARDDATE) --headless --sd build/run-sd --console-us $$cu --max-seconds $(SHSECS) \
 	      --keys $$(python3 tests/keyscript.py tests/shell.keys) \
 	      --mouse $$(python3 tests/keyscript.py --mouse tests/shell.keys) \
@@ -435,7 +458,9 @@ test: all $(EMU)
 	@$(MAKE) --no-print-directory test-23
 	@$(MAKE) --no-print-directory test-24
 	@$(MAKE) --no-print-directory test-25
-	@rm -rf build/run-sd; cp -r $(SD) build/run-sd; touch build/run-sd/SYSTEM/NODESK; cp tests/basic.bas build/run-sd/BT.BAS
+	@$(MAKE) --no-print-directory test-music
+	@$(MAKE) --no-print-directory test-26
+	@rm -rf build/run-sd; cp -r $(SD) build/run-sd; rm -rf build/run-sd/Music; touch build/run-sd/SYSTEM/NODESK; cp tests/basic.bas build/run-sd/BT.BAS
 	@$(EMU) $(EMUFLAGS) $(CARDDATE) --headless --sd build/run-sd --max-seconds $(BASSECS) \
 	    --keys "$$(python3 tests/keyscript.py tests/basic-t.keys)" \
 	    $(SD)/SYSTEM/HORIZON.SYS > $(B)/basic-t.out 2> $(B)/basic-t.err || true
@@ -445,7 +470,7 @@ test: all $(EMU)
 	@sh tests/shots.sh "$(EMU) $(EMUFLAGS) $(CARDDATE)" $(SD) basic 39 $(BASSHOTS)
 	@if diff -u tests/pictures/basic.md5 $(B)/basic.md5; then echo "PASS  BASIC pictures"; \
 	else echo "FAIL  BASIC pictures (look at $(B)/basic*.ppm, then make pictures)"; exit 1; fi
-	@rm -rf build/run-sd; cp -r $(SD) build/run-sd; touch build/run-sd/SYSTEM/NODESK; cp tests/sheet.sht build/run-sd/ST.SHT
+	@rm -rf build/run-sd; cp -r $(SD) build/run-sd; rm -rf build/run-sd/Music; touch build/run-sd/SYSTEM/NODESK; cp tests/sheet.sht build/run-sd/ST.SHT
 	@$(EMU) $(EMUFLAGS) $(CARDDATE) --headless --sd build/run-sd --max-seconds $(SHTSECS) \
 	    --keys "$$(python3 tests/keyscript.py tests/sheet-t.keys)" \
 	    $(SD)/SYSTEM/HORIZON.SYS > $(B)/sheet-t.out 2> $(B)/sheet-t.err || true
@@ -461,13 +486,13 @@ test: all $(EMU)
 	@if cmp "$(JOB) Sheet.txt" tests/sheet-print.txt && cmp "$(JOB) Sheet 2.txt" tests/sheet-print.txt; \
 	then echo "PASS  0.23 Sheet: the print jobs (the used area as text columns)"; \
 	else echo "FAIL  0.23 Sheet: the jobs in build/run-pic/Printouts are not tests/sheet-print.txt"; exit 1; fi
-	@rm -rf build/run-sd; cp -r $(SD) build/run-sd; touch build/run-sd/SYSTEM/NODESK
+	@rm -rf build/run-sd; cp -r $(SD) build/run-sd; rm -rf build/run-sd/Music; touch build/run-sd/SYSTEM/NODESK
 	@$(EMU) $(EMUFLAGS) $(CARDDATE) --headless --sd build/run-sd --max-seconds 60 \
 	    --keys "$$(python3 tests/keyscript.py tests/leak.keys)" \
 	    $(SD)/SYSTEM/HORIZON.SYS > $(B)/leak.out 2> $(B)/leak.err || true
 	@if grep -a 'leak: 200 runs:.*: PASS' $(B)/leak.out; then echo "PASS  every resource comes back after 200 programs (exited or killed)"; \
 	else echo "FAIL  leak ($(B)/leak.out)"; exit 1; fi
-	@rm -rf build/run-sd; cp -r $(SD) build/run-sd; touch build/run-sd/SYSTEM/NODESK
+	@rm -rf build/run-sd; cp -r $(SD) build/run-sd; rm -rf build/run-sd/Music; touch build/run-sd/SYSTEM/NODESK
 	@$(EMU) $(EMUFLAGS) $(CARDDATE) --headless --log-sound --sd build/run-sd --max-seconds 19 \
 	    --keys "$$(python3 tests/keyscript.py tests/ktest.keys)" --mouse "$$(python3 tests/keyscript.py --mouse tests/ktest.keys)" \
 	    $(SD)/SYSTEM/HORIZON.SYS > $(B)/ktest.out 2> $(B)/ktest.err || true
@@ -476,7 +501,7 @@ test: all $(EMU)
 	else echo "FAIL  KTEST ($(B)/ktest.out)"; exit 1; fi
 	@if grep sound $(B)/ktest.err | diff -u tests/ktest.err -; then echo "PASS  0.15 sound: the four chimes (two notes, the volume falling every tick), a task's channels silenced at its exit, a channel borrowed and given back"; \
 	else echo "FAIL  KTEST sound log ($(B)/ktest.err)"; exit 1; fi
-	@rm -rf build/run-sd; cp -r $(SD) build/run-sd; touch build/run-sd/SYSTEM/NODESK
+	@rm -rf build/run-sd; cp -r $(SD) build/run-sd; rm -rf build/run-sd/Music; touch build/run-sd/SYSTEM/NODESK
 	@$(EMU) $(EMUFLAGS) $(CARDDATE) --headless --log-lau --sd build/run-sd --max-seconds 9 \
 	    --keys "$$(python3 tests/keyscript.py tests/stest.keys)" \
 	    $(SD)/SYSTEM/HORIZON.SYS > $(B)/stest.out 2> $(B)/stest.err || true
@@ -543,7 +568,7 @@ SOLSHOTS := 5.5 6.8 11.0 14.5 17.4 20.4 58
 # the blitter (REV $07) it draws slower: the same session, some later states, its own md5.
 QBSHOTS := 5 6.5 10.25 11.1 16.4 17.2 22.5 24 24.8 26.5 31.5 33 37 41 42
 test-games: all $(EMU)
-	@rm -rf build/run-sd; cp -r $(SD) build/run-sd; touch build/run-sd/SYSTEM/NODESK
+	@rm -rf build/run-sd; cp -r $(SD) build/run-sd; rm -rf build/run-sd/Music; touch build/run-sd/SYSTEM/NODESK
 	@$(EMU) $(EMUFLAGS) $(CARDDATE) --headless --sd build/run-sd --max-seconds 12 --keys "$$(python3 tests/keyscript.py tests/calc-t.keys)" \
 	    $(SD)/SYSTEM/HORIZON.SYS > $(B)/calc-t.out 2> $(B)/calc-t.err || true
 	@python3 -c "L = open('$(B)/calc-t.out', encoding='latin-1').read().split('\n'); i = [k for k, l in enumerate(L) if '> calc -t' in l][0]; open('$(B)/calc-t.txt', 'w', encoding='latin-1').write('\n'.join(L[i + 1:]))"
@@ -552,7 +577,7 @@ test-games: all $(EMU)
 	@sh tests/shots.sh "$(EMU) $(EMUFLAGS) $(CARDDATE)" $(SD) calc 21 $(CALCSHOTS)
 	@if diff -u tests/pictures/calc.md5 $(B)/calc.md5; then echo "PASS  Calculator pictures"; \
 	else echo "FAIL  Calculator pictures (look at $(B)/calc*.ppm, then make pictures-games)"; exit 1; fi
-	@rm -rf build/run-sd; cp -r $(SD) build/run-sd; touch build/run-sd/SYSTEM/NODESK
+	@rm -rf build/run-sd; cp -r $(SD) build/run-sd; rm -rf build/run-sd/Music; touch build/run-sd/SYSTEM/NODESK
 	@$(EMU) $(EMUFLAGS) $(CARDDATE) --headless --sd build/run-sd --max-seconds 70 --keys "$$(python3 tests/keyscript.py tests/solitair-t.keys)" \
 	    $(SD)/SYSTEM/HORIZON.SYS > $(B)/solitair-t.out 2> $(B)/solitair-t.err || true
 	@python3 -c "L = open('$(B)/solitair-t.out', encoding='latin-1').read().split('\n'); i = [k for k, l in enumerate(L) if '> solitair -t' in l][0]; open('$(B)/solitair-t.txt', 'w', encoding='latin-1').write('\n'.join(L[i + 1:]))"
@@ -561,7 +586,7 @@ test-games: all $(EMU)
 	@sh tests/shots.sh "$(EMU) $(EMUFLAGS) $(CARDDATE)" $(SD) solitair 60 $(SOLSHOTS)
 	@if diff -u tests/pictures/solitair.md5 $(B)/solitair.md5; then echo "PASS  Solitaire pictures"; \
 	else echo "FAIL  Solitaire pictures (look at $(B)/solitair*.ppm, then make pictures-games)"; exit 1; fi
-	@rm -rf build/run-sd; cp -r $(SD) build/run-sd; touch build/run-sd/SYSTEM/NODESK
+	@rm -rf build/run-sd; cp -r $(SD) build/run-sd; rm -rf build/run-sd/Music; touch build/run-sd/SYSTEM/NODESK
 	@$(EMU) $(EMUFLAGS) $(CARDDATE) --headless --sd build/run-sd --max-seconds 30 --keys "$$(python3 tests/keyscript.py tests/quabrick-t.keys)" \
 	    $(SD)/SYSTEM/HORIZON.SYS > $(B)/quabrick-t.out 2> $(B)/quabrick-t.err || true
 	@python3 -c "L = open('$(B)/quabrick-t.out', encoding='latin-1').read().split('\n'); i = [k for k, l in enumerate(L) if '> quabrick -t' in l][0]; open('$(B)/quabrick-t.txt', 'w', encoding='latin-1').write('\n'.join(L[i + 1:]))"
@@ -582,7 +607,7 @@ test-games: all $(EMU)
 # on every revision); the statistics it saved in /BIN/FREECELL.DAT (two games played, one won)
 FCSHOTS := 5.8 6.9 9.3 10.7 12 14 15.5 20.5 23 24.9 26.5 28.4 33 35.3 44 46.5
 test-freecell: all $(EMU)
-	@rm -rf build/run-sd; cp -r $(SD) build/run-sd; touch build/run-sd/SYSTEM/NODESK
+	@rm -rf build/run-sd; cp -r $(SD) build/run-sd; rm -rf build/run-sd/Music; touch build/run-sd/SYSTEM/NODESK
 	@$(EMU) $(EMUFLAGS) $(CARDDATE) --headless --sd build/run-sd --max-seconds 25 --keys "$$(python3 tests/keyscript.py tests/freecell-t.keys)" \
 	    $(SD)/SYSTEM/HORIZON.SYS > $(B)/freecell-t.out 2> $(B)/freecell-t.err || true
 	@python3 -c "L = open('$(B)/freecell-t.out', encoding='latin-1').read().split('\n'); i = [k for k, l in enumerate(L) if '> freecell -t' in l][0]; open('$(B)/freecell-t.txt', 'w', encoding='latin-1').write('\n'.join(L[i + 1:]))"
@@ -606,7 +631,7 @@ pictures-freecell:
 
 # (0.20) the PC volume: run by make test (see PCFLAGS); make pictures-pc freezes its pictures
 test-pc: all $(EMU)
-	@rm -rf build/run-sd build/run-pc; cp -r $(SD) build/run-sd; touch build/run-sd/SYSTEM/NODESK
+	@rm -rf build/run-sd build/run-pc; cp -r $(SD) build/run-sd; rm -rf build/run-sd/Music; touch build/run-sd/SYSTEM/NODESK
 	@cp -r tests/pc build/run-pc; cp $(SD)/SYSTEM/TESTS/HELLO.PRG build/run-pc/hello.prg
 	@$(EMU) $(EMUFLAGS) $(CARDDATE) $(PCFLAGS) --headless --sd build/run-sd --max-seconds 50 \
 	    --keys "$$(python3 tests/keyscript.py tests/pcshell.keys)" \
@@ -618,7 +643,7 @@ test-pc: all $(EMU)
 	  && cmp -s build/run-pc/Games/Notes.txt tests/pc/Notes.txt && ! test -e build/run-sd/n2.txt && ! test -e build/run-sd/games2; \
 	then echo "PASS  PC volume, shell: the files on the PC folder and on the card"; \
 	else echo "FAIL  PC volume, shell: the files (build/run-pc, build/run-sd)"; exit 1; fi
-	@rm -rf build/run-sd; cp -r $(SD) build/run-sd; touch build/run-sd/SYSTEM/NODESK
+	@rm -rf build/run-sd; cp -r $(SD) build/run-sd; rm -rf build/run-sd/Music; touch build/run-sd/SYSTEM/NODESK
 	@$(EMU) $(EMUFLAGS) $(CARDDATE) --headless --sd build/run-sd --max-seconds 16 \
 	    --keys "$$(python3 tests/keyscript.py tests/pcshell2.keys)" \
 	    $(SD)/SYSTEM/HORIZON.SYS > $(B)/pcshell2.out 2> $(B)/pcshell2.err || true
@@ -644,7 +669,7 @@ test-pc: all $(EMU)
 	  && [ "$$(ls build/run-pic | grep -c BIG)" = 2 ]; \
 	then echo "PASS  0.21 the copies byte for byte; nothing left by Esc, Cancel or the lost link (on the card, on the PC)"; \
 	else echo "FAIL  0.21 the files of the long copies (build/run-pc, build/run-pic)"; exit 1; fi
-	@rm -rf build/run-sd build/run-pc; cp -r $(SD) build/run-sd; touch build/run-sd/SYSTEM/NODESK; cp -r tests/pc build/run-pc
+	@rm -rf build/run-sd build/run-pc; cp -r $(SD) build/run-sd; rm -rf build/run-sd/Music; touch build/run-sd/SYSTEM/NODESK; cp -r tests/pc build/run-pc
 	@(cd build/run-sd && $(BIGPREP))
 	@$(EMU) $(EMUFLAGS) $(CARDDATE) $(PCFLAGS) $(SLOWFLAGS) --headless --sd build/run-sd --max-seconds 32 \
 	    --keys "$$(python3 tests/keyscript.py tests/cpstop.keys)" \
@@ -673,7 +698,7 @@ NETFLAGS := --net-root build/run-net --pc-kbps 100:55
 DLSHOTS := 5.5 8.5 13.5 16.8 19.5 23 25.5 27.5
 BBSSHOTS := 8.5 14 17 19 27.5
 test-net: all $(EMU)
-	@rm -rf build/run-sd build/run-pc; cp -r $(SD) build/run-sd; touch build/run-sd/SYSTEM/NODESK; cp -r tests/pc build/run-pc; $(NETPREP)
+	@rm -rf build/run-sd build/run-pc; cp -r $(SD) build/run-sd; rm -rf build/run-sd/Music; touch build/run-sd/SYSTEM/NODESK; cp -r tests/pc build/run-pc; $(NETPREP)
 	@$(EMU) $(EMUFLAGS) $(CARDDATE) $(PCFLAGS) $(NETFLAGS) --headless --sd build/run-sd --max-seconds 75 \
 	    --keys "$$(python3 tests/keyscript.py tests/netshell.keys)" \
 	    $(SD)/SYSTEM/HORIZON.SYS > $(B)/netshell.out 2> $(B)/netshell.err || true
@@ -685,14 +710,14 @@ test-net: all $(EMU)
 	  && printf 'notes.md\nreadme.txt\n' | cmp -s - build/run-sd/listing.txt && ! test -e build/run-sd/part.bin && [ -z "$$(ls -A build/run-pc/.atari816-partial)" ]; \
 	then echo "PASS  0.22 internet, shell: the files byte for byte; no partial file after ctrl-C"; \
 	else echo "FAIL  0.22 internet, shell: the files (build/run-sd, build/run-pc)"; exit 1; fi
-	@rm -rf build/run-sd build/run-pc; cp -r $(SD) build/run-sd; touch build/run-sd/SYSTEM/NODESK; cp -r tests/pc build/run-pc
+	@rm -rf build/run-sd build/run-pc; cp -r $(SD) build/run-sd; rm -rf build/run-sd/Music; touch build/run-sd/SYSTEM/NODESK; cp -r tests/pc build/run-pc
 	@$(EMU) $(EMUFLAGS) $(CARDDATE) $(PCFLAGS) --headless --sd build/run-sd --max-seconds 14 \
 	    --keys "$$(python3 tests/keyscript.py tests/netshell2.keys)" \
 	    $(SD)/SYSTEM/HORIZON.SYS > $(B)/netshell2.out 2> $(B)/netshell2.err || true
 	@python3 -c "L = open('$(B)/netshell2.out', encoding='latin-1').read().split('\n'); i = [k for k, l in enumerate(L) if '> get http' in l][0]; open('$(B)/netshell2.txt', 'w', encoding='latin-1').write('\n'.join([L[i][L[i].index('> get'):]] + L[i + 1:]))"
 	@if python3 tests/compare.py tests/netshell2.txt $(B)/netshell2.txt && ! test -e build/run-sd/readme.txt; then echo "PASS  0.22 internet, shell: a gateway without internet: \"no such service\", nothing written"; \
 	else echo "FAIL  0.22 internet, shell without the service ($(B)/netshell2.out)"; exit 1; fi
-	@rm -rf build/run-sd; cp -r $(SD) build/run-sd; touch build/run-sd/SYSTEM/NODESK; $(NETPREP)
+	@rm -rf build/run-sd; cp -r $(SD) build/run-sd; rm -rf build/run-sd/Music; touch build/run-sd/SYSTEM/NODESK; $(NETPREP)
 	@$(EMU) $(EMUFLAGS) $(CARDDATE) $(NETFLAGS) --pc-drop-at 6 --headless --sd build/run-sd --max-seconds 14 \
 	    --keys "$$(python3 tests/keyscript.py tests/netshell3.keys)" \
 	    $(SD)/SYSTEM/HORIZON.SYS > $(B)/netshell3.out 2> $(B)/netshell3.err || true
@@ -731,7 +756,7 @@ test-net: all $(EMU)
 D23SHOTS := 10.5 13 16 18 20.5 23 26.5 32.3 35 37.5 39.5
 D23PREP := python3 ../../tests/mk23.py
 test-23: all $(EMU)
-	@rm -rf build/run-sd; cp -r $(SD) build/run-sd; touch build/run-sd/SYSTEM/NODESK; (cd build/run-sd && $(D23PREP))
+	@rm -rf build/run-sd; cp -r $(SD) build/run-sd; rm -rf build/run-sd/Music; touch build/run-sd/SYSTEM/NODESK; (cd build/run-sd && $(D23PREP))
 	@$(EMU) $(EMUFLAGS) $(CARDDATE) --headless --sd build/run-sd --max-seconds 18 \
 	    --keys "$$(python3 tests/keyscript.py tests/sh23.keys)" \
 	    $(SD)/SYSTEM/HORIZON.SYS > $(B)/sh23.out 2> $(B)/sh23.err || true
@@ -797,7 +822,7 @@ D25SHOTS := 11 27 31
 F25SHOTS := 12.5 14.5 20.5 23 27 33
 F25FLAGS = --classic-print tests/p23.atascii@16 --no-pc-print --pc-folder build/run-pc --pc-time 2026-03-04T05:06 --pc-drop-at 30
 test-25: all $(EMU)
-	@rm -rf build/run-sd; cp -r $(SD) build/run-sd; touch build/run-sd/SYSTEM/NODESK
+	@rm -rf build/run-sd; cp -r $(SD) build/run-sd; rm -rf build/run-sd/Music; touch build/run-sd/SYSTEM/NODESK
 	@$(EMU) $(EMUFLAGS) $(CARDDATE) --headless --sd build/run-sd --max-seconds 20 --keys "$$(python3 tests/keyscript.py tests/gtestv.keys)" \
 	    $(SD)/SYSTEM/HORIZON.SYS > $(B)/gtestv.out 2> $(B)/gtestv.err || true
 	@if grep -q 'gtest v: 120 lists with LS_VBL while another program draws: done' $(B)/gtestv.out && ! grep -q 'emu816: blitter:' $(B)/gtestv.err; \
@@ -821,6 +846,53 @@ pictures-25:
 	python3 -c "from PIL import Image; import glob; [Image.open(f).save('tests/pictures/' + f.split('/')[-1][:-4] + '.png') for f in sorted(glob.glob('$(B)/desk25[0-9]*.ppm') + glob.glob('$(B)/files25[0-9]*.ppm'))]"
 
 .PHONY: test-25 pictures-25
+
+# (0.26) the music engine (user/musicd.s, user/modplay.s), at the board's speed (no
+# --ideal-timing: its timing is what is measured): the replayer's conformance, tick by tick, with
+# the independent reference player tests/modref.py (tests/modrun.py: the modules of
+# tests/mkmodtests.py and a long one across a bank; emu816 --log-lau-us, tests/modcheck.py),
+# its tempo and jitter while eight CPU hogs run, WAV playback (tests/wavrun.py: the tones and
+# lengths heard in emu816's --wav capture); without Lau (--rev 9 and below) a polite refusal
+test-music: all $(EMU)
+	@python3 tests/modrun.py $(EMU) $(SD) $(SD)/SYSTEM/HORIZON.SYS $(EMUFLAGS)
+	@if [ -z "$(NOLAU)" ]; then python3 tests/wavrun.py $(EMU) $(SD) $(SD)/SYSTEM/HORIZON.SYS $(EMUFLAGS); fi
+.PHONY: test-music
+
+# (0.26) Music, the player's window (user/music.s, mu_*.s): its self test (tests/music-t.keys,
+# compared with tests/music-t.txt), a Desktop session (tests/music26.src: started from the
+# Programs menu, songs opened in Files reach the running Music, playing with the meters, two
+# songs, Pause, a seek on the position bar, the samples, Edit in front while it plays on; the
+# Lau writes with their times in build/music26.err, emu816 --log-lau-us) and one without the
+# engine (tests/music26b.src). Without Lau (--rev 9 and below) both sessions show the polite
+# refusal: their own md5 files (NAME-nolau.md5). make pictures-26 freezes the pictures.
+M26SHOTS := 9 15 16.5 21.5 23.5 26.5 29 32 40 42
+M26PREP := echo "Music=/BIN/MUSIC.PRG" >> SYSTEM/PROGRAMS
+M26MD5  = $(if $(NOLAU),$(1)-nolau.md5,$(1).md5)
+test-26: all $(EMU)
+	@rm -rf build/run-sd; cp -r $(SD) build/run-sd; touch build/run-sd/SYSTEM/NODESK
+	@$(EMU) $(EMUFLAGS) $(CARDDATE) --headless --sd build/run-sd --max-seconds 12 --keys "$$(python3 tests/keyscript.py tests/music-t.keys)" \
+	    $(SD)/SYSTEM/HORIZON.SYS > $(B)/music-t.out 2> $(B)/music-t.err || true
+	@python3 -c "L = open('$(B)/music-t.out', encoding='latin-1').read().split('\n'); i = [k for k, l in enumerate(L) if '> music -t' in l][0]; open('$(B)/music-t.txt', 'w', encoding='latin-1').write('\n'.join(L[i + 1:]))"
+	@if python3 tests/compare.py tests/music-t.txt $(B)/music-t.txt; then echo "PASS  0.26 Music: self test (names, arguments, folder songs, times, error texts, the settings file, sorting)"; \
+	else echo "FAIL  0.26 Music self test ($(B)/music-t.out)"; exit 1; fi
+	@PREP='$(M26PREP)' KEEPMUSIC=1 DESK=1 sh tests/shots.sh "$(EMU) $(EMUFLAGS) $(CARDDATE) --log-lau-us" $(SD) music26 43 $(M26SHOTS)
+	@if diff -u tests/pictures/$(call M26MD5,music26) $(B)/music26.md5; \
+	then echo "PASS  0.26 Music on the Desktop: Programs > Music, files from Files reach it, the meters, two songs, Pause, a seek, the samples, playing on behind Edit"; \
+	else echo "FAIL  0.26 Music pictures (look at $(B)/music26*.ppm, then make pictures-26)"; exit 1; fi
+	@PREP='$(M26PREP) && rm SYSTEM/MUSICD.PRG' KEEPMUSIC=1 DESK=1 sh tests/shots.sh "$(EMU) $(EMUFLAGS) $(CARDDATE)" $(SD) music26b 12 9 11
+	@if diff -u tests/pictures/$(call M26MD5,music26b) $(B)/music26b.md5; \
+	then echo "PASS  0.26 Music without its engine: a clean alert, nothing left behind"; \
+	else echo "FAIL  0.26 Music without its engine (look at $(B)/music26b*.ppm, then make pictures-26)"; exit 1; fi
+	@if grep -l 'emu816: blitter:' $(B)/music26.err $(B)/music26b.err $(B)/music-t.err; then echo "FAIL  blitter rules (the 0.26 Music sessions)"; exit 1; \
+	else echo "PASS  blitter rules: the 0.26 Music sessions"; fi
+
+pictures-26:
+	cp $(B)/music26.md5 tests/pictures/$(call M26MD5,music26)
+	cp $(B)/music26b.md5 tests/pictures/$(call M26MD5,music26b)
+	python3 -c "from PIL import Image; import glob; [Image.open(f).save('tests/pictures/' + f.split('/')[-1][:-4] + '$(if $(NOLAU),-nolau,).png') for f in sorted(glob.glob('$(B)/music26[0-9]*.ppm') + glob.glob('$(B)/music26b[0-9]*.ppm')) if not '$(NOLAU)' or f.endswith('1.ppm')]"
+	@# (without Lau: only the first picture of each session, the refusal, is kept as a PNG)
+
+.PHONY: test-26 pictures-26
 
 pictures-net:
 	cp $(B)/download.md5 tests/pictures/$(call REV7,download)
@@ -846,7 +918,7 @@ pictures-games:
 # (tests/printer.src: the list, the preview, a classic Atari job arriving, Delete, Send to
 # PC; tests/printer2.src: no jobs, jobs arriving, a resize, "printer PATH", Open in Edit).
 # make pictures-print freezes the pictures.
-PRTPREP = rm -rf build/run-sd build/run-pc; cp -r $(SD) build/run-sd; touch build/run-sd/SYSTEM/NODESK; cp -r tests/print build/run-sd/Printouts; \
+PRTPREP = rm -rf build/run-sd build/run-pc; cp -r $(SD) build/run-sd; rm -rf build/run-sd/Music; touch build/run-sd/SYSTEM/NODESK; cp -r tests/print build/run-sd/Printouts; \
           cp -r tests/pc build/run-pc; python3 tests/mkbig.py "build/run-sd/Printouts/2026-11-16 08.00.00 Big.txt"
 PRTCUT  = python3 -c "import sys; L = open(sys.argv[1], encoding='latin-1').read().split('\n'); i = [k for k, l in enumerate(L) if '> printd' in l][0]; \
           open(sys.argv[2], 'w', encoding='latin-1').write('\n'.join([L[i][L[i].index('> printd'):]] + L[i + 1:]))"
@@ -920,7 +992,7 @@ clean:
 # Write's tests (also run first by make test; make write-test runs them alone)
 test: write-test
 write-test: all $(EMU)
-	@rm -rf build/run-sd; cp -r $(SD) build/run-sd; touch build/run-sd/SYSTEM/NODESK; cp tests/write.wt build/run-sd/WT.WT
+	@rm -rf build/run-sd; cp -r $(SD) build/run-sd; rm -rf build/run-sd/Music; touch build/run-sd/SYSTEM/NODESK; cp tests/write.wt build/run-sd/WT.WT
 	@cp tests/write-rt.md build/run-sd/WRT.MD; cp tests/write-rt2.md build/run-sd/WRT2.MD; cp tests/write-ex.txt build/run-sd/WEX.TXT; cp tests/write-new.md build/run-sd/WNEWX.MD
 	@$(EMU) $(EMUFLAGS) $(CARDDATE) --headless --sd build/run-sd --max-seconds $(WRSECS) \
 	    --keys "$$(python3 tests/keyscript.py tests/write-t.keys)" \
@@ -970,7 +1042,7 @@ BAS2TXT = $(if $(OLD8),basic2-r8.txt,$(if $(BREV9),basic2-r9.txt,$(if $(BREV10),
 BAS2ERR = $(if $(NOLAU),/dev/null,$(if $(BREV10),tests/basic2-r10.err,tests/basic2.err))
 test: basic2-test
 basic2-test: all $(EMU)
-	@rm -rf build/run-sd; cp -r $(SD) build/run-sd; touch build/run-sd/SYSTEM/NODESK; cp tests/basic2.bas build/run-sd/B2.BAS
+	@rm -rf build/run-sd; cp -r $(SD) build/run-sd; rm -rf build/run-sd/Music; touch build/run-sd/SYSTEM/NODESK; cp tests/basic2.bas build/run-sd/B2.BAS
 	@python3 tests/mkwav.py build/run-sd
 	@$(EMU) $(EMUFLAGS) $(CARDDATE) --headless --log-lau --sd build/run-sd --max-seconds $(BAS2SECS) \
 	    --keys "$$(python3 tests/keyscript.py tests/basic2-t.keys)" \
@@ -1009,7 +1081,7 @@ BASPSECS := 14
 BASPJOBS := 1 2 3 4 5 6 7
 test: basicp-test
 basicp-test: all $(EMU)
-	@rm -rf build/run-sd; cp -r $(SD) build/run-sd; touch build/run-sd/SYSTEM/NODESK; cp tests/basicp.bas build/run-sd/BP.BAS
+	@rm -rf build/run-sd; cp -r $(SD) build/run-sd; rm -rf build/run-sd/Music; touch build/run-sd/SYSTEM/NODESK; cp tests/basicp.bas build/run-sd/BP.BAS
 	@$(EMU) $(EMUFLAGS) $(CARDDATE) --headless --sd build/run-sd --max-seconds $(BASPSECS) \
 	    --keys "$$(python3 tests/keyscript.py tests/basicp-t.keys)" \
 	    $(SD)/SYSTEM/HORIZON.SYS > $(B)/basicp-t.out 2> $(B)/basicp-t.err || true
@@ -1021,7 +1093,7 @@ basicp-test: all $(EMU)
 	  [ "$$(ls -A build/run-sd/Printouts | wc -l)" = "$(words $(BASPJOBS))" ] || { ls -A build/run-sd/Printouts; ok=0; }; \
 	  if [ $$ok = 1 ]; then echo "PASS  BASIC printing: the $(words $(BASPJOBS)) jobs in /Printouts, all closed"; \
 	  else echo "FAIL  BASIC printing: the jobs in build/run-sd/Printouts are not tests/basicp-N.txt"; exit 1; fi
-	@rm -rf build/run-sd; cp -r $(SD) build/run-sd; touch build/run-sd/SYSTEM/NODESK build/run-sd/Printouts; cp tests/basicpe.bas build/run-sd/BPE.BAS
+	@rm -rf build/run-sd; cp -r $(SD) build/run-sd; rm -rf build/run-sd/Music; touch build/run-sd/SYSTEM/NODESK build/run-sd/Printouts; cp tests/basicpe.bas build/run-sd/BPE.BAS
 	@$(EMU) $(EMUFLAGS) $(CARDDATE) --headless --sd build/run-sd --max-seconds 8 \
 	    --keys "$$(python3 tests/keyscript.py tests/basicpe-t.keys)" \
 	    $(SD)/SYSTEM/HORIZON.SYS > $(B)/basicpe-t.out 2> $(B)/basicpe-t.err || true

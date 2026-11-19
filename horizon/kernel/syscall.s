@@ -28,7 +28,7 @@ sys_tab:
         .word   .loword(sys_nosys), .loword(sys_nosys), .loword(sys_nosys), .loword(sys_nosys), .loword(sys_nosys), .loword(sys_minject)  ; $5F
         .word   .loword(sys_classic), .loword(sys_cmount), .loword(sys_ceject), .loword(sys_cboot)  ; $60
         .word   .loword(sys_cquery), .loword(sys_beep), .loword(sys_sndw), .loword(sys_chime), .loword(sys_splay), .loword(sys_sstop)
-        .word   .loword(sys_sstat), .loword(sys_sset), .loword(sys_nosys), .loword(sys_nosys), .loword(sys_nosys), .loword(sys_nosys)    ; $6A (0.17: $68-$6B Lau)
+        .word   .loword(sys_sstat), .loword(sys_sset), .loword(sys_stimer), .loword(sys_nosys), .loword(sys_nosys), .loword(sys_nosys)    ; $6A (0.17: $68-$6B Lau; 0.26: $6C the music timer)
         .assert (* - sys_tab) = $70 * 2, error, "syscall table: ws_start must be $70"
         .word   .loword(sys_wsstart), .loword(sys_wsstop), .loword(sys_wopen), .loword(sys_wclose)  ; $70
         .word   .loword(sys_wdraw), .loword(sys_wevent), .loword(sys_wtwidth), .loword(sys_wssync)

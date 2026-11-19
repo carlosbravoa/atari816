@@ -85,6 +85,7 @@ the kernel's syscall table, and assembles every example.
 | $69 | sample_stop | SYS_SSTOP | [sound](sound.md) |
 | $6A | sample_stat | SYS_SSTAT | [sound](sound.md) |
 | $6B | sample_set | SYS_SSET | [sound](sound.md) |
+| $6C | sample_timer | SYS_STIMER | [sound](sound.md) |
 | $70 | ws_start | SYS_WSSTART | [windows](windows.md) |
 | $71 | ws_stop | SYS_WSSTOP | [windows](windows.md) |
 | $72 | win_open | SYS_WOPEN | [windows](windows.md) |

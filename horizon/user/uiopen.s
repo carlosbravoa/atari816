@@ -38,7 +38,7 @@ ui_launch:
         jsr     spawn
         bcc     @named
         cmp     #ERUNNING
-        beq     @ok
+        beq     @req
         pha
         ldx     op_name
         jsr     ui_spawnerr
@@ -50,6 +50,56 @@ ui_launch:
         sys     SYS_TNAME
 @ok:    clc
         rts
+@req:   lda     op_arg                  ; (0.26) a single-instance program runs already: an
+        beq     @ok                     ; argument goes to it through /SYSTEM/OPEN.REQ
+        jsr     op_request
+        clc
+        rts
+
+; (0.26) /SYSTEM/OPEN.REQ written: op_prg, LF, op_arg, LF (the running program reads it when
+; its window gets the focus, or within a second, and deletes it: Music)
+op_request:
+        ldx     op_prg
+        ldy     #.loword(op_lbuf)
+        jsr     ui_strcpy
+        clc
+        adc     #.loword(op_lbuf)
+        tay
+        lda     #10
+        sta     a:0,y
+        iny
+        tya
+        pha
+        ldx     op_arg
+        jsr     ui_strcpy
+        sta     op_t
+        pla
+        clc
+        adc     op_t
+        tay
+        lda     #10
+        sta     a:0,y
+        iny
+        sty     op_end
+        ptr     p_req
+        lda     #O_CREATE
+        sys     SYS_OPEN
+        bcs     @out
+        sta     op_t
+        sta     op_rw
+        lda     #.loword(op_lbuf)
+        sta     op_rw+1
+        lda     #^op_lbuf
+        sta     op_rw+3
+        lda     op_end
+        sec
+        sbc     #.loword(op_lbuf)
+        sta     op_rw+4
+        ptr     op_rw
+        sys     SYS_WRITE
+        lda     op_t
+        sys     SYS_CLOSE
+@out:   rts
 
 ; A = a spawn error, X = the program's name: a warning alert saying why it did not start
 ui_spawnerr:
@@ -842,10 +892,11 @@ pg_tab: .byte   "EDIT", 0, ICO_EDIT, "Edit", 0, "WRITE", 0, ICO_WRITE, "Write", 
         .byte   "SOLITAIR", 0, ICO_SOLITAIRE, "Solitaire", 0, "TERM", 0, ICO_TERMINAL, "Terminal", 0
         .byte   "WFILES", 0, ICO_FILES, "Files", 0, "SETTINGS", 0, ICO_SETTINGS, "Settings", 0
         .byte   "FREECELL", 0, ICO_FREECELL, "FreeCell", 0
+        .byte   "MUSIC", 0, ICO_MUSIC, "Music", 0
         .byte   "ABOUT", 0, ICO_ABOUT, "About", 0, 0
 ; the icon of each type (FT_* order)
 ft_icon: .byte  ICO_DOC, ICO_FOLDER, ICO_DISK, ICO_PROGRAM, ICO_TEXT, ICO_BASDOC, ICO_PICTURE
-        .byte   ICO_SHEETDOC, ICO_WRITEDOC, ICO_DOC
+        .byte   ICO_SHEETDOC, ICO_WRITEDOC, ICO_DOC, ICO_MUSICDOC
 s_title: .byte  "TITLE=", 0
 s_args: .byte   "ARGS=", 0
 s_tl:   .byte   "title=", 0
@@ -860,22 +911,26 @@ ft_tab: .byte   "LNK", 0, FT_LINK, "PRG", 0, FT_PRG, "BAS", 0, FT_BASIC, "PIC", 
         .byte   "INI", 0, FT_TEXT, "ASC", 0, FT_TEXT, "LOG", 0, FT_TEXT, "S", 0, FT_TEXT
         .byte   "INC", 0, FT_TEXT, "ASM", 0, FT_TEXT
         .byte   "LST", 0, FT_TEXT       ; (0.23) a BASIC listing (LIST "D:..." on the Atari: $9B line ends)
+        .byte   "MOD", 0, FT_MUSIC, "WAV", 0, FT_MUSIC  ; (0.26) Music
         .byte   0
 ; the program of each type (FT_* order) and its name for messages
-ft_prog: .addr  0, p_files, 0, 0, p_edit, p_basic, p_paint, p_sheet, p_write, 0
-ft_name: .addr  0, n_files, 0, 0, n_edit, n_basic, n_paint, n_sheet, n_write, 0
+ft_prog: .addr  0, p_files, 0, 0, p_edit, p_basic, p_paint, p_sheet, p_write, 0, p_music
+ft_name: .addr  0, n_files, 0, 0, n_edit, n_basic, n_paint, n_sheet, n_write, 0, n_music
 p_files: .byte  "/BIN/WFILES.PRG", 0
 p_edit: .byte   "/BIN/EDIT.PRG", 0
 p_basic: .byte  "/BIN/BASIC.PRG", 0
 p_paint: .byte  "/BIN/PAINT.PRG", 0
 p_sheet: .byte  "/BIN/SHEET.PRG", 0
 p_write: .byte  "/BIN/WRITE.PRG", 0
+p_music: .byte  "/BIN/MUSIC.PRG", 0
+p_req:  .byte   "/SYSTEM/OPEN.REQ", 0
 n_files: .byte  "Files", 0
 n_edit: .byte   "Edit", 0
 n_basic: .byte  "BASIC", 0
 n_paint: .byte  "Paint", 0
 n_sheet: .byte  "Sheet", 0
 n_write: .byte  "Write", 0
+n_music: .byte  "Music", 0
 s_sys:  .byte   "/SYSTEM/", 0
 s_ok:   .byte   "OK", 0
 hexd:   .byte   "0123456789ABCDEF"
