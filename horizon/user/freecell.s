@@ -601,9 +601,6 @@ onrelease:
 
 onmotion:
         lda     ui_ev+2
-        jsr     put_dec
-        jsr     put_nl
-        lda     ui_ev+2
         sta     z:ex
         lda     ui_ev+4
         sta     z:ey
