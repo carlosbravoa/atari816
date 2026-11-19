@@ -2071,7 +2071,7 @@ moveto: stz     z:mvcp
 @pre:   lda     pth,y
         and     #$00FF
         cmp     #'/'
-        beq     @bad
+        jeq     @bad
 @ok:    ldx     #.loword(dropbuf)       ; + the last part of the path
         ldy     #.loword(dropbuf)
 :       lda     a:0,y
@@ -2101,6 +2101,19 @@ moveto: stz     z:mvcp
         sta     sblk+5
         jsr     stpth                   ; (there already?)
         bcc     @bad
+        ldx     #.loword(dropbuf)       ; (0.27) between the card and the PC: always a copy
+        jsr     ispc
+        lda     #0
+        rol     a
+        pha
+        ldx     #.loword(pth)
+        jsr     ispc
+        lda     #0
+        rol     a
+        eor     1,s
+        beq     @samev
+        sta     z:mvcp
+@samev: pla
         lda     z:mvcp                  ; (0.21) a long copy or move: the progress window
         eor     #1
         jsr     ui_cpwin

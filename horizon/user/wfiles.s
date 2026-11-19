@@ -942,6 +942,8 @@ ctxmenu:
         sty     z:pn
         lda     #A_NEWF
         jsr     additem
+        lda     #A_NEWT
+        jsr     additem
         lda     #A_PASTE
         jsr     additem
         jsr     clipempty
@@ -1166,11 +1168,27 @@ domove: ldy     #0                      ; pth2 inside pth: pth2 starts with pth 
         ldx     #.loword(m_exists)
         jsr     say
         jmp     loop
-:       lda     #1                      ; (0.21) a long move: the progress window
+:       ldx     #.loword(pth)           ; (0.27) between the card and the PC: a copy
+        jsr     ispc
+        lda     #0
+        rol     a
+        pha
+        ldx     #.loword(pth2)
+        jsr     ispc
+        lda     #0
+        rol     a
+        eor     1,s
+        sta     1,s
+        eor     #1                      ; (0.21) the progress window: 1 a move, 0 a copy
         jsr     ui_cpwin
-        ldx     #.loword(pth)           ; (0.20 ui_mvtree: between the card and the PC
-        ldy     #.loword(pth2)          ; volume a copy, then the source deleted)
-        jsr     ui_mvtree
+        ldx     #.loword(pth)
+        ldy     #.loword(pth2)
+        pla
+        beq     :+
+        jsr     ui_cptree
+        bra     :++
+:       jsr     ui_mvtree
+:
         jsr     ui_cpdone
         bcc     :+
         ldx     #.loword(m_mvcan)
@@ -1461,6 +1479,43 @@ newdir: ldx     #.loword(s_newf)
 :       ptr     pth
         sys     SYS_MKDIR
         jcs     oops
+        ldx     #.loword(nbuf)
+        ldy     #.loword(came)
+        jsr     ui_strcpy
+        jsr     reload
+        jmp     loop
+
+; (0.27) New text file...: its name in a dialog, an empty file made
+newtxt: ldx     #.loword(s_newt)
+        ldy     #.loword(nbuf)
+        jsr     ui_strcpy
+        ldx     #.loword(ak_newtxt)
+        jsr     ui_ask
+        jcs     loop
+        jsr     chkname
+        jcs     loop
+        ldx     #.loword(pth)
+        jsr     cwdto
+        txy
+        ldx     #.loword(nbuf)
+        jsr     cat
+        txa
+        sec
+        sbc     #.loword(pth)
+        cmp     #128
+        jcs     long
+        ldx     #.loword(pth)
+        jsr     exists
+        bcc     :+
+        ldx     #.loword(m_exists)
+        jsr     say
+        jmp     loop
+:       ldx     #.loword(pth)
+        ldy     #^pth
+        lda     #O_CREATE
+        sys     SYS_OPEN
+        jcs     oops
+        sys     SYS_CLOSE
         ldx     #.loword(nbuf)
         ldy     #.loword(came)
         jsr     ui_strcpy
@@ -3143,10 +3198,11 @@ A_PASTE = 11
 A_UP    = 12
 A_PRINT = 13                            ; (0.23)
 A_RUNAT = 14
+A_NEWT  = 15                            ; (0.27) New text file...
 acttab: .addr   open, a_neww, a_edit, a_write, a_load, loop, copy, addesk, rename, delete
-        .addr   newdir, paste, parent, a_print, a_runat
+        .addr   newdir, paste, parent, a_print, a_runat, newtxt
 acttxt: .addr   s_aopen, s_aneww, s_aedit, s_awrite, s_aload, s_asep, s_acopy, s_adesk
-        .addr   s_aren, s_adel, s_anewf, s_apaste, s_aup, s_aprint, s_arunat
+        .addr   s_aren, s_adel, s_anewf, s_apaste, s_aup, s_aprint, s_arunat, s_anewt
 s_aopen: .byte  "Open", 9, "Enter", 0
 s_aneww: .byte  "Open in new window", 0
 s_aedit: .byte  "Open with Edit", 0
@@ -3162,7 +3218,32 @@ s_apaste: .byte "Paste", 9, "Ctrl+V", 0
 s_aup:  .byte   "Parent folder", 9, "Backspace", 0
 s_aprint: .byte "Print", 0
 s_arunat: .byte "Run in Atari", 0
+s_anewt: .byte  "New text file...", 0
+s_newt: .byte   "New.txt", 0
+t_newtxt: .byte "New text file", 0
+l_newtxt: .byte "Name of the new file:", 0
+ak_newtxt: .addr t_newtxt, l_newtxt, nbuf
+        .word   NAMEMAX
+        .addr   0
 p_prn:  .byte   "/PRN:Files", 0         ; (0.23) a print job
+; (0.27) C set: the path at X is on the PC volume ("/PC:" then its end or a '/')
+ispc:   lda     a:0,x
+        and     #$DFFF                  ; ('p' as 'P')
+        cmp     #$502F                  ; "/P"
+        bne     @no
+        lda     a:2,x
+        and     #$FFDF
+        cmp     #$3A43                  ; "C:"
+        bne     @no
+        lda     a:4,x
+        and     #$00FF
+        beq     @yes
+        cmp     #'/'
+        beq     @yes
+@no:    clc
+        rts
+@yes:   sec
+        rts
 m_print: .byte  "Printed (Programs > Printer shows it)", 0
 p_edit: .byte   "/BIN/EDIT.PRG", 0
 p_write: .byte  "/BIN/WRITE.PRG", 0

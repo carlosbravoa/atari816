@@ -655,7 +655,7 @@ test-pc: all $(EMU)
 	@if diff -u tests/pictures/$(call REV10,pcdesk,$(call REV7,pcdesk)) $(B)/pcdesk.md5; then echo "PASS  PC volume, Desktop: the PC icon (it goes and comes with the link), drops on it, Files at /PC:, copy and paste both ways, a move, the file dialog"; \
 	else echo "FAIL  PC volume, Desktop pictures (look at $(B)/pcdesk*.ppm, then make pictures-pc)"; exit 1; fi
 	@if cmp -s build/run-pc/BLUE.XEX $(SD)/BLUE.XEX && cmp -s "build/run-pc/docs/Read me first.txt" "$(SD)/docs/Read me first.txt" \
-	  && cmp -s build/run-pic/Notes.txt tests/pc/Notes.txt && cmp -s build/run-pc/README.TXT $(SD)/README.TXT && ! test -e build/run-pic/README.TXT \
+	  && cmp -s build/run-pic/Notes.txt tests/pc/Notes.txt && cmp -s build/run-pc/README.TXT $(SD)/README.TXT && cmp -s build/run-pic/README.TXT $(SD)/README.TXT \
 	  && grep -q '^2026-03-04 05:0' build/run-pic/SYSTEM/CLOCK; \
 	then echo "PASS  PC volume, Desktop: the files copied and moved, /SYSTEM/CLOCK from the PC"; \
 	else echo "FAIL  PC volume, Desktop: the files or the clock (build/run-pc, build/run-pic)"; exit 1; fi

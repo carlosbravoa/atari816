@@ -7,7 +7,7 @@
 #            a double click on the PC icon: Files at /PC:
 #   3  17.0  Notes.txt selected in it: its date on the footer (then ctrl-C)
 #   4  21.0  the first Files window raised, ctrl-V: Notes.txt copied from the PC to the card
-#   5  26.0  README.TXT dragged from the card's window into the PC's: moved (a copy, then
+#   5  26.0  README.TXT dragged from the card's window into the PC's: (0.27) copied (was: a copy, then
 #            the card's file deleted)
 #   6  33.5  the link dropped at 27.5 s: the PC icon is gone
 #   7  41.5  the link back at 35.5 s: the PC icon again (the clock set from the PC again)
