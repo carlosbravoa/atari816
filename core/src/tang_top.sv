@@ -235,36 +235,26 @@ wire        video_sof;        // VIDEO_START_OF_FIELD — genlock marker for the
 
 // ── Audio ──────────────────────────────────────────────────────────────────
 wire [15:0] audio_l_pcm, audio_r_pcm;
-
-// 1 kHz test tone: hold S2 (btn_n[1]) to inject into both HDMI and GPIO audio.
-// 27 MHz / (1000 Hz × 2) = 13500 cycles per half-period.
-reg [13:0] tone_cnt = 14'd0;
-reg        tone_sq = 1'b0;
-always_ff @(posedge sys_clk)
-    if (tone_cnt == 14'd13499) begin tone_cnt <= 14'd0; tone_sq <= ~tone_sq; end
-    else                            tone_cnt <= tone_cnt + 14'd1;
-
-wire [15:0] tone_sample = tone_sq ? 16'h4000 : 16'hC000;  // ±25 % FS square wave
-// HDMI audio = classic mix + 16384 + Atari816 sample player, saturated. The classic mix sits at
-// -32768 when silent (POKEY only reaches about 0), so it is moved up by a quarter of the range
-// to leave room for the sample player (one voice at full volume: +-16384).
+// HDMI audio = classic mix + 16384 + Atari816 sample player (Lau) + OPL2 (YM3812), saturated.
+// The classic mix sits at -32768 when silent (POKEY only reaches about 0), so it is moved up by
+// a quarter of the range to leave room for Lau and OPL2.
 wire signed [15:0] snd_l, snd_r;         // sample player (a816_snd)
+wire signed [15:0] opl_snd;              // OPL2 FM synth (a816_opl)
 wire               hdmi_smp_tgl;         // HDMI audio sample clock (toggle, clk_pix)
-function automatic [15:0] mix_sat(input [15:0] cl, input signed [15:0] nv);
-    reg signed [17:0] t;
-    t = $signed({{2{cl[15]}}, cl}) + 18'sd16384 + {{2{nv[15]}}, nv};
-    mix_sat = (t > 18'sd32767) ? 16'h7FFF : (t < -18'sd32768) ? 16'h8000 : t[15:0];
+function automatic [15:0] mix_sat(input [15:0] cl, input signed [15:0] nv, input signed [15:0] fm);
+    reg signed [18:0] t;
+    t = $signed({{3{cl[15]}}, cl}) + 19'sd16384 + {{3{nv[15]}}, nv} + {{3{fm[15]}}, fm};
+    mix_sat = (t > 19'sd32767) ? 16'h7FFF : (t < -19'sd32768) ? 16'h8000 : t[15:0];
 endfunction
 // Build switch: the sample player (a816_snd) is in the default build (bring-up log, step 17).
-// Define A816_NO_SAMPLER to leave it out (REV $09, about 1,000 cells less). REV $0B (step 19)
-// is Marga with sprites and fine scrolling, always in.
+// Define A816_NO_SAMPLER to leave it out (REV $09, about 1,000 cells less). REV $0C adds OPL2.
 // `define A816_NO_SAMPLER
 `ifndef A816_NO_SAMPLER
-localparam logic [7:0] A816_REV = 8'h0B;
+localparam logic [7:0] A816_REV = 8'h0C;
 reg  [15:0] audio_l_out = 16'h0000, audio_r_out = 16'h0000;   // feed HDMI audio
 always @(posedge clk_core) begin
-    audio_l_out <= mix_sat(audio_l_pcm, snd_l);
-    audio_r_out <= mix_sat(audio_r_pcm, snd_r);
+    audio_l_out <= mix_sat(audio_l_pcm, snd_l, opl_snd);
+    audio_r_out <= mix_sat(audio_r_pcm, snd_r, opl_snd);
 end
 `else
 localparam logic [7:0] A816_REV = 8'h09;
@@ -593,63 +583,6 @@ always_ff @(posedge sys_clk or negedge hw_reset_n) begin
     else             rv_done_sys_r <= {rv_done_sys_r[1:0], rv_done_toggle_r};
 end
 
-// ── DEADLOCK DISCRIMINATOR (sys_clk domain — what the CPU actually sees) ──────
-// Distinguishes the two candidate deadlock mechanisms:
-//   diag_req_no_grant : rv_valid held high a long time with NO rv_ready returning
-//                       → request never served end-to-end (arbiter starves it)
-//   diag_grant_no_ack : the clk_core arbiter toggled rv_done_toggle_r (work
-//                       completed) but no rv_ready edge was produced for the CPU
-//                       → completion lost crossing clk_core→sys_clk
-// Both are sticky (latched until reset) so a momentary deadlock is captured.
-reg        diag_req_no_grant = 1'b0;
-reg [19:0] diag_stall_cnt    = 20'd0;   // ~38 ms at 27 MHz before declaring stall
-reg        rv_done_sys_prev  = 1'b0;    // last value of synced toggle stage [2]
-always_ff @(posedge sys_clk or negedge hw_reset_n) begin
-    if (!hw_reset_n) begin
-        diag_req_no_grant <= 1'b0;
-        diag_stall_cnt    <= 20'd0;
-        rv_done_sys_prev  <= 1'b0;
-    end else begin
-        // Track the synced completion toggle: a change at stage [2] means the
-        // arbiter completed an rv access (a "grant" reached the CPU domain).
-        rv_done_sys_prev <= rv_done_sys_r[2];
-
-        // Stall timer: counts while CPU is requesting (rv_valid) but no completion
-        // toggle change has arrived. Reset whenever a completion crosses over.
-        if (rv_done_sys_r[2] != rv_done_sys_prev) begin
-            diag_stall_cnt <= 20'd0;                 // a grant/ack crossed — healthy
-        end else if (rv_valid) begin
-            if (diag_stall_cnt == 20'hFFFFF) begin
-                // CPU has been waiting a long time with no completion crossing.
-                diag_req_no_grant <= 1'b1;
-            end else begin
-                diag_stall_cnt <= diag_stall_cnt + 20'd1;
-            end
-        end
-    end
-end
-
-// rv-completion activity window (clk_core): lit while the arbiter has completed
-// an rv access recently (~0.2 s).  Read TOGETHER with diag_req_no_grant:
-//   LED2(req_no_grant)=ON, LED3(rv_act)=ON  → arbiter still completing but CPU
-//                                              never gets rv_ready  ⇒ ACK LOST in CDC
-//   LED2=ON, LED3=OFF                        → arbiter stopped completing rv
-//                                              accesses entirely    ⇒ NEVER GRANTED
-localparam RVACT_WINDOW = 27_000_000/5;   // ~0.2 s at clk_core (≤54 MHz, fits 23b margin)
-reg        rv_done_toggle_prev = 1'b0;
-reg [23:0] rv_act_cnt = 24'd0;
-wire       rv_act_recent = (rv_act_cnt != 0);
-always_ff @(posedge clk_core or negedge hw_reset_n) begin
-    if (!hw_reset_n) begin
-        rv_done_toggle_prev <= 1'b0;
-        rv_act_cnt          <= 24'd0;
-    end else begin
-        rv_done_toggle_prev <= rv_done_toggle_r;
-        if (rv_done_toggle_r != rv_done_toggle_prev) rv_act_cnt <= RVACT_WINDOW[23:0];
-        else if (rv_act_cnt != 0)                    rv_act_cnt <= rv_act_cnt - 24'd1;
-    end
-end
-
 // ── Atari816 bring-up 1: 65C816 + cache + minimal native I/O page ────────────
 wire       a816_run_sys;                 // iosys (sys_clk): 1 = release the 65C816
 wire [7:0] a816_dbg_data;
@@ -671,8 +604,8 @@ assign kb_to_horizon = a816_run_sync[1] & ~a816_kb_route;
 // Marga, the Atari816 video chip (a816_nvc). It sits between the 65C816 and the arbiter's 65C816 port, and
 // its port mux also serves Ali, the blitter (priority: line fetch, CPU, blitter).
 wire        nvc_xio_wr, nvc_xio_rd, blt_xio_wr, blt_irq;
-wire        aud_xio_wr, aud_xio_rd, aud_irq, aud_req, aud_done;
-wire [7:0]  aud_xio_rdata;
+wire        aud_xio_wr, aud_xio_rd, aud_irq, opl_irq, aud_req, aud_done;
+wire [7:0]  aud_xio_rdata, opl_xio_rdata;
 wire [22:0] aud_addr;
 wire [7:0]  blt_xio_rdata;
 wire        blt_req, blt_gnt, blt_we, blt_long, blt_done;
@@ -702,7 +635,7 @@ a816_sys #(.AW(23), .REV(A816_REV)) a816 (
     .mb_req_tail_a(a816_mb_iop[7:0]), .mb_rsp_head_a(a816_mb_iop[15:8]), .mb_status_a(a816_mb_iop[17:16]),
     .xio_wr(nvc_xio_wr), .xio_rd(nvc_xio_rd), .xio_addr(nvc_xio_addr), .xio_wdata(nvc_xio_wdata), .xio_rdata(nvc_xio_rdata),
     .blt_wr(blt_xio_wr), .blt_rdata(blt_xio_rdata),
-    .aud_wr(aud_xio_wr), .aud_rd(aud_xio_rd), .aud_rdata(aud_xio_rdata), .irq_audio(aud_irq),
+    .aud_wr(aud_xio_wr), .aud_rd(aud_xio_rd), .aud_rdata(aud_xio_rdata | opl_xio_rdata), .irq_audio(aud_irq | opl_irq),
     .irq_vblank(nvc_irq_vblank), .irq_line(nvc_irq_line), .irq_blit(blt_irq),
     .sd_req     (cpu816_req),
     .sd_we      (cpu816_we),
@@ -742,6 +675,13 @@ a816_blit #(.AW(23)) blit (
     .b_req(blt_req), .b_gnt(blt_gnt), .b_we(blt_we), .b_addr(blt_addr), .b_wdata(blt_wdata),
     .b_wmask(blt_wmask), .b_long(blt_long), .b_done(blt_done), .b_rdata(sdram_burst_dout[127:0]),
     .long_ok(a816_sv_freeze)
+);
+
+a816_opl opl (
+    .clk(clk_core), .reset_n(hw_reset_n), .run(a816_run_sync[1]),
+    .xio_wr(aud_xio_wr), .xio_addr(nvc_xio_addr), .xio_wdata(nvc_xio_wdata),
+    .xio_rdata(opl_xio_rdata), .irq(opl_irq),
+    .snd(opl_snd)
 );
 
 `ifndef A816_NO_SAMPLER
@@ -812,49 +752,14 @@ always_ff @(posedge clk_core) begin
     cart_mode_core <= cart_mode_m;
 end
 
-// ── Hardware CH9350 keyboard decoder (SDRAM-decoupled Stage 1) ────────────────
-// Taps the same UART RX (pin 51 / usb_dp) as the firmware, decodes CH9350 frames
-// in hardware, and drives the key matrix without the PicoRV32/SDRAM path.
-// See docs/hw_keyboard_decouple.md.
-wire [7:0] hk_mod, hk_key1, hk_key2, hk_key3, hk_key4;
-
-uart_kbd_ch9350 #(
-    .CLK_HZ(27_000_000), .BAUD(115200), .TIMEOUT_MS(1000)
-) uart_kbd (
-    .clk(sys_clk), .reset_n(hw_reset_n), .uart_rx(usb_dp),
-    .kbd_mod(hk_mod), .kbd_key1(hk_key1), .kbd_key2(hk_key2),
-    .kbd_key3(hk_key3), .kbd_key4(hk_key4)
-);
-
-// CDC: held bytes (sys_clk) → clk_core (the core matrix domain). 2-FF per bit;
-// bytes are quasi-static between updates so no handshake is needed.
-reg [7:0] hk_mod_m,  hk_mod_s;
-reg [7:0] hk_k1_m,   hk_k1_s;
-reg [7:0] hk_k2_m,   hk_k2_s;
-reg [7:0] hk_k3_m,   hk_k3_s;
-reg [7:0] hk_k4_m,   hk_k4_s;
-always_ff @(posedge clk_core) begin
-    {hk_mod_s, hk_mod_m} <= {hk_mod_m, hk_mod};
-    {hk_k1_s,  hk_k1_m}  <= {hk_k1_m,  hk_key1};
-    {hk_k2_s,  hk_k2_m}  <= {hk_k2_m,  hk_key2};
-    {hk_k3_s,  hk_k3_m}  <= {hk_k3_m,  hk_key3};
-    {hk_k4_s,  hk_k4_m}  <= {hk_k4_m,  hk_key4};
-end
-
-// Priority: hardware CH9350 decoder > firmware virt_kbd (OPTION-hold injection,
-// boot keys, PC Link KEY/TYPE). Per-slot "non-zero wins" (0x00 = empty HID slot).
-// (The direct USB-HID host fallback was removed, Atari816: the firmware held it
-// disabled permanently; the keyboard is CH9350 only.)
-wire [7:0] hv_key1 = (hk_k1_s != 8'h00) ? hk_k1_s : virt_kbd_key1;
-wire [7:0] hv_key2 = (hk_k2_s != 8'h00) ? hk_k2_s : virt_kbd_key2;
-wire [7:0] hv_key3 = (hk_k3_s != 8'h00) ? hk_k3_s : virt_kbd_key3;
-wire [7:0] hv_key4 = (hk_k4_s != 8'h00) ? hk_k4_s : virt_kbd_key4;
-
-wire [7:0] combined_key_mod = hk_mod_s | virt_kbd_mod;
-wire [7:0] combined_key1    = hv_key1;
-wire [7:0] combined_key2    = hv_key2;
-wire [7:0] combined_key3    = hv_key3;
-wire [7:0] combined_key4    = hv_key4;
+// Keyboard comes from PicoRV32's hot BSRAM CH9350 parser (uart_keyboard_poll -> virt_kbd_*).
+// The duplicate hardware uart_kbd_ch9350 decoder (left over from the SDRAM-firmware era) is
+// removed to save ~180 LUTs / ~240 FFs for OPL2.
+wire [7:0] combined_key_mod = virt_kbd_mod;
+wire [7:0] combined_key1    = virt_kbd_key1;
+wire [7:0] combined_key2    = virt_kbd_key2;
+wire [7:0] combined_key3    = virt_kbd_key3;
+wire [7:0] combined_key4    = virt_kbd_key4;
 
 // OSD navigation: driven by BOTH real USB keyboard and virtual UART keyboard.
 wire key_up    = (combined_key1 == 8'h52) || (combined_key2 == 8'h52) || (combined_key3 == 8'h52) || (combined_key4 == 8'h52); // Up Arrow
@@ -1030,11 +935,6 @@ iosys_picorv32 #(
     .cart_mode_out(cart_mode_sys),
     .usb_host_enable_out(usb_host_enable),
     .joystick_mode_out(joystick_mode),
-    .joy_poll_dbg(joy_poll_dbg),
-    .cpu_progress_dbg(cpu_progress_dbg),
-    .dbg_stall_undec_out(dbg_stall_undec),
-    .dbg_stall_peri_out(dbg_stall_peri),
-    .dbg_stall_ram_out(dbg_stall_ram),
 
     // SD Card (SPI mode)
     .sd_clk(sd_clk),
@@ -1139,7 +1039,7 @@ atari800core_simple_sdram #(
     .internal_rom               (0),    // ROMs in SDRAM
     .internal_ram               (0),
     .low_memory                 (0),
-    .covox                      (1)
+    .covox                      (0)
 ) core (
     .CLK                        (clk_core),
     .RESET_N                    (core_reset_n),
@@ -1161,8 +1061,8 @@ atari800core_simple_sdram #(
     .HBLANK                     (),
     .VBLANK                     (),
 
-    // Audio
-    .STEREO                     (stereo_core),   // dual-POKEY stereo (OSD toggle): POKEY2 $D210 -> AUDIO_R
+    // Audio (mono POKEY 1; POKEY 2 removed for OPL2)
+    .STEREO                     (1'b0),
     .AUDIO_L                    (audio_l_pcm),
     .AUDIO_R                    (audio_r_pcm),
 
@@ -1411,37 +1311,7 @@ DVI_TX_Top hdmi (
 );
 */
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Diagnostic free-running blinker — no reset, no external inputs.
-// If sys_clk reaches flip-flops, these blink.  blink[26]=0.2 Hz, [25]=0.4 Hz.
-// ─────────────────────────────────────────────────────────────────────────────
-reg [26:0] blink_cnt = 27'd0;
-always_ff @(posedge sys_clk) blink_cnt <= blink_cnt + 1'b1;
-
-// ─────────────────────────────────────────────────────────────────────────────
-// LEDs (active low) — DIAGNOSTIC MAPPING for OSD-stuck investigation.
-// leds_n[4:1] → pins 17,18,19,20 → physical LED2,LED3,LED4,LED5 (see CLAUDE.md).
-//   leds_n[1] pin17 LED2 = cpu_progress_hb : PicoRV32 executing memory txns
-//   leds_n[2] pin18 LED3 = joy_poll_hb     : firmware loop reaching joy_get()
-//   leds_n[3] pin19 LED4 = dbg_sd_ready    : ROMs loaded / past init
-//   leds_n[4] pin20 LED5 = blink_cnt[22]   : ~6 Hz FPGA-alive free-run heartbeat
-// Interpretation (with no Pico, no ATR):
-//   LED2 dark              → CPU hung (e.g. SDRAM access never completes) ROOT = arbiter/CDC
-//   LED2 blink, LED3 dark  → CPU runs but stuck in a firmware loop before joy_get()
-//   LED2 blink, LED3 blink → loop alive; S2/F12 read or compare is the issue
-// ─────────────────────────────────────────────────────────────────────────────
-wire joy_poll_dbg;
-wire cpu_progress_dbg;
-wire dbg_stall_undec, dbg_stall_peri, dbg_stall_ram;
-
-// Pulse-stretch SIO line activity to ~78 ms so the eye can see it.
-// A serial bit is ~55 us (invisible); stretch any LOW (start/0 bit) to a long blink.
-// sio_rx_data_in = our DRIVE's transmit line (sys_clk domain, handler output)
-// sio_txd_sys    = Atari's transmit line, synchronized to sys_clk
-// Stretch ≈ 19 ms: long enough to bridge the ~0.6 ms gaps between bytes inside a
-// sector (LED solid while a sector streams), short enough to go dark in the
-// inter-sector gaps — so the LED blinks in the same rhythm as POKEY's load noises.
-// (155 ms swamped the gaps and made the LED look stuck-on during loads.)
+// Pulse-stretch SIO line activity to ~19 ms so the eye can see it.
 localparam [21:0] SIO_STRETCH = 22'h07FFFF; // 2^19-1 @ 27 MHz ≈ 19 ms
 reg [21:0] sio_tx_stretch  = 22'd0; // our drive -> Atari activity
 reg [21:0] sio_rx_stretch  = 22'd0; // Atari -> drive activity
@@ -1457,47 +1327,6 @@ always_ff @(posedge sys_clk) begin
     else if (sio_cmd_stretch) sio_cmd_stretch <= sio_cmd_stretch - 1'b1;
 end
 
-// SIO DIAGNOSTIC LED map (pins via leds_n[4:1] = pins17,18,19,20 = LED2,3,4,5):
-//   LED2 pin17 (leds_n[1]) = sio_command         : ON when SIO Command line is active (low)
-//   LED3 pin18 (leds_n[2]) = |sio_tx_stretch     : BLINKS when OUR DRIVE transmits to the Atari
-//   LED4 pin19 (leds_n[3]) = |sio_rx_stretch     : BLINKS when the Atari transmits to the drive
-//   LED5 pin20 (leds_n[4]) = ~blink_cnt[22]      : ~6 Hz FPGA-alive heartbeat
-// ── STAGE 0 DIAGNOSTIC: SDRAM bandwidth meter (frame-buffer feasibility) ─────────
-// Peak-hold thermometer of arbiter SA_BUSY occupancy (= SDRAM access load) at exact
-// speed. The frame buffer needs ~46% free (write ~22% + read ~22% + refresh ~2%), so
-// the go/no-go is "does peak occupancy stay below ~54%?". Window = 2^20 clk_core
-// cycles (~37 ms). Peak-held since power-on (power-cycle to reset). Run a demanding
-// program (heavy-ANTIC game) and read the LEDs. See docs/frame_buffer_plan.md Stage 0.
-// (PASS 2 — zoomed into the 39-54% band found in pass 1)
-//   LED2 (pin17) on if peak > 42%
-//   LED3 (pin18) on if peak > 46%
-//   LED4 (pin19) on if peak > 50%
-//   LED5 (pin20) on if peak > 54%
-// Reading: fewer LEDs = more headroom. ≤LED2 (≤46%) ⇒ FB fits with margin; LED4/LED5
-// lit (>50-54%) ⇒ FB needs burst reads / faster SDRAM clock first.
-reg  [19:0] u0_win  = 20'd0;
-reg  [19:0] u0_busy = 20'd0;
-reg  [3:0]  u0_peak = 4'd0;
-wire        u0_busy_now = (sadap_st == SA_BUSY);
-always_ff @(posedge clk_core) begin
-    if (!roms_loaded) begin
-        // ignore the boot ROM-load burst; only measure steady-state (Atari running)
-        u0_win  <= 20'd0;
-        u0_busy <= 20'd0;
-        u0_peak <= 4'd0;
-    end else if (u0_win == 20'hFFFFF) begin
-        u0_win  <= 20'd0;
-        u0_busy <= 20'd0;
-        // zoomed into the 39-54% band found in the first pass (window = 2^20 = 1048576)
-        u0_peak[0] <= u0_peak[0] | (u0_busy > 20'd440401);  // >42%
-        u0_peak[1] <= u0_peak[1] | (u0_busy > 20'd482345);  // >46%
-        u0_peak[2] <= u0_peak[2] | (u0_busy > 20'd524288);  // >50%
-        u0_peak[3] <= u0_peak[3] | (u0_busy > 20'd566231);  // >54%
-    end else begin
-        u0_win <= u0_win + 20'd1;
-        if (u0_busy_now) u0_busy <= u0_busy + 20'd1;
-    end
-end
 // ── PRODUCTION LEDs ──────────────────────────────────────────────────────────
 // (active low; leds_n[4:1] → pins 17,18,19,20 → physical LED2,LED3,LED4,LED5)
 //   LED2 (leds_n[1]) = SIO data activity : flickers while disk bytes move (either

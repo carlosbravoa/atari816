@@ -165,27 +165,43 @@ always_ff @(posedge clk) begin
     sh_m <= shift_pressed; sh_s <= sh_m;
 end
 
-// One explicit register pair per slot (no arrays: Gowin infers RAM from small arrays,
-// which cannot be written 4-wide per cycle nor read 4-wide combinationally).
-`define KEY_LATCH(N, KEY) \
-    reg [7:0] hid_l``N = 8'h00; \
-    reg [8:0] map_l``N = {PASS, 7'h7F}; \
-    always_ff @(posedge clk) begin \
-        if (!reset_n) begin \
-            hid_l``N <= 8'h00; \
-            map_l``N <= {PASS, 7'h7F}; \
-        end else if (KEY != hid_l``N) begin \
-            hid_l``N <= KEY; \
-            map_l``N <= (KEY == 8'h00) ? {PASS, 7'h7F} \
-                      : pc_layout      ? hid2atari_pc(KEY, sh_s) \
-                                       : {PASS, hid2atari(KEY)}; \
-        end \
+// Time-multiplexed lookup across the 4 key slots (1 shared hid2atari / hid2atari_pc
+// table instead of 4 parallel copies: updates all 4 slots every 4 sys_clk = 148 ns,
+// invisible to POKEY's 64 us scan). Explicit scalar regs keep Gowin from inferring RAM.
+reg [7:0] hid_l0 = 8'h00, hid_l1 = 8'h00, hid_l2 = 8'h00, hid_l3 = 8'h00;
+reg [8:0] map_l0 = {PASS, 7'h7F}, map_l1 = {PASS, 7'h7F},
+          map_l2 = {PASS, 7'h7F}, map_l3 = {PASS, 7'h7F};
+reg [1:0] slot = 2'd0;
+
+wire [7:0] cur_key = (slot == 2'd0) ? k1_s :
+                     (slot == 2'd1) ? k2_s :
+                     (slot == 2'd2) ? k3_s : k4_s;
+wire [7:0] cur_hid = (slot == 2'd0) ? hid_l0 :
+                     (slot == 2'd1) ? hid_l1 :
+                     (slot == 2'd2) ? hid_l2 : hid_l3;
+wire [8:0] cur_map = (cur_key == 8'h00) ? {PASS, 7'h7F}
+                   : pc_layout          ? hid2atari_pc(cur_key, sh_s)
+                                        : {PASS, hid2atari(cur_key)};
+
+always_ff @(posedge clk) begin
+    if (!reset_n) begin
+        slot   <= 2'd0;
+        hid_l0 <= 8'h00;          hid_l1 <= 8'h00;
+        hid_l2 <= 8'h00;          hid_l3 <= 8'h00;
+        map_l0 <= {PASS, 7'h7F};  map_l1 <= {PASS, 7'h7F};
+        map_l2 <= {PASS, 7'h7F};  map_l3 <= {PASS, 7'h7F};
+    end else begin
+        slot <= slot + 2'd1;
+        if (cur_key != cur_hid) begin
+            case (slot)
+                2'd0: begin hid_l0 <= cur_key; map_l0 <= cur_map; end
+                2'd1: begin hid_l1 <= cur_key; map_l1 <= cur_map; end
+                2'd2: begin hid_l2 <= cur_key; map_l2 <= cur_map; end
+                2'd3: begin hid_l3 <= cur_key; map_l3 <= cur_map; end
+            endcase
+        end
     end
-`KEY_LATCH(0, k1_s)
-`KEY_LATCH(1, k2_s)
-`KEY_LATCH(2, k3_s)
-`KEY_LATCH(3, k4_s)
-`undef KEY_LATCH
+end
 
 // ── Build atari_keyboard and special flags from the latched key slots ─────────
 wire [6:0] p1 = map_l0[6:0];

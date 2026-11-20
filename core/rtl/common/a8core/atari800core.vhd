@@ -447,28 +447,31 @@ PORT MAP(CLK => CLK,
 		 DATA_OUT => ANTIC_DO,
 		 dma_address_out => ANTIC_ADDR);
 
--- Atari816 native sound: a 1.79 MHz tick that does not stop with the freeze, and the
--- muxes that hand POKEY 2 and the COVOX DACs to the 65C816
+-- Atari816 (opl2 branch): POKEY 2 removed (mono classic POKEY 1; OPL2 replaces POKEY 2 for
+-- native sound). Keep a free-running 1.79 MHz tick so freezing the classic machine (A816_SND=1)
+-- cleanly mutes POKEY 1 / GTIA through the low-pass filter instead of holding a DC offset.
 snd_free_div : entity work.enable_divider
 	generic map (COUNT=>cycle_length)
 	port map(clk=>CLK,reset_n=>RESET_N,enable_in=>'1',enable_out=>snd_free_179);
-snd_p2_en    <= snd_free_179 when A816_SND = '1' else ANTIC_ENABLE_179;
 snd_mix_en   <= snd_free_179 when A816_SND = '1' else ANTIC_ENABLE_179;
-snd_p2_wr    <= (A816_SND_WR and not A816_SND_ADDR(4)) when A816_SND = '1' else POKEY2_WRITE_ENABLE;
-snd_p2_addr  <= A816_SND_ADDR(3 downto 0) when A816_SND = '1' else PBI_ADDR_INT(3 DOWNTO 0);
 snd_cvx_wr   <= (A816_SND_WR and A816_SND_ADDR(4)) when A816_SND = '1' else covox_write_enable;
 snd_cvx_addr <= A816_SND_ADDR(1 downto 0) when A816_SND = '1' else pbi_addr_int(1 downto 0);
 snd_data     <= A816_SND_DATA when A816_SND = '1' else WRITE_DATA(7 DOWNTO 0);
-snd_l0 <= POKEY2_CHANNEL0 when A816_SND = '1' else POKEY1_CHANNEL0;   -- frozen POKEY 1 is left out
-snd_l1 <= POKEY2_CHANNEL1 when A816_SND = '1' else POKEY1_CHANNEL1;
-snd_l2 <= POKEY2_CHANNEL2 when A816_SND = '1' else POKEY1_CHANNEL2;
-snd_l3 <= POKEY2_CHANNEL3 when A816_SND = '1' else POKEY1_CHANNEL3;
-snd_stereo <= STEREO or A816_SND;
+snd_l0 <= (others => '0') when A816_SND = '1' else POKEY1_CHANNEL0;
+snd_l1 <= (others => '0') when A816_SND = '1' else POKEY1_CHANNEL1;
+snd_l2 <= (others => '0') when A816_SND = '1' else POKEY1_CHANNEL2;
+snd_l3 <= (others => '0') when A816_SND = '1' else POKEY1_CHANNEL3;
+snd_stereo <= GTIA_SOUND and not A816_SND;
+POKEY2_CHANNEL0 <= (others => '0');
+POKEY2_CHANNEL1 <= (others => '0');
+POKEY2_CHANNEL2 <= (others => '0');
+POKEY2_CHANNEL3 <= (others => '0');
+POKEY2_DO <= POKEY_DO;
 
 pokey_mixer_both : entity work.pokey_mixer_mux
 PORT MAP(CLK => CLK,
 		 ENABLE_179 => snd_mix_en,
-		 GTIA_SOUND => GTIA_SOUND,
+		 GTIA_SOUND => snd_stereo,
 		 SIO_AUDIO => SIO_AUDIO,
 		 CHANNEL_L_0 => snd_l0,
 		 CHANNEL_L_1 => snd_l1,
@@ -486,23 +489,7 @@ PORT MAP(CLK => CLK,
 		 VOLUME_OUT_R => AUDIO_R_pre);
 
 AUDIO_L <= AUDIO_L_pre;
-AUDIO_R <= AUDIO_R_pre when snd_stereo = '1' else AUDIO_L_pre;
-
-pokey2 : entity work.pokey
-PORT MAP(CLK => CLK,
-		 ENABLE_179 => snd_p2_en,
-		 WR_EN => snd_p2_wr,
-		 RESET_N => RESET_N,
-		 ADDR => snd_p2_addr,
-		 DATA_IN => snd_data,
-		 CHANNEL_0_OUT => POKEY2_CHANNEL0,
-		 CHANNEL_1_OUT => POKEY2_CHANNEL1,
-		 CHANNEL_2_OUT => POKEY2_CHANNEL2,
-		 CHANNEL_3_OUT => POKEY2_CHANNEL3,
-		 DATA_OUT => POKEY2_DO,
-		 SIO_IN1 => '1',
-		 keyboard_response => "00",
-		 pot_in=>"00000000");
+AUDIO_R <= AUDIO_L_pre;
 
 pia1 : entity work.pia
 PORT MAP(CLK => CLK,
