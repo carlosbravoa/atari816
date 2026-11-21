@@ -137,7 +137,7 @@ def compile_c(src, obj, model, opt=DEFAULT_OPT, incs=(), defs=(), asm_out=None, 
                         "it too early: the code is likely wrong. Compile this file with -O1 "
                         "(docs/c/reference.md, \"Compiler notes\").")
             print(msg, file=sys.stderr)
-        n = fix_asm(asm)
+        n = fix_asm(asm, model)
         if n and VERBOSE:
             print(f"  hcc: {n} code-generator slip(s) repaired in {src}", file=sys.stderr)
         if obj:
@@ -156,9 +156,10 @@ _BADLOAD = re.compile(r"^\tlda\t(>?)(\d+)\+(\S+),x ;am\((r\d+)\)\n"
                       r"\tlda\t\1(\d+)\+\3,x ;am\(\4\)\n", re.M)
 
 
-def fix_asm(path):
-    """Repair two code-generator slips of vbcc 65816 in its assembly output (see the
-    comment above _BADLOAD and fix_ysave). Returns the number of places repaired."""
+def fix_asm(path, model="large"):
+    """Repair code-generator slips of vbcc 65816 in its assembly output (see the comments
+    above _BADLOAD, fix_ysave, fix_nearoff and fix_neardw). Returns the number of places
+    repaired."""
     txt = open(path, encoding="latin-1").read()
     n = 0
 
@@ -173,6 +174,11 @@ def fix_asm(path):
     new = _BADLOAD.sub(rep, txt)
     new, k = fix_ysave(new)
     n += k
+    new, k = fix_nearoff(new)
+    n += k
+    if model != "tiny":
+        new, k = fix_neardw(new)
+        n += k
     if n:
         with open(path, "w", encoding="latin-1") as f:
             f.write(new)
@@ -232,6 +238,59 @@ def fix_ysave(txt):
             yk = None
         i += 1
     return "\n".join(out), n
+
+
+# vbcc 65816 (r2) reads or writes through a 16-bit (near) pointer held in a member of a
+# static structure at offset K, at the pointer's offset 0, as
+#     ldx K+sym              (or lda >K+sym / tax)
+#     lda !K,x               the member's offset again: should be !0,x
+# (s.label[0], s.next->first, in the tiny model every pointer member; in the large model
+# __near ones, as the controls library's structures have). For any other offset it adds
+# the offset to the pointer (adc #n / tax / !0,x), so "!K,x" with the K of the load is
+# always this slip. The repair writes !0,x.
+_XLOAD = re.compile(r"^\t(?:ldx\t|lda\t)>?(\d+)\+\S+\s*(?:;.*)?$")
+_XUSE = re.compile(r"^(\t[a-z]{3}\t)!(\d+),x(\s*(?:;.*)?)$")
+_XKEEP = re.compile(r"^\t(?:sep|rep|a8|a16|x8|x16|lda\t#|php|plp|clc|sec)\b")
+
+
+def fix_nearoff(txt):
+    lines = txt.split("\n")
+    n = 0
+    k = None            # X holds the near pointer loaded from member offset k
+    pend = None         # lda K+sym seen: a tax makes it X's
+    for i, ln in enumerate(lines):
+        m = _XLOAD.match(ln)
+        if m:
+            if ln.startswith("\tldx"):
+                k, pend = int(m.group(1)), None
+            else:
+                pend = int(m.group(1))
+            continue
+        if ln.startswith("\ttax") and pend is not None:
+            k, pend = pend, None
+            continue
+        pend = None
+        u = _XUSE.match(ln)
+        if u and k and int(u.group(2)) == k:
+            lines[i] = f"{u.group(1)}!0,x{u.group(3)}"
+            n += 1
+            continue
+        if u or _XKEEP.match(ln):
+            continue                    # X unchanged
+        k = None
+    return "\n".join(lines), n
+
+
+# Large model: a __near pointer in initialised data is "dw label", a 16-bit field that
+# vasm relocates with the full address and vlink then refuses in the links at banks $5A
+# and $A5 ("doesn't fit into relocation type R_ABS ... size=16"). The offset is what is
+# meant: "dw <label" (vasm's selector: the bits that fit the field). Instructions are not
+# concerned (vasm masks their 16-bit operands already).
+_NEARDW = re.compile(r"^\tdw\t([A-Za-z_.][^;\s]*)(\s*(?:;.*)?)$", re.M)
+
+
+def fix_neardw(txt):
+    return _NEARDW.subn(lambda m: f"\tdw\t<{m.group(1)}{m.group(2)}", txt)
 
 
 def assemble(src, obj, model, defs=(), incs=(), src_name=None):
@@ -333,6 +392,230 @@ def ensure_lib(model):
         build_lib(model)
 
 
+# ---- the controls library (hui.h) ----------------------------------------------------
+#
+# Horizon's controls library (horizon/user/ui*.s) and ulib are ca65 code: hcc assembles
+# them from the Horizon tree's sources with the generated JSL->JSR shims (tools/genhui.py,
+# ui/hui.tab) and the SDK's helpers (ui/lib) into build/ui/hui.lib (an ar65 archive), once
+# and again whenever a source changes. For a program that uses hui.h, ld65 links the
+# shims it calls (and what they need) into one block at $0100 with the zero page at
+# $50-$EF (vbcc's registers are $00-$4F, the float library's $F0-$FF); the block goes
+# first in the program's text (rt/horizon.cmd's *_text.blob) and its bank bytes become
+# relocations (mko65's BANKS file). sdk/docs/c/apps.md, "How the block is built".
+
+UI_TINY = ("the controls library (hui.h) needs the large model: build without "
+           "--model tiny (sdk/docs/c/apps.md, \"Limits\")")
+
+
+def horizon_dir():
+    return os.path.abspath(os.environ.get("HORIZON") or os.path.join(SDKC, "..", "..", "horizon"))
+
+
+def ui_dir():
+    return os.path.join(os.environ.get("HZ_BUILD") or os.path.join(SDKC, "build"), "ui")
+
+
+def cc65_tool(name):
+    t = os.environ.get(name.upper()) or shutil.which(name)
+    if not t:
+        raise HccError(f"{name} (cc65) is not installed: the controls library (hui.h) is "
+                       f"assembled and linked with ca65 / ld65 / ar65 (sdk/docs/c/apps.md)")
+    return t
+
+
+def ui_inputs():
+    user = os.path.join(horizon_dir(), "user")
+    files = [os.path.join(user, f) for f in os.listdir(user)
+             if (f.startswith("ui") and f.endswith(".s")) or
+             f in ("ui.inc", "horizon.inc", "version.inc", "icons.inc", "ulib.s")]
+    lib = os.path.join(SDKC, "ui", "lib")
+    files += [os.path.join(lib, f) for f in os.listdir(lib)]
+    files += [os.path.join(SDKC, "ui", f) for f in ("hui.tab", "huirt.c", "blob.cfg")]
+    files += [os.path.join(HERE, "genhui.py")]
+    return files
+
+
+def ui_stale():
+    stamp = os.path.join(ui_dir(), "stamp")
+    if not os.path.exists(stamp):
+        return True
+    t = os.path.getmtime(stamp)
+    return any(os.path.getmtime(f) > t for f in ui_inputs())
+
+
+def build_ui(quiet=False):
+    import genhui
+    hz = horizon_dir()
+    user = os.path.join(hz, "user")
+    if not os.path.exists(os.path.join(user, "ui.inc")):
+        raise HccError(f"the Horizon tree is not at {hz} (set HORIZON): the controls library "
+                       f"is built from its sources")
+    ca65, ar65 = cc65_tool("ca65"), cc65_tool("ar65")
+    d = ui_dir()
+    od = os.path.join(d, "obj")
+    if os.path.exists(od):
+        shutil.rmtree(od)
+    os.makedirs(od)
+    if not quiet:
+        print(f"hcc: building the controls library for C ({d}) from {user}", file=sys.stderr)
+    fns, _, _ = genhui.parse_table()
+    shims = genhui.write_shims(os.path.join(d, "shims"), fns)
+    lib = os.path.join(SDKC, "ui", "lib")
+    srcs = [os.path.join(user, f) for f in sorted(os.listdir(user))
+            if f.startswith("ui") and f.endswith(".s")]
+    srcs.append(os.path.join(user, "ulib.s"))
+    srcs += [os.path.join(lib, f) for f in sorted(os.listdir(lib)) if f.endswith(".s")]
+    srcs += shims
+    members = []
+    for src in srcs:
+        o = os.path.join(od, os.path.splitext(os.path.basename(src))[0] + ".o")
+        run([ca65, "--cpu", "65816", "-I", user, "-I", lib, "-o", o, src], f"assembling {src}")
+        if os.path.basename(o) != "hdr.o":
+            members.append(o)
+    arc = os.path.join(d, "hui.lib")
+    if os.path.exists(arc):
+        os.remove(arc)
+    run([ar65, "a", arc] + members, "ar65")
+    shutil.copy(os.path.join(od, "hdr.o"), os.path.join(d, "hdr.o"))
+    shutil.copy(os.path.join(SDKC, "ui", "blob.cfg"), os.path.join(d, "blob.cfg"))
+    compile_c(os.path.join(SDKC, "ui", "huirt.c"), os.path.join(d, "huirt.o"), "large", opt="1")
+    open(os.path.join(d, "stamp"), "w").write("ok\n")
+
+
+def ensure_ui():
+    if ui_stale():
+        build_ui()
+
+
+def ui_names():
+    """The C names hui.h defines (functions, variables): a program using one gets the
+    block."""
+    import genhui
+    return set(genhui.c_names())
+
+
+def o65_block(path):
+    """An ld65 o65 file linked at $0100 -> (image: text + data + bss as zeros, the
+    addresses of its bank bytes, sizes)."""
+    d = open(path, "rb").read()
+    if d[:6] != b"\x01\x00o65\x00":
+        raise HccError(f"{path}: not an o65 file")
+    if int.from_bytes(d[6:8], "little") & 0x6000:
+        raise HccError(f"{path}: 32-bit sizes or paged relocation")
+    h = [int.from_bytes(d[8 + 2 * i:10 + 2 * i], "little") for i in range(9)]
+    tbase, tlen, dbase, dlen, bbase, blen, zbase, zlen, _ = h
+    if tbase != 0x100 or dbase != tbase + tlen or bbase != dbase + dlen:
+        raise HccError(f"{path}: text, data and bss not one after the other from $0100")
+    p = 26
+    while d[p]:
+        p += d[p]
+    p += 1
+    img = d[p:p + tlen + dlen] + bytes(blen)
+    p += tlen + dlen
+    if int.from_bytes(d[p:p + 2], "little"):
+        raise HccError(f"{path}: undefined references in the block")
+    p += 2
+    banks = []
+    for base in (tbase, dbase):
+        pos = base - 1
+        while True:
+            b = d[p]
+            p += 1
+            if b == 0:
+                break
+            if b == 255:
+                pos += 254
+                continue
+            pos += b
+            t = d[p]
+            p += 1
+            typ, seg = t & 0xE0, t & 0x1F
+            if typ == 0x40:                 # HIGH: one more byte
+                p += 1
+            elif typ == 0xA0:               # SEG: two more bytes
+                p += 2
+            if seg not in (2, 3, 4, 5):
+                raise HccError(f"{path}: a relocation to segment {seg}")
+            if typ == 0xA0 and seg != 5:
+                banks.append(pos)           # a bank byte
+            elif typ == 0xC0 and seg != 5:
+                banks.append(pos + 2)       # SEGADR: its bank byte
+    return img, banks, {"text": tlen, "data": dlen, "bss": blen, "zp": (zbase, zlen)}
+
+
+def ui_block(names, tmp):
+    """The block for the hui.h names a program uses: ld65 links the shims (and the library
+    routines they need) at $0100; the wrapper (vasm) puts it first in the program's text,
+    fills its header and gives the C names their addresses. -> dict: wrapper (object),
+    rt (the C side: __hui_fatal), banks (file), sizes."""
+    import genhui
+    ensure_ui()
+    d = ui_dir()
+    fns, vars_, _ = genhui.parse_table()
+    fnames = {e["c"] for e in fns}
+    vnames = {v["c"] for v in vars_}
+    names = sorted(set(names))
+    force = []
+    for n in names:
+        if n in fnames:
+            force.append("hc_" + n)
+        elif n in vnames:
+            force.append(n)
+        else:
+            raise HccError(f"{n}: not a name of hui.h")
+    rows = "ui_init" in names           # a program with controls: lists may call back
+    if rows:
+        force.append("hui_rowtramp")
+    o65 = os.path.join(tmp, "hui.o65")
+    lbl = os.path.join(tmp, "hui.lbl")
+    mp = os.path.join(tmp, "hui.map")
+    cmd = [cc65_tool("ld65"), "-C", os.path.join(d, "blob.cfg"), "-o", o65, "-Ln", lbl,
+           "-m", mp]
+    for f in force:
+        cmd += ["--force-import", f]
+    cmd += [os.path.join(d, "hdr.o"), os.path.join(d, "hui.lib")]
+    run(cmd, "linking the controls library (ld65)")
+    img, banks, sz = o65_block(o65)
+    addr = {}
+    for ln in open(lbl):
+        m = re.match(r"^al ([0-9A-Fa-f]+) \.(\w+)", ln)
+        if m:
+            addr[m.group(2)] = int(m.group(1), 16)
+    binf = os.path.join(tmp, "hui.bin")
+    with open(binf, "wb") as f:
+        f.write(img)
+    bankf = os.path.join(tmp, "hui.banks")
+    with open(bankf, "w") as f:
+        f.write("".join("%04X\n" % b for b in banks))
+    if any(b < 0x100 + 12 for b in banks):
+        raise HccError("the block's header holds a bank byte")
+    w = ["; the controls library's block for this program: GENERATED by hcc (tools/hzc.py)",
+         '\tsection\t"DONTMERGE_text.blob","acrx"',
+         "\tglobal\t___hui_blob",
+         "___hui_blob:",
+         "\tjmp\t!_start\t\t\t; +0 the program's entry: the C startup",
+         "\tjml\t>___hui_fatal\t\t; +3 the block's failure messages",
+         "\tdw\t<_hz_errno\t\t; +7 hz_errno"]
+    if rows:
+        w.append(f"\tjmp\t!___hui_blob+${addr['hui_rowtramp'] - 0x100:X}\t; +9 HUI_ROWCB")
+    else:
+        w.append("\trts\t\t\t\t; +9 HUI_ROWCB: no lists\n\tnop\n\tnop")
+    w.append(f'\tincbin\t"{binf}",12')
+    for n in names:
+        sym = "hc_" + n if n in fnames else n
+        if sym not in addr:
+            raise HccError(f"{n}: ld65 did not place {sym}")
+        w += [f"\tglobal\t_{n}", f"_{n}\tequ\t___hui_blob+${addr[sym] - 0x100:X}"]
+    ws = os.path.join(tmp, "huiblock.s")
+    with open(ws, "w") as f:
+        f.write("\n".join(w) + "\n")
+    wo = os.path.join(tmp, "huiblock.o")
+    assemble(ws, wo, "large")
+    sz["block"] = len(img)
+    sz["names"] = len(names)
+    return {"wrapper": wo, "rt": os.path.join(d, "huirt.o"), "banks": bankf, "sizes": sz}
+
+
 # ---- linking -------------------------------------------------------------------------
 
 def float_lib(model):
@@ -340,8 +623,9 @@ def float_lib(model):
 
 
 def link(objs, out, model, float_=False, wend=0x7000, debug=False, mapfile=None,
-         extra_libs=(), keep=None):
-    """Three raw links + mko65 -> out. Returns the sizes dict."""
+         extra_libs=(), keep=None, ui=None):
+    """Three raw links + mko65 -> out. Returns the sizes dict. ui: None, or the set of
+    hui.h names the program uses (the controls library's block is linked first)."""
     ensure_lib(model)
     d = libdir(model)
     script = os.path.join(SDKC, "rt", "horizon-tiny.cmd" if model == "tiny" else "horizon.cmd")
@@ -350,32 +634,59 @@ def link(objs, out, model, float_=False, wend=0x7000, debug=False, mapfile=None,
     tmp = keep or tempfile.mkdtemp(prefix="hcc")
     os.makedirs(tmp, exist_ok=True)
     try:
-        imgs, maps = [], []
-        for k, base in enumerate(BANKS):
-            img = os.path.join(tmp, f"{name}.{k}.bin")
-            mp = os.path.join(tmp, f"{name}.{k}.map")
-            cmd = [tool("vlink"), "-b", "rawbin1", "-nowarn=22", "-Cvbcc", "-gc-all",
-                   "-T", script, f"-DBASE={base:#x}", f"-DHZ_PAINT={1 if debug else 0}",
-                   "-L" + d, "-L" + os.path.join(target_dir(), "lib"),
-                   "-M" + mp, "-o", img, os.path.join(d, "crt0.o")]
+        banks = None
+        objs = list(objs)
+        if ui:
             if model == "tiny":
-                cmd.append(f"-DWEND={wend:#x}")
-            # the SDK's objects are linked as objects, not as a library: they replace
-            # objects of vbcc's C library (stdio's hooks, _main.o, the runtime), and
-            # vlink's -gc-all drops the functions a program does not use
-            cmd += list(objs) + lib_objects(model) + list(extra_libs)
-            if float_:
-                cmd.append("-l" + float_lib(model))
-            cmd.append("-l" + clib)
-            out_txt = run(cmd, "linking", filter_out=_link_messages)
-            if k == 0 and out_txt.strip():
-                print(out_txt.rstrip(), file=sys.stderr)
-            imgs.append(img)
-            maps.append(mp)
+                raise HccError(UI_TINY)
+            blk = ui_block(ui, tmp)
+            banks = blk["banks"]
+        else:
+            ui = None                   # --ui with no hui.h name used: no block
+
+        def links(objs):
+            imgs, maps = [], []
+            for k, base in enumerate(BANKS):
+                img = os.path.join(tmp, f"{name}.{k}.bin")
+                mp = os.path.join(tmp, f"{name}.{k}.map")
+                cmd = [tool("vlink"), "-b", "rawbin1", "-nowarn=22", "-Cvbcc", "-gc-all",
+                       "-T", script, f"-DBASE={base:#x}", f"-DHZ_PAINT={1 if debug else 0}",
+                       "-L" + d, "-L" + os.path.join(target_dir(), "lib"),
+                       "-M" + mp, "-o", img, os.path.join(d, "crt0.o")]
+                if model == "tiny":
+                    cmd.append(f"-DWEND={wend:#x}")
+                # the SDK's objects are linked as objects, not as a library: they replace
+                # objects of vbcc's C library (stdio's hooks, _main.o, the runtime), and
+                # vlink's -gc-all drops the functions a program does not use
+                cmd += list(objs) + lib_objects(model) + list(extra_libs)
+                if float_:
+                    cmd.append("-l" + float_lib(model))
+                cmd.append("-l" + clib)
+                out_txt = run(cmd, "linking", filter_out=_link_messages)
+                if k == 0 and out_txt.strip():
+                    print(out_txt.rstrip(), file=sys.stderr)
+                imgs.append(img)
+                maps.append(mp)
+            return imgs, maps
+
+        if ui is not None:
+            imgs, maps = links([blk["wrapper"], blk["rt"]] + objs)
+            at = mko65.symbols(maps[0]).get("___hui_blob")
+            if at is None:
+                # the names that wanted it were only in code -gc-all dropped: no block
+                ui, banks = None, None
+            elif at != 0x100:
+                raise HccError(f"{name}: the controls library's block is not at the start "
+                               f"of the program's text (the linker script's *_text.blob)")
+        if ui is None:
+            imgs, maps = links(objs)
         try:
-            sizes = mko65.convert(out, model, imgs, maps, wend=wend, name=name)
+            sizes = mko65.convert(out, model, imgs, maps, banksfile=banks, wend=wend,
+                                  name=name)
         except mko65.O65Error as e:
             raise HccError(str(e))
+        if ui is not None:
+            sizes["ui"] = blk
         if mapfile:
             shutil.copy(maps[0], mapfile)
         sizes["heap"] = heap_size(maps[0], model, wend)
@@ -419,6 +730,15 @@ copysign nan expm1 log1p erf erfc lgamma tgamma rint lrint lround nearbyint rema
 acosh asinh atanh scalbn logb ilogb fdim fma""".split())
 
 
+def undefined_names(msg):
+    """The C names of a failed link's undefined symbols."""
+    return set(re.findall(r"undefined: (\S+)", msg))
+
+
+def is_float_name(s):
+    return "flt" in s or s.rstrip("f") in MATHFUNCS or s in MATHFUNCS
+
+
 def needs_float(msg):
     """True when the undefined symbols of a failed link are all floating-point ones."""
     syms = re.findall(r"undefined: (\S+)", msg)
@@ -438,4 +758,9 @@ def size_report(out, model, s, wend):
         lines.append(f"  code bank: code+constants {s['text']:,} + data {s['data']:,} + "
                      f"bss {s['bss']:,} = {s['code']:,} of 65,280; heap {s['heap']:,}")
         lines.append("  window:    stack about 32,000 (from $7F7F down to $0100)")
+    if "ui" in s:
+        u = s["ui"]["sizes"]
+        lines.append(f"  controls library block: {u['block']:,} bytes (code+constants "
+                     f"{u['text']:,} + data {u['data']:,} + bss {u['bss']:,}) for "
+                     f"{u['names']} hui.h names; direct page $50+{u['zp'][1]}")
     return "\n".join(lines)

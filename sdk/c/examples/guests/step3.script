@@ -1,0 +1,6 @@
+# step3: Help > About... (Alt+H, Enter), OK (Enter), then ctrl+Q
+1000 {alt-h}
++400 \n
++800 shot
++300 \n
++600 ^Q

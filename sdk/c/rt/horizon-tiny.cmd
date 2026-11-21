@@ -27,9 +27,9 @@ MEMORY
 SECTIONS
 {
   zpage (NOLOAD) : { *(zpage) *(zp1) *(zp2) } >zp
-  .text : { *(*_text.blob) *(*_text.startup) *(*text*) *(.dtors) *(.ctors) } >main
-  .wdata : { *(*rodata*) *(*data*) } >win AT>main
-  .wbss (NOLOAD) : { *(*bss*) } >win
+  .text : { *(*_text.blob) *(*_text.startup) *(?????????_text.*) *(text*) *(.text*) *(.dtors) *(.ctors) } >main
+  .wdata : { *(?????????_rodata.*) *(rodata*) *(.rodata*) *(?????????_data.*) *(data*) *(.data*) } >win AT>main
+  .wbss (NOLOAD) : { *(?????????_bss.*) *(bss*) *(.bss*) } >win
   __DBR_init = 0;
   ___WDS = ADDR(.wdata);
   ___WDL = SIZEOF(.wdata);

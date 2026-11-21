@@ -1,0 +1,66 @@
+# Input for uitest.c (tests/run.py, desktop mode). Time 0 = the program was started.
+# The window's content starts at screen (41, 46) (outer top left 40, 30).
+1500 shot
+# typed into the field (it has the focus), Enter: the default button (Count)
++300 Ada
++500 \n
+# the list's row 3 (content 60, 87): a click selects it, a double click opens it
++600 move 101 133
++300 click
++700 dclick
+# the vertical scroll bar's down arrow (content 223, 129)
++700 move 264 175
++300 click
+# Test > About...: an alert (shot 2), Enter
++700 {alt-t}
++400 \n
++900 shot
++300 \n
+# Test > Ask...: the field holds "red", all selected: typing replaces it
++700 {alt-t}
++400 {down}
++200 \n
++900 shot
++300 blue\n
+# the Dialog... button (content 352, 16): type into its field, Enter: OK
++800 move 393 62
++300 click
++900 x\n
+# a right press on the empty part of the window (content 300, 200): the pop-up menu,
+# Down, Enter: the second item
++800 move 341 246
++300 click right
++800 shot
++300 {down}{down}\n
+# File > Save...: the dialog suggests UITEST.TXT; Enter saves
++800 {alt-f}
++400 \n
++1500 shot
++300 \n
+# File > Open...: typing selects the first name starting with the letters, Enter opens
++1200 {alt-f}
++400 {down}
++200 \n
++1500 UITEST
++600 \n
++1000 shot
+# Test > Launch: a program that is not there: the "Cannot start" alert, Enter
++800 {alt-t}
++400 {down}{down}
++200 \n
++1200 shot
++300 \n
+# Test > Open: ui_open of a file no program takes: an alert, Enter
++800 {alt-t}
++400 {down}{down}{down}
++200 \n
++1200 shot
++300 \n
+# Shift+F10 (the list has the focus since the Count click): ui_menukey, then ui_popat
+# at (300, 200) with its first item highlighted: Down, Enter: item 1
++800 down lshift
++100 {f10}
++100 up lshift
++800 shot
++300 {down}\n
++600 ^Q

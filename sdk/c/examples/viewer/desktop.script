@@ -1,0 +1,27 @@
+# Input for the second part of `make test` (desktop mode: the Desktop starts the viewer
+# from its Programs menu, without an argument). Time 0 = the program was started.
+# 1. no file yet: the status line says how to open one
+1000 shot
+# 2. File > Open... (ctrl+O): the file dialog; a double click on LONG.TXT (its row at
+# screen 170, 239) opens it
++200 ^O
++1500 shot
++200 move 170 239
++300 dclick
++300 move 560 346
++900 shot
+# 3. drag and drop: Programs > Files opens a Files window over ours; drag README.TXT (its
+# row at screen 100, 217) and release it on the viewer's list (at 520, 200)
++300 move 110 6
++200 click
++400 move 100 177
++200 click
++2000 move 100 217
++200 press
++100 drag 520 200
++800 release
++1000 shot
+# a click on the viewer's title bar brings it to the front: README.TXT
++200 move 480 34
++200 click
++800 shot

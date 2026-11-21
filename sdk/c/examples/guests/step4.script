@@ -1,0 +1,8 @@
+# step4: two names; a click on the first row (screen 161, 121), a double click
+1000 Ada\n
++500 Bob\n
++600 move 161 121
++300 click
++700 dclick
++600 shot
++300 ^Q

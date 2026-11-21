@@ -61,9 +61,12 @@ machine's emulator, with scripted input and screenshots.
 | [docs/getting-started.md](docs/getting-started.md) | Install, build the emulator and Horizon, hello as a console and a window program, run, screenshot, script input, the real machine |
 | [docs/reference/](docs/reference/README.md) | The programmer's reference: program format and memory, every syscall with an example, the window system, drawing, the controls library, sound, the internet ([internet.md](docs/reference/internet.md)), the games calls (full screen, sprites, scrolling, draw lists, palette entries, frame sync: [games.md](docs/reference/games.md)), the classic machine, the hardware, performance, game patterns, limits |
 | [c/](c) | The C SDK: `hcc` (one command from .c files to a program), the C library on Horizon (stdio with files, argc/argv, time, far memory), every syscall as a C function (`horizon.h`), examples, tests; [docs/c/](docs/c/getting-started.md): getting started, the reference (memory models, calling convention, speed), porting |
+| [c/ (applications)](docs/c/apps.md) | Desktop applications in C: the controls library as `hui.h` (windows with menus, buttons, fields, lists, scroll bars, the file dialog, alerts, dialogs; callbacks into C), linked by hcc when used; a tutorial in five steps ([c/examples/guests](c/examples/guests)), a text viewer ([c/examples/viewer](c/examples/viewer)) |
+| (C games) | (the game layer of the C SDK: its line goes here) |
 | [docs/roadmap-notes.md](docs/roadmap-notes.md) | The C compiler candidates (vbcc 65816 was chosen: [c/](c)) |
 | [templates/console](templates/console) | Arguments, output, a line of input, a file |
 | [templates/c-console](templates/c-console) | The same in C (hcc, `make` with sdk/c/c.mk) |
+| [templates/c-window-app](templates/c-window-app) | The window-app template in C (`hui.h`): the same window, menus, field, buttons, file dialog and alert |
 | [templates/window-app](templates/window-app) | A window with menus, a text field, buttons, the file dialog, an alert |
 | [templates/game](templates/game) | Gem Run: a timer loop, a tile map, keyed-blit sprites with dirty rectangles, keys + mouse, POKEY sound, title / play / game over |
 | [templates/basic-game](templates/basic-game) | Starfall, a BASIC 2.0 game: sprites, HIT, the arrows or a joystick, samples, 60 frames a second |

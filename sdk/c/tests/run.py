@@ -17,6 +17,16 @@ Tests (in tests/):
   rt       the tuned runtime against host-made tables (tests/rt/run.py), when present
   hcc      the driver's messages: a compile error with file:line, a program too big for
            its bank, data too big for the tiny model's window (no emulator)
+  ui       the controls library from C (tests/ui/uitest.c, uitest.script; desktop mode):
+           every kind of argument and result of the bindings, the callbacks, the controls,
+           dialogs and events; pixel checks of its screenshots; the block's size
+  uibad    the block's checks stop a program with a message (tests/ui/badhui.c: a control
+           given as a local, a control routine called in a callback)
+  uitiny   the tiny model is refused: hui.h's #error, hcc --ui, a link (no emulator)
+  uitwin   sdk/templates/c-window-app against sdk/templates/window-app (assembly): both
+           scripted tests, then their screenshots compared pixel by pixel
+  appsdoc  the code blocks of docs/c/apps.md (the tutorial) are in examples/guests/stepN.c
+           as written (no emulator; make -C examples/guests test runs the steps)
 """
 import os
 import re
@@ -48,8 +58,8 @@ def hcc(out, srcs, model, extra=()):
     return sh([sys.executable, HCC, "--model", model, "-o", out] + list(extra) + list(srcs))
 
 
-def emu(prg, outdir, horizon, args=None, script=None, seconds=6, expect=()):
-    cmd = [sys.executable, RUN816, prg, "--horizon", horizon, "--mode", "shell",
+def emu(prg, outdir, horizon, args=None, script=None, seconds=6, expect=(), mode="shell"):
+    cmd = [sys.executable, RUN816, prg, "--horizon", horizon, "--mode", mode,
            "--seconds", str(seconds), "--out", outdir]
     if args:
         cmd += ["--args", args]
@@ -222,6 +232,159 @@ def hcc_messages(only):
     report("hcc", "-", ok, "undefined function reported as 'undefined: nosuch'" if ok else out.strip()[:200])
 
 
+# pixels of uitest's screenshots (1280 x 720): (shot, x, y, RGB, what)
+UI_PIXELS = [
+    (1, 112, 181, (200, 52, 44), "row 0's icon, drawn by the row function (C_RED)"),
+    (1, 112, 237, (255, 255, 255), "row 2's icon on the selection (C_WHITE)"),
+    (1, 400, 236, (204, 206, 210), "row 2 selected, the list without the focus (C_LIGHT)"),
+    (1, 400, 208, (255, 255, 255), "row 1 not selected (white)"),
+    (6, 400, 264, (52, 100, 204), "row 3 selected by a click, the list focused (C_SELECT)"),
+    (6, 112, 237, (200, 52, 44), "row 2's icon, not selected any more (C_RED)"),
+]
+
+
+def pixel_checks(outdir, table):
+    try:
+        from PIL import Image
+    except ImportError:
+        return ["(PIL not installed: no pixel checks)"], 0
+    bad, n = [], 0
+    for shot, x, y, rgb, what in table:
+        p = os.path.join(outdir, f"shot{shot}.png")
+        if not os.path.exists(p):
+            bad.append(f"no shot{shot}.png")
+            continue
+        got = Image.open(p).convert("RGB").getpixel((x, y))
+        n += 1
+        if tuple(got) != rgb:
+            bad.append(f"shot{shot} ({x},{y}) {what}: {got}, not {rgb}")
+    return bad, n
+
+
+def run_ui(horizon, only):
+    """The controls library from C (large model only; the tiny model's refusal)."""
+    want = lambda n: not only or n in only  # noqa: E731
+    b = os.path.join(SDKC, "build", "tests", "ui")
+    os.makedirs(b, exist_ok=True)
+    T = lambda *p: os.path.join(HERE, *p)  # noqa: E731
+
+    if want("ui"):
+        prg = os.path.join(b, "UITEST.PRG")
+        rc, out = hcc(prg, [T("ui", "uitest.c")], "large", ["--map"])
+        if rc:
+            report("ui", "large", False, "build: " + out.strip().splitlines()[-1])
+        else:
+            blk = grab(out, r"block: [\d,]+ bytes") + " for " + \
+                grab(out, r"\d+ hui.h names")
+            od = os.path.join(b, "run-ui")
+            rc, con, _ = emu(prg, od, horizon, script=T("ui", "uitest.script"), seconds=45,
+                             mode="desktop")
+            want_lines = ["UITEST: click 1, name 'Ada'", "UITEST: list sel 3",
+                          "UITEST: list open 3", "UITEST: vscroll 13", "UITEST: alert 0",
+                          "UITEST: ask 0 'blue'", "UITEST: dialog OK 'x'", "UITEST: popup 1",
+                          "UITEST: saved '/UITEST.TXT'", "UITEST: open '/UITEST.TXT'",
+                          "UITEST: dropped '/DROPPED.TXT'", "UITEST: 3 ticks",
+                          "UITEST: launch -1, error $44", "UITEST: ui_open -1",
+                          "UITEST: popat 1"]
+            con = open(os.path.join(od, "console.txt"), encoding="latin-1").read() \
+                if os.path.exists(os.path.join(od, "console.txt")) else ""
+            missing = [w for w in want_lines if w not in con]
+            bad, n = pixel_checks(od, UI_PIXELS)
+            ok = "UITEST PASS" in con and "[kill]" not in con and not missing and \
+                not [x for x in bad if not x.startswith("(")]
+            report("ui", "large", ok, grab(con, r"uitest: \d+ checks, \d+ failures") +
+                   f", {len(want_lines) - len(missing)} events, {n} pixels; {blk}" + ("" if ok else " | " + " | ".join(
+                       [l for l in con.splitlines() if "FAIL" in l] + missing + bad)))
+
+    if want("uibad"):
+        prg = os.path.join(b, "BADHUI.PRG")
+        rc, out = hcc(prg, [T("ui", "badhui.c")], "large")
+        if rc:
+            report("uibad", "large", False, "build: " + out.strip().splitlines()[-1])
+        else:
+            for arg, text in (("ptr", "hui: ui_draw: ctl: not in the code bank"),
+                              ("cb", "hui: ui_lsset: a control routine called inside a "
+                                     "callback")):
+                rc, con, _ = emu(prg, os.path.join(b, "run-bad" + arg), horizon, args=arg,
+                                 seconds=4)
+                i, j = con.find("BADHUI: start"), con.find(text)
+                ok = 0 <= i < j and "not stopped" not in con
+                report("uibad", "large", ok, f"{arg}: " + (text if ok else con.strip()[-200:]))
+
+    if want("uitiny"):
+        t = os.path.join(b, "tiny")
+        os.makedirs(t, exist_ok=True)
+        msg = "needs the large model"
+        rc, out = hcc(os.path.join(t, "X.PRG"), [T("ui", "badhui.c")], "tiny")
+        report("uitiny", "tiny", rc != 0 and msg in out and "hui.h:" in out,
+               "hui.h in the tiny model: #error" if rc else out.strip()[-200:])
+        e = os.path.join(t, "e.c")
+        open(e, "w").write("int main(void) { return 0; }\n")
+        rc, out = hcc(os.path.join(t, "E.PRG"), [e], "tiny", ["--ui"])
+        report("uitiny", "tiny", rc != 0 and msg in out, "hcc --ui --model tiny refused"
+               if rc else out.strip()[-200:])
+        u = os.path.join(t, "u.c")
+        open(u, "w").write("void ui_beep(void);\nint main(void) { ui_beep(); return 0; }\n")
+        rc, out = hcc(os.path.join(t, "U.PRG"), [u], "tiny")
+        report("uitiny", "tiny", rc != 0 and msg in out, "a hui name at the tiny link refused"
+               if rc else out.strip()[-200:])
+        rc, out = hcc(os.path.join(t, "U.PRG"), [u], "large", ["--map"])
+        report("uitiny", "large", rc == 0 and "block:" in out, "the same in the large model: "
+               + (grab(out, r"block: [\d,]+ bytes") or out.strip()[-200:]) + " for ui_beep")
+
+    if want("appsdoc"):
+        doc = os.path.join(SDK, "docs", "c", "apps.md")
+        guests = os.path.join(SDKC, "examples", "guests")
+        cur, blk, inblk, bad, n = None, [], False, [], 0
+        for ln in open(doc, encoding="utf-8"):
+            m = re.search(r"From `(step\d\.c)`:", ln)
+            if m:
+                cur = m.group(1)
+            elif ln.startswith("## "):
+                cur = None
+            elif ln.startswith("```c") and cur:
+                inblk, blk = True, []
+            elif ln.startswith("```") and inblk:
+                inblk = False
+                n += 1
+                if "".join(blk) not in open(os.path.join(guests, cur)).read():
+                    bad.append(f"a block of {cur} ({blk[0].strip()[:40]}...)")
+            elif inblk:
+                blk.append(ln)
+        report("appsdoc", "-", n > 0 and not bad, f"{n} code blocks as in the step files"
+               if not bad else "not in the files: " + " | ".join(bad))
+
+    if want("uitwin"):
+        tpl = os.path.join(SDK, "templates")
+        res = []
+        for d in ("c-window-app", "window-app"):
+            rc, out = sh(["make", "--no-print-directory", "-C", os.path.join(tpl, d), "test",
+                          "HORIZON=" + horizon])
+            res.append((d, rc, out))
+        bad = [f"{d}: make test failed: {out.strip()[-200:]}" for d, rc, out in res if rc]
+        n = 0
+        if not bad:
+            try:
+                from PIL import Image, ImageChops
+                for i in range(1, 6):
+                    a = Image.open(os.path.join(tpl, "window-app", "build", "test",
+                                                f"shot{i}.png")).convert("RGB")
+                    c = Image.open(os.path.join(tpl, "c-window-app", "build", "test",
+                                                f"shot{i + 1}.png")).convert("RGB")
+                    # (Files' status line shows the time a file changed: not compared)
+                    for im in (a, c):
+                        im.paste((0, 0, 0), (0, 480, 680, 512))
+                    box = ImageChops.difference(a, c).getbbox()
+                    n += 1
+                    if box:
+                        bad.append(f"shot {i}: differs in {box}")
+            except ImportError:
+                bad.append("(PIL not installed: screenshots not compared)")
+        report("uitwin", "large", not [x for x in bad if not x.startswith("(")],
+               f"both templates' tests pass; {n} screenshots identical" if not bad
+               else " | ".join(bad))
+
+
 def main():
     a = sys.argv[1:]
     horizon = os.environ.get("HORIZON") or os.path.join(SDK, "..", "horizon")
@@ -244,6 +407,8 @@ def main():
     hcc_messages(only)
     for m in models:
         run_model(m, horizon, only)
+    if "large" in models:
+        run_ui(horizon, only)
     bad = [r for r in results if not r[2]]
     print(f"\nC SDK tests: {len(results) - len(bad)} passed, {len(bad)} failed "
           f"({time.time() - t0:.0f} s)")

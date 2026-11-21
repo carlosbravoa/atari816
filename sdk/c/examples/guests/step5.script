@@ -1,0 +1,11 @@
+# step5: two names, File > Save as... (ctrl+S, Enter: GUESTS.TXT), then File > Open...
+# (ctrl+O; typing selects GUESTS.TXT in the list, Enter opens it)
+1000 Ada\n
++500 Bob\n
++600 ^S
++1500 \n
++1000 ^O
++1500 GUESTS
++600 \n
++1000 shot
++300 ^Q

@@ -4,3 +4,4 @@ build/
 *.PRG
 *.o
 __pycache__/
+*.map

@@ -1,0 +1,9 @@
+# gt_screens: time 0 = the program started (each screen is held for 2 s)
+1500 shot
+3500 shot
+# the pause: the desktop comes back, then the game's screen again
+4300 {alt-esc}
+4900 shot
+5300 {alt-tab}
+7000 shot
+9000 shot

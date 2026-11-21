@@ -24,9 +24,14 @@ Options:
   --stack N         tiny model: bytes for the stack (default 3968; data gets the rest)
   --float           link the floating-point library (printf %f, math.h); hcc also
                     adds it by itself when the link needs it
+  --ui              link Horizon's controls library (hui.h: windows with buttons,
+                    fields, lists, dialogs; large model only); hcc also adds it by
+                    itself when the program uses a name of hui.h (docs/c/apps.md)
   --map             write FILE.map (the link map) and print the sizes
   --debug           paint the stack; at exit the program prints how much it used
   -l FILE           link an extra object or library (.o, .a)
+  --game            link hgame, the game library (sdk/c/game); hcc also does it by
+                    itself when a C source includes <hgame.h>, <conio.h> or <joystick.h>
   -v                show the commands
   --keep DIR        keep the intermediate links in DIR
   --version, -h
@@ -40,6 +45,8 @@ import sys
 HERE = os.path.dirname(os.path.realpath(__file__))
 sys.path.insert(0, os.path.join(os.path.dirname(HERE), "tools"))
 import hzc  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(HERE), "game"))
+import hgbuild  # noqa: E402
 
 VERSION = "hcc 1.0 (Horizon C SDK, vbcc 65816)"
 
@@ -63,11 +70,18 @@ def main(argv):
         except hzc.HccError as e:
             die(str(e))
         return 0
+    if argv[0] == "--build-ui":             # the SDK's Makefile: the controls library
+        try:
+            hzc.build_ui()
+        except hzc.HccError as e:
+            die(str(e))
+        return 0
     out = None
     srcs, incs, defs, libs = [], [], [], []
     opt = hzc.DEFAULT_OPT
     model = "large"
-    compile_only = asm_too = want_map = debug = float_ = False
+    compile_only = asm_too = want_map = debug = float_ = ui = False
+    game = False
     stack = None
     keep = None
     i = 0
@@ -108,12 +122,16 @@ def main(argv):
                 die(f"--stack needs a number of bytes, not {v}")
         elif a == "--float" or a == "-lm":
             float_ = True
+        elif a == "--ui":
+            ui = True
         elif a == "--map":
             want_map = True
         elif a == "--debug":
             debug = True
         elif a == "-l":
             libs.append(val("-l"))
+        elif a == "--game":
+            game = True
         elif a == "-v":
             hzc.VERBOSE = True
         elif a == "--keep":
@@ -141,6 +159,8 @@ def main(argv):
         wend = (0x7F80 - stack) & ~15
     if compile_only and out and len([s for s in srcs if not s.endswith((".o", ".a"))]) > 1:
         die("-c with -o takes one source")
+    if ui and model == "tiny":
+        die(hzc.UI_TINY)
 
     tmp = None
     try:
@@ -175,21 +195,36 @@ def main(argv):
             die(f"{errors} file(s) did not compile")
         if compile_only:
             return 0
+        if game or hgbuild.uses_game(srcs):     # the game library (sdk/c/game)
+            libs.append(hgbuild.lib_for(model))
         if not out:
             out = os.path.basename(os.path.splitext(srcs[0])[0]).upper() + ".PRG"
         mapfile = os.path.splitext(out)[0] + ".map" if want_map else None
-        try:
-            sizes = hzc.link(objs, out, model, float_=float_, wend=wend, debug=debug,
-                             mapfile=mapfile, extra_libs=libs, keep=keep)
-        except hzc.HccError as e:
-            msg = str(e)
-            if not float_ and "undefined:" in msg and hzc.needs_float(msg):
-                print("hcc: the program uses floating point: linking the float library",
-                      file=sys.stderr)
-                sizes = hzc.link(objs, out, model, float_=True, wend=wend, debug=debug,
-                                 mapfile=mapfile, extra_libs=libs, keep=keep)
-            else:
-                raise
+        uinames = set() if ui else None     # the hui.h names used (None: no block)
+        while True:
+            # a link that misses only floating-point names or hui.h names is done again
+            # with the float library or the controls library's block (made for the names)
+            try:
+                sizes = hzc.link(objs, out, model, float_=float_, wend=wend, debug=debug,
+                                 mapfile=mapfile, extra_libs=libs, keep=keep, ui=uinames)
+                break
+            except hzc.HccError as e:
+                msg = str(e)
+                undef = hzc.undefined_names(msg)
+                huin = undef & hzc.ui_names()
+                fl = {n for n in undef if hzc.is_float_name(n)}
+                if not undef or undef - huin - fl:
+                    raise
+                if huin and model == "tiny":
+                    die(hzc.UI_TINY)
+                if (fl and float_) or (huin and uinames is not None and huin <= uinames):
+                    raise
+                if fl and not float_:
+                    print("hcc: the program uses floating point: linking the float library",
+                          file=sys.stderr)
+                    float_ = True
+                if huin:
+                    uinames = (uinames or set()) | huin
         if want_map:
             print(hzc.size_report(out, model, sizes, wend))
         return 0

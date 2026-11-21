@@ -1,0 +1,13 @@
+# gt_window: the window's content starts at screen (200, 116)
+1500 shot
+2000 move 260 195
++300 click
+2800 x
++200 x
+3500 shot
+# the window's menu "Test" in the menu bar, then its second item, "Two"
+4000 move 302 6
++300 click
++400 move 312 37
++300 click
+5500 shot

@@ -1,0 +1,20 @@
+# Input for `make test` (sdk/tools/inputscript.py). Time 0 = the program was started.
+# 1. the start: the cave, the panel, the firefly at the entrance, sparks
+1500 shot
+# 2. right, then down the left shaft: two sparks
++100 key right 540
++600 key down 1250
++1300 shot
+# 3. down to the long gallery, then right: the camera scrolls, a bat
++100 key down 670
++700 key right 2200
++2300 shot
+# 4. Alt+Esc: the desktop as it was; the game waits (paused)
++300 {alt-esc}
++800 shot
+# 5. Alt+Tab: the game again, exactly as it was
++300 {alt-tab}
++800 shot
+# 6. Esc: the end (the frame counts are printed)
++300 {esc}
++1000 shot

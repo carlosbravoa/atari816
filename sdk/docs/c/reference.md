@@ -3,13 +3,14 @@
 The C SDK for Horizon: how a C program is laid out in memory, its types, far memory, the
 calling convention (for assembly), the C library on Horizon, syscalls from C, the stack,
 the compiler's known faults and what the SDK does about them, and speed. Getting
-started: [getting-started.md](getting-started.md); porting: [porting.md](porting.md).
+started: [getting-started.md](getting-started.md); window applications (the controls
+library, `hui.h`): [apps.md](apps.md); porting: [porting.md](porting.md).
 
 | | |
 | --- | --- |
 | Compiler | vbcc 65816 Release 2 (Volker Barthelmann), C99 without `long long`; installed by `sdk/c/tools/get-toolchain.sh` |
 | Driver | `sdk/c/bin/hcc` (`hcc -h` lists the options) |
-| Headers | `horizon.h` (syscalls, blocks, helpers), `dirent.h`, and vbcc's: `stdio.h`, `stdlib.h`, `string.h`, `ctype.h`, `math.h`, `time.h`, `errno.h`, `stdint.h`, `stdarg.h`, `setjmp.h`, `limits.h`, ... |
+| Headers | `horizon.h` (syscalls, blocks, helpers), `hui.h` (the controls library: [apps.md](apps.md)), `dirent.h`, and vbcc's: `stdio.h`, `stdlib.h`, `string.h`, `ctype.h`, `math.h`, `time.h`, `errno.h`, `stdint.h`, `stdarg.h`, `setjmp.h`, `limits.h`, ... |
 | Library | `sdk/c/lib`, `sdk/c/rt`, `sdk/c/fastrt` over vbcc's C library (binary), built by hcc into `sdk/c/build/lib/<model>/` |
 | Make | `sdk/c/c.mk` (a program's Makefile is three lines) |
 
@@ -162,8 +163,10 @@ _add3:	sta	r0
 Build it with the C files: `hcc -o PROG.PRG main.c add3.s`. In C: `unsigned
 add3(unsigned a, unsigned b, unsigned c);`. A 32-bit far address in data is `dd sym`
 (vbcc writes pointers so); hcc relocates every bank byte (see "Program files" below). Assembly libraries written for ca65 (ulib, the controls library) are
-another matter: they are called with JSR and use the direct page from $50; binding them
-is planned (the controls library's bindings, phase 2).
+another matter: they are called with JSR and use the direct page from $50. The controls
+library is bound for C (`hui.h`): [apps.md](apps.md), "How the library gets into a
+program", shows how such a library is linked into a C program (a block made by ld65,
+JSL->JSR shims); a `hui.h` program's own assembly must leave $50-$EF alone.
 
 ## The C library on Horizon
 
@@ -308,6 +311,27 @@ works around each, and `tests/codegen` checks the cases:
    elements read another bank). hcc reloads the constant after the save (`hzc.fix_ysave`).
 4. **The tiny model with a pointer in X** loads a 32-bit value through X as "high word,
    TAX, low word": hcc compiles the tiny model with `-nox` (no variable in X).
+5. **A pointer member of a static structure, dereferenced at offset 0** (`s.p[0]`,
+   `s.next->first`; in the tiny model every pointer member, in the large model `__near`
+   ones) is loaded into X and then read at the *member's* offset: `ldx 4+_s` / `lda
+   !4,x` where `!0,x` is meant (for any other offset vbcc adds it first and uses `!0,x`).
+   hcc writes `!0,x` there (`hzc.fix_nearoff`).
+6. **A `__near` pointer in initialised data** (large model: `dw label`) is a 16-bit
+   field vlink fills with the whole address, which does not fit in the links at banks
+   $5A and $A5 ("doesn't fit into relocation type R_ABS"). hcc writes `dw <label` (the
+   offset, which is what is meant; `hzc.fix_neardw`). The controls library's structures
+   (`hui.h`) have such pointers.
+
+7. **Not repaired: a structure assigned between array elements** (`a[i] = b[j];`, or
+   through a pointer taken as `&a[i]`), at `-O0` and `-O1`: the copy writes to a wrong
+   address in a wrong bank and Horizon ends the program. Copy such structures with
+   `memcpy`, or member by member; a copy through a pointer that is stepped (`*p++ = *q++`)
+   works. `game/tests/vbcc_structcopy.c` reports whether the fault is still there.
+
+The linker scripts (`rt/horizon.cmd`, `rt/horizon-tiny.cmd`) take sections by their
+kind (`?????????_text.*`, `_rodata`, `_data`, `_bss`: vlink numbers vbcc's `DONTMERGE`
+sections), not by any name containing "text": a static variable called `context` or
+`ntext` went into the code (the tiny model then failed to link).
 
 `hcc -v` shows the commands and how many places were repaired in each file.
 

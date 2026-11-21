@@ -1,0 +1,10 @@
+# Step 5: the title, Space, half a minute of flying, game over, Esc.
+1500 shot
+2000 {space}
+2200 key right 2000
+4500 key down 1500
+6500 key left 2500
+9500 key up 1000
+11000 shot
+34000 shot
+35000 {esc}

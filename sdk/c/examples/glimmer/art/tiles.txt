@@ -1,0 +1,80 @@
+; Glimmer's tiles, 16 x 16, entries of the game's own palette (main.c, pal): 0 the cave's
+; air (also what the sprites show through: they are SPR_BEHIND), 1 rock, 2 rock with
+; moss on top, 3 a crystal vein in the rock.
+. = 0
+, = 16
+a = 3
+b = 4
+c = 5
+m = 6
+M = 7
+k = 11
+K = 12
+
+................
+................
+.....,..........
+................
+................
+................
+...........,....
+................
+................
+..,.............
+................
+................
+........,.......
+................
+................
+................
+
+aaabbbaaaabbbaaa
+abbbcbbaabbcbbba
+abccbbbaabcbbbba
+abbbbaaabbbbaaba
+aabbaaabbbcbbaaa
+abbaaabbccbbbaba
+bbbaaabbbbbaabbb
+bcbbaabbbaaaabcb
+bbbbaaabaaaabbcb
+abbaaaaaaabbbbba
+aaabbbaaabbcbbaa
+abbbcbbaabbbbbaa
+abccbbbaaabbaaab
+abbbbaaabbaaaabb
+aabbaaabbbaaabbb
+aaaaaaaaaaaaaaaa
+
+M.M..MM..M..M.MM
+MmMmMmmMMmMmMmMm
+mmmmmmmmmmmmmmmm
+bmmbmmbbmmbbmmbm
+bbbcbbaabbcbbbab
+abccbbbaabcbbbba
+abbbbaaabbbbaaba
+aabbaaabbbcbbaaa
+abbaaabbccbbbaba
+bbbaaabbbbbaabbb
+bcbbaabbbaaaabcb
+bbbbaaabaaaabbcb
+abbaaaaaaabbbbba
+aaabbbaaabbcbbaa
+abbbcbbaabbbbbaa
+aaaaaaaaaaaaaaaa
+
+aaabbbaaaabbbaaa
+abbbcbbaabbcbbba
+abccbbbaabcbkbba
+abbbbaaabbbkKaba
+aabbaaabbbkKbaaa
+abbaaabbckKbbaba
+bbbaaabbkKbbabbb
+bcbbaabkKbaaabcb
+bbbbaakKbaaabbcb
+abbaakKaaabbbbba
+aaabkKaaabbcbbaa
+abbkKbbaabbbbbaa
+abkKbbbaaabbaaab
+abbbbaaabbaaaabb
+aabbaaabbbaaabbb
+aaaaaaaaaaaaaaaa

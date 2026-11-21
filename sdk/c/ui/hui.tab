@@ -1,0 +1,551 @@
+# hui.tab - the C binding of Horizon's controls library (horizon/user/ui.inc, ui.lib) and
+# of the parts of ulib a C program has no equivalent for. tools/genhui.py reads it to write
+# include/huigen.h (the prototypes, with these doc lines) and the JSL->JSR shims; its
+# --check (make -C sdk/c check) fails when a public routine or variable of ui.inc or of
+# ulib (horizon.inc) is neither bound here nor listed as "unbound" with the reason.
+#
+# An entry:
+#   fn    the C prototype (one line)
+#   asm   the routine called (default: the C name)
+#   in    param=DEST[:KIND] ...   how each C argument reaches the routine
+#           DEST: A, X, Y or a library zero-page variable (ui_win, ui_x, ui_y, ui_w, ui_h,
+#                 ui_font, ui_c2); two of them, comma-separated, for KIND far / long
+#           KIND: val   a 16-bit value (default)
+#                 ptr   a pointer the library keeps or reads structures through: it must
+#                       be in the code bank (checked: a C local, on the stack, stops the
+#                       program with a message); the offset goes to DEST
+#                 str   a string read during the call: any bank (copied to a scratch
+#                       buffer when it is not in the code bank, at most 255 characters);
+#                       NULL passes 0
+#                 buf   a string buffer written by the call: as str, and copied back
+#                 far   a pointer as offset (DEST 1) and bank (DEST 2): ulib's own way
+#                 long  a 32-bit value: low word to DEST 1, high word to DEST 2
+#   set   DEST=VALUE ...           constant inputs
+#   out   param=SRC[:val|ptr]      after the call, register SRC (A, X) written through the
+#                                  C pointer param (NULL: skipped); ptr: as a C pointer
+#   ret   void   nothing
+#         A, X   that register (16 bits)
+#         AX     A low, X high (32 bits)
+#         Xptr   X as a C pointer into the code bank (0: NULL)
+#         ok     0, or -1 when the routine returns carry set
+#         err    as ok, and hz_errno = A on carry set (0 otherwise)
+#         Aerr   A, or -1 and hz_errno = A on carry set (hz_errno = 0 otherwise)
+#         bool   1 when the routine returns carry set, else 0
+#         xoff   carry set: X after the call minus X before it; else -1
+#   flags ctl    a control or dialog routine: not allowed inside a callback (checked)
+#   doc   the comment of the prototype (several doc lines join)
+#
+#   var   C declaration of a library variable        (doc lines may follow)#
+#   struct NAME [base]  a structure of ui.inc as a C type (typedef NAME), laid out from the
+#                       offset constants: genhui places each field at its constant, pads
+#                       the gaps and fails when fields overlap or the size disagrees
+#                       (base: the fields of that structure first, e.g. ui_ctl)
+#   field OFFSET | C declaration | comment
+#   size  SIZE_CONSTANT        the structure's size (when ui.inc has one)
+#   unbound NAME  the reason (what a C program uses instead)
+
+# ---------------------------------------------------------------- structures
+
+struct ui_ctl
+doc   The common header of every control (CT_*). The library writes into controls: they
+doc   must be global or static (the code bank).
+field CT_TYPE  | unsigned char type    | UT_*
+field CT_WIN   | unsigned char win     | the window it is in (ui_setwin)
+field CT_X     | short x               | position and size in the window's content
+field CT_Y     | short y               |
+field CT_W     | short w               |
+field CT_H     | short h               |
+field CT_FLAGS | unsigned short flags  | UF_*
+
+struct ui_button ui_ctl
+doc   UT_BUTTON: a label centred; UA_CLICK on a release inside it after a press in it.
+field BT_LABEL | const char __near *label | the label (code bank)
+size  BT_SIZE
+
+struct ui_label ui_ctl
+doc   UT_LABEL: static text (UI font), cut with "..." to its width; height UI_LINE.
+field LB_TEXT  | const char __near *text | the text (code bank)
+size  LB_SIZE
+
+struct ui_scroll ui_ctl
+doc   UT_VSCROLL (w = UI_SBW) or UT_HSCROLL (h = UI_SBW): UA_CHANGE with the new pos.
+field SB_POS   | unsigned short pos    | 0 .. max
+field SB_MAX   | unsigned short max    | total - visible (0: nothing to scroll)
+field SB_PAGE  | unsigned short page   | the visible amount (a track click's step)
+field SB_STEP  | unsigned short step   | an arrow's step (a wheel notch: 3 steps)
+field SB_GRAB  | unsigned short grab_  | (the library's)
+field SB_PART  | unsigned short part_  | (the library's)
+size  SB_SIZE
+
+struct ui_field ui_ctl
+doc   UT_FIELD: one line of text in your buffer; UA_CHANGE at every change of the text,
+doc   Enter activates the window's default button.
+field FD_BUF   | char __near *buf      | the text, zero-terminated (code bank)
+field FD_MAX   | unsigned short max    | the buffer's size (the text is at most max - 1)
+field FD_LEN   | unsigned short len    | the text's length (ui_fdset keeps it right)
+field FD_CUR   | unsigned short cur    | the cursor (0 .. len)
+field FD_ANC   | unsigned short anc    | the selection's other end (= cur: none)
+field FD_SCR   | unsigned short scr    | the first character shown
+size  FD_SIZE
+
+struct ui_list ui_ctl
+doc   UT_LIST: rows of text (UI_ROWH high) and a scroll bar at the right; your row
+doc   function gives each row's text. UA_CHANGE: sel changed; UA_OPEN: double click or Enter.
+field LS_COUNT  | unsigned short count  | rows (ui_lsset)
+field LS_SEL    | unsigned short sel    | the selected row (UI_NONE: none)
+field LS_TOP    | unsigned short top    | the first row shown
+field LS_ROW    | unsigned short row_   | HUI_ROWCB (UI_LIST sets it)
+field LS_INDENT | unsigned short indent | pixels left of the text for an icon (0: none)
+field LS_CLICK  | unsigned short click_ | (the library's)
+field LS_SB     | ui_scroll sb_         | (the library's: the list's scroll bar)
+field LS_SIZE   | ui_rowfn rowfn        | the C side: your row function
+
+struct ui_alertblk
+doc   ui_alert's block.
+field AL_KIND  | unsigned short kind       | AL_INFO, AL_WARN, AL_QUESTION, AL_ERROR
+field AL_TITLE | const char __near *title  | the window title
+field AL_TEXT  | const char __near *text   | the message: lines separated by '\n' (at most 3)
+field AL_B1    | const char __near *b1     | the rightmost button (the default)
+field AL_B2    | const char __near *b2     | 0: none
+field AL_B3    | const char __near *b3     | 0: none
+
+struct ui_dlgblk
+doc   ui_dlgopen's block: a modal dialog of your controls.
+field DG_TITLE | const char __near *title  | the window title
+field DG_W     | unsigned short w          | the content's size
+field DG_H     | unsigned short h          |
+field DG_LIST  | ui_ctlref __near *list    | its control list (x, y in its content)
+field DG_WIN   | unsigned short win        | (set by ui_dlgopen) the window
+size  DG_SIZE
+
+struct ui_askblk
+doc   ui_ask's block.
+field AK_TITLE  | const char __near *title  | the window title
+field AK_PROMPT | const char __near *prompt | the prompt
+field AK_BUF    | char __near *buf          | the text it starts with; the answer
+field AK_SIZE   | unsigned short size       | the buffer's size
+field AK_OK     | const char __near *ok     | the OK button's label (0: "OK")
+size  AK_SIZEOF
+
+struct ui_clock
+doc   ui_clk: a date and time.
+field CK_YEAR  | unsigned short year  | 2000 ..
+field CK_MON   | unsigned short mon   | 1-12
+field CK_DAY   | unsigned short day   | 1-31
+field CK_HOUR  | unsigned short hour  | 0-23
+field CK_MIN   | unsigned short min   |
+field CK_SEC   | unsigned short sec   |
+field CK_WDAY  | unsigned short wday  | 0 Sunday .. 6 Saturday
+
+# ---------------------------------------------------------------- start, events
+
+fn    void ui_init(void)
+flags ctl
+doc   Once, after hz_ws_start() and before any other ui_ call: measures the UI font.
+
+fn    int ui_getev(unsigned poll)
+in    poll=A
+ret   ok
+flags ctl
+doc   The next event into ui_ev (poll 0: wait for one; 1: return at once): 0, or -1 when
+doc   there is none (poll). Read events with this, not hz_win_event: the library needs to
+doc   see them, and a dialog keeps a WE_RESIZE / WE_CLOSE of your windows aside for it.
+
+var   hz_event ui_ev
+doc   The event ui_getev read (type WE_*, window, a, b, c: horizon.h, hz_event).
+
+# ---------------------------------------------------------------- controls
+
+fn    void ui_draw(void *ctl)
+in    ctl=X:ptr
+flags ctl
+doc   Draws one control (at the start, or after you changed its fields or geometry).
+
+fn    void ui_drawall(ui_ctlref *list)
+in    list=X:ptr
+flags ctl
+doc   Draws every control of a control list (an array of ui_ctlref ending with 0).
+
+fn    unsigned ui_event(ui_ctlref *list, void **ctl)
+in    list=X:ptr
+out   ctl=X:ptr
+ret   A
+flags ctl
+doc   Gives the event in ui_ev to the controls of list -> UA_NONE (not theirs: menus,
+doc   close, resize, keys nobody took: yours), UA_USED, UA_CLICK (a button), UA_CHANGE (a
+doc   scroll bar's pos, a list's sel, a field's text), UA_OPEN (a list: double click or
+doc   Enter). *ctl (if ctl is not NULL) = the control that acted (NULL for UA_NONE).
+
+fn    void ui_focus(void *ctl)
+in    ctl=X:ptr
+flags ctl
+doc   Gives the keyboard focus to a field, a list or a button (the others of its window,
+doc   in the list last given to ui_event / ui_drawall, lose it; both redrawn).
+
+fn    void ui_sbset(ui_scroll *sb, unsigned pos)
+in    sb=X:ptr pos=A
+flags ctl
+doc   Sets a scroll bar's position (clamped to 0 .. max) and redraws it.
+
+fn    void ui_sbpos(ui_scroll *sb, unsigned pos)
+in    sb=X:ptr pos=A
+flags ctl
+doc   As ui_sbset, but redraws only the thumb: for a bar drawn before with the same max
+doc   and page (sb->pos must still be the position drawn).
+
+fn    void ui_fdset(ui_field *fd, const char *text)
+in    fd=X:ptr text=Y:str
+flags ctl
+doc   New text for a field (copied into its buffer, cut to its size): cursor at the end,
+doc   all selected, redrawn.
+
+fn    void ui_lsset(ui_list *ls, unsigned count)
+in    ls=X:ptr count=A
+flags ctl
+doc   A list's row count: selection none, top 0, redrawn.
+
+fn    void ui_lssel(ui_list *ls, unsigned row)
+in    ls=X:ptr row=A
+flags ctl
+doc   Selects a row (UI_NONE: none), scrolls it into view, redraws.
+
+# ---------------------------------------------------------------- pop-up menus
+
+fn    unsigned ui_popup(unsigned win, const char *items)
+in    win=A items=X:ptr
+flags ctl
+ret   A
+doc   A pop-up menu at the pointer (items as a menu's: "Open\0-\0Rename...\0\0", in the
+doc   code bank) -> the item chosen (counting separators), UI_NONE for none. Blocks until
+doc   it closes. Call it on a right press (WE_BUTTON with c & 2).
+
+fn    unsigned ui_popat(unsigned win, const char *items, int x, int y)
+in    win=A items=X:ptr x=ui_x y=ui_y
+flags ctl
+ret   A
+doc   The same at x, y of the window's content with the first item highlighted (for the
+doc   menu key).
+
+fn    int ui_menukey(void)
+ret   bool
+doc   1 if the event in ui_ev is the menu key or Shift+F10 pressed.
+
+# ---------------------------------------------------------------- dialogs
+
+fn    unsigned ui_alert(const ui_alertblk *al)
+in    al=X:ptr
+ret   A
+flags ctl
+doc   An alert (modal, centred): icon, 1-3 lines, 1-3 buttons -> the button chosen (0 =
+doc   b1, the rightmost and default; the last one given is the cancel button: Esc and the
+doc   close box).
+
+fn    int ui_filedlg(unsigned save, char *path, const char *title)
+in    save=A path=X:buf title=Y:str
+ret   ok
+flags ctl
+doc   The file dialog (save 0: Open, 1: Save; path: a 128-byte buffer, for Save it may
+doc   hold a suggested name) -> 0 and the full path in path, or -1: cancelled. It changes
+doc   the task's current folder as the user moves. Save asks before replacing a file.
+
+var   unsigned ui_dlfilt
+doc   Set to CK_DISK, CK_XEX or CK_CART before ui_filedlg: only folders and Atari files of
+doc   that kind are listed (the dialog clears it).
+
+fn    int ui_dlgopen(ui_dlgblk *dg)
+in    dg=X:ptr
+ret   ok
+flags ctl
+doc   Opens a dialog of your own controls (modal, centred, drawn): 0, or -1 (no window).
+
+fn    void *ui_dlgrun(ui_dlgblk *dg)
+in    dg=X:ptr
+ret   Xptr
+flags ctl
+doc   Runs the dialog until a button is activated (Enter: the default one; Esc, the close
+doc   box: the cancel one) -> that button. The dialog stays open.
+
+fn    void ui_dlgclose(ui_dlgblk *dg)
+in    dg=X:ptr
+flags ctl
+doc   Closes the dialog's window.
+
+fn    int ui_ask(const ui_askblk *ak)
+in    ak=X:ptr
+ret   ok
+flags ctl
+doc   Asks for one value (a prompt, a field with the buffer's text, Cancel and OK) -> 0:
+doc   the buffer holds the answer; -1: cancelled.
+
+# ---------------------------------------------------------------- programs and files
+
+fn    int ui_launch(const char *path, const char *args, const char *name)
+in    path=X:str args=Y:str name=A:str
+ret   err
+flags ctl
+doc   Starts a program detached (args, name: NULL for none / from the path) -> 0, or -1
+doc   and hz_errno after an alert that said why.
+
+fn    void ui_spawnerr(unsigned err, const char *name)
+in    err=A name=X:str
+flags ctl
+doc   The "Cannot start NAME" alert for a spawn error.
+
+fn    unsigned ui_ftype(const char *name)
+in    name=X:str
+ret   A
+doc   A file's type FT_* by its extension.
+
+fn    int ui_open(const char *path)
+in    path=X:str
+ret   ok
+flags ctl
+doc   Opens a file or folder with its program (a folder in Files, a .PRG started, an
+doc   Atari file in the classic machine...) -> 0, or -1 (an alert said why).
+
+fn    int ui_atload(const char *path)
+in    path=X:str
+ret   Aerr
+flags ctl
+doc   Loads an Atari file into the Atari without booting it -> the kind mounted (CK_*), or
+doc   -1 and hz_errno: 0 not an Atari file, else the mount's error.
+
+fn    int ui_lnkread(const char *path)
+in    path=X:str
+ret   ok
+doc   Reads a shortcut (.LNK) into ui_lktgt, ui_lktitl, ui_lkargs -> 0, or -1.
+
+var   char ui_lktgt[130]
+doc   ui_lnkread: the shortcut's target.
+var   char ui_lktitl[130]
+doc   ui_lnkread: its title ("" when none).
+var   char ui_lkargs[130]
+doc   ui_lnkread: its argument string ("" when none).
+
+fn    int ui_mklink(const char *path)
+in    path=X:str
+ret   ok
+doc   A shortcut to path in /Desktop -> 0, or -1.
+
+fn    const char *ui_prog(const char *path, unsigned *icon)
+in    path=X:str
+out   icon=A:val
+ret   Xptr
+doc   The name of one of Horizon's programs ("Calculator"; NULL: not one of them), and
+doc   its icon (ICO_*) in *icon (if not NULL).
+
+fn    unsigned ui_ficon(const char *path, unsigned folder)
+in    path=X:str folder=A
+ret   A
+doc   The icon (ICO_*) for a path (folder: 1 if it is a folder).
+
+# ---------------------------------------------------------------- the date
+
+var   ui_clock ui_clk
+doc   The date the ui_clk* routines work on (year, mon, day, hour, min, sec, wday).
+
+fn    void ui_clksplit(unsigned long secs)
+in    secs=A,X:long
+doc   Seconds since 2000-01-01 (hz_time_get) -> ui_clk, every field.
+
+fn    unsigned long ui_clkjoin(void)
+ret   AX
+doc   ui_clk (year .. sec) -> seconds since 2000-01-01 (and ui_clk.wday).
+
+fn    int ui_clkcheck(void)
+ret   ok
+doc   0 if ui_clk is a valid date and time (2000 .. 2135), else -1.
+
+fn    unsigned ui_clkmdays(unsigned month)
+in    month=A
+ret   A
+doc   The days of month 1-12 of ui_clk's year.
+
+fn    unsigned ui_clkfmt(char *buf)
+in    buf=Y:buf
+ret   A
+doc   ui_clk as "YYYY-MM-DD HH:MM:SS" into buf (20 bytes) -> 19.
+
+fn    void ui_clklong(char *buf)
+in    buf=Y:buf
+doc   ui_clk as "Tuesday, 17 November 2026" into buf (32 bytes).
+
+fn    int ui_clkparse(const char *s)
+in    s=X:str
+ret   ok
+doc   "YYYY-MM-DD HH:MM[:SS]" (any separators) -> ui_clk: 0, or -1 when not valid.
+
+fn    int ui_clkload(void)
+ret   ok
+doc   The clock never set: /SYSTEM/CLOCK (or the PC's clock) becomes its start -> 0, or -1.
+
+fn    int ui_clksave(void)
+ret   ok
+doc   The clock written to /SYSTEM/CLOCK -> 0, or -1.
+
+fn    int ui_clkpc(void)
+ret   ok
+doc   The PC volume's clock sets the clock and is saved -> 0, or -1: no PC volume.
+
+# ---------------------------------------------------------------- copying
+
+fn    int ui_cptree(const char *from, const char *to)
+in    from=X:str to=Y:str
+ret   err
+doc   Copies a file (replacing one there) or a folder and everything in it (to must not
+doc   exist) -> 0, or -1 and hz_errno (HZ_ECANCELED: cancelled, say nothing).
+
+fn    int ui_rmtree(const char *path)
+in    path=X:str
+ret   err
+doc   Deletes a file, or a folder and everything in it -> 0, or -1 and hz_errno.
+
+fn    int ui_mvtree(const char *from, const char *to)
+in    from=X:str to=Y:str
+ret   err
+doc   Moves (across the card and the PC volume: copies, then deletes the source) -> 0, or
+doc   -1 and hz_errno.
+
+fn    void ui_cpwin(unsigned move)
+in    move=A
+flags ctl
+doc   The progress window for the next ui_cptree / ui_mvtree (move 0: "Copying", 1:
+doc   "Moving"); it opens only when the copy takes more than about 0.5 s; Cancel stops it.
+
+fn    void ui_cpdone(void)
+flags ctl
+doc   After ui_cptree / ui_mvtree with ui_cpwin: the window closed.
+
+unbound ui_cpcb  set with ui_setcpcb(fn): the library calls an assembly routine
+var   const char __near *ui_cpname
+doc   In a copy callback: the name of the file being copied.
+var   unsigned ui_cpk
+doc   In a copy callback: K of it copied so far.
+var   unsigned long ui_cpsize
+doc   In a copy callback: its size.
+var   unsigned ui_cpblk
+doc   The piece copied at a time (default 16384).
+var   unsigned ui_cpx
+doc   X of the last stat / open of a copy's source (HZ_E_HTTP: the HTTP status).
+
+fn    int ui_isurl(const char *s)
+in    s=X:str
+ret   xoff
+doc   If s is a URL (letters, then "://"): the index after "://"; else -1.
+
+fn    void ui_urlname(const char *path, char *buf)
+in    path=X:str buf=Y:buf
+doc   The name a copy of path or URL gets in a folder, into buf (UI_NAMEMAX + 1 bytes).
+
+# ---------------------------------------------------------------- drawing helpers
+
+fn    void ui_rect(unsigned win, int x, int y, int w, int h, unsigned long op)
+in    win=ui_win x=ui_x y=ui_y w=ui_w h=ui_h op=A,ui_c2:long
+doc   A rectangle: op = UI_FILL(colour), UI_FRAME(colour) or UI_DITHER(c1, c2).
+
+fn    void ui_bevel(unsigned win, int x, int y, int w, int h, unsigned sunken)
+in    win=ui_win x=ui_x y=ui_y w=ui_w h=ui_h sunken=A
+doc   The 1-pixel bevel just inside the rectangle (sunken 0: raised, 1: sunken).
+
+fn    void ui_text(unsigned win, int x, int y, unsigned font, unsigned colors, const char *s)
+in    win=ui_win x=ui_x y=ui_y font=ui_font colors=A s=X:str
+doc   Text at x, y (its top) in font 0 (UI) or 1 (fixed 8x12); colors = UI_INK(ink,
+doc   paper), paper UI_NOPAPER: none.
+
+fn    void ui_copy(unsigned win, int x, int y, int w, int h, int dx, int dy)
+in    win=ui_win x=ui_x y=ui_y w=ui_w h=ui_h dx=X dy=Y
+doc   Moves the rectangle to dx, dy (one blitter copy; they may overlap).
+
+fn    unsigned ui_twidth(const char *s, unsigned font)
+in    s=X:str font=A
+ret   A
+doc   The width of s in pixels in font 0 (UI) or 1 (fixed).
+
+fn    unsigned ui_cwidth(unsigned c, unsigned font)
+in    c=A font=X
+ret   A
+doc   The advance of one character (UI font: 2-7; fixed: 8).
+
+fn    void ui_fit(char *s, unsigned width)
+in    s=X:buf width=A
+doc   Cuts s with "..." to fit width pixels (UI font).
+
+fn    unsigned ui_btnw(const char *label)
+in    label=X:str
+ret   A
+doc   The width of a button for label (at least 64).
+
+fn    void ui_beep(void)
+doc   The error beep.
+
+fn    void ui_chime(unsigned kind)
+in    kind=A
+doc   A chime (CH_INFO, CH_WARN, CH_QUESTION, CH_ERROR) at the beep volume.
+
+unbound ui_strcpy  strcpy (string.h)
+unbound ui_strlen  strlen (string.h)
+unbound ui_win     zero page: the drawing functions take it as an argument; a row callback gets it in ui_rowinfo
+unbound ui_x       zero page: an argument of the drawing functions; ui_rowinfo
+unbound ui_y       zero page: an argument of the drawing functions; ui_rowinfo
+unbound ui_w       zero page: an argument of the drawing functions
+unbound ui_h       zero page: an argument of the drawing functions
+unbound ui_font    zero page: an argument of ui_text
+unbound ui_c2      zero page: UI_DITHER's second colour (ui_rect)
+unbound ui_rsel    zero page: ui_rowinfo.sel
+
+# ---------------------------------------------------------------- the SDK's own (sdk/c/ui/lib)
+
+fn    void ui_setwin(ui_ctlref *list, unsigned win)
+asm   hui_setwin
+in    list=X:ptr win=A
+doc   Puts every control of a control list in window win (sets each one's win field).
+
+fn    void ui_setcpcb(ui_cpfn fn)
+asm   hui_setcpcb
+in    fn=A,X:long
+doc   A C function the copy routines call when a file starts and after every piece
+doc   (NULL: none). It returns nonzero to cancel the copy. ui_cpwin replaces it.
+
+# ---------------------------------------------------------------- ulib (horizon.inc)
+
+fn    unsigned atari_kind(const char *path)
+in    path=X,Y:far
+ret   A
+doc   The kind of an Atari file by its extension: 1 disk (.atr .xfd), 2 executable (.xex
+doc   .com .exe), 3 cartridge (.car .rom .bin), 0 none.
+
+fn    unsigned atari_rkind(const char *path)
+in    path=X,Y:far
+ret   A
+doc   As atari_kind, and 4 (CK_BASRUN) for a BASIC program (.bas .lst).
+
+fn    int atari_run(const char *path)
+in    path=X,Y:far
+ret   err
+flags ctl
+doc   Runs an Atari file in the classic machine (returns after F12) -> 0, or -1 and
+doc   hz_errno.
+
+unbound out_char   putchar (stdio.h; ulib's line buffer is not used from C)
+unbound put_char   putchar
+unbound out_str    fputs, printf
+unbound put_str    fputs, printf
+unbound out_flush  fflush
+unbound put_nl     putchar('\n')
+unbound put_hex8   printf("%02X")
+unbound put_hex16  printf("%04X")
+unbound put_dec    printf("%u")
+unbound put_decw   printf("%*u")
+unbound div10      the / operator
+unbound key_ascii  hz_key_ascii (horizon.h)
+unbound read_char  getchar
+unbound getline    hz_getline, fgets
+unbound key_keep   C's stdin keeps its own type-ahead
+unbound str_skip   strspn, isspace
+unbound parse_dec  strtoul
+unbound spawn      hz_spawn_path, hz_spawn
+unbound exit_a     exit
+unbound args_init  main's argc, argv
+unbound next_arg   main's argc, argv
+unbound u_p        zero page of str_skip / parse_dec
+unbound u_arg      zero page of spawn

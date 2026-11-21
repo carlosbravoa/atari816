@@ -1,0 +1,8 @@
+# gt_input: time 0 = the program started
+1000 key right 500
+2000 key s 300
+2600 hi
+3000 {space}
+3500 move 400 200
++400 click
+4500 shot

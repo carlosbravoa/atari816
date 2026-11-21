@@ -1,0 +1,4 @@
+# step1: the close box (the window opens at 100, 60: the box at screen 109, 67)
+1200 shot
++300 move 109 67
++300 click

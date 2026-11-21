@@ -44,6 +44,25 @@ int grow(int h, unsigned r)
     return 0;
 }
 
+/* a pointer member of a static structure, read and written at offset 0 (vbcc read the
+ * member's offset there: hzc.fix_nearoff). Tiny model: every pointer is 16 bits; large
+ * model: __near ones (the controls library's structures, hui.h). */
+#ifdef __MNEAR
+#define NEARP
+#else
+#define NEARP __near
+#endif
+struct nrec { int a; int b; char NEARP *s; struct nnode NEARP *n; };
+struct nnode { int v0; int v1; };
+static struct nnode nn = {11, 22};
+static char ntext[] = "abc";
+static struct nrec nr = {1, 2, ntext, &nn};
+int nfirst(void) { return nr.s[0]; }
+int nsecond(void) { return nr.s[1]; }
+int nfield0(void) { return nr.n->v0; }
+int nfield1(void) { return nr.n->v1; }
+void nstore(void) { nr.s[0] = 'X'; nr.n->v0 = 33; }
+
 int main(void)
 {
     volatile int zero = 0, one = 1, two = 2, three = 3;
@@ -68,6 +87,10 @@ int main(void)
           "long arrays: += and compare");
     sprintf(b, "%ld %lu %s", ltbl[one], utbl[two], ptbl[zero]);
     check(!strcmp(b, "858997828 2147483648 zero"), "table values as arguments");
+    check(nfirst() == 'a' && nsecond() == 'b', "near pointer member, element 0 and 1");
+    check(nfield0() == 11 && nfield1() == 22, "near pointer member, fields at 0 and 2");
+    nstore();
+    check(ntext[0] == 'X' && nn.v0 == 33 && nn.v1 == 22, "near pointer member, stores at 0");
     printf("codegen: %u checks, %u failures\n", checks, fails);
     printf(fails ? "CODEGEN FAIL\n" : "CODEGEN PASS\n");
     return 0;

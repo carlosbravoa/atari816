@@ -1,6 +1,6 @@
 ---
 name: atari-816-dev
-description: Write, build, run and test programs for the Atari816 (a 65C816 computer on an FPGA) and its OS Horizon - console tools, desktop window apps, games and BASIC programs - in 65816 assembly (ca65/ld65) or Horizon BASIC, checked in the emu816 emulator with scripted input and screenshots. Use when asked to "write an Atari816 program", "make a Horizon app / window program / game", "write 65816 code for Horizon", "port X to the Atari816", "a .PRG for Horizon", "a Horizon BASIC game", or to fix, test or deploy such a program.
+description: Write, build, run and test programs for the Atari816 (a 65C816 computer on an FPGA) and its OS Horizon - console tools, desktop window apps, games and BASIC programs - in 65816 assembly (ca65/ld65), C (vbcc, the SDK's hcc) or Horizon BASIC, checked in the emu816 emulator with scripted input and screenshots. Use when asked to "write an Atari816 program", "make a Horizon app / window program / game", "write 65816 code for Horizon", "port X to the Atari816", "a .PRG for Horizon", "a Horizon BASIC game", or to fix, test or deploy such a program.
 ---
 
 # Atari816 development
@@ -41,6 +41,16 @@ the Horizon tree, copy `horizon/` and `emu/` somewhere private, build there, and
    - `SDK/examples/fetch`, `SDK/examples/echo` - (Horizon 0.22) the internet through the PC
      link: a URL read as a file, a TCP connection polled with sleep. Rules in the
      cheat sheet's "The internet" and `SDK/docs/reference/internet.md`.
+   **In C** (the C SDK, `SDK/c`: vbcc 65816; `SDK/c/bin/hcc -o X.PRG x.c` builds a
+   program; docs in `SDK/docs/c/`):
+   - `SDK/templates/c-console` - the console template in C (`horizon.h`: every syscall).
+   - `SDK/templates/c-window-app` - the window-app template in C with the controls
+     library (`hui.h`: same names as ui.inc, `ui_event`/`ui_getev` loop, `UI_BUTTON` ...
+     initialisers). Rules: controls, control lists, alert/dialog blocks and field buffers
+     must be static or global (the code bank), never locals; a list's row function or
+     the copy callback may only draw; large model only. `SDK/docs/c/apps.md` (tutorial
+     in `SDK/c/examples/guests`, a viewer in `SDK/c/examples/viewer`).
+   - (C games: the game layer's template goes here.)
    Set `NAME` in the Makefile. If the folder is not two levels below SDK, pass both
    paths on every make command: `make HORIZON=/abs/horizon SDK=/abs/sdk` (run816 is
    found through `SDK`). Replace the template's `test` target with checks for your

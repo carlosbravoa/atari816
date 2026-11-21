@@ -1,0 +1,13 @@
+# Input for `make test`. Time 0 = the program was started.
+# the title, then a game: the basket moves right and left now and then; letters are
+# caught or missed until five are missed (game over); then Q.
+1500 shot
+2000 {space}
+2500 key right 400
+4000 key left 800
+6000 key right 600
+8000 shot
+11000 key left 300
+14000 key right 500
+30000 shot
+31000 q

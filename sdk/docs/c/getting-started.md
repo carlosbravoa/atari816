@@ -162,6 +162,9 @@ were run in the emulator only so far (it models the board's timing within about 
 - [reference.md](reference.md): the memory models (where code, data, heap and stack live,
   the limits), int and pointer sizes, far memory, the calling convention for assembly, the
   C library on Horizon, syscalls from C, speed.
+- [apps.md](apps.md): window applications with Horizon's controls library (`hui.h`:
+  buttons, fields, lists, menus, dialogs, the file dialog), a tutorial in five steps;
+  the template `sdk/templates/c-window-app`, the example `sdk/c/examples/viewer`.
 - [porting.md](porting.md): what breaks when C from a PC or from cc65 comes over, and how
   to find it.
 - `make -C sdk/c test`: the SDK's own tests in the emulator.

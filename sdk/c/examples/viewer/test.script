@@ -1,0 +1,33 @@
+# Input for the first part of `make test` (shell mode: "viewer /VIEWTEST.TXT", 120
+# lines). Time 0 = the program was started. The window opens at (8, 28): its content
+# starts at screen (9, 44); the list at content (8, 8), 584 x 230; the horizontal scroll
+# bar under it at content y 242; the size grip at screen (606, 332).
+1500 shot
+# 1. the selection two pages on, then to the end (the list scrolls)
++200 {pgdn}{pgdn}
++500 shot
++200 {end}
++500 shot
+# Enter on line 120: the program prints it
++300 \n
+# 2. the horizontal scroll bar's right arrow (content 585, 249), three clicks: 12 columns
++300 move 594 293
++200 click
++300 click
++300 click
++600 shot
++200 {home}
+# 3. resize: drag the size grip up and left (fewer rows), then down and right again
++300 move 606 332
++200 press
++100 drag 400 220
++1000 release
++800 shot
++300 move 400 220
++200 press
++100 drag 630 352
++1000 release
++800 shot
+# 4. ctrl+W: the program ends
++300 ^W
++800 shot

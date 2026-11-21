@@ -1,0 +1,8 @@
+# The tutorial's steps: fly up-right a while (stars are caught in steps 3 and 4), Esc.
+1000 shot
+1200 key right 1500
+1200 key up 600
+3000 key down 1200
+4500 key left 800
+5600 shot
+6000 {esc}

@@ -23,9 +23,9 @@ MEMORY
 SECTIONS
 {
   zpage (NOLOAD) : { *(zpage) *(zp1) *(zp2) } >zp
-  .text : { *(*_text.blob) *(*_text.startup) *(*text*) *(*rodata*) *(.dtors) *(.ctors) } >main
-  .data : { *(*data*) } >main
-  .bss (NOLOAD) : { *(*bss*) } >main
+  .text : { *(*_text.blob) *(*_text.startup) *(?????????_text.*) *(text*) *(.text*) *(?????????_rodata.*) *(rodata*) *(.rodata*) *(.dtors) *(.ctors) } >main
+  .data : { *(?????????_data.*) *(data*) *(.data*) } >main
+  .bss (NOLOAD) : { *(?????????_bss.*) *(bss*) *(.bss*) } >main
   __DBR_init = ADDR(.text);
   ___heap = ADDR(.bss) + SIZEOF(.bss);
   ___heapend = BASE + 0xFFF0;
