@@ -15,6 +15,17 @@ serial port at all, so only writes and programs with their own serial routines a
 exposed. If it happens again: does `core/tools/atari.py status` still answer (firmware alive or
 not), and which disk image was it?
 
+## OPEN: Horizon restarted by itself when a second disk was attached (seen once)
+
+Seen once, 2026-11-21, on the board (v0.27.1 bitstream, Horizon 0.27, `fastdisk=1`,
+`basic=0`). Steps: a disk attached, it did not boot, F12 back to Horizon, "Attach disk..."
+with another disk: the whole Horizon start-up ran again. The firmware did not restart (its
+uptime went on), so the 65C816 was reset or jumped to its start. The same steps with the
+same disk worked afterwards. Ruled out by reading: the fast disk's ROM (physical 0x1F2000 =
+bank $2F) is inside the banks Horizon reserves ($20-$3F). Not known: the cause. If it comes
+back: note the two files, whether the first was started with "Restart Atari" or only F12,
+and try `fastdisk=0`.
+
 ## ROADMAP: the freeze should wait for the right moment
 
 Horizon's freeze (SV\_CTRL.FREEZE\_REQ) stops the classic machine at whatever clock it arrives.
