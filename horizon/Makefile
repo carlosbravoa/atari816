@@ -52,8 +52,8 @@ PROGS  += freecell
 UIPROGS += freecell
 # (0.26) Music (the player's window: user/music.s, mu_*.s) and its engine /SYSTEM/MUSICD.PRG
 # (user/musicd.s with the replayer library user/modplay.s, build/modplay.o; protocol user/music.inc)
-PROGS  += music
-UIPROGS += music
+PROGS  += music opldemo
+UIPROGS += music opldemo
 
 # self test keys: 'a' 1.0-1.2 s with F12 (system key NMI) in between. SELFTEST holds the
 # keyboard from its start, so they queue up whenever they come; KEYS reads them at the end.

@@ -19,6 +19,9 @@ SND_AUDCTL  = $00DB08
 SND_SKCTL   = $00DB0F
 SND_DAC     = $00DB10
 SND_NREG    = $14
+OPL_ADDR    = $00DB30
+OPL_STAT    = $00DB30
+OPL_DATA    = $00DB31
 
 CH_T1       = 7                         ; the chime: ticks of note 1 (its last one silent),
 CH_T2       = 15                        ; of note 2
@@ -26,6 +29,7 @@ CH_T2       = 15                        ; of note 2
 ; at boot (the classic machine is frozen): POKEY 2 out of reset, silent
 snd_init:
         stz     snd_left
+        stz     opl_owner
         lda     #NONE
         sta     ch_n
         a8
@@ -46,14 +50,20 @@ snd_init:
         jsr     snd_silence
 @out:   jmp     au_init                 ; (0.17) Lau
 
-; AUDC1-4 = 0, DACs = 0 (keeps A, X, Y); a chime stops
+; AUDC1-4 = 0, DACs = 0, OPL2 key-off (keeps A, X, Y); a chime stops
 snd_silence:
         jsr     au_silence              ; (0.17) Lau's voices too
         pha
+        phx
+        phy
+        jsr     opl_silence
+        ply
+        plx
         lda     k_rev
         cmp     #$07
         bcc     @out
         stz     snd_left
+        stz     opl_owner
         lda     #NONE
         sta     ch_n
         a8
@@ -323,7 +333,116 @@ snd_task_exit:
         iny
         cpy     #18
         bne     @d
+        lda     opl_owner
+        cmp     kt0
+        bne     :+
+        stz     opl_owner
+        jsr     opl_silence
+:       rts
+
+; ---- OPL2 (YM3812, REV $0C, $00:DB30-$DB31) ----
+; Wait A microseconds using UPTIME (low 16 bits); preserves X and Y.
+opl_wait_us:
+        sta     kt1
+        a8
+        lda     f:UPTIME
+        sta     kt0
+        lda     f:UPTIME+1
+        sta     kt0+1
+        a16
+        lda     kt0
+        clc
+        adc     kt1
+        sta     kt1                     ; target = start + delay
+@w:     a8
+        lda     f:UPTIME
+        sta     kt0
+        lda     f:UPTIME+1
+        sta     kt0+1
+        a16
+        lda     kt0
+        sec
+        sbc     kt1
+        bmi     @w
         rts
+
+; Write OPL2 register A ($00-$F5) = X ($00-$FF) with real YM3812 delays (5 us + 26 us); preserves Y.
+opl_hw: a8
+        sta     f:OPL_ADDR
+        a16
+        lda     #5
+        jsr     opl_wait_us
+        a8
+        txa
+        sta     f:OPL_DATA
+        a16
+        lda     #26
+        jmp     opl_wait_us
+
+; Silence OPL2: key-off all 9 channels ($B0-$B8 = 0) and rhythm ($BD = 0).
+opl_silence:
+        lda     k_rev
+        cmp     #$0C
+        bcc     @out
+        ldy     #$00B0
+@lp:    tya
+        ldx     #0
+        jsr     opl_hw
+        iny
+        cpy     #$00B9
+        bne     @lp
+        lda     #$00BD
+        ldx     #0
+        jsr     opl_hw
+@out:   rts
+
+; Reset OPL2: clear registers $01-$F5 and release owner.
+opl_reset:
+        lda     k_rev
+        cmp     #$0C
+        bcc     @out
+        ldy     #$0001
+@lp:    tya
+        ldx     #0
+        jsr     opl_hw
+        iny
+        cpy     #$00F6
+        bne     @lp
+        stz     opl_owner
+@out:   rts
+
+; ---- $6D opl_write(A = reg $00-$F5 / $FFFE probe / $FFFF reset, X = val) -> A = OPL_STAT ----
+sys_oplw:
+        lda     k_rev
+        cmp     #$0C
+        bcs     :+
+        lda     #ENODEV
+        jmp     set_err
+:       ldx     cur
+        lda     t_a,x
+        cmp     #$FFFE
+        beq     @stat
+        cmp     #$FFFF
+        bne     :+
+        jsr     opl_reset
+        bra     @stat
+:       cmp     #$00F6
+        bcc     :+
+        jmp     err_inval
+:       pha
+        lda     cur
+        inc     a
+        sta     opl_owner
+        lda     t_x,x
+        and     #$00FF
+        tax
+        pla
+        jsr     opl_hw
+@stat:  a8
+        lda     f:OPL_STAT
+        a16
+        and     #$00FF
+        jmp     set_ok
 
 ; register X (0-$13) written by the current task: owner and shadow (A = value)
 snd_mine:

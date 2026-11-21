@@ -96,7 +96,7 @@ start:  sys     SYS_SINGLE              ; one About only: the kernel raised the 
         ldx     #100
         ldy     #0
         jsr     textat_p
-        ldx     #.loword(t_snd_none)    ; the sound: POKEY 2 from REV $07, Lau from $0A
+        ldx     #.loword(t_snd_none)    ; the sound: POKEY 2 from REV $07, Lau from $0A, OPL2 from $0C
         lda     z:rev
         cmp     #$07
         bcc     :+
@@ -104,6 +104,9 @@ start:  sys     SYS_SINGLE              ; one About only: the kernel raised the 
         cmp     #$0A
         bcc     :+
         ldx     #.loword(t_snd_lau)
+        cmp     #$0C
+        bcc     :+
+        ldx     #.loword(t_snd_opl)
 :       stx     z:sc
         lda     #30
         ldx     #114
@@ -402,6 +405,7 @@ t_cpu:  .byte   "65C816 at 14.3 MHz", 0
 t_gfx:  .byte   "Video: Marga, 640 x 360, 256 colours", 0
 t_blit_on:  .byte "Blitter: Ali", 0
 t_blit_off: .byte "Blitter: none (the CPU draws)", 0
+t_snd_opl:  .byte "Sound: Lau, OPL2", 0
 t_snd_lau:  .byte "Sound: POKEY 2, Lau", 0
 t_snd_p2:   .byte "Sound: POKEY 2", 0
 t_snd_none: .byte "Sound: none", 0
