@@ -46,31 +46,35 @@
   <!-- the memory bus -->
   <rect class="bus" x="200" y="146" width="580" height="6" rx="3"/>
   <path class="w" d="M290 128V146M490 128V146M690 128V146"/>
-  <path class="w" d="M270 152V176M400 152V176M540 152V176M702 152V176M320 152V306"/>
+  <path class="w" d="M262 152V176M368 152V176M478 152V176M583 152V176M709 152V176M311 152V306"/>
 
   <!-- row 2: the chips -->
-  <rect class="classic" x="200" y="176" width="110" height="84" rx="6"/>
-  <text class="h" x="255" y="200">Classic Atari</text>
-  <text class="s" x="255" y="218">6502, ANTIC,</text>
-  <text class="s" x="255" y="234">GTIA, POKEY</text>
-  <text class="n" x="255" y="251">cycle-exact 8-bit</text>
+  <rect class="classic" x="200" y="176" width="104" height="84" rx="6"/>
+  <text class="h" x="252" y="200">Classic Atari</text>
+  <text class="s" x="252" y="218">6502, ANTIC,</text>
+  <text class="s" x="252" y="234">GTIA, POKEY</text>
+  <text class="n" x="252" y="251">cycle-exact 8-bit</text>
 
-  <rect class="chip" x="340" y="176" width="120" height="84" rx="6"/>
-  <text class="h" x="400" y="204">Ali</text>
-  <text class="s" x="400" y="224">blitter: fills,</text>
-  <text class="s" x="400" y="240">copies, lists</text>
+  <rect class="chip" x="318" y="176" width="100" height="84" rx="6"/>
+  <text class="h" x="368" y="204">Ali</text>
+  <text class="s" x="368" y="224">blitter: fills,</text>
+  <text class="s" x="368" y="240">copies, lists</text>
 
-  <rect class="chip" x="475" y="176" width="130" height="84" rx="6"/>
-  <text class="h" x="540" y="200">Lau + OPL2</text>
-  <text class="s" x="540" y="220">8 sample voices,</text>
-  <text class="s" x="540" y="236">48 kHz, and FM</text>
-  <text class="s" x="540" y="252">(YM3812)</text>
+  <rect class="chip" x="428" y="176" width="100" height="84" rx="6"/>
+  <text class="h" x="478" y="204">Lau</text>
+  <text class="s" x="478" y="224">8 sample voices</text>
+  <text class="s" x="478" y="240">48 kHz stereo</text>
 
-  <rect class="chip" x="620" y="176" width="160" height="84" rx="6"/>
-  <text class="h" x="700" y="200">Marga</text>
-  <text class="s" x="700" y="220">video: 640 x 360,</text>
-  <text class="s" x="700" y="236">256 colours, 16 sprites,</text>
-  <text class="s" x="700" y="252">scrolling, pointer</text>
+  <rect class="chip" x="538" y="176" width="90" height="84" rx="6"/>
+  <text class="h" x="583" y="204">OPL2</text>
+  <text class="s" x="583" y="224">FM synthesis</text>
+  <text class="s" x="583" y="240">(YM3812)</text>
+
+  <rect class="chip" x="638" y="176" width="142" height="84" rx="6"/>
+  <text class="h" x="709" y="200">Marga</text>
+  <text class="s" x="709" y="220">video: 640 x 360,</text>
+  <text class="s" x="709" y="236">256 colours, sprites,</text>
+  <text class="s" x="709" y="252">scrolling, pointer</text>
 
   <!-- row 3 -->
   <rect class="io" x="200" y="306" width="370" height="84" rx="6"/>
@@ -87,10 +91,11 @@
   <!-- classic: SIO to the I/O processor, picture to the output -->
   <path class="w" d="M232 260V306" marker-end="url(#a)" marker-start="url(#a)"/>
   <path class="w" d="M285 260V292H625V306" marker-end="url(#a)"/>
-  <!-- Lau to the output -->
-  <path class="w" d="M560 260V280H660V306" marker-end="url(#a)"/>
+  <!-- Lau and the OPL2 to the output -->
+  <path class="w" d="M478 260V280H660V306" marker-end="url(#a)"/>
+  <path class="w" d="M583 260V280"/>
   <!-- Marga to the output -->
-  <path class="w" d="M720 260V306" marker-end="url(#a)"/>
+  <path class="w" d="M730 260V306" marker-end="url(#a)"/>
 
   <!-- outside, left -->
   <rect class="ext" x="14" y="196" width="140" height="56" rx="6"/>
