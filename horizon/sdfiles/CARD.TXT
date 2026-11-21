@@ -1,0 +1,22 @@
+Atari816: the SD card
+
+Unpack everything here onto an empty SD card formatted as FAT32, keeping the folders.
+
+Two files are not included, because they are Atari's and may not be given away. Put them
+in the root of the card yourself:
+
+  ATARIXL.ROM   16384 bytes   the XL/XE operating system
+  BASIC.ROM      8192 bytes   Atari BASIC
+
+Without them Horizon still starts; the classic Atari (F12, "Run in Atari", disk images,
+cartridges, executables) does not.
+
+Folders:
+  /SYSTEM    Horizon itself and its system programs
+  /BIN       the programs of the Programs menu
+  /Music     songs for the Music Player
+  /docs      Welcome.md: start here
+  /programs  examples for BASIC and Sheet
+  atari.ini  the classic Atari's settings (Settings > Classic Atari edits it)
+
+The board needs the bitstream and cold.bin of the same release.

@@ -1082,6 +1082,23 @@ pictures-print:
 .PHONY: test-games pictures-games test-pc pictures-pc test-net pictures-net test-23 pictures-23 test-print pictures-print
 .PHONY: test-24 pictures-24
 
+# The card for a release: build/atari816-sd.zip, to be unpacked onto an empty FAT32 card.
+# The normal card without what only the tests need (/SYSTEM/TESTS, /many, /carts, /disks, the
+# files in the root), with /atari.ini and a note about the two ROM files nobody may ship.
+CARD = build/card
+.PHONY: card
+card: all
+	rm -rf $(CARD) build/atari816-sd.zip
+	mkdir -p $(CARD)/SYSTEM $(CARD)/programs $(CARD)/docs
+	cp -r $(SD)/BIN $(SD)/Music $(CARD)/
+	cp $(SD)/SYSTEM/HORIZON.SYS $(SD)/SYSTEM/*.PRG $(SD)/SYSTEM/PROGRAMS $(SD)/SYSTEM/ICONS $(SD)/SYSTEM/BBS.TXT $(CARD)/SYSTEM/
+	cp sdfiles/programs/* $(CARD)/programs/
+	cp sdfiles/docs/* $(CARD)/docs/
+	cp sdfiles/atari.ini $(CARD)/atari.ini
+	cp sdfiles/CARD.TXT $(CARD)/README.TXT
+	cd $(CARD) && zip -q -r -X ../atari816-sd.zip .
+	@unzip -l build/atari816-sd.zip | tail -1
+
 clean:
 	rm -rf build
 

@@ -60,6 +60,7 @@ itself), and so does File > Add to desktop.
 
 ```
 make          # build/sd: the normal SD card; build/tsd: the test SD card
+make card     # build/atari816-sd.zip: the card for a release (no test files; sdfiles/CARD.TXT as its README)
 make run      # emu816 on build/sd (the shell; with SDL you can type into it)
 make test     # the regression at three console speeds, then a scripted shell session
 make clean
