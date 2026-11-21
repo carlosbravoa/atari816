@@ -105,6 +105,8 @@ module iosys_picorv32 #(
     output wire [7:0]  h_offset_out,         // horizontal picture position (front porch 0..80)
     output wire        kbd_pc_layout_out,    // keyboard: 1 = US-PC symbolic layout (video_opts bit 3)
     output wire [2:0]  ram_select_out,       // Atari RAM size code (core RAM_SELECT)
+    output wire        pbi_en_out,           // the classic machine's PBI disk present (video_opts bit 2)
+    input              pbi_req,              // other clock: its request bit (video_opts bit 8, read)
 
     // Virtual Keyboard outputs
     output wire [7:0]  virt_kbd_mod_out,
@@ -376,7 +378,7 @@ assign mem_rdata = bram_ready ? bram_rdata :
         cart_reg_sel ? {24'b0, cart_mode_reg} :
         siocmd_a_sel ? siocmd_bytes[31:0] :
         siocmd_b_sel ? {8'b0, siocmd_seq, siocmd_status, siocmd_bytes[39:32]} :
-        video_opts_sel ? {24'b0, video_opts_reg} :
+        video_opts_sel ? {23'b0, pbi_req_s[1], video_opts_reg} :
         h_offset_sel ? {24'b0, h_offset_reg} :
         ram_select_sel ? {29'b0, ram_select_reg} :
         a816_ctrl_sel ? {31'b0, a816_run} :
@@ -518,6 +520,9 @@ reg [7:0] video_opts_reg = 8'h00;  // [1:0] = scanline level, [2] = unused, [3] 
 reg [7:0] h_offset_reg   = 8'd0;   // horizontal position (capture-skip pixels); 0 = no pan
 assign    scanline_level_out = video_opts_reg[1:0];
 assign    kbd_pc_layout_out  = video_opts_reg[3];
+assign    pbi_en_out         = video_opts_reg[2];
+reg [1:0] pbi_req_s = 2'b00;
+always @(posedge clk) pbi_req_s <= {pbi_req_s[0], pbi_req};
 assign    h_offset_out       = h_offset_reg;
 reg [2:0] ram_select_reg = 3'b001;   // default 128 KB (matches firmware default)
 assign    ram_select_out     = ram_select_reg;

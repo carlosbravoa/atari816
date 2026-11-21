@@ -933,3 +933,55 @@ installed over the PC link and restarted; `canyon.mid` opened from Files plays i
 time and the meters run); JOYTEST.xex opened from Files runs on the classic machine and F12
 returns. Not checked here, because it needs eyes and ears at the board: the HDMI picture itself
 during these tests, and the sound.
+
+## Step 26: the fast disk (SIO patch as a PBI device) (2026-11-21)
+
+Disk loading on the classic machine was at the real drive's speed: 19,200 baud, about 90 ms
+a sector. Emulators offer three ways around it: high-speed SIO (a faster divisor, needs a
+patched OS or DOS), running the machine unthrottled during I/O (not for hardware), and the
+"SIO patch", a trap on the OS's SIOV entry that puts the sector straight into memory. The
+last one is what was wanted. It is done here with the mechanism the XL OS has for it, not
+with a trap: SIO offers each call to the parallel bus devices in PDVMSK first ($D1FF select,
+JSR $D805, carry set = done). The core already carried MiSTer's PBI ROM emulation, unused
+(`PBI_ROM_MODE` tied to 0) and with its SDRAM slot (0x1F2000) free.
+
+- `pbi_rom.vhdl` cut down to the select bit ($D1FF) and a request bit ($D1FE): no ROM banks,
+  no 254-register scratch RAM. `PBI_ROM_MODE` comes from the firmware (reg 0xB4 bit 2), the
+  request bit goes to it (bit 8, read).
+- `firmware/pbi_disk.s`: the device's ROM. For "R" and "S" on device $31 it flips the request
+  bit, waits for the I/O processor to copy that bit into the ROM, and copies the bytes from
+  the ROM's last page to the caller's buffer.
+- Firmware (`pbi_poll`): reads the DCB at $0300, gets the sector with the same functions the
+  serial path uses (disk image, executable's virtual disk, folder disk), writes it into the
+  ROM. It never writes the Atari's RAM, so a buffer in banked memory or under the ROM needs
+  nothing special. Anything it does not take is declined and the OS goes on to the serial
+  port: the old path is the fallback and is unchanged.
+- `/atari.ini` `fastdisk` (default 1). The device is only added or removed while the
+  machine is held in reset.
+
+| | Step 25 | Step 26 |
+| --- | --- | --- |
+| Logic | 16,752 (81%) | 16,942 (82%) |
+| CLS | 9,373 (91%) | 9,484 / 10,368 (92%) |
+| Block RAM | 43 / 46 | 43 / 46 |
+| clk\_core (needs 28.69 MHz) | 30.74 MHz | 32.68 MHz |
+| clk\_pix (needs 71.72 MHz) | 85.21 MHz | 92.40 MHz |
+| sys\_clk (needs 27 MHz) | 41.15 MHz | 36.81 MHz |
+| Setup / hold violations | 0 / 0 | 0 / 0 (worst hold 0.074 ns) |
+
+**Board** (build `core/impl/pbi_a/`), files opened from Horizon's Files, times from the key
+press, which include the OS's start (about 1.5 s):
+
+| | Sectors by the fast path | Loaded after |
+| --- | --- | --- |
+| `DOS25.atr` (to BASIC's READY) | 43 | under 2 s |
+| `BobTerm1.21.atr` | 243 | 3.7 s |
+| `MYDOS45D.ATR` | 26 | 2.9 s |
+| `acid800.atr` (its boot) | 20 | 2.1 s |
+| `Alley Cat.xex` (32,594 bytes) | 260 | 5.4 s |
+
+No SIO errors, PDVMSK = 1. At the serial rate measured in step 25's F12 tests (about 12
+sectors a second) the 243 sectors alone are 20 s. F12 pressed at ten moments of the BobTerm
+boot: the firmware answered and Horizon took input every time. Not measured: `fastdisk=0`
+on this build (the serial path's code is unchanged), a write, and the picture and sound of
+what was loaded (the executable's clock runs after the load).

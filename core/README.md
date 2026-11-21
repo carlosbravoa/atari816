@@ -84,6 +84,7 @@ edits it. One `key=value` per line; `#` starts a comment.
 | `scanlines` | `0` off, `1` 25%, `2` 50%, `3` 75% |
 | `hpos` | Horizontal picture position, 0 to 48 |
 | `boot` | `ash` = `/ASH.CAR` is the default cartridge |
+| `fastdisk` | `1` (the default) = the fast disk below; `0` = every disk access over the serial port |
 
 ## The 8-bit Atari
 
@@ -97,6 +98,30 @@ F12 returns to the desktop and freezes it. The 8-bit machine is kept at the leve
 compatibility needed to boot, run normal disks, executables and cartridges, and play sound and
 joystick games; features beyond that were removed to make room for the native machine
 (Docs/03-bringup1-log.md, steps 13 and 17).
+
+### Fast disk
+
+What emulators call the SIO patch, done the way the XL operating system provides for: a
+parallel bus (PBI) device. The OS offers every SIO call to the PBI devices before it uses the
+serial port. This one (`firmware/pbi_disk.s`, 109 bytes of 6502 code at $D800 while the OS
+has it selected; `rtl/common/a8core/pbi_rom.vhdl`) takes "read a sector" and "status" of a
+drive that holds a disk image, an executable or the folder disk: the I/O processor leaves the
+sector in the device's ROM and the 6502 copies it to the caller's buffer. A sector takes
+about 3 ms instead of 90: a 130 KB disk that boots by reading 243 sectors is up in under
+4 s, where the serial port needs over 20.
+
+Everything else is declined and goes over the serial port as before: writes, format, the
+printer, a drive without a disk, a request whose length is not the sector's, a read error. So
+does a program that brings its own serial routines (most copy-protected disks) or runs
+without the OS ROM; those load at the old speed. The device needs an OS with PBI support
+(any XL/XE OS). `fastdisk=0` in `/atari.ini` takes it out (the OS then finds no device);
+it is read at the next cold start of the 8-bit machine.
+
+Registers, for the record: $D1FF (W) bit 0 selects the device, as the OS does around each
+call; $D1FE (W) bit 0 is the request bit, which the ROM sets to the opposite of the "served"
+byte the I/O processor keeps at $DEF0; $DEF1 is the result (0 declined, 1 the bytes are at
+$DF00); the request itself is the caller's DCB at $0300. `atari.py status` counts the
+requests served (`pbi:`).
 
 ## PC link and tools
 

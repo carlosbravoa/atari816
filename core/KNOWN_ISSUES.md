@@ -10,7 +10,9 @@ SIO transmitter is clocked by the classic POKEY tick, which stops with the freez
 `sio_tx_byte` waited without a bound for room in its 256-byte FIFO. An answer longer than the
 FIFO (a 256-byte sector: 259 bytes) sent to a machine that has just been frozen hung the
 firmware, and Horizon's keyboard and mouse come through the firmware. It now gives up after
-5 ms. If it happens again: does `core/tools/atari.py status` still answer (firmware alive or
+5 ms. Since the fast disk (bring-up log, step 26) the OS's sector reads no longer use the
+serial port at all, so only writes and programs with their own serial routines are still
+exposed. If it happens again: does `core/tools/atari.py status` still answer (firmware alive or
 not), and which disk image was it?
 
 ## ROADMAP: the freeze should wait for the right moment

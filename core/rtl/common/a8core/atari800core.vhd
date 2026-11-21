@@ -196,6 +196,7 @@ ENTITY atari800core IS
 		freezer_activate: in std_logic;
 		ATARI800MODE : in std_logic := '0';
 		PBI_ROM_MODE : in std_logic := '0';
+		PBI_DISK_REQ : out std_logic;	-- Atari816: the PBI disk's request bit
 		XEX_LOADER_MODE : in std_logic := '0';
 		RTC : IN STD_LOGIC_VECTOR(64 DOWNTO 0);
 		VBXE_SWITCH : IN STD_LOGIC;
@@ -613,6 +614,7 @@ PORT MAP(CLK => CLK,
 		 ram_select => RAM_SELECT(2 downto 0),
 		 ATARI800MODE => ATARI800MODE,
 		 PBI_ROM_MODE => PBI_ROM_MODE,
+		 PBI_DISK_REQ => PBI_DISK_REQ,
 		 XEX_LOADER_MODE => XEX_LOADER_MODE,
 		 ROM_DATA => ROM_DO,
 		 SDRAM_DATA => SDRAM_DO,

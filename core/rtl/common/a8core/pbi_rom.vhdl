@@ -20,10 +20,17 @@
 
 library IEEE;
 use IEEE.STD_LOGIC_1164.ALL;
-use IEEE.STD_LOGIC_ARITH.ALL;
 
 library work;
 
+-- Atari816: the one PBI device of the classic machine, the I/O processor's disk
+-- (see core/README.md, "Fast disk"). Cut down from the MiSTer
+-- original: no ROM banks and no scratch RAM at $D100 (254 registers there).
+--   $D1FF write: bit 0 selects the device: its 2 KB ROM (SDRAM, written by the I/O processor)
+--                replaces the math pack at $D800-$DFFF. The OS does this around each call.
+--   $D1FE write: bit 0 = the request bit, read by the I/O processor: a request is pending
+--                while it differs from the "served" byte the I/O processor keeps in the ROM.
+--   $D1xx read:  $00 (no interrupt pending).
 entity PBIROM is
 	Port (
 		clk: in std_logic;
@@ -38,77 +45,38 @@ entity PBIROM is
 		pbi_rom_address_enable: out std_logic;
 		data_out: out std_logic_vector(7 downto 0);
 		cache_data_out: out std_logic_vector(7 downto 0);
-		data_out_enable: out std_logic
-	);	
+		data_out_enable: out std_logic;
+		req: out std_logic
+	);
 end PBIROM;
 
 architecture vhdl of PBIROM is
 
-signal pbi_rom_bank_reg: std_logic_vector(12 downto 11) := (others => '0');
-signal pbi_rom_bank_next: std_logic_vector(12 downto 11);
 signal pbi_rom_enable_reg: std_logic := '0';
-signal pbi_rom_enable_next: std_logic := '0';
-
-type small_ram is array(0 to 253) of std_logic_vector(7 downto 0);
-signal pbi_ram_reg: small_ram;
-signal pbi_ram_next: small_ram;
+signal req_reg: std_logic := '0';
 
 begin
 
-pbi_rom_address <= pbi_rom_bank_reg & a(10 downto 0);
+pbi_rom_address <= "00" & a(10 downto 0);
 pbi_rom_address_enable <= d8xx and rw and pbi_rom_enable_reg;
+data_out <= x"00";
+cache_data_out <= x"00";
+data_out_enable <= d1xx and rw;
+req <= req_reg;
 
 process(clk, reset_n)
 begin
 	if reset_n = '0' then
-		pbi_rom_bank_reg <= (others => '0');
 		pbi_rom_enable_reg <= '0';
-		pbi_ram_reg <= (others => (others => '0'));
+		req_reg <= '0';
 	elsif rising_edge(clk) then
-		pbi_rom_bank_reg <= pbi_rom_bank_next;
-		pbi_rom_enable_reg <= pbi_rom_enable_next;
-		pbi_ram_reg <= pbi_ram_next;
-	end if;
-end process;
-
-process(a, rw, d1xx, pbi_rom_enable_reg, pbi_rom_bank_reg, pbi_ram_reg)
-begin
-	data_out_enable <= '0';
-	data_out <= x"ff";
-	cache_data_out <= x"ff";
-	if (d1xx = '1') and (rw = '1') then
-		data_out_enable <= '1';
-		case a(7 downto 0) is 
-		when x"FF" =>
-			-- read out PDVI register
-			data_out <= x"00";
-			cache_data_out <= "0000000" & pbi_rom_enable_reg;
-		when x"FE" =>
-			cache_data_out <= "000000" & pbi_rom_bank_reg;
-		when others =>
-			data_out <= pbi_ram_reg(conv_integer(unsigned(a(7 downto 0))));
-			cache_data_out <= pbi_ram_reg(conv_integer(unsigned(a(7 downto 0))));
-		end case;
-	end if;
-end process;
-
-process(a, d1xx, rw, pbi_rom_enable_reg, pbi_rom_bank_reg, pbi_ram_reg, data_in)
-begin
-	pbi_rom_enable_next <= pbi_rom_enable_reg;
-	pbi_rom_bank_next <= pbi_rom_bank_reg;
-	pbi_ram_next <= pbi_ram_reg;
-	if (d1xx = '1') and (rw = '0') then
-		case a(7 downto 0) is
-		when x"FE" =>
-			pbi_rom_bank_next <= data_in(1 downto 0);
-		when x"FF" =>
-			pbi_rom_enable_next <= data_in(0);
-			if data_in(0) = '0' then
-				pbi_rom_bank_next <= (others => '0');
+		if (d1xx = '1') and (rw = '0') then
+			if a(7 downto 0) = x"FF" then
+				pbi_rom_enable_reg <= data_in(0);
+			elsif a(7 downto 0) = x"FE" then
+				req_reg <= data_in(0);
 			end if;
-		when others =>
-			pbi_ram_next(conv_integer(unsigned(a(7 downto 0)))) <= data_in;
-		end case;
+		end if;
 	end if;
 end process;
 

@@ -854,6 +854,10 @@ wire        kbd_pc_layout;   // OSD "Keyboard: PC" (sys_clk, same domain as the 
 // firmware only changes it across a cold boot, so a plain 2-FF sync into clk_core
 // is safe (settles long before the core leaves reset). Default 3'b001 = 128 KB.
 wire [2:0]  ram_select_opt;
+// The classic machine's PBI disk (core/README.md, "Fast disk"): enable from the firmware, request bit to it
+wire        pbi_en_opt, pbi_req_core;
+reg         pbi_en_s1 = 1'b0, pbi_en_core = 1'b0;
+always @(posedge clk_core) begin pbi_en_s1 <= pbi_en_opt; pbi_en_core <= pbi_en_s1; end
 reg  [2:0]  ram_sel_s1 = 3'b001, ram_select_core = 3'b001;
 always @(posedge clk_core) begin ram_sel_s1 <= ram_select_opt; ram_select_core <= ram_sel_s1; end
 
@@ -957,7 +961,9 @@ iosys_picorv32 #(
     .scanline_level_out(scanline_level),
     .h_offset_out(h_offset),
     .kbd_pc_layout_out(kbd_pc_layout),
-    .ram_select_out(ram_select_opt)
+    .ram_select_out(ram_select_opt),
+    .pbi_en_out(pbi_en_opt),
+    .pbi_req(pbi_req_core)
 );
 
 // Clock Domain Crossing (CDC) Synchronization for SIO Handler
@@ -1118,7 +1124,8 @@ atari800core_simple_sdram #(
     .CLIP_SIDES                 (1'b0),
     .RESET_RNMI                 (1'b0),
     .ATARI800MODE               (1'b0),     // XL/XE mode
-    .PBI_ROM_MODE               (1'b0),
+    .PBI_ROM_MODE               (pbi_en_core),      // the PBI disk (firmware option)
+    .PBI_DISK_REQ               (pbi_req_core),
     .XEX_LOADER_MODE            (1'b0),
     .RTC                        (65'd0),
     .VBXE_SWITCH                (1'b0),
