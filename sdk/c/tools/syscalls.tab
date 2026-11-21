@@ -1,0 +1,138 @@
+# syscalls.tab - the C signatures of Horizon's syscalls (tools/gensys.py reads it).
+#
+# One line per syscall, keyed by its ABI.md name; the number and the SYS_ constant come
+# from horizon.inc (through sdk/tools/abicheck.py), never from here:
+#
+#   abi_name | ret | params | outs | doc
+#
+# ret      void      nothing (the call has no error result)
+#          ok        int: 0, or -1 on error
+#          int       int: A, or -1 on error
+#          unsigned  unsigned: A, or $FFFF on error (when $FFFF is also a valid answer,
+#                    test hz_errno, which every stub sets: 0 or the error code)
+#          long      long: A | X << 16, or -1 on error
+#          noreturn  never returns
+# params   C parameters in order, each "type name:REG". REG: A X Y (16-bit), A.lo A.hi
+#          X.lo X.hi Y.lo Y.hi (one byte of the register), XY (a data pointer: X = offset,
+#          Y = bank; in the tiny model Y = 0), XY32 (a 32-bit value: X low, Y high),
+#          AX32 (A low, X high). A constant: "=A:0" (A = 0), "+A:0x8000" (A |= $8000).
+# outs     x, y: X / Y after the call are also kept in hz_x / hz_y (also after an error)
+#
+# Every stub: carry set -> hz_errno = A (the Horizon error code) and the error value;
+# carry clear -> hz_errno = 0.
+
+exit          | noreturn | unsigned code:A | | End the task with an exit code. Nothing is flushed: exit() (stdlib.h) flushes the C streams first.
+yield         | void     | | | Give the CPU to the next ready task of the same or higher priority.
+sleep         | void     | unsigned ms:A | | Sleep ms milliseconds (10 ms resolution, rounded up; 0 = yield).
+getpid        | unsigned | | | The task id (1-62).
+uptime        | long     | | | Milliseconds since reset (32 bits).
+putc          | void     | unsigned c:A | | One character on the kernel console (unbuffered).
+puts          | ok       | const char *s:XY | | A zero-terminated string on the console, written as one piece.
+con_size      | unsigned | | x | The console's columns; hz_x = its rows (78 x 29 on the screen; a terminal window's size in a terminal).
+chdir         | ok       | const char *path:XY | | Change the current directory (inherited by tasks it spawns).
+getcwd        | int      | char *buf:XY, unsigned size:A | | The current directory (absolute, zero-terminated) into buf -> its length. EINVAL if buf is too small.
+restart       | ok       | unsigned full:A | | Restart Horizon (0) or the whole machine (1). Programs should rather use sysreq.
+sync          | ok       | unsigned flags:A | | Close every open file and flush the card; flags bit 0: end every other program first.
+sysreq        | ok       | unsigned what:A | | Ask the Desktop to shut down (SR_SHUTDOWN), restart (SR_RESTART) or fully restart (SR_FULLRESTART).
+time_get      | long     | | y | The clock: seconds since 2000-01-01 00:00; hz_y = CLK_NONE / CLK_SAVED / CLK_SET (how it was set).
+time_set      | ok       | long secs:AX32, unsigned state:Y | | Set the clock (state CLK_SAVED or CLK_SET).
+vsync         | unsigned | | | Wait for the next vertical blank (60 Hz) -> the frame counter. Also waits for the caller's draw list.
+bank_alloc    | unsigned | | | A fresh 64 KB bank owned by the task -> its number. ENOMEM when none is left.
+bank_free     | ok       | unsigned bank:A | | Give back a bank from bank_alloc.
+mem_info      | unsigned | | x | Free banks; hz_x = total banks.
+open          | int      | const char *path:XY, unsigned mode:A | x | Open a file (HZ_O_READ, HZ_O_RDWR, HZ_O_CREATE, HZ_O_APPEND) -> handle (0-3; URLs and connections 4-7). For an HTTP error hz_x = the status.
+close         | ok       | unsigned handle:A | | Close a handle.
+read          | int      | hz_io *io:XY | | Read io->len bytes into io->buf -> bytes read (fewer = end of file).
+write         | int      | const hz_io *io:XY | | Write io->len bytes from io->buf -> bytes written.
+seek          | long     | unsigned handle:A, unsigned long pos:XY32 | | Move to an absolute position -> the new position.
+stat          | long     | hz_statblk *blk:XY | x | Information on blk->path into blk->out (9 bytes: hz_fileinfo) -> the size. For an HTTP error hz_x = the status.
+readdir       | int      | hz_readdirblk *blk:XY | | Directory entries of blk->path packed into blk->buf (skipping blk->skip) -> entries read. See hz_dirent.
+delete        | ok       | const char *path:XY | | Delete a file (or an empty folder).
+mkdir         | ok       | const char *path:XY | | Make a folder.
+rename        | ok       | const hz_renameblk *blk:XY | | Rename or move a file or folder.
+spawn         | int      | const hz_spawnblk *blk:XY | | Start a program -> task id. Returns once it is loaded (load errors come here).
+wait          | int      | unsigned task:A | | Wait for a child to end -> its exit code (the low 15 bits; see the docs for $FF80 and $FF00+cause).
+kill          | ok       | unsigned task:A | | End a task (it exits with $FF80).
+task_info     | ok       | unsigned slot:A, hz_taskinfo *rec:XY | | The task in slot 0-15 into rec (id 0 = a free slot).
+task_single   | ok       | | x | One instance of this program only: when one runs already, -1 with hz_errno ERUNNING and hz_x = its id (the program should exit).
+port_create   | int      | | | A message port owned by the caller -> its number (0-15).
+send          | ok       | unsigned port:A, const hz_msg *msg:XY | | Send a 16-byte message (EAGAIN: the queue is full).
+recv          | ok       | unsigned port:A, hz_msg *msg:XY | | Receive a 16-byte message; blocks unless port | RV_POLL (then EAGAIN when empty).
+port_close    | ok       | unsigned port:A | | Close an own port.
+input_claim   | ok       | | | Take the keyboard (EAGAIN if another task holds it).
+input_read    | unsigned | | x y | Wait for a key or mouse event -> A (key: HID usage; mouse: $0100 | buttons; wheel: $0200); hz_x, hz_y as in ABI.md ("Mouse").
+input_release | ok       | | | Give the keyboard back.
+input_lend    | ok       | unsigned task:A, unsigned flags:X | | Lend the keyboard to a task (flags bit 0: ctrl-C kills it).
+input_poll    | unsigned | | x y | As input_read, but EAGAIN at once when nothing is queued (test hz_errno).
+joystick      | unsigned | =A:0 | x | The joysticks' directions (JOY_*: port 1 bits 0-3, port 2 bits 4-7); hz_x = triggers (bit 0 port 1, bit 1 port 2).
+mouse_inject  | ok       | unsigned dx:A.lo, unsigned dy:A.hi, unsigned wheel:X.lo, unsigned buttons:X.hi | | Test aid: one mouse event through the kernel's path (signed bytes).
+classic_show  | ok       | | | Show the classic Atari until F12 (keyboard holder only).
+classic_mount | int      | const char *path:XY, unsigned kind:A.lo, unsigned slot:A.hi | | Mount a disk image, executable or cartridge (CK_*) -> the kind mounted.
+classic_eject | ok       | unsigned kind:A.lo, unsigned slot:A.hi | | Eject (CK_DISK with a slot 0-3, CK_XEX, CK_CART).
+classic_boot  | ok       | unsigned mode:A | | Cold boot the classic Atari and show it (0), or only boot it (CB_STAY).
+classic_query | int      | unsigned item:A, char *buf128:XY | | The path mounted at item (0-3 D1:-D4:, 4 executable, 5 cartridge) into a 128-byte buffer -> its length (0: none).
+beep          | ok       | unsigned pitch:A, unsigned ticks:X, unsigned volume:Y | | A POKEY tone on channel 1: pitch (AUDF), duration in 10 ms ticks, volume 0-15.
+sound_write   | ok       | unsigned reg:A, unsigned value:X | | Write a POKEY register ($00-$0F; $10-$13 the DACs before REV $0C).
+sound_chime   | ok       | unsigned kind:A, unsigned volume:X | | The user interface's chime (CH_INFO, CH_WARN, CH_QUESTION, CH_ERROR); volume $FFFF = the setting.
+sample_play   | int      | const hz_sample *s:XY | | Play a sample on Lau (REV $0A) -> the voice 0-7. ENODEV without Lau.
+sample_stop   | ok       | unsigned voice:A | | Stop a voice of the caller ($FFFF: all of them).
+sample_stat   | unsigned | | x | The caller's voices playing (bit n = voice n); hz_x = all voices playing. ENODEV without Lau.
+sample_set    | ok       | unsigned voice:A, unsigned pitch:X, unsigned left:Y.lo, unsigned right:Y.hi | | Change a playing voice's pitch and volumes.
+sample_timer  | unsigned | unsigned port:A, unsigned long period_us:XY32 | | The music timer: a message to port every period (microseconds, 1000 or more); port $FFFF: off -> the generation.
+opl_write     | unsigned | unsigned reg:A, unsigned value:X | | Write an OPL2 register (REV $0C; $FFFE probe, $FFFF reset, $FFFD release) -> OPL_STAT.
+ws_start      | unsigned | | | Start the window system -> 1 started now, 0 already running.
+ws_stop       | ok       | | | End the window system (its starter only).
+win_open      | int      | const hz_winopen *w:XY | | Open a window -> its number (0-15).
+win_close     | ok       | unsigned win:A | | Close an own window.
+win_draw      | ok       | unsigned win:A, const hz_windraw *d:XY | | Draw in a window (WD_* ops; see hz_windraw).
+win_event     | ok       | unsigned poll:A, hz_event *ev:XY | | The next event of the caller's windows into ev; poll = 1: EAGAIN at once when there is none.
+win_twidth    | unsigned | unsigned font:A, const char *s:XY | | The width in pixels of s in a font (0 UI, 1 fixed 8x12).
+ws_sync       | ok       | | | Wait until the screen shows everything drawn so far.
+win_move      | ok       | unsigned win:A, int x:X, int y:Y | | Move a window.
+ws_redraw     | ok       | | | Repaint the whole screen (for measurements).
+ws_stats      | long     | | | Microseconds the last repaint took.
+ws_config     | unsigned | unsigned flags:A | x | Measurement switches (bit 0 blitter off, ...) -> 1 if the blitter is used; hz_x = the hardware revision.
+win_timer     | ok       | unsigned win:A, unsigned ticks:X | | WE_TICK events every ticks x 10 ms (0 = off).
+win_menu      | ok       | unsigned win:A, const char *menus:XY | | The window's menus: "title", "item", ..., "", "title", ..., "", "" in one block.
+ws_status     | ok       | const char *s:XY | | The text at the right of the menu bar (31 characters).
+ws_term       | ok       | unsigned win:A | | Send this task's console (and its children's) to a WF_TERM window ($FF: detach).
+clip_put      | ok       | const hz_clipblk *c:XY | | Put bytes on the clipboard (length 0 empties it).
+clip_get      | unsigned | hz_clipblk *c:XY | | Copy the clipboard into c->data (at most c->len bytes) -> the clipboard's length.
+win_info      | ok       | unsigned win:A, hz_rect *r:XY | | A window's content rectangle on the screen (any program's window).
+win_at        | unsigned | int x:X, int y:Y | | The top-most window at a screen position -> its number, $FF none.
+win_drop      | ok       | unsigned win:A, const char *s:XY | | Drop a string on a window (any program's): it gets WE_DROP.
+win_dropget   | ok       | unsigned win:A, char *buf128:XY | | The last string dropped on an own window (128-byte buffer).
+ws_palette    | ok       | unsigned index:A, unsigned red:X.lo, unsigned green:X.hi, unsigned blue:Y | | Set one palette entry (16-255: the caller's own; see ABI.md "Palette entries").
+setting       | unsigned | unsigned id:A, unsigned value:X | | A system setting (0 mouse speed, 1 alert volume, ...); value $FFFF only reads -> the old value.
+win_title     | ok       | unsigned win:A, const char *s:XY | | A new window title (31 characters).
+ws_pointer    | ok       | unsigned shape:A | | The pointer's shape (PTR_*).
+ws_mouse      | unsigned | unsigned win:A, hz_mouse *m:XY | x | The pointer now (screen, and relative to win's content; $FF none) -> the buttons; hz_x = the window under it ($FF none).
+ws_hold       | ok       | unsigned on:A | | Hold the screen while one change is drawn in several calls (1), release (0).
+win_mstate    | ok       | unsigned win:A, unsigned menu:X.lo, unsigned item:X.hi, unsigned state:Y | | A menu item's state (MS_CHECK, MS_DIM); the item must start with a state byte.
+ws_closeall   | ok       | | | Send WE_CLOSE to every window of every other program.
+win_geom      | ok       | unsigned win:A, const hz_rect *r:XY | | Move and resize an own window (x = $8000: it stays).
+task_name     | ok       | unsigned task:A, const char *name:XY | | The name the menu bar shows for a task's windows (0 = the caller). See hz_task_name_get.
+win_popup     | unsigned | unsigned win:A, const hz_popup *p:XY | | A pop-up menu (blocks) -> the item chosen, $FFFF none (test hz_errno).
+spr_alloc     | int      | unsigned count:A, unsigned win:X | | count hardware sprites in a row for an own window -> the first one (REV $0B).
+spr_free      | ok       | unsigned first:A, unsigned count:X | | Free sprites (first $FFFF: all of the caller's).
+spr_set       | ok       | unsigned count:A, const hz_sprite *e:XY | | Set count sprites (all of their fields) from the next frame on.
+spr_move      | ok       | unsigned sprite:A, int x:X, int y:Y | | Move one sprite (the cheap per-frame call). Several at once: hz_spr_move_many.
+spr_show      | ok       | unsigned sprite:A, unsigned on:X | | Show (1) or hide (0) a sprite.
+fs_enter      | ok       | unsigned win:A, const hz_fsenter *f:XY | | Full-screen mode for an own window with the given framebuffer.
+fs_leave      | ok       | unsigned win:A | | Back to the desktop.
+fs_scroll     | ok       | const hz_fsscroll *s:XY | | The full-screen program's scroll registers (REV $0B).
+fs_raster     | ok       | unsigned count:A, const hz_raster *e:XY | | The raster table: count palette changes at given lines (0: off; REV $09).
+pal_set       | ok       | unsigned first:A.lo, unsigned count:A.hi, const unsigned char *rgb:XY | | Set count palette entries from first (count 0 = 256) from red, green, blue bytes.
+pal_alloc     | int      | unsigned count:A, unsigned first:X | | count palette entries in a row for the caller -> the first ($FFFF: any place; count 0: give all back).
+draw_list     | int      | unsigned win:A.lo, unsigned count:A.hi, const hz_drawrec *r:XY | | Run count (1-128) draw-list records with the blitter -> records drawn. Returns at once: see list_wait.
+list_wait     | unsigned | unsigned ask:A | | 0: wait until the caller's draw list is done; 1: ask -> 1 while it runs.
+frame         | unsigned | | | The frame counter (+1 every vertical blank; REV $09).
+win_vbl       | ok       | unsigned win:A, unsigned on:X | | WE_VBL events at every vertical blank (REV $09).
+win_front     | ok       | unsigned win:A | | Raise an own window (restored if minimized) and give it the focus.
+sheet_new     | int      | const hz_sheetnew *s:XY | | Register a sheet of art in own memory -> its number (1-32).
+sheet_free    | ok       | unsigned sheet:A | | Free a sheet ($FFFF: all of the caller's).
+sheet_draw    | int      | unsigned win:A.lo, unsigned count:A.hi, const hz_sheetrec *r:XY | | Run count (1-128) sheet records -> records drawn. Returns at once: see list_wait.
+
+# extra entry points: other register uses of a call above (abi_name:c_name)
+spr_move:spr_move_many   | ok  | unsigned count:A, const hz_sprmove *e:XY, +A:0x8000 | | (0.24) Move count sprites (1-16) in one call.
+task_name:task_name_get  | ok  | unsigned task:A, char *buf16:XY, +A:0x8000 | | Read a task's name as the menu bar shows it (16-byte buffer; 0 = the caller).

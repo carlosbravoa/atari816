@@ -49,9 +49,10 @@ sprites, scrolling, draw lists) and the classic machine.
   hardware too: sprites with collisions, a scrolling full screen with a panel and raster
   colours, blitter blocks, samples made or loaded and played by note name.
 
-Programs are written in 65816 assembly with ca65 / ld65 from the cc65 suite (no C
-compiler targets the machine yet: [docs/roadmap-notes.md](docs/roadmap-notes.md)) and
-run in **emu816**, the machine's emulator, with scripted input and screenshots.
+Programs are written in 65816 assembly with ca65 / ld65 from the cc65 suite, or in **C**
+with the C SDK ([c/](c), on the vbcc 65816 compiler: one command, `hcc`, builds a program;
+[docs/c/getting-started.md](docs/c/getting-started.md)), and run in **emu816**, the
+machine's emulator, with scripted input and screenshots.
 
 ## The SDK
 
@@ -59,8 +60,10 @@ run in **emu816**, the machine's emulator, with scripted input and screenshots.
 | --- | --- |
 | [docs/getting-started.md](docs/getting-started.md) | Install, build the emulator and Horizon, hello as a console and a window program, run, screenshot, script input, the real machine |
 | [docs/reference/](docs/reference/README.md) | The programmer's reference: program format and memory, every syscall with an example, the window system, drawing, the controls library, sound, the internet ([internet.md](docs/reference/internet.md)), the games calls (full screen, sprites, scrolling, draw lists, palette entries, frame sync: [games.md](docs/reference/games.md)), the classic machine, the hardware, performance, game patterns, limits |
-| [docs/roadmap-notes.md](docs/roadmap-notes.md) | What a C compiler target would need, and the candidates |
+| [c/](c) | The C SDK: `hcc` (one command from .c files to a program), the C library on Horizon (stdio with files, argc/argv, time, far memory), every syscall as a C function (`horizon.h`), examples, tests; [docs/c/](docs/c/getting-started.md): getting started, the reference (memory models, calling convention, speed), porting |
+| [docs/roadmap-notes.md](docs/roadmap-notes.md) | The C compiler candidates (vbcc 65816 was chosen: [c/](c)) |
 | [templates/console](templates/console) | Arguments, output, a line of input, a file |
+| [templates/c-console](templates/c-console) | The same in C (hcc, `make` with sdk/c/c.mk) |
 | [templates/window-app](templates/window-app) | A window with menus, a text field, buttons, the file dialog, an alert |
 | [templates/game](templates/game) | Gem Run: a timer loop, a tile map, keyed-blit sprites with dirty rectangles, keys + mouse, POKEY sound, title / play / game over |
 | [templates/basic-game](templates/basic-game) | Starfall, a BASIC 2.0 game: sprites, HIT, the arrows or a joystick, samples, 60 frames a second |
@@ -94,7 +97,7 @@ Verified in the emulator (REV $0B, its default): every template and example buil
 passes its scripted test, every reference example assembles and links, and the reference
 matches horizon.inc and the kernel's syscall tables. Not verified: the real board (no access
 while writing), sound (the emulator logs it, and writes Lau's and, since Horizon 0.27, the
-OPL2's output to a WAV file; POKEY is only logged), the PC link scripts, the C compiler
-notes. The internet examples (Fetch, Echo, Horizon 0.22) are tested in the emulator only
+OPL2's output to a WAV file; POKEY is only logged), the PC link scripts. The C SDK
+(November 2026) is tested in the emulator only (`make -C c test`). The internet examples (Fetch, Echo, Horizon 0.22) are tested in the emulator only
 (`--net-root` stands in for the web, a local echo server for TCP), not yet through the real gateway. Where a document states something that was not checked,
 it says so.

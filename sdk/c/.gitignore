@@ -1,0 +1,6 @@
+# the vbcc toolchain (tools/get-toolchain.sh) and everything built
+toolchain/
+build/
+*.PRG
+*.o
+__pycache__/

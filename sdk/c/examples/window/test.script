@@ -1,0 +1,13 @@
+# Input for `make test`. Time 0 = the program was started from the Desktop's Programs menu.
+# Two clicks in the window's content, then the close box. Screen coordinates (the shots are
+# at twice the size): the window's outer top left is (160, 100), its content starts one
+# pixel in and 15 lines down.
+1500 shot
++300 move 300 200
++300 click
++500 move 420 210
++300 click
++600 shot
++300 move 169 107
++300 click
++800 shot

@@ -1,10 +1,12 @@
 # Roadmap notes: a C compiler for the Atari816
 
-Research notes, no implementation. Horizon programs are written in 65816 assembly today.
-This page says what a C target would need and how far the known compilers are from it.
-**No compiler was tried for these notes.** What is said about the compilers comes from
-the author's general knowledge as of 2026 and is marked "(unverified)" where it matters;
-check the current state before choosing.
+**Status (November 2026): done.** Two compilers were tried (`sdk/c-spike/`: cc65 in 8-bit
+native mode and vbcc 65816); vbcc was 1.4 to 9 times faster and the C SDK is built on it:
+[sdk/c](../c), [docs/c/getting-started.md](c/getting-started.md). The notes below are the
+research that came before the trials, kept as a record; where they guessed (vbcc's 65816
+backend was "unverified"), the trials and the SDK have the answer: vbcc 65816 Release 2 has
+tiny, large and huge memory models, 32-bit pointers, a 65816-native code generator and a C
+library for a simulator target that the SDK adapts to Horizon.
 
 ## What a Horizon C target needs
 
@@ -59,7 +61,7 @@ mode, so the code must stay in native mode. A cc65 program would need:
 That gives C quickly, with the limits of a 6502 compiler (slow 16-bit arithmetic through
 the runtime). Worth a weekend experiment before anything bigger.
 
-## Recommendation
+## Recommendation (before the trials; the SDK followed point 3 with vbcc)
 
 1. Short term: try the cc65 8-bit-native experiment above (cheapest; same toolchain, same
    object format, same linker, and C functions callable from assembly programs).

@@ -1,0 +1,4 @@
+# Input for `make test` (see sdk/tools/inputscript.py). Time 0 = the program started.
+# It asks for a name: type one, Enter, then take a picture.
+800 Ada\n
++1500 shot

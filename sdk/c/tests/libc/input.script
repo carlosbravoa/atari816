@@ -1,0 +1,3 @@
+# typed input for libc.c (time 0 = the program started)
+1500 42 apples\n
++800 a line\n
