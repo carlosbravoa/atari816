@@ -16,7 +16,7 @@ It boots into the Desktop (or, with `/SYSTEM/NODESK` on the card, into the text 
 General MIDI sound bank), the settings files `CONFIG` (Settings), `PROGRAMS` (the Desktop's Programs menu) and `NODESK` (optional: boot into the text shell), and (0.14) `ICONS` (the Desktop's icons, made from `sdfiles/icons.txt`), `CLOCK` (the last time set, written by the Desktop and the shell) and `LAYOUT` (where the desktop icons are), (0.22) `URLS` (the Downloader's last addresses) and `BBS.TXT` (the BBS terminal's address book). Files hides it and refuses to start its programs |
 | `/SYSTEM/TESTS` | Test and demo programs: SELFTEST, HELLO, COUNT, SPIN, TICK, REGS, CRASH, FTEST, PING, PONG, KEYS, MOUSE, MTEST, BENCH, WDEMO, LEAK, HOG, (0.15) KTEST, (0.17) STEST, (0.18) GTEST, (0.27) OTEST |
 | `/BIN` | The applications: WFILES (Files), TERM (Terminal), EDIT, WRITE, SHEET, PAINT, BASIC, CALC, SOLITAIR, (0.17) QUABRICK (Quabricks; its samples QUABRICK.SFX, its high scores QUABRICK.DAT), SETTINGS, (0.22) DOWNLOAD (the Downloader), BBS (the BBS terminal), (0.23) PRINTER (Printer), (0.25) FREECELL (FreeCell; its sounds FREECELL.SFX, its statistics FREECELL.DAT), (0.26) MUSIC (Music, the music player), (0.27) OPLDEMO (OPL2 FM Synth), and the shell's tools FILES (the text browser), CAT, DIR, MEM |
-| `/Music` | (0.26) Music to play: `HORIZON.MOD` (83 s) and `LAU.MOD` (13 s), original modules generated at build time by `tools/mkmod.py`; (0.27) MIDI files (`.MID`) play on the OPL2 (`tools/mkmid.py` makes two demo songs; they are not on the card) |
+| `/Music` | (0.26) Music to play: `HORIZON.MOD` (83 s) and `LAU.MOD` (13 s), original modules generated at build time by `tools/mkmod.py`; (0.27) MIDI files (`.MID`) play on the OPL2: `PRELUDE.MID`, `ELISE.MID`, `ENTERTNR.MID` and `THEME.MID`, written as notes at build time by `tools/mkmid.py --song` (see "Music", the card's songs) |
 | `/Desktop` | Created by the Desktop if missing: what is in it shows as icons on the desktop (0.14: shortcuts are `.LNK` files, below) |
 | `/atari.ini` | The classic machine's settings, read by the I/O processor at boot (Settings > Classic Atari edits it; 0.23: also the folder disk, `folder=` and `folderdrive=`) |
 | `/Printouts` | (0.23) The print jobs, made by the I/O processor at the first one (see "Version 0.23") |
@@ -384,7 +384,10 @@ the blitter: the software drawing paths; both must pass):
    answered at once; a file of exactly 64 KB played to its end. Before REV $0C a polite
    refusal. A Desktop session (`tests/opl27.src`, REV $0C only): Music plays a MIDI file,
    the OPL2 app finds the chip taken, Stop gives it back, the app's Chords demo, Music finds
-   the chip taken (`opl27*.png`).
+   the chip taken (`opl27*.png`). MIDI heard (`tests/midwav.py`, REV $0C only): a small file
+   played by `musicd` with emu816's `--wav`; the pitch heard early and late in each of four
+   notes within 1 % of the note's, a rest, a chord, nothing before the first note and silence
+   after the end (no stuck note).
 
 The Desktop sessions (`DESK=1` in `tests/shots.sh`) get `tests/desk.programs` as their
 Programs menu (the order of 0.12), so programs added to `sdfiles/PROGRAMS` do not change
@@ -636,8 +639,8 @@ names with spaces: "in quotes"; ctrl-C stops the foreground job
 | `user/otest.s` | (0.27) OTEST, the test of opl_write |
 | `user/midplay.s`, `user/midplay.inc`, `user/opl_gm.inc` | (0.27) the General MIDI player on the OPL2 (`build/midplay.o`, linked into the music engine): Standard MIDI Files 0 and 1, nine voices, the GM drums on channel 10, its built-in bank of 128 + 47 patches, a WOPL bank read at run time |
 | `user/opldemo.s` | (0.27) OPL2 FM Synth (`/BIN/OPLDEMO.PRG`, Programs > OPL2): demos and a live FM keyboard |
-| `tools/mkmid.py`, `tools/mkoplgm.py` | (0.27) two demo MIDI songs (`OPLGROOVE.MID`, `BAROQUE.MID`; the MIDI tests make their files with its classes); the built-in GM bank `user/opl_gm.inc` |
-| `tests/midrun.py` | (0.27) the MIDI tests: files played by the engine, the OPL2 register stream read back as notes and times |
+| `tools/mkmid.py`, `tools/mkoplgm.py` | (0.27) the card's MIDI songs (`--song NAME FILE`: `/Music/*.MID`), two more demo songs (`OPLGROOVE.MID`, `BAROQUE.MID`, for the Desktop test; the MIDI tests make their files with its classes); the built-in GM bank `user/opl_gm.inc` |
+| `tests/midrun.py`, `tests/midwav.py` | (0.27) the MIDI tests: files played by the engine, the OPL2 register stream read back as notes and times; the sound heard in emu816's `--wav` |
 | `kernel/k2.s`, `kernel/k2*.s`, `kernel/k2.inc`, `kernel/kfar.s` | (0.18) the second code segment (bank 0): frame sync and the vertical blank (`k2vbl.s`), palette entries (`k2pal.s`), sprites (`k2spr.s`), full-screen mode, scrolling and the raster table (`k2fs.s`), draw lists (`k2list.s`); its imports and the bank $01 wrappers |
 | `kernel/k3.s` | (0.19) the third code segment (bank $7F): sheets (sheet_new, sheet_free, sheet_draw: the fast path and the full one), their cleanup at bank_free and at a task's end |
 | `tools/kspace.py` | (0.18) the kernel's space at every build |
@@ -1119,11 +1122,26 @@ bus time (see emu/README.md, "Memory timing"). Expect the same factor on the CPU
   sample `/atari.ini` lost it.
 - **emu816**: REV $0C is the default (`--rev 11` and older as before): the OPL2's registers,
   status and timers A and B against emulated time with JTOPL's flags and masks, its
-  interrupt on IRQ_STATUS bit 5, the chip reset with the CPU; `--log-opl`, `--log-opl-us`;
-  no FM synthesis ($DB32/$DB33 read 0, `--wav` stays Lau's). The DACs ignore writes on REV
-  $0C. Its own tests: `OPLTEST.BIN` (status and timer parts; its tone part needs the
-  synthesis) and `tests/asm/opltimer` (the periods, masks, the IRQ waking WAI).
-- **Tests**: item 32 of the list above (`make test-27`). The pictures that show About have
+  interrupt on IRQ_STATUS bit 5, the chip reset with the CPU; `--log-opl`, `--log-opl-us`.
+  The DACs ignore writes on REV $0C. **The OPL2 sounds**: Nuked OPL3 (Nuke.YKT's
+  cycle-accurate emulation of the YMF262, LGPL-2.1-or-later, vendored unmodified in
+  `emu/nuked-opl3/`) runs in OPL2 mode at the board's 49,803 Hz and gets every register write
+  at its emulated cycle; around it, as JTOPL does on the board, the waveform-select enable bit
+  and JTOPL's sum (its per-channel levels, 17-bit sum, saturation). $DB32/$DB33 read its
+  output, and `--wav` records Lau plus the OPL2 mixed as the board's HDMI output mixes them
+  (without the classic machine's POKEY and GTIA). An SDL build plays the same mix live
+  (`--mute`: not). `emu/README.md`, "OPL2", has the details and the ways it can still differ
+  from the board. Its own tests: `OPLTEST.BIN` (status, timer and, now, tone parts),
+  `tests/asm/opltimer` (the periods, masks, the IRQ waking WAI) and `tests/asm/opltone` (a
+  440 Hz note in the WAV: its pitch, level, release to silence; the same bytes twice).
+- **Songs for the OPL2 on the card**: `/Music` has four MIDI files next to the two modules,
+  written as notes by `tools/mkmid.py --song` at build time: Bach's Prelude in C, Fur Elise,
+  The Entertainer and "Horizon" for FM (see "Music", the card's songs). The Desktop sessions
+  that keep `/Music` (Music's and the OPL2's: KEEPMUSIC=1) show them in Files' listing of
+  that folder; their pictures were looked at and only that listing changed (`music26*.png`,
+  `opl27*.png`).
+- **Tests**: item 32 of the list above (`make test-27`; `tests/midwav.py`, MIDI heard through
+  the WAV, on REV $0C). The pictures that show About have
   REV $0C's sound line; the REV $0A-$0B ones are kept as `NAME-rev11.md5` (desk, system,
   desk14, kmenu), and the sound logs of the browser session and KTEST as
   `tests/browse-rev11.err`, `tests/ktest-rev11.err`. `EMUFLAGS="--rev 11"` now means REV $0B
@@ -1968,6 +1986,19 @@ file in Files.
 - A file opened from Files while Music already runs reaches it through `/SYSTEM/OPEN.REQ`
   (`ui_launch` writes the program's path and the file there when the kernel answers that the
   single-instance program runs; Music reads it when it gets the focus, and once a second).
+- **The card's songs** (`/Music`), all made at build time, nothing downloaded. The lengths are
+  as played by the music engine in emu816; the MIDI songs sound about 6 to 15 dB quieter than
+  `HORIZON.MOD` (RMS), as on the board, where one OPL2 voice reaches an eighth of full scale
+  and one Lau voice half of it:
+
+  | File | What | Length | Made by |
+  | --- | --- | --- | --- |
+  | `HORIZON.MOD` | "Horizon", a cheerful C-major tune (0.26) | 1:23 | `tools/mkmod.py`: original, samples synthesised |
+  | `LAU.MOD` | "Lau", a jingle in A major (0.26) | 0:13 | `tools/mkmod.py --jingle`: original |
+  | `PRELUDE.MID` | J. S. Bach, Prelude in C major BWV 846 (1722): the 35 bars on the piano, strings from bar 24, a ritardando | 1:56 | `tools/mkmid.py --song prelude`: our arrangement from the score (public domain) |
+  | `ELISE.MID` | L. van Beethoven, Fur Elise WoO 59 (1810): the theme on the piano, then the FM electric piano, the C-major episode with strings, the theme again; sustain pedal | 0:46 | `tools/mkmid.py --song elise`: our arrangement, shortened (public domain) |
+  | `ENTERTNR.MID` | S. Joplin, The Entertainer (1902): the first strain on the honky-tonk piano, then a little band (clarinet, tuba, piano, drums on channel 10) | 0:52 | `tools/mkmid.py --song entertainer`: our arrangement (public domain) |
+  | `THEME.MID` | "Horizon" for the OPL2: the module's tune, chords, bass and grooves row for row; square lead with vibrato and slides (pitch bend), a diving bass, electric piano, a pad swelling (CC 11), vibraphone, GM drums | 1:23 | `tools/mkmid.py --song horizon`: original |
 
 ## FreeCell
 

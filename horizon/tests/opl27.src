@@ -1,5 +1,6 @@
 # (0.27) the OPL2 on the Desktop (DESK=1; tests/mousegen.py makes tests/opl27.keys from this;
-# the card's Programs menu gets "Music" and "OPL2", /Music the two songs of tools/mkmid.py).
+# the card's Programs menu gets "Music" and "OPL2", /Music the two songs of tools/mkmid.py
+# next to the card's own).
 # Shots (s):
 #   1  13.0  Music plays /Music/OPLGROOVE.MID (opened in Files): MIDI on the OPL2, its title,
 #            the time, the meters

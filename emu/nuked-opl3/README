@@ -1,0 +1,10 @@
+Nuked OPL3 1.8 - Nuke.YKT, (c) 2013-2020 - a cycle-accurate emulator of the YMF262 (OPL3),
+made from die shots of the chip. emu816 uses it in OPL2 mode (the OPL3's NEW bit never set)
+to make the sound of the board's YM3812 (opl.c).
+
+Upstream:  https://github.com/nukeykt/Nuked-OPL3
+Commit:    765ec962e473aeb767e4cba74ffdc8f588ffbfe8 (2026-08-24, "remove NEW bit checks for
+           4-op channels")
+Files:     opl3.c, opl3.h, LICENSE - copied unmodified.
+Licence:   GNU Lesser General Public License v2.1 or (at your option) any later version, in
+           the file headers; full text in LICENSE.

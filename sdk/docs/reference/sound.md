@@ -16,11 +16,14 @@ Hardware REV $0C adds the **OPL2**, a YM3812 FM synthesizer (the AdLib's chip: n
 two-operator voices; `Docs/02-register-spec.md`, "OPL2"). Horizon 0.27 gives programs one
 call for it ($6D, below) and plays MIDI files on it.
 
-The emulator makes no sound. `run816.py --log-sound` (emu816 `--log-sound`) logs every
+The emulator makes no POKEY sound. `run816.py --log-sound` (emu816 `--log-sound`) logs every
 accepted write (`sound $DB01 = $AC`) in `emu.err`, `run816.py --log-lau` every write to Lau
 (`lau $DB20 = $00`), emu816 `--log-opl` every OPL2 register write (`opl $B0 = $31`): test
-your sound code with those (`emu816 --wav FILE` records Lau; the OPL2's sound is not
-modelled, only its registers and timers).
+your sound code with those. Lau and (Horizon 0.27) the OPL2 do sound: `emu816 --wav FILE`
+(`run816.py --wav`) records them mixed as the board's HDMI output mixes them (without the
+classic machine's POKEY), and emu816 built with SDL plays them live in its window. The OPL2's
+sound comes from Nuked OPL3, an accurate emulation of the chip family; the board's JTOPL
+core may differ in small details, so check a sound that matters on the board.
 
 ### $65 beep (SYS_BEEP)
 In: A = pitch (POKEY AUDF value), X = duration in 10 ms ticks (0 = silence: channel 1
@@ -148,8 +151,8 @@ recording at its own pitch, $2000 a 24 kHz one, $1555 a 16 kHz one; a semitone u
 1.0595. There is no interpolation: samples made near 48 kHz, or played near their own rate,
 sound cleanest. 16 kHz 8-bit is a good size for game effects (16 KB a second).
 
-The emulator plays Lau exactly (`emu816 --wav FILE` writes its output, `--log-lau` logs the
-writes; `run816.py --log-lau` passes that on). `sdk/examples/deepdive` makes its two samples
+The emulator plays Lau exactly (`emu816 --wav FILE` writes its output, with the OPL2's from
+REV $0C; `--log-lau` logs the writes, `run816.py --log-lau` passes that on). `sdk/examples/deepdive` makes its two samples
 at run time (`makesound`) and plays them with SP_ANY.
 
 ### $68 sample_play (SYS_SPLAY)

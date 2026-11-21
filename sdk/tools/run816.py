@@ -38,7 +38,8 @@ Options:
                   scrolling, 9 no Lau, 8 no command lists / raster / NV_FRAME, 7 no blitter
   --log-sound     log every write to POKEY 2 / the DACs in emu.err
   --log-lau       log every write to Lau, the sample player, in emu.err ("lau $DBxx = $yy")
-  --wav FILE      (Horizon 0.26) record Lau's output (48 kHz stereo WAV): listen on the PC
+  --wav FILE      (Horizon 0.26) record Lau's output (48 kHz stereo WAV): listen on the PC;
+                  (0.27) with the OPL2's, mixed as on the board (no POKEY)
   --net           (Horizon 0.22) the internet through an emulated PC link: tcp:// URLs
                   become real connections of the PC running the emulator
   --net-root DIR  (Horizon 0.22) http://, https://, ftp:// URLs are served from the

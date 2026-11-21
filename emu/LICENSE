@@ -17,4 +17,12 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General
 Public License for more details.
 
 Files that carry their own licence notice are governed by that notice.
+
+Third-party code:
+
+  Nuked OPL3 1.8 - Nuke.YKT, (c) 2013-2020 - the OPL2's sound (opl.c)
+    nuked-opl3/opl3.c, nuked-opl3/opl3.h, copied unmodified
+    GNU Lesser General Public License v2.1 or later, in the file headers;
+    full text: nuked-opl3/LICENSE
+    Upstream: https://github.com/nukeykt/Nuked-OPL3 (commit in nuked-opl3/README)
 The licences of the rest of the repository are listed in ../LICENSE.

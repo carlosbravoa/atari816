@@ -93,8 +93,8 @@ Written for Horizon 0.13 and brought up to 0.18 ("the games round", November 202
 Verified in the emulator (REV $0B, its default): every template and example builds and
 passes its scripted test, every reference example assembles and links, and the reference
 matches horizon.inc and the kernel's syscall tables. Not verified: the real board (no access
-while writing), sound (the emulator only logs it, and writes Lau's output to a WAV file),
-the PC link scripts, the C compiler notes. The internet examples (Fetch, Echo, Horizon 0.22)
-are tested in the emulator only (`--net-root` stands in for the web, a local echo server
-for TCP), not yet through the real gateway. Where a document states something that was not checked,
+while writing), sound (the emulator logs it, and writes Lau's and, since Horizon 0.27, the
+OPL2's output to a WAV file; POKEY is only logged), the PC link scripts, the C compiler
+notes. The internet examples (Fetch, Echo, Horizon 0.22) are tested in the emulator only
+(`--net-root` stands in for the web, a local echo server for TCP), not yet through the real gateway. Where a document states something that was not checked,
 it says so.

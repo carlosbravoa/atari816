@@ -1,5 +1,5 @@
 /* OPL2 (YM3812), $00:DB30-$DB33 (REV $0C): the registers, the status byte and timers A and B
- * of core/src/a816/a816_opl.sv (JTOPL: jtopl_mmr.v, jtopl_timers.v). No FM synthesis. */
+ * of core/src/a816/a816_opl.sv (JTOPL: jtopl_mmr.v, jtopl_timers.v), and its sound (Nuked OPL3 in OPL2 mode). */
 #ifndef OPL_H
 #define OPL_H
 #include <stdint.h>
@@ -22,5 +22,6 @@ uint64_t opl_next_event(void);
 uint8_t  opl_read(uint32_t a);
 void     opl_write(uint32_t a, uint8_t v);
 int      opl_irq(void);             /* timer A or B flag, unmasked: IRQ_STATUS bit 5 */
+int16_t  opl_sample(uint64_t at);   /* the output at CPU cycle `at` (0 before REV $0C) */
 
 #endif

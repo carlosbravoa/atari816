@@ -145,7 +145,7 @@ in [`LICENSES/`](LICENSES/) and [`core/LICENSES/`](core/LICENSES/). See [`LICENS
 | Directory | Licence |
 | --- | --- |
 | `horizon/` | GPL-3.0-or-later |
-| `emu/` | GPL-3.0-or-later |
+| `emu/` | GPL-3.0-or-later (third-party: `emu/nuked-opl3/`, Nuked OPL3, LGPL-2.1-or-later, listed in [`emu/LICENSE`](emu/LICENSE)) |
 | `tools/` | GPL-3.0-or-later |
 | `sdk/` | MIT |
 | `Docs/` | CC-BY-SA-4.0 |
@@ -178,6 +178,9 @@ The hardware builds on the work of others (details and licences in
 - Sameer Puri: the HDMI library (hdl-util/hdmi).
 - WangXuan95: the SD-card reader.
 - Avery Lee: the Altirra palettes.
+
+The emulator, emu816, makes the OPL2's sound with Nuke.YKT's
+[Nuked OPL3](https://github.com/nukeykt/Nuked-OPL3) (details in [`emu/LICENSE`](emu/LICENSE)).
 
 ## Disclaimer
 

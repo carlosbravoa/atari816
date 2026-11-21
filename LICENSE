@@ -8,6 +8,8 @@ core/LICENSES/).
 
   horizon/        GPL-3.0-or-later              horizon/LICENSE
   emu/            GPL-3.0-or-later              emu/LICENSE
+                  third-party: emu/nuked-opl3/ (Nuked OPL3),
+                  LGPL-2.1-or-later             emu/nuked-opl3/LICENSE
   tools/          GPL-3.0-or-later              tools/LICENSE
   sdk/            MIT                           sdk/LICENSE
   Docs/           CC-BY-SA-4.0                  Docs/LICENSE
@@ -27,6 +29,8 @@ Full texts:
   LICENSES/CC-BY-SA-4.0.txt      Creative Commons Attribution-ShareAlike 4.0
   LICENSES/CC-BY-NC-SA-4.0.txt   Creative Commons Attribution-NonCommercial-
                                  ShareAlike 4.0
+  emu/nuked-opl3/LICENSE         GNU Lesser General Public License v2.1
+                                 (Nuked OPL3, the emulator's OPL2 sound)
   core/LICENSES/                 the texts and notices of the hardware's
                                  third-party components (Apache-2.0, LGPL-2.1,
                                  BSD-3-Clause, MIT, Mark Watson's notice)

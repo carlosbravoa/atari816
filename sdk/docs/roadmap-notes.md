@@ -77,6 +77,6 @@ the runtime). Worth a weekend experiment before anything bigger.
   fs_scroll blocks, the draw-list record (LR_* / LS_*), generated from horizon.inc like the rest.
 - A shared-library mechanism (the architecture plans JSL jump tables) would let ulib /
   ui.lib / a C library be loaded once instead of linked into every program.
-- An emulator option to play sound (POKEY 2 and the DACs) would let sound be heard
-  while developing; today it is only logged (`--log-sound`); Lau's output can be written to
-  a WAV file (`emu816 --wav`) and its writes logged (`run816.py --log-lau`).
+- An emulator option to play POKEY's sound would let it be heard while developing; today it
+  is only logged (`--log-sound`). Lau and (Horizon 0.27) the OPL2 are heard: written to a
+  WAV file (`emu816 --wav`) and played live by an SDL build of emu816.

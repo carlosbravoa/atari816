@@ -20,7 +20,8 @@ static const char *shot_path[MAXSHOTS];
 static double shot_at[MAXSHOTS];
 static int shot_done[MAXSHOTS], nshots;
 #ifdef HAVE_SDL
-static int sdl_on = 1, fast;
+static int sdl_on = 1, fast, mute;
+static SDL_AudioDeviceID adev;      /* the live sound (0: none) */
 #endif
 
 /* ── host keyboard: SDL or --keys ── */
@@ -156,8 +157,24 @@ static void sdl_events(void)
     mouse_wheel = 0;
 }
 
+/* the live sound: the samples made since the last frame, queued for the host. The device waits
+ * until 60 ms are queued (at the start, and again after running dry: emulated time trails real
+ * time a little); when emulated time runs ahead (--fast) the queue is kept to about 100 ms and
+ * the rest is dropped */
+static void sdl_audio(void)
+{
+    static int primed;
+    int16_t buf[2 * 1024];
+    int n;
+    if (primed && SDL_GetQueuedAudioSize(adev) == 0) { SDL_PauseAudioDevice(adev, 1); primed = 0; }
+    while ((n = audio_live_take(buf, 1024)) > 0)
+        if (SDL_GetQueuedAudioSize(adev) < 48000 / 10 * 4) SDL_QueueAudio(adev, buf, n * 4);
+    if (!primed && SDL_GetQueuedAudioSize(adev) >= 48000 * 6 / 100 * 4) { SDL_PauseAudioDevice(adev, 0); primed = 1; }
+}
+
 static void sdl_frame(void)
 {
+    if (adev) sdl_audio();
     nvc_render();
     SDL_UpdateTexture(tex, NULL, M.nvc.out, NV_OUT_W * 4);
     SDL_RenderClear(ren);
@@ -306,7 +323,8 @@ static void usage(void)
         "                       9 (+ blitter lists, raster events at the beam, NV_FRAME),\n"
         "                       10 (+ sample player), 11 (+ sprites, fine scrolling),\n"
         "                       12 (default: + OPL2 at $DB30, POKEY's native bank, no DACs)\n"
-        "  --wav FILE.wav       write the sample player's output (48 kHz stereo, without POKEY and OPL2)\n"
+        "  --wav FILE.wav       write the sound as the board's HDMI mixes it, without the classic machine's\n"
+        "                       (POKEY, GTIA): Lau, the sample player, plus the OPL2 (48 kHz, 16-bit stereo)\n"
         "  --log-sound          print every accepted sound write ($DB00-$DB13; REV 12 $DB00-$DB0F) on stderr\n"
         "  --log-lau            print every write to Lau, the sample player ($DB20-$DBFF, REV 10), on stderr\n"
         "  --log-lau-us         the same, each line with the emulated time in microseconds: lau US $DBxx = $yy\n"
@@ -316,6 +334,7 @@ static void usage(void)
         "  --headless           no window (SDL builds open a 1280x720 window by default)\n"
 #ifdef HAVE_SDL
         "  --fast               window open, but do not throttle to real time\n"
+        "  --mute               no live sound (the window plays Lau and the OPL2, as --wav records them)\n"
 #endif
         );
     exit(1);
@@ -378,6 +397,7 @@ int main(int argc, char **argv)
 #ifdef HAVE_SDL
         else if (!strcmp(a, "--headless")) sdl_on = 0;
         else if (!strcmp(a, "--fast")) fast = 1;
+        else if (!strcmp(a, "--mute")) mute = 1;
 #else
         else if (!strcmp(a, "--headless")) ;
 #endif
@@ -447,6 +467,12 @@ int main(int argc, char **argv)
                                NV_OUT_W, NV_OUT_H, 0);
         ren = SDL_CreateRenderer(win, -1, 0);
         tex = SDL_CreateTexture(ren, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING, NV_OUT_W, NV_OUT_H);
+        if (!mute && !SDL_InitSubSystem(SDL_INIT_AUDIO)) {   /* no sound device: play on silently */
+            SDL_AudioSpec want = { .freq = 48000, .format = AUDIO_S16SYS, .channels = 2, .samples = 1024 };
+            adev = SDL_OpenAudioDevice(NULL, 0, &want, NULL, 0);
+            if (adev) audio_live_on();          /* (unpaused by sdl_audio) */
+        }
+        if (!mute && !adev) fprintf(stderr, "emu816: no live sound: %s\n", SDL_GetError());
         t_start_real = now_real();
     }
 #endif

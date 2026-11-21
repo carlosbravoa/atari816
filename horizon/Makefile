@@ -306,15 +306,31 @@ $(SD)/SYSTEM/MUSICD.PRG: user/musicd.s user/music.inc user/modplay.inc user/midp
 $(SD)/BIN/MUSIC.PRG: $(wildcard user/mu_*.s) user/music.inc
 # (0.26) the demo music, original and generated here (tools/mkmod.py): /Music/HORIZON.MOD, /Music/LAU.MOD.
 # The test sessions run on a copy of the card without /Music (as before 0.26: the root's
-# listings and the Desktop's pictures stay as they were); Music's own (KEEPMUSIC=1) keep it
-all: $(SD)/Music/HORIZON.MOD $(SD)/Music/LAU.MOD
-$(TSD)/SYSTEM/INIT.PRG: $(SD)/Music/HORIZON.MOD $(SD)/Music/LAU.MOD
+# listings and the Desktop's pictures stay as they were); Music's own (KEEPMUSIC=1) keep it.
+# (0.27) and the songs for the OPL2, written as notes by tools/mkmid.py --song: PRELUDE.MID,
+# ELISE.MID, ENTERTNR.MID (public-domain pieces in our arrangements) and THEME.MID (the tune of
+# HORIZON.MOD). Their names start with none of the letters the Music sessions type in Files
+MIDSONGS := $(SD)/Music/PRELUDE.MID $(SD)/Music/ELISE.MID $(SD)/Music/ENTERTNR.MID $(SD)/Music/THEME.MID
+all: $(SD)/Music/HORIZON.MOD $(SD)/Music/LAU.MOD $(MIDSONGS)
+$(TSD)/SYSTEM/INIT.PRG: $(SD)/Music/HORIZON.MOD $(SD)/Music/LAU.MOD $(MIDSONGS)
 $(SD)/Music/HORIZON.MOD: tools/mkmod.py
 	mkdir -p $(SD)/Music
 	python3 tools/mkmod.py $@
 $(SD)/Music/LAU.MOD: tools/mkmod.py
 	mkdir -p $(SD)/Music
 	python3 tools/mkmod.py --jingle $@
+$(SD)/Music/PRELUDE.MID: tools/mkmid.py
+	mkdir -p $(SD)/Music
+	python3 tools/mkmid.py --song prelude $@
+$(SD)/Music/ELISE.MID: tools/mkmid.py
+	mkdir -p $(SD)/Music
+	python3 tools/mkmid.py --song elise $@
+$(SD)/Music/ENTERTNR.MID: tools/mkmid.py
+	mkdir -p $(SD)/Music
+	python3 tools/mkmid.py --song entertainer $@
+$(SD)/Music/THEME.MID: tools/mkmid.py
+	mkdir -p $(SD)/Music
+	python3 tools/mkmid.py --song horizon $@
 # Calculator and Solitaire are one assembly unit each
 $(SD)/BIN/CALC.PRG: $(wildcard user/calc_*.s)
 $(SD)/BIN/SOLITAIR.PRG: $(wildcard user/sol_*.s user/sol_*.inc)
@@ -921,9 +937,11 @@ pictures-26:
 # release, the notes keyed off when the owner exits or is killed; before REV $0C ENODEV
 # (tests/otest-noopl.txt, no writes). MIDI in the music engine (tests/midrun.py: small files of
 # tools/mkmid.py, the register stream's notes and times against the files', broken files; before
-# REV $0C a polite refusal). A Desktop session (tests/opl27.src): Music plays a MIDI file, the
-# OPL2 app finds the chip taken, Stop gives it back, the app plays, Music finds it taken
-# (REV $0C only). make pictures-27 freezes the pictures.
+# REV $0C a polite refusal). MIDI heard (tests/midwav.py, REV $0C only): a small file played
+# with emu816's --wav, the pitches, a rest, a chord, silence after the end. A Desktop session
+# (tests/opl27.src): Music plays a MIDI file, the OPL2 app finds the chip taken, Stop gives it
+# back, the app plays, Music finds it taken (REV $0C only). make pictures-27 freezes the
+# pictures.
 OTESTTXT = $(if $(PRE12),otest-noopl.txt,otest.txt)
 OTESTERR = $(if $(PRE12),/dev/null,tests/otest.err)
 O27SHOTS := 13 17 23 25.5 30
@@ -939,6 +957,8 @@ test-27: all $(EMU)
 	@if grep opl $(B)/otest.err | diff -u $(OTESTERR) -; then echo "PASS  0.27 OPL2 writes: the registers, the reset, only key-offs while the classic machine is shown, the release, the owner's notes off at its exit and kill"; \
 	else echo "FAIL  OTEST OPL2 log ($(B)/otest.err)"; exit 1; fi
 	@python3 tests/midrun.py $(EMU) $(SD) $(SD)/SYSTEM/HORIZON.SYS $(EMUFLAGS)
+	@if [ -z "$(PRE12)" ]; then python3 tests/midwav.py $(EMU) $(SD) $(SD)/SYSTEM/HORIZON.SYS $(EMUFLAGS); \
+	else echo "SKIP  0.27 MIDI heard (REV \$$0C only)"; fi
 	@if [ -z "$(PRE12)" ]; then \
 	  PREP='$(O27PREP)' KEEPMUSIC=1 DESK=1 sh tests/shots.sh "$(EMU) $(EMUFLAGS) $(CARDDATE)" $(SD) opl27 32 $(O27SHOTS); \
 	  if diff -u tests/pictures/opl27.md5 $(B)/opl27.md5; then echo "PASS  0.27 the OPL2 on the Desktop: MIDI in Music, the app finding the chip taken, Stop giving it back, the app's demo, Music finding it taken"; \
