@@ -3,8 +3,9 @@
 emu816 is a fast C model of the Atari816 native machine: a 65C816, FREDDIE II (memory map,
 bank 0 window, user/supervisor modes, protection, ABORT), the system block, the I/O
 processor mailbox, Marga, the video chip (first called the NVC, with sprites and fine scrolling
-from REV $0B), Ali, the blitter, and Lau, the sample player, next to POKEY 2. Use it to develop Horizon on
-a PC. The reference for FREDDIE II and the system block is `core/src/a816/a816_sys.sv`.
+from REV $0B), Ali, the blitter, Lau, the sample player, next to POKEY 2 (from REV $0C POKEY 1's
+native register bank), and from REV $0C the OPL2 (YM3812): its registers and timers, and its
+sound from Nuked OPL3 (`nuked-opl3/`). Use it to develop Horizon on a PC. The reference for FREDDIE II and the system block is `core/src/a816/a816_sys.sv`.
 The reference for the mailbox is `a816_mailbox()` in `core/firmware/firmware.c`. The reference for Marga is
 `core/src/a816/a816_nvc.sv`. The rest follows `Docs/02-register-spec.md`.
 
@@ -12,7 +13,7 @@ The reference for the mailbox is `a816_mailbox()` in `core/firmware/firmware.c`.
 
 ```
 make                 # emu816, C11 + libc (+ libm)
-make SDL=1           # adds a 1280x720 window, keyboard and mouse (needs SDL2)
+make SDL=1           # adds a 1280x720 window, keyboard, mouse and live sound (needs SDL2)
 make test            # acceptance tests (see "Tests")
 make sst             # downloads the SingleStepTests sample that make test uses (~40 MB)
 ```
@@ -36,13 +37,16 @@ emu816 [--sd DIR] [--load FILE@ADDR]... [--max-seconds N] [--trace]
 | `--mouse LIST` | Mouse input `t_ms:dx:dy:wheel:buttons,...` at emulated milliseconds: decimal motion in desktop pixels (dy > 0 = down), buttons bit 0 left, 1 right, 2 middle (`0x` allowed). Example: `--mouse 100:5:-3:0:1,200:0:0:0:0` |
 | `--console-us N` | Slow console: after each DBG_OUT byte, DBG_STAT bit 7 reads 1 for N emulated microseconds, and bytes written meanwhile are dropped, as on the hardware. The board takes about 90 us per byte while its log is read and can stall for milliseconds. Default 0: never busy |
 | `--stats` | At exit, print the emulated time, host time, emulated MHz, the cycles the CPU waited in WAI (the kernel's idle loop: the rest is its load) and counters (and the dropped console bytes with `--console-us`; the cache fills, RAM writes, cache sweeps and stall cycles of the memory model) |
-| `--rev N` | SYS_REV to report: 6 (no sound page, no blitter), 7 (sound page), 8 (sound and blitter), 9 (+ blitter command lists, raster events at the beam, NV_FRAME), 10 = $0A (+ Lau, the sample player, the default hardware build of bring-up step 17), 11 = $0B (default: + Marga's sprites and fine scrolling, bring-up step 19). Below 11 Marga's registers $D930-$D9FF read 0 and ignore writes; below 10 the sample player reads 0 and ignores writes; below 9 the list registers do, and the raster events come at the fetch trigger; below 8 the blitter registers read 0 and ignore writes; below 7 the sound page ignores writes |
-| `--wav FILE.wav` | Write Lau's output (48 kHz, 16-bit stereo, without the POKEY sound) |
-| `--log-sound` | Print every accepted write to the sound page ($00:DB00-$DB13) on stderr |
+| `--rev N` | SYS_REV to report: 6 (no sound page, no blitter), 7 (sound page), 8 (sound and blitter), 9 (+ blitter command lists, raster events at the beam, NV_FRAME), 10 = $0A (+ Lau, the sample player, the default hardware build of bring-up step 17), 11 = $0B (+ Marga's sprites and fine scrolling, bring-up step 19), 12 = $0C (default: + the OPL2 at $00:DB30-$DB33; POKEY 2 replaced by POKEY 1's native register bank at the same addresses; the four DACs gone). Below 12 $00:DB30-$DB33 belong to Lau's page as before (they read 0); below 11 Marga's registers $D930-$D9FF read 0 and ignore writes; below 10 the sample player reads 0 and ignores writes; below 9 the list registers do, and the raster events come at the fetch trigger; below 8 the blitter registers read 0 and ignore writes; below 7 the sound page ignores writes |
+| `--wav FILE.wav` | Write the sound the board's HDMI output carries, without the classic machine's part: Lau's left and right plus the OPL2's output on both (REV $0C), saturated to 16 bits, 48 kHz stereo, from the start of the run. Not in it: POKEY (the native bank and the classic machine's) and GTIA. See "OPL2", the mix |
+| `--log-sound` | Print every accepted write to the sound page ($00:DB00-$DB13; from REV $0C $DB00-$DB0F) on stderr |
 | `--log-lau` | Print every write to Lau, the sample player ($00:DB20-$DBFF, REV $0A), on stderr as `lau $DBxx = $yy` (Horizon's sample-call test compares it) |
 | `--log-lau-us` | The same as `--log-lau`, each line with the emulated time in microseconds: `lau 1234567 $DB89 = $12` (the music tests rebuild Lau's voice state at every tick from it) |
+| `--log-opl` | Print every OPL2 data write ($00:DB31, REV $0C) on stderr as `opl $RR = $yy`, RR the register selected at $DB30 (the selects themselves are not printed) |
+| `--log-opl-us` | The same as `--log-opl`, each line with the emulated time in microseconds: `opl 1234567 $B0 = $31` (Horizon's OPL2 and MIDI tests compare it) |
 | `--headless` | SDL builds open a window by default; this flag suppresses it (accepted and ignored in plain builds) |
-| `--fast` | SDL: keep the window but do not throttle to real time |
+| `--fast` | SDL: keep the window but do not throttle to real time (the live sound is then cut to about 100 ms a frame) |
+| `--mute` | SDL: no live sound. Without the option the window plays what `--wav` records, through SDL's default output device (none found: a note on stderr, the run goes on silently) |
 | `--ideal-timing` | The time model before Horizon 0.19: every CPU cycle ideal (no cache misses, SDRAM write stalls or cache sweeps) and Ali's older per-pixel rates. Programs then run about twice as fast as on the board (see "Memory timing") |
 | `--card-date YYYY-MM-DDTHH:MM` | The date STAT reports for every file this run did not create or write, on the card and on the PC volume (Horizon's tests run on fresh copies of the card, whose host dates mean nothing); the files the run writes keep the date SYS_TIME gives them |
 | `--pc-folder DIR` | The PC volume of the PC link: paths starting `/PC:` are served from DIR (see "The PC volume" below). Without it the volume is absent: those paths answer $87 |
@@ -139,16 +143,19 @@ This is a line-by-line model of the FREDDIE II part of `a816_sys.sv`:
 
 ### System block (`sysblock.c`)
 
-- SYS_ID reads $81, SYS_REV reads $0B (or `--rev`), and SYS_SPEED reads 0.
+- SYS_ID reads $81, SYS_REV reads $0C (or `--rev`), and SYS_SPEED reads 0.
 - **Sound (REV $07):** writes to $00:DB00-$DB13 (POKEY 2, the four DACs) are kept and
   counted only while SV_CTRL FREEZE_REQ is set, as on the hardware; otherwise they are
-  counted as ignored. No audio is produced. `--stats` prints both counts.
+  counted as ignored. No audio is produced. `--stats` prints both counts. From REV $0C
+  $DB00-$DB0F reach POKEY 1's native register bank (still only while frozen) and the DACs
+  are gone: writes to $DB10-$DB13 do nothing and are not counted.
 - **SV_CTRL** ($00:DC00): bit 2 FREEZE_REQ is stored, bit 0 reads 1. **SV_STATUS**
   ($00:DC01) bit 0 FROZEN follows FREEZE_REQ at once. The rest of the supervisor page
   reads 0 (the classic machine is not modelled).
 - **IRQ_STATUS** latches bits 0 VBLANK, 1 LINE, 2 TIMER0, 3 TIMER1 and 4 BLITTER; they are
   W1C. Bit 6 (IOP) is the live level MB_RSP_HEAD != MB_RSP_TAIL: it cannot be cleared by
-  W1C and reads back as part of IRQ_STATUS, as in the RTL's `irq_now`.
+  W1C and reads back as part of IRQ_STATUS, as in the RTL's `irq_now`. So is bit 5 (AUDIO):
+  Lau's end interrupt ORed (REV $0C) with the OPL2's.
 - **UPTIME** follows the RTL accumulator exactly: UPTIME = floor(32 x cycles / 459), which
   is microseconds at 14.34375 MHz. Reading $DE18 latches $DE19-$DE1B.
 - **Timers:** count at microsecond ticks. A count <= 1 at a tick fires, then reloads or
@@ -540,7 +547,61 @@ A bit-exact model of `a816_snd.sv`: output sample k at CPU cycle floor(k x 11953
 block as they were when it read them). Differences: the hardware computes up to four
 samples ahead into a FIFO, so its positions and KEYON lead the emulator's by up to 4
 samples (83 us); AU_LATE is always 0. Steps run only while a voice plays (or with
-`--wav`).
+`--wav`, or the SDL build's live sound).
+
+### OPL2 (YM3812) — $DB30 (`opl.c`, REV $0C)
+
+The part of `a816_opl.sv` and JTOPL (`jtopl_mmr.v`, `jtopl_timers.v`) that software can see.
+Like the hardware's, these registers work whether or not the classic machine is frozen.
+
+- **$DB30** write: the register select; read: the status `{IRQ, T1, T2, 0 0 1 1 0}`, $06
+  when idle. **$DB31** write: the data for the selected register, kept in a 256-byte shadow
+  ($01-$F5 are the chip's); `--log-opl` / `--log-opl-us` print these writes. $DB31 reads 0.
+- **$DB32 / $DB33** (OPL_OUT): the output sample now, signed 16-bit, from the sound core (below).
+- **Sound:** Nuked OPL3 1.8 (`nuked-opl3/`, Nuke.YKT, LGPL-2.1-or-later, copied unmodified;
+  upstream and commit in `nuked-opl3/README`), a cycle-accurate model of the YMF262 made from
+  die shots, run in OPL2 mode (the OPL3's NEW bit is never set, so its second register bank,
+  stereo bits and extra waveforms stay off). Every $DB31 write reaches it at its emulated
+  cycle; it makes one sample per 72 chip clocks (288 CPU cycles, 49,803 Hz): sample n at
+  cycle t0 + 288 n from the chip's reset t0, from the registers written before that cycle;
+  before sample 1 the output is 0. Pitches follow the board's clock (F-number x 49,803 /
+  2^(20 - block): F-number 579, block 4 is 440.0 Hz). Around the core, as JTOPL does: register
+  $01 bit 5 (WSE) masks the waveform bits of $E0-$F5 (the OPL3 has no such bit: the core gets 0
+  while it is clear and the registers again when it is set), and the output is JTOPL's sum
+  (`jtopl_acc.v`): each operator that reaches the output at full scale (the rhythm
+  instruments doubled), except that JTOPL scales the carriers of channels 0 to 3 by 256, 181,
+  203 and 203 / 256 (0, -3, -2, -2 dB; rounding down), summed in 17 bits and saturated to 16.
+  The timers, status and interrupt above stay this file's own model: the core has none. The
+  core runs lazily, up to the cycle a write, an OPL_OUT read or an output sample needs it
+  (about 0.7 us of host time per sample once the chip has been touched). Differences from the
+  board: the core is an OPL3 in compatibility mode, not JTOPL, so envelope steps, the
+  phase and the LFOs' rounding may differ in the low bits; CSM mode ($08 bit 7) is ignored
+  by both. A silent operator gives -1 in the negative half of its phase, as on the chips: a
+  released note leaves a +-1 ripple.
+- **The mix** (`--wav`, the live sound): sample k of the 48 kHz output (CPU cycle
+  floor(k x 11953 / 40), Lau's) is Lau's L / R plus the OPL2's latest sample at that cycle on
+  both channels, saturated to 16 bits, as `mix_sat` in `tang_top.sv` without its classic
+  part. On the board that part (POKEY and GTIA, moved up by 16384) is added too, so with a
+  silent classic machine the board's output sits 16384 lower and clips below -16384
+  (`Docs/02-register-spec.md`, Lau "Mix"); the WAV has no such offset. Lau's own registers
+  ($DB2C-$DB2F) still read Lau alone.
+- **Timers:** the chip runs on clk_core / 8 (3.5859 MHz). Timer A steps every 288 chip clocks
+  (1,152 CPU cycles, 80.3 us), timer B every 1,152 (4,608 CPU cycles, 321 us), on
+  free-running prescalers that start at the chip's reset. A timer starts at its value
+  ($02 / $03) on the rising edge of its load bit ($04 bit 0 / 1); the step after 255 sets its
+  flag and reloads the value as it is then, so a new value takes effect at the next overflow.
+  A stopped timer keeps its count.
+- **$04:** bit 7 (IRQ reset) clears both flags and changes nothing else. Otherwise bit 6 /
+  bit 5 clear the flag of A / B and mask it, and bits 0 / 1 are the load bits. As in JTOPL
+  (unlike the data sheet's wording), a masked timer still sets its flag; the mask only hides
+  it from the status and the IRQ, so unmasking without a clear shows it at once.
+- **IRQ:** a visible flag of A or B (status bit 7) drives IRQ_STATUS bit 5 (AUDIO), ORed with
+  Lau's. An overflow is a scheduled device event, so a WAI wakes at its exact cycle.
+- **Reset:** at power-on and whenever the 65C816 is held in reset (SYS_RESTART): every
+  register 0, both masks off, the prescalers restart.
+- Not modelled: the one-clk_core write and read registers of `a816_opl.sv`, and the flag
+  clear lasting until JTOPL's next operator clock (at most 16 CPU cycles). No minimum time
+  between writes is enforced (the YM3812 wants 3.3 us after a select and 23 us after data).
 
 ### Memory timing (since Horizon 0.19)
 
@@ -612,7 +673,9 @@ every 512 CPU cycles here.
 
 ### Not modelled
 
-- **Audio:** the sound page is write only and makes no sound.
+- **Audio:** the sound page (POKEY's native bank) is write only and makes no sound, nor does
+  the classic machine's POKEY and GTIA. Lau and the OPL2 sound (`--wav`, live in SDL builds;
+  see "OPL2").
 - **Classic side:** the supervisor ($00:DC00) and the chipset window ($00:D000-$D7FF) read
   0, and the classic map ($00:D810-) is not implemented.
 - **Inputs:** joysticks read 0, and turbo mode is not modelled.
@@ -620,7 +683,7 @@ every 512 CPU cycles here.
 
 ## Tests
 
-`make test` runs `tests/run_tests.sh`. Every check passes. `EMUFLAGS="--rev 10" ./tests/run_tests.sh` (or 9, 8, 7) runs them on an older board; checks of hardware it lacks are skipped:
+`make test` runs `tests/run_tests.sh`. Every check passes. `EMUFLAGS="--rev 11" ./tests/run_tests.sh` (or 10, 9, 8, 7) runs them on an older board; checks of hardware it lacks are skipped:
 
 | Test | Checks |
 | --- | --- |
@@ -644,6 +707,9 @@ every 512 CPU cycles here.
 | SAMPLER.BIN | `core/sw/a816/sampler.s`: Lau's rate, end interrupt, loop, mix values, AU_LATE (REV $0A and up) |
 | SPRTEST.BIN | `core/sw/a816/sprtest.s`: Marga's REV $0B registers, NV_SPR_PEEK, COMMIT latching, the line limit (OVERFLOW), the load test (REV $0B and up) |
 | tests/sprsceneN.bin | `core/sw/a816/sprscene.s` with SEED 1-10: a random scene each (9 and 10 crowded, so the line limit drops sprites) (all modes, scrolling, wrap, split, pointer, 16 sprites with every option). The pictures must be identical to the frames the RTL simulation gave (`expected/sprsceneN.ppm.md5`), REV $0B and up |
+| OPLTEST.BIN | `core/sw/a816/opltest.s`, the OPL2 hardware self test (REV $0C and up): STAT ($06), TIMER (the AdLib detection sequence, status $C6, IRQ_STATUS bit 5) and TONE (a 440 Hz note: OPL_OUT reads both positive and negative samples) must pass (`OPL2 PASS`). Below REV $0C it must print `STAT FAIL 00` |
+| tests/asm/opltone | The OPL2's sound (REV $0C and up): a 440 Hz sine on channel 0 (F-number 579, block 4) keyed on for 1 s and released, recorded with `--wav` twice; `tests/oplwav.py` checks both sides equal, 440 +-0.5 Hz, the peak (one operator at total level 0: 4,000-4,100), the note's length (1.0-1.1 s above 200) and the last 0.5 s within +-2, and the two files must be the same bytes. Below REV $0C the recording must be silent |
+| tests/asm/opltimer | The OPL2's timers (REV $0C and up): the idle status, $DB31-$DB33 reading 0, timer A and B periods at value $F0 (1,285 us and 5,140 us, between two overflows), a masked flag that still sets and shows when unmasked, IRQ_STATUS bit 5 waking WAI, a new value taking effect after the running count, a stopped timer; with `--log-sound` its two frozen writes give only `sound $DB00 = $12` ($DB10 was a DAC). Output `tests/expected/opltimer.txt` |
 | SingleStepTests | 102,000 tests, with `tests/fetch_sst.py` / `make sst` to download them |
 
 LOOP prints `00005948` (`00005943` with `--ideal-timing`); the board printed `00005947`. The

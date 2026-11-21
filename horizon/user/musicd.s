@@ -13,6 +13,7 @@
         .include "horizon.inc"
         .include "music.inc"
         .include "modplay.inc"
+        .include "midplay.inc"
 
 HBUF    = 1084                          ; the head of a file read first
 CHUNK   = 16384                         ; read in pieces of 16 KB (progress between them)
@@ -20,6 +21,7 @@ IDLE_US = 200000                        ; the timer while nothing plays (the par
 WAV_US  = 20000                         ; the WAV tick (status, position)
 KIND_MOD = 1
 KIND_WAV = 2
+KIND_MID = 3
 
         .segment "ZEROPAGE"
 e_p:    .res    4                       ; pointers
@@ -159,6 +161,8 @@ engine: sys     SYS_GETPID
         sta     mp_keep
         lda     e_loop
         sta     mp_loop
+        sta     mid_loop
+        jsr     mid_init_bank
         jsr     idle_timer
         sys     SYS_UPTIME
         sta     e_ms
@@ -183,6 +187,11 @@ engine: sys     SYS_GETPID
         jsr     out_flush
         lda     #0
         jsr     e_play
+        lda     e_state                 ; (0.27) MIDI: the OPL2 taken by another program
+        cmp     #MST_ERROR
+        bne     loop
+        jsr     print_err
+        exit    1
 
 ; ---- the main loop: everything comes as a message ----
 loop:   lda     e_port
@@ -231,6 +240,10 @@ on_tick:
         cmp     #KIND_WAV
         bne     :+
         jsr     wav_tick
+        bra     :+++
+:       cmp     #KIND_MID
+        bne     :+
+        jsr     mid_tick_step
         bra     :++
 :       jsr     mod_tick
 :       lda     e_state
@@ -238,7 +251,18 @@ on_tick:
         bne     :+
         dec     e_n
         bne     @t
-:       lda     #1                      ; (a tick's status may be dropped)
+:       ; For MIDI (200 Hz), throttle status messages to 50 Hz unless state changed
+        lda     e_kind
+        cmp     #KIND_MID
+        bne     @sstat
+        lda     e_state
+        cmp     #MST_PLAYING
+        bne     @sstat
+        inc     e_msdiv
+        lda     e_msdiv
+        and     #3
+        bne     @chk
+@sstat: lda     #1                      ; (a tick's status may be dropped)
         sta     e_drop
         jsr     send_status
         stz     e_drop
@@ -278,6 +302,19 @@ mod_tick:
         sta     e_endp
 @x:     rts
 
+; one MIDI tick (5000 us = 200 Hz)
+mid_tick_step:
+        jsr     mid_tick
+        and     #MIDF_END
+        beq     @x
+        lda     mid_state
+        bne     @x                      ; looped
+        lda     #MST_ENDED
+        sta     e_state
+        lda     #1
+        sta     e_endp
+@x:     rts
+
 ; the tick after a song's end: its voices stop; from the shell: done
 end_tick:
         stz     e_endp
@@ -285,8 +322,13 @@ end_tick:
         cmp     #MST_ENDED
         beq     :+
         rts
+:       lda     e_kind
+        cmp     #KIND_MID
+        bne     :+
+        jsr     mid_release             ; (0.27) the OPL2 given back
+        bra     :++
 :       jsr     mp_stop
-        jsr     idle_timer
+:       jsr     idle_timer
         lda     e_mode
         cmp     #1
         bne     :+
@@ -324,6 +366,10 @@ mod_start:
         bra     timer_start
 wav_timer:
         ldx     #WAV_US
+        ldy     #0
+        bra     timer_start
+mid_timer:
+        ldx     #MID_US
         ldy     #0
         bra     timer_start
 
@@ -400,6 +446,10 @@ c_pause:
         cmp     #KIND_WAV
         bne     :+
         jsr     wav_hold
+        bra     :+++
+:       cmp     #KIND_MID
+        bne     :+
+        jsr     mid_pause
         bra     :++
 :       jsr     mp_pause
 :       jsr     idle_timer
@@ -424,7 +474,20 @@ c_seek: lda     e_state
         cmp     #KIND_WAV
         bne     :+
         jmp     wav_seek
+:       cmp     #KIND_MID
+        bne     @sk_mod
+        lda     e_state
+        cmp     #MST_PAUSED
+        bne     :+
+        lda     e_arg                   ; (0.27) paused: no notes until it plays on
+        jsr     mid_cue
+        jmp     send_status
 :       lda     e_arg
+        jsr     mid_play
+        jsr     mid_timer
+        jmp     send_status
+@sk_mod:
+        lda     e_arg
         jsr     mp_seek
         lda     e_state
         cmp     #MST_PLAYING
@@ -441,7 +504,11 @@ c_vol:  lda     e_arg
 :       sta     e_vol
         jsr     mp_setvol
         lda     e_kind
-        cmp     #KIND_WAV
+        cmp     #KIND_MID
+        bne     :+
+        lda     e_vol
+        jmp     mid_setvol
+:       cmp     #KIND_WAV
         bne     c_nop2
         lda     e_state
         cmp     #MST_PLAYING
@@ -454,6 +521,7 @@ c_loop: lda     e_arg
         and     #1
         sta     e_loop
         sta     mp_loop
+        sta     mid_loop
         rts
 
 ; [1] length, [2..4] offset, [5] area -> MS_DATA
@@ -467,7 +535,25 @@ c_read: lda     #MS_DATA
         lda     e_msg+5
         and     #$00FF
         bne     @info
-        lda     e_kind                  ; area 0: the module in memory
+        lda     e_kind                  ; area 0: the module (or MIDI title) in memory
+        cmp     #KIND_MID
+        bne     @a0_mod
+        lda     e_msg+4
+        and     #$00FF
+        jne     @none
+        lda     e_msg+2
+        clc
+        adc     e_n
+        cmp     #21
+        jcs     @none
+        lda     #.loword(mid_title)
+        clc
+        adc     e_msg+2
+        sta     e_p
+        lda     #^mid_title
+        sta     e_p+2
+        bra     @copy
+@a0_mod:
         cmp     #KIND_MOD
         jne     @none
         lda     e_msg+2                 ; offset + length <= mp_mlen
@@ -505,7 +591,10 @@ c_read: lda     #MS_DATA
         sta     e_p
         lda     #^e_info
         sta     e_p+2
-        lda     mp_speed                ; the live values
+        lda     e_kind
+        cmp     #KIND_MOD
+        bne     @copy
+        lda     mp_speed                ; the live values (MOD only)
         sep     #$20
         .a8
         sta     e_info+MI_SPEED
@@ -535,7 +624,7 @@ quit:   jsr     e_stop
         jsr     exit_a
 
 ; ---------------------------------------------------------------- play, stop
-; A = the first order (MOD) / position in 256ths (WAV)
+; A = the first order (MOD) / position in 256ths (WAV, MIDI)
 e_play: sta     e_t
         stz     e_endp
         lda     e_kind
@@ -546,7 +635,21 @@ e_play: sta     e_t
         lda     e_t
         sta     e_arg
         jmp     wav_seek
-:       lda     #MST_PLAYING
+:       cmp     #KIND_MID
+        bne     @mod
+        lda     #MST_PLAYING
+        sta     e_state
+        stz     e_msdiv
+        lda     e_t
+        jsr     mid_play
+        bcc     :+
+        jsr     unload                  ; (0.27) another program has the OPL2
+        lda     #EMS_OPLBUSY
+        jsr     set_err
+        jmp     send_status
+:       jsr     mid_timer
+        jmp     send_status
+@mod:   lda     #MST_PLAYING
         sta     e_state
         jsr     mp_reset125             ; the timer runs from the first tick (at 125 BPM) ...
         jsr     mod_start
@@ -574,6 +677,11 @@ e_resume:
         jsr     wav_vols
         jsr     wav_timer
         jmp     send_status
+:       cmp     #KIND_MID
+        bne     :+
+        jsr     mid_resume
+        jsr     mid_timer
+        jmp     send_status
 :       jsr     mp_resume
         jsr     mod_start
         jmp     send_status
@@ -586,6 +694,10 @@ e_stop: lda     e_kind
         stz     e_wpos
         stz     e_wpos+2
         stz     e_tenths
+        bra     :+++
+:       cmp     #KIND_MID
+        bne     :+
+        jsr     mid_release             ; (0.27) the OPL2 given back
         bra     :++
 :       cmp     #KIND_MOD
         bne     :+
@@ -615,6 +727,8 @@ send_status:
         lda     e_kind
         cmp     #KIND_WAV
         beq     @wav
+        cmp     #KIND_MID
+        beq     @mid
         lda     mp_order
         sta     e_sbuf+2
         lda     mp_row
@@ -635,6 +749,24 @@ send_status:
         lda     mp_lev+4
         sta     e_sbuf+12
         lda     mp_lev+6
+        sta     e_sbuf+14
+        bra     @spec
+@mid:   lda     mid_frac
+        sta     e_sbuf+2
+        stz     e_sbuf+3
+        stz     e_sbuf+4
+        lda     mid_tenths
+        sta     e_sbuf+6
+        lda     e_state
+        cmp     #MST_PLAYING
+        bne     @spec
+        lda     mid_lev
+        sta     e_sbuf+8
+        lda     mid_lev+2
+        sta     e_sbuf+10
+        lda     mid_lev+4
+        sta     e_sbuf+12
+        lda     mid_lev+6
         sta     e_sbuf+14
         bra     @spec
 @wav:   lda     e_wfrac
@@ -845,6 +977,16 @@ e_load: jsr     e_stop
         cmp     #'W' | 'A' << 8
         bne     :+
         jmp     wav_load
+:       lda     e_hn                    ; MIDI: "MThd"
+        cmp     #14
+        bcc     :+
+        lda     e_hbuf
+        cmp     #'M' | 'T' << 8
+        bne     :+
+        lda     e_hbuf+2
+        cmp     #'h' | 'd' << 8
+        bne     :+
+        jmp     mid_load
 :       jmp     mod_load
 
 ; the load failed with A: the file closed, the memory freed
@@ -1299,6 +1441,140 @@ mod_load:
         lda     mp_tag+2
         sta     e_info+MI_TAG+2
 :       lda     #MST_STOPPED
+        sta     e_state
+        jsr     send_status
+        clc
+        rts
+
+; ---------------------------------------------------------------- MIDI (SMF on OPL2)
+; Initialize built-in OPL2 GM bank, then override from /SYSTEM/OPL2.WOPL if present.
+mid_init_bank:
+        jsr     mid_bank_init
+        ldx     #.loword(p_wopl)
+        ldy     #^p_wopl
+        lda     #O_READ
+        sys     SYS_OPEN
+        bcs     @done
+        sta     e_fh
+        sys     SYS_BALLOC
+        bcs     @close
+        sta     e_cb
+        ; Read up to 65000 bytes in CHUNK pieces into bank e_cb
+        stz     e_got
+        stz     e_q
+        lda     e_cb
+        sta     e_q+2
+@rlp:   lda     #65000
+        sec
+        sbc     e_got
+        beq     @rdone
+        cmp     #CHUNK
+        bcc     :+
+        lda     #CHUNK
+:       sta     e_n
+        lda     e_q
+        sta     e_rb+1
+        lda     e_q+2
+        sta     e_rb+3
+        lda     e_n
+        jsr     rd_file
+        bcs     @free
+        sta     e_t
+        clc
+        adc     e_got
+        sta     e_got
+        lda     e_t
+        clc
+        adc     e_q
+        sta     e_q
+        lda     e_t
+        cmp     e_n
+        beq     @rlp
+@rdone: lda     e_cb
+        ldx     e_got
+        jsr     mid_load_wopl
+@free:  lda     e_cb
+        sys     SYS_BFREE
+        stz     e_cb
+@close: lda     e_fh
+        sys     SYS_CLOSE
+@done:  rts
+
+mid_load:
+        ; Check OPL2 hardware before allocating/reading
+        lda     #$FFFE
+        ldx     #0
+        sys     SYS_OPLW
+        bcc     :+
+        lda     #EMS_NOOPL              ; (0.27: its own error, not "No Lau")
+        jmp     lfail
+:       ; Allocate consecutive banks for the file (unknown size: 4 banks = 256 KB)
+        lda     e_size
+        ora     e_size+2
+        bne     @known
+        lda     #4
+        jsr     alloc_run
+        jcs     nomem
+        stz     e_lim
+        lda     #4
+        sta     e_lim+2
+        bra     @rd
+@known: lda     e_size+2
+        ldx     e_size
+        jsr     banks_for
+        jcs     nomem
+        lda     e_size
+        sta     e_lim
+        lda     e_size+2
+        sta     e_lim+2
+@rd:    stz     e_q
+        lda     e_b0
+        sta     e_q+2
+        stz     e_hpos
+        lda     e_hn
+        sta     e_n
+        jsr     hd_copy
+        lda     e_q
+        sta     e_got
+        stz     e_got+2
+        jsr     rd_rest
+        jcs     lfail
+        jsr     fclose
+        ; Parse SMF header + tracks and pre-scan duration
+        stz     mid_buf
+        lda     e_b0
+        sta     mid_buf+2
+        lda     e_got
+        sta     mid_len
+        lda     e_got+2
+        sta     mid_len+2
+        jsr     mid_open
+        jcs     lfail
+        lda     #KIND_MID
+        sta     e_kind
+        lda     e_vol
+        jsr     mid_setvol
+        lda     e_loop
+        sta     mid_loop
+        sep     #$20
+        .a8
+        lda     #KIND_MID
+        sta     e_info+MI_KIND
+        lda     #8
+        sta     e_info+MI_NCHAN
+        lda     mid_ntrks
+        sta     e_info+MI_NPAT
+        lda     mid_bpm
+        sta     e_info+MI_BPM
+        rep     #$20
+        .a16
+        lda     mid_tot_tenths
+        sta     e_info+MI_TENTHS
+        lda     #'M' | 'I' << 8
+        sta     e_info+MI_TAG
+        lda     #'D' | 'I' << 8
+        sta     e_info+MI_TAG+2
+        lda     #MST_STOPPED
         sta     e_state
         jsr     send_status
         clc
@@ -2107,6 +2383,14 @@ print_err:
         bne     :+
         print   "not enough memory\n"
         rts
+:       cmp     #EMS_NOOPL              ; (0.27) MIDI
+        bne     :+
+        print   "MIDI needs the OPL2 (hardware revision $0C)\n"
+        rts
+:       cmp     #EMS_OPLBUSY
+        bne     :+
+        print   "the OPL2 is in use by another program\n"
+        rts
 :       pha
         print   "error $"
         pla
@@ -2116,6 +2400,7 @@ print_err:
 
         .segment "RODATA"
 p_self: .byte   "/SYSTEM/MUSICD.PRG", 0
+p_wopl: .byte   "/SYSTEM/OPL2.WOPL", 0
 tags:   .byte   "M.K.M!K!M&K!N.T.FLT4FLT84CHN6CHN8CHNCD81OKTAOCTA"
         .word   0
 
@@ -2162,6 +2447,7 @@ e_left: .res    2
 e_lim:  .res    4
 e_gen:  .res    2
 e_endp: .res    2
+e_msdiv: .res   2                       ; MIDI 200 Hz -> 50 Hz status divider
 e_chk:  .res    2
 e_drop: .res    2
 e_np:   .res    2                       ; bytes waiting in e_pend

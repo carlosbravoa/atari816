@@ -6,8 +6,8 @@ description: Write, build, run and test programs for the Atari816 (a 65C816 comp
 # Atari816 development
 
 The Atari816: a 65C816 at 14.3 MHz, 8 MB RAM, a 640 x 360 x 8 bpp desktop shown 2 x 2 on
-720p by Marga, the video chip, Ali, the blitter, POKEY 2 sound and Lau, the sample player
-(Horizon 0.17), an Atari 8-bit inside. Horizon 0.18 adds full-screen mode with fine
+720p by Marga, the video chip, Ali, the blitter, POKEY sound and Lau, the sample player
+(Horizon 0.17), an OPL2 FM synthesizer (REV $0C, Horizon 0.27), an Atari 8-bit inside. Horizon 0.18 adds full-screen mode with fine
 scrolling, 16 hardware sprites, draw lists and frame sync. Horizon is its preemptive,
 memory-protected OS with a window system. Programs are `.PRG` files: 65816 assembly
 built with ca65/ld65 against Horizon's `horizon.inc`, run in user mode; **all hardware
@@ -79,7 +79,7 @@ the Horizon tree, copy `horizon/` and `emu/` somewhere private, build there, and
 8. Report what you verified by running and what you did not (sound is never audible in
    the emulator; the emulator's joysticks read 0; emu816 runs at the board's speed since Horizon 0.19
    (`--ideal-timing`: the old, ~2x faster model); the
-   emulator is REV $0B by default: `--rev 10/9/8/7` for older boards).
+   emulator is REV $0C by default: `--rev 11/10/9/8/7` for older boards).
 
 ## Input scripts (run816.py --script)
 

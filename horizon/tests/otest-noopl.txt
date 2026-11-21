@@ -1,0 +1,1 @@
+otest 1: probe: no OPL2: ENODEV

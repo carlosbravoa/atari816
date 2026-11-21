@@ -1,5 +1,36 @@
 # Known issues
 
+## OPEN: crackling while the Music Player plays
+
+Reported 2026-11-21 on the board (REV $0C, Horizon 0.27). Not looked at yet, on purpose:
+to be chased on a settled build. To find out first: MODs (Lau), MIDI (OPL2) or both; whether
+it follows the mouse, window redraws or card access; whether the emulator's `--wav` of the
+same song has it (then it is software) or not (then the board: Lau's FIFO underrun counter
+AU\_LATE, the HDMI audio sample path, the OPL2's sample crossing to the 48 kHz side).
+
+## OPEN: Horizon without keyboard and mouse after F12 during an ATR load
+
+Reported 2026-11-21 (REV $0C, Horizon 0.27, but older than both): F12 pressed while the classic
+Atari loads a disk image returns to a desktop that takes no input. Not reproduced with keys
+injected over the PC link (30 tries on `acid800.atr` and `DOS25.atr`, single density). One
+cause was found by reading and is fixed in the firmware, not yet confirmed as *the* cause: the
+SIO transmitter is clocked by the classic POKEY tick, which stops with the freeze, and
+`sio_tx_byte` waited without a bound for room in its 256-byte FIFO. An answer longer than the
+FIFO (a 256-byte sector: 259 bytes) sent to a machine that has just been frozen hung the
+firmware, and Horizon's keyboard and mouse come through the firmware. It now gives up after
+5 ms. Since the fast disk (bring-up log, step 26) the OS's sector reads no longer use the
+serial port at all, so only writes and programs with their own serial routines are still
+exposed. If it happens again: does `core/tools/atari.py status` still answer (firmware alive or
+not), and which disk image was it?
+
+## ROADMAP: the freeze should wait for the right moment
+
+Horizon's freeze (SV\_CTRL.FREEZE\_REQ) stops the classic machine at whatever clock it arrives.
+Two consequences: a POKEY write of the 6502 in the very clock where the freeze begins is lost
+(REV $0C routes POKEY's inputs to the native side in that clock), and a disk transfer is cut
+in the middle of a frame (the OS's retries recover it). The freeze should take effect at the
+end of a 6502 cycle and, better, between SIO frames; FROZEN would then tell Horizon when.
+
 ## FIXED (v3.2): about one reset in fifteen left the machine dead (cold-boot / reset lottery)
 
 Any reset path (power-on, Hard Reset, Boot OS/BASIC, cartridge attach, F9/Soft, PC Link

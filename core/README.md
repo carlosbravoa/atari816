@@ -7,8 +7,9 @@ with original 8-bit Atari compatibility, for the
 
 - the FPGA design: the 65C816 native machine (`src/a816/`: CPU, FREDDIE II memory protection,
   system block, and the custom chips Marga, the video chip (with 16 sprites and fine
-  scrolling from REV $0B), Ali, the blitter, and Lau, the 8-voice sample player), the shared
-  SDRAM arbiter and HDMI output (`src/tang_top.sv`), and the 8-bit Atari (6502, ANTIC, GTIA, two POKEYs, PIA) based on
+  scrolling from REV $0B), Ali, the blitter, Lau, the 8-voice sample player, and from REV $0C an OPL2 FM synthesizer,
+  the JTOPL core in `src/a816/jtopl/`), the shared
+  SDRAM arbiter and HDMI output (`src/tang_top.sv`), and the 8-bit Atari (6502, ANTIC, GTIA, POKEY, PIA) based on
   Mark Watson's atari800core (`rtl/`, `src/address_decoder.vhdl`);
 - the firmware of the PicoRV32 I/O processor (`firmware/`): SD card, the mailbox the 65C816
   talks to, the 8-bit Atari's disks, executables and cartridges, keyboard and mouse, PC link;
@@ -78,24 +79,50 @@ edits it. One `key=value` per line; `#` starts a comment.
 | Key | Values |
 | --- | --- |
 | `ram` | `128` (130XE, the default) or `320` (RAMBO). Any other value gives 320 KB and a line on the serial log |
-| `stereo` | `1` = the second POKEY ($D210) on the right channel |
 | `kbdlayout` | `0` Atari key positions, `1` US PC symbols |
 | `joystick` | `1` = arrow keys are joystick 1, Left Alt is fire |
 | `scanlines` | `0` off, `1` 25%, `2` 50%, `3` 75% |
 | `hpos` | Horizontal picture position, 0 to 48 |
 | `boot` | `ash` = `/ASH.CAR` is the default cartridge |
+| `basic` | `0` = a disk in D1: boots without BASIC (OPTION held for it, what most games need); `1` (the default) = BASIC present, as on the real machine. Executables always boot without it |
+| `fastdisk` | `1` (the default) = the fast disk below; `0` = every disk access over the serial port |
 
 ## The 8-bit Atari
 
 XL/XE (NTSC, exact speed) with 128 or 320 KB, BASIC, `.atr`/`.xfd` disks on D1: to D4:,
 `.xex` executables, cartridges (raw `.rom` of 2, 4, 8 or 16 KB; `.car` of the types standard
 8/16 KB, OSS, XEGS and switchable XEGS, Atarimax 1 and 8 Mbit, SIC 128 to 512 KB, MegaCart
-16 KB to 4 MB; other `.car` types are refused), two POKEYs, two joysticks, keyboard. No paddles. Horizon
+16 KB to 4 MB; other `.car` types are refused), one POKEY (mono; the second POKEY, the `stereo`
+key of `/atari.ini` and the COVOX DACs made room for the OPL2 in REV $0C), two joysticks, keyboard. No paddles. Horizon
 loads software into it (`run FILE` in the Terminal, mailbox ops $18 to $1A) and switches to it;
 F12 returns to the desktop and freezes it. The 8-bit machine is kept at the level of
 compatibility needed to boot, run normal disks, executables and cartridges, and play sound and
 joystick games; features beyond that were removed to make room for the native machine
 (Docs/03-bringup1-log.md, steps 13 and 17).
+
+### Fast disk
+
+What emulators call the SIO patch, done the way the XL operating system provides for: a
+parallel bus (PBI) device. The OS offers every SIO call to the PBI devices before it uses the
+serial port. This one (`firmware/pbi_disk.s`, 109 bytes of 6502 code at $D800 while the OS
+has it selected; `rtl/common/a8core/pbi_rom.vhdl`) takes "read a sector" and "status" of a
+drive that holds a disk image, an executable or the folder disk: the I/O processor leaves the
+sector in the device's ROM and the 6502 copies it to the caller's buffer. A sector takes
+about 3 ms instead of 90: a 130 KB disk that boots by reading 243 sectors is up in under
+4 s, where the serial port needs over 20.
+
+Everything else is declined and goes over the serial port as before: writes, format, the
+printer, a drive without a disk, a request whose length is not the sector's, a read error. So
+does a program that brings its own serial routines (most copy-protected disks) or runs
+without the OS ROM; those load at the old speed. The device needs an OS with PBI support
+(any XL/XE OS). `fastdisk=0` in `/atari.ini` takes it out (the OS then finds no device);
+it is read at the next cold start of the 8-bit machine.
+
+Registers, for the record: $D1FF (W) bit 0 selects the device, as the OS does around each
+call; $D1FE (W) bit 0 is the request bit, which the ROM sets to the opposite of the "served"
+byte the I/O processor keeps at $DEF0; $DEF1 is the result (0 declined, 1 the bytes are at
+$DF00); the request itself is the caller's DCB at $0300. `atari.py status` counts the
+requests served (`pbi:`).
 
 ## PC link and tools
 
@@ -156,6 +183,7 @@ Never wire inputs to pins 69-76 and 79 (driven by the BL616) or 51 (PLL clock in
 | **6502 core**, FPGA 64 `cpu_65xx.vhd` | Peter Wendrich | "All Rights Reserved" header, reaches us via the core above |
 | **Cartridge bank switching, freezer, PBI ROM** | Matthias Reichl, Wojciech Mostowski | LGPL v2-or-later |
 | **65C816 CPU core** (`src/a816/P65C816.v` and its parts), SNES_FPGA via [snestang](https://github.com/nand2mario/snestang); `P65C816.v` and `AddrGen.v` modified here | srg320, gyurco, nand2mario | **GPL-3.0** |
+| **OPL2 FM synthesizer** (`src/a816/jtopl/`), [JTOPL](https://github.com/jotego/jtopl) | Jose Tejada Gomez (jotego) | **GPL-3.0-or-later** |
 | **I/O subsystem** (PicoRV32 host, SPI), adapted from [nestang](https://github.com/nand2mario/nestang) | nand2mario | **GPL-3.0** |
 | **Firmware base** (`firmware/`), [firmware-picorv32](https://github.com/nand2mario/firmware-picorv32) | nand2mario | No licence file upstream; ships in NESTang under GPL-3.0 and is treated as such here |
 | **PicoRV32**, [YosysHQ/picorv32](https://github.com/YosysHQ/picorv32) | Claire Xenia Wolf | ISC |

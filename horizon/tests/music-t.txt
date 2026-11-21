@@ -27,7 +27,7 @@ errors:
   $C8 The PC link was lost.
   $CF The server answered with an error (not found?).
   $02 Not enough memory for this song.
-  $FE Not a module (MOD) or a WAV file Music can play.
+  $FE Not a module (MOD) or a WAV file Music Player can play.
   $C2 This cannot be opened here.
   $99 Error $99.
 settings read:
@@ -37,7 +37,7 @@ settings read:
   3: http://example.com/x.mod
   4: /PC:/a.wav
 settings written:
-# Music: the settings and the playlist (one path or address a line)
+# Music Player: the settings and the playlist (one path or address a line)
 volume=48
 separation=20
 repeat=one

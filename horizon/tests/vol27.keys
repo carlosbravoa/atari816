@@ -1,0 +1,51 @@
+# (0.27) Music Player's Volume and Stereo bars follow every change (DESK=1; tests/mousegen.py
+# makes tests/vol27.keys from this; the card's Programs menu gets "Music Player"). Before
+# 0.27 a bar only ever grew: lowered, it kept its old length (the rest was not painted white
+# again), whichever way the value changed. tests/volbars.py measures both bars in each
+# shot (the session sets the values below; Music's window content at (120, 71)).
+# Shots (s), volume / stereo (0-64):
+#   1  15.0  HORIZON.MOD playing (opened in Files): 64 / 32, the defaults
+#   2  17.0  - four times: 48
+#   3  19.5  Play > Softer: 44
+#   4  21.5  a click at a quarter of the volume bar: 15
+#   5  24.5  the volume bar dragged to its left end and past it: 0
+#   6  26.5  a click near the stereo bar's left end: 14
+#   7  28.5  + three times: volume 12
+6000 M -100:-100:0:0
+6050 M -100:-72:0:0
+6100 M -15:0:0:0
+6400 M 0:0:0:1
+6480 M 0:0:0:0
+6800 M -8:99:0:0
+7200 M 0:0:0:1
+7280 M 0:0:0:0
+10000 M -37:-76:0:0
+10200 M 0:0:0:1
+10280 M 0:0:0:0
+11000 music\n
+12500 hor\n
+16000 ----
+18000 M 100:-23:0:0
+18050 M 100:0:0:0
+18100 M 100:0:0:0
+18200 M 0:0:0:1
+18280 M 0:0:0:0
+18700 M 20:100:0:0
+18750 M 0:100:0:0
+18800 M 0:11:0:0
+18900 M 0:0:0:1
+18980 M 0:0:0:0
+20500 M -20:-57:0:0
+20700 M 0:0:0:1
+20780 M 0:0:0:0
+22500 M 20:0:0:0
+22700 M 0:0:0:1
+22900 M -30:0:0:1
+22960 M -30:0:0:1
+23020 M -20:0:0:1
+24000 M 0:0:0:0
+25500 M 100:0:0:0
+25550 M 70:0:0:0
+25700 M 0:0:0:1
+25780 M 0:0:0:0
+27500 +++

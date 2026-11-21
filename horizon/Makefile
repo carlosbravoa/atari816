@@ -37,6 +37,8 @@ SYSPROGS += printd
 # (0.24) the screen saver (the Desktop starts it; its art: tools/mksaver.py)
 SYSPROGS += saver
 TESTPROGS := selftest bench mouse mtest wdemo hello count spin tick regs crash ping pong keys ftest leak hog ktest stest gtest
+# (0.27) OTEST: the OPL2 call (tests/otest.keys)
+TESTPROGS += otest
 # programs linked with the controls library (build/ui.lib from user/ui*.s, API in user/ui.inc)
 UIPROGS := edit wfiles desk paint settings basic sheet about
 UIPROGS += calc solitair quabrick download bbs printer
@@ -74,8 +76,10 @@ DSHOTS := 5 7 10 15.8 17.2 19 11.3
 PSHOTS := 12.1 13.2 15.4 16.4 17.9 21.9 24.5 25.9
 SSHOTS := 8.8 10.4 12.4 17.2 20.5
 # Settings, the Classic Atari page (tests/classic.keys; the card gets sdfiles/atari.ini, a
-# sample of the I/O processor's file): shot times; /atari.ini must then be tests/atari-ini.txt
-CLSHOTS := 7 9.8 12 14.5
+# sample of the I/O processor's file): shot times; /atari.ini must then be tests/atari-ini.txt.
+# (0.27) The same session on 0.26's sample (tests/atari-old.ini: a stereo line, no basic or
+# fastdisk key) must leave tests/atari-ini-old.txt: the stereo line as it was, the keys added
+CLSHOTS := 7 10.2 12 14.5
 # Files (Desktop session; it moves, copies, renames and deletes on its copy of the card; 16 shots: emu816's most)
 FSHOTS := 5.4 10.6 11.2 15.8 17.6 19.0 19.8 22 26.6 29.5 32.5 35.5 39.5 42.2 43.9 45.5
 # BASIC: the -t script run (tests/basic-t.keys), emulated seconds; the picture session
@@ -158,9 +162,20 @@ NOSPR   = $(or $(NOLAU),$(findstring --rev 10,$(EMUFLAGS)))
 GTESTTXT = $(if $(OLD8),gtest-r8.txt,$(if $(NOSPR),gtest-r10.txt,gtest.txt))
 # (About says how it draws: without the blitter, its own md5; so do the next two)
 # (0.18) and boards without Lau (REV $08, $09): About says "Sound: POKEY 2": $(1)-rev9.md5 where
-# the session shows About (only that line differs from the default)
-REV9F   = $(if $(OLD89),$(if $(wildcard tests/pictures/$(1)-rev9.md5),$(1)-rev9.md5,$(1).md5),$(1).md5)
+# the session shows About (only that line differs from the default); (0.27) REV $0A and $0B
+# (--rev 10, --rev 11): "Sound: POKEY 2, Lau" (the default, REV $0C, adds the OPL2):
+# $(1)-rev11.md5 where it shows About
+REV9F   = $(if $(OLD89),$(if $(wildcard tests/pictures/$(1)-rev9.md5),$(1)-rev9.md5,$(1).md5),$(call REV11F,$(1)))
+REV11F  = $(if $(and $(OLD1011),$(wildcard tests/pictures/$(1)-rev11.md5)),$(1)-rev11.md5,$(1).md5)
 OLD89   = $(or $(findstring --rev 9,$(EMUFLAGS)),$(findstring --rev 8,$(EMUFLAGS)))
+OLD1011 = $(or $(findstring --rev 10,$(EMUFLAGS)),$(findstring --rev 11,$(EMUFLAGS)))
+# (0.27) REV $08-$0A (before 0.27 any --rev but 7 meant these: the default was REV $0B)
+OLD810  = $(or $(OLD89),$(findstring --rev 10,$(EMUFLAGS)))
+# (0.27) any revision before REV $0C (the OPL2; POKEY 2 and the four DACs before it): the
+# sound logs of the browser session and KTEST have the DAC writes, which REV $0C no longer takes
+PRE12   = $(or $(OLD810),$(findstring --rev 7,$(EMUFLAGS)),$(findstring --rev 11,$(EMUFLAGS)))
+BROWSEERR = $(if $(PRE12),tests/browse-rev11.err,tests/browse.err)
+KTESTERR = $(if $(PRE12),tests/ktest-rev11.err,tests/ktest.err)
 REV7    = $(if $(findstring --rev 7,$(EMUFLAGS)),$(1)-rev7.md5,$(call REV9F,$(1)))
 DMD5    = $(call REV7,desk)
 # (0.22) REV $08-$0A where a picture differs from the default one (a moment's free memory on
@@ -169,7 +184,7 @@ DMD5    = $(call REV7,desk)
 # (0.22) $(1)-rev7.md5 without the blitter when it exists, else $(1).md5 (the Classic Atari
 # page: the free memory on the status line)
 REV7IF  = $(if $(and $(findstring --rev 7,$(EMUFLAGS)),$(wildcard tests/pictures/$(1)-rev7.md5)),$(1)-rev7.md5,$(1).md5)
-REV10   = $(if $(and $(findstring --rev,$(EMUFLAGS)),$(if $(findstring --rev 7,$(EMUFLAGS)),,1),$(wildcard tests/pictures/$(1)-rev10.md5)),$(1)-rev10.md5,$(2))
+REV10   = $(if $(and $(OLD810),$(wildcard tests/pictures/$(1)-rev10.md5)),$(1)-rev10.md5,$(2))
 
 KSRC   := $(wildcard kernel/*.s kernel/*.inc)
 UPPER   = $(shell echo $(1) | tr a-z A-Z)
@@ -285,21 +300,39 @@ user/saver_art.inc: sdfiles/icons.txt kernel/font8x12.txt tools/mksaver.py tools
 # SDK's too) and ulib
 $(B)/modplay.o: user/modplay.s user/modplay.inc user/horizon.inc user/version.inc | $(B)
 	$(CA65) -I user -o $@ $<
-$(SD)/SYSTEM/MUSICD.PRG: user/musicd.s user/music.inc user/modplay.inc user/horizon.inc user/version.inc user/prog.cfg $(B)/modplay.o $(B)/ulib.o | $(SD)/SYSTEM
+$(B)/midplay.o: user/midplay.s user/midplay.inc user/opl_gm.inc user/horizon.inc | $(B)
+	$(CA65) -I user -o $@ $<
+$(SD)/SYSTEM/MUSICD.PRG: user/musicd.s user/music.inc user/modplay.inc user/midplay.inc user/horizon.inc user/version.inc user/prog.cfg $(B)/modplay.o $(B)/midplay.o $(B)/ulib.o | $(SD)/SYSTEM
 	$(CA65) -I user -o $(B)/musicd.o $<
-	$(LD65) -C user/prog.cfg -o $@ $(B)/musicd.o $(B)/modplay.o $(B)/ulib.o
+	$(LD65) -C user/prog.cfg -o $@ $(B)/musicd.o $(B)/modplay.o $(B)/midplay.o $(B)/ulib.o
 $(SD)/BIN/MUSIC.PRG: $(wildcard user/mu_*.s) user/music.inc
 # (0.26) the demo music, original and generated here (tools/mkmod.py): /Music/HORIZON.MOD, /Music/LAU.MOD.
 # The test sessions run on a copy of the card without /Music (as before 0.26: the root's
-# listings and the Desktop's pictures stay as they were); Music's own (KEEPMUSIC=1) keep it
-all: $(SD)/Music/HORIZON.MOD $(SD)/Music/LAU.MOD
-$(TSD)/SYSTEM/INIT.PRG: $(SD)/Music/HORIZON.MOD $(SD)/Music/LAU.MOD
+# listings and the Desktop's pictures stay as they were); Music's own (KEEPMUSIC=1) keep it.
+# (0.27) and the songs for the OPL2, written as notes by tools/mkmid.py --song: PRELUDE.MID,
+# ELISE.MID, ENTERTNR.MID (public-domain pieces in our arrangements) and THEME.MID (the tune of
+# HORIZON.MOD). Their names start with none of the letters the Music sessions type in Files
+MIDSONGS := $(SD)/Music/PRELUDE.MID $(SD)/Music/ELISE.MID $(SD)/Music/ENTERTNR.MID $(SD)/Music/THEME.MID
+all: $(SD)/Music/HORIZON.MOD $(SD)/Music/LAU.MOD $(MIDSONGS)
+$(TSD)/SYSTEM/INIT.PRG: $(SD)/Music/HORIZON.MOD $(SD)/Music/LAU.MOD $(MIDSONGS)
 $(SD)/Music/HORIZON.MOD: tools/mkmod.py
 	mkdir -p $(SD)/Music
 	python3 tools/mkmod.py $@
 $(SD)/Music/LAU.MOD: tools/mkmod.py
 	mkdir -p $(SD)/Music
 	python3 tools/mkmod.py --jingle $@
+$(SD)/Music/PRELUDE.MID: tools/mkmid.py
+	mkdir -p $(SD)/Music
+	python3 tools/mkmid.py --song prelude $@
+$(SD)/Music/ELISE.MID: tools/mkmid.py
+	mkdir -p $(SD)/Music
+	python3 tools/mkmid.py --song elise $@
+$(SD)/Music/ENTERTNR.MID: tools/mkmid.py
+	mkdir -p $(SD)/Music
+	python3 tools/mkmid.py --song entertainer $@
+$(SD)/Music/THEME.MID: tools/mkmid.py
+	mkdir -p $(SD)/Music
+	python3 tools/mkmid.py --song horizon $@
 # Calculator and Solitaire are one assembly unit each
 $(SD)/BIN/CALC.PRG: $(wildcard user/calc_*.s)
 $(SD)/BIN/SOLITAIR.PRG: $(wildcard user/sol_*.s user/sol_*.inc)
@@ -379,7 +412,7 @@ test: all $(EMU)
 	@sh tests/shots.sh "$(EMU) $(EMUFLAGS) $(CARDDATE) --log-sound" $(SD) browse 51 $(BSHOTS)
 	@if diff -u tests/pictures/browse.md5 $(B)/browse.md5; then echo "PASS  browser pictures"; \
 	else echo "FAIL  browser pictures (look at $(B)/browse*.ppm, then make pictures)"; exit 1; fi
-	@if diff -u tests/browse.err $(B)/browse.err; then echo "PASS  browser: classic ops (run = start this, and only this)"; \
+	@if diff -u $(BROWSEERR) $(B)/browse.err; then echo "PASS  browser: classic ops (run = start this, and only this)"; \
 	else echo "FAIL  browser: classic ops"; exit 1; fi
 	@sh tests/shots.sh "$(EMU) $(EMUFLAGS) $(CARDDATE)" $(SD) wdemo 15 $(WSHOTS)
 	@if diff -u tests/pictures/wdemo.md5 $(B)/wdemo.md5; then echo "PASS  window system pictures"; \
@@ -449,6 +482,9 @@ test: all $(EMU)
 	else echo "FAIL  Settings pictures, Classic Atari (look at $(B)/classic*.ppm, then make pictures)"; exit 1; fi
 	@if cmp $(B)/run-pic/atari.ini tests/atari-ini.txt; then echo "PASS  Settings: the /atari.ini it saved"; \
 	else echo "FAIL  Settings: build/run-pic/atari.ini is not tests/atari-ini.txt"; exit 1; fi
+	@KEYS=tests/classic.keys PREP='cp ../../tests/atari-old.ini atari.ini' DESK=1 sh tests/shots.sh "$(EMU) $(EMUFLAGS) $(CARDDATE)" $(SD) classicold 16 14.5
+	@if cmp $(B)/run-pic/atari.ini tests/atari-ini-old.txt; then echo "PASS  0.27 Settings: a 0.26 /atari.ini saved (its stereo line kept as it was, the keys it lacks added)"; \
+	else echo "FAIL  Settings: build/run-pic/atari.ini (from tests/atari-old.ini) is not tests/atari-ini-old.txt"; exit 1; fi
 	@DESK=1 sh tests/shots.sh "$(EMU) $(EMUFLAGS) $(CARDDATE)" $(SD) files 46 $(FSHOTS)
 	@if diff -u tests/pictures/$(call REV10,files,$(subst edit,files,$(EMD5))) $(B)/files.md5; then echo "PASS  Files pictures"; \
 	else echo "FAIL  Files pictures (look at $(B)/files*.ppm, then make pictures)"; exit 1; fi
@@ -460,6 +496,7 @@ test: all $(EMU)
 	@$(MAKE) --no-print-directory test-25
 	@$(MAKE) --no-print-directory test-music
 	@$(MAKE) --no-print-directory test-26
+	@$(MAKE) --no-print-directory test-27
 	@rm -rf build/run-sd; cp -r $(SD) build/run-sd; rm -rf build/run-sd/Music; touch build/run-sd/SYSTEM/NODESK; cp tests/basic.bas build/run-sd/BT.BAS
 	@$(EMU) $(EMUFLAGS) $(CARDDATE) --headless --sd build/run-sd --max-seconds $(BASSECS) \
 	    --keys "$$(python3 tests/keyscript.py tests/basic-t.keys)" \
@@ -499,7 +536,7 @@ test: all $(EMU)
 	@python3 -c "L = open('$(B)/ktest.out', encoding='latin-1').read().split('\n'); i = [k for k, l in enumerate(L) if l.startswith('ktest 1')][0]; j = ([k for k, l in enumerate(L) if l.startswith('ktest: done')] + [len(L) - 1])[0]; open('$(B)/ktest.txt', 'w', encoding='latin-1').write('\n'.join(L[i:j + 1]) + '\n')"
 	@if python3 tests/compare.py tests/ktest.txt $(B)/ktest.txt; then echo "PASS  0.15 kernel: joystick, vsync, focus events and held keys, pop-up menus, no phantom button after a menu"; \
 	else echo "FAIL  KTEST ($(B)/ktest.out)"; exit 1; fi
-	@if grep sound $(B)/ktest.err | diff -u tests/ktest.err -; then echo "PASS  0.15 sound: the four chimes (two notes, the volume falling every tick), a task's channels silenced at its exit, a channel borrowed and given back"; \
+	@if grep sound $(B)/ktest.err | diff -u $(KTESTERR) -; then echo "PASS  0.15 sound: the four chimes (two notes, the volume falling every tick), a task's channels silenced at its exit, a channel borrowed and given back"; \
 	else echo "FAIL  KTEST sound log ($(B)/ktest.err)"; exit 1; fi
 	@rm -rf build/run-sd; cp -r $(SD) build/run-sd; rm -rf build/run-sd/Music; touch build/run-sd/SYSTEM/NODESK
 	@$(EMU) $(EMUFLAGS) $(CARDDATE) --headless --log-lau --sd build/run-sd --max-seconds 9 \
@@ -554,7 +591,7 @@ pictures:
 	cp $(B)/basic.md5 tests/pictures/basic.md5
 	cp $(B)/sheet.md5 tests/pictures/sheet.md5
 	cp $(B)/sheetp.md5 tests/pictures/sheetp.md5
-	cp $(B)/browse.err tests/browse.err
+	cp $(B)/browse.err $(BROWSEERR)
 	python3 -c "from PIL import Image; import glob; [Image.open(f).save('tests/pictures/' + f.split('/')[-1][:-4] + '.png') for f in sorted(glob.glob('$(B)/screen[0-9]*.ppm') + glob.glob('$(B)/browse[0-9]*.ppm') + glob.glob('$(B)/wdemo[0-9]*.ppm') + glob.glob('$(B)/wcopy[0-9]*.ppm') + glob.glob('$(B)/wdraw[0-9]*.ppm') + glob.glob('$(B)/desk[0-9]*.ppm') + glob.glob('$(B)/edit[0-9]*.ppm') + glob.glob('$(B)/editw[0-9]*.ppm') + glob.glob('$(B)/editp[0-9]*.ppm') + glob.glob('$(B)/paint[0-9]*.ppm') + glob.glob('$(B)/settings[0-9]*.ppm') + glob.glob('$(B)/classic[0-9]*.ppm') + glob.glob('$(B)/system[0-9]*.ppm') + glob.glob('$(B)/kmenu[0-9]*.ppm') + glob.glob('$(B)/wins[0-9]*.ppm') + glob.glob('$(B)/desk14[0-9]*.ppm') + glob.glob('$(B)/desk15[0-9]*.ppm') + glob.glob('$(B)/files[0-9]*.ppm') + glob.glob('$(B)/basic[0-9]*.ppm') + glob.glob('$(B)/sheet[0-9]*.ppm') + glob.glob('$(B)/sheetp[0-9]*.ppm'))]"
 
 # Calculator and Solitaire: their self tests (tests/calc-t.keys, tests/solitair-t.keys; the
@@ -793,8 +830,8 @@ pictures-23:
 # (tests/pictures/saver-rev10.md5 for REV $08-$0A, saver-rev7.md5). make pictures-24 freezes
 # the pictures.
 SVSHOTS := 10.5 15 17.5 19 24 26.5 30 32.5 35 48 51.5 58 60
-SVMD5 = $(if $(findstring --rev 7,$(EMUFLAGS)),saver-rev7.md5,$(if $(findstring --rev,$(EMUFLAGS)),saver-rev10.md5,saver.md5))
-SVSFX = $(if $(findstring --rev 7,$(EMUFLAGS)),-rev7,$(if $(findstring --rev,$(EMUFLAGS)),-rev10,))
+SVMD5 = $(if $(findstring --rev 7,$(EMUFLAGS)),saver-rev7.md5,$(if $(OLD810),saver-rev10.md5,saver.md5))
+SVSFX = $(if $(findstring --rev 7,$(EMUFLAGS)),-rev7,$(if $(OLD810),-rev10,))
 test-24: all $(EMU)
 	@PREP='printf "saver=4\n" > SYSTEM/CONFIG' DESK=1 sh tests/shots.sh "$(EMU) $(EMUFLAGS) $(CARDDATE)" $(SD) saver 61 $(SVSHOTS)
 	@if diff -u tests/pictures/$(SVMD5) $(B)/saver.md5; then echo "PASS  0.24 the screen saver: started after the delay, Settings' row and Test, not while a program is in full screen or the classic Atari is shown"; \
@@ -864,10 +901,14 @@ test-music: all $(EMU)
 # songs, Pause, a seek on the position bar, the samples, Edit in front while it plays on; the
 # Lau writes with their times in build/music26.err, emu816 --log-lau-us) and one without the
 # engine (tests/music26b.src). Without Lau (--rev 9 and below) both sessions show the polite
-# refusal: their own md5 files (NAME-nolau.md5). make pictures-26 freezes the pictures.
+# refusal: their own md5 files (NAME-nolau.md5; 0.27: NAME-rev7.md5 for REV $07). make
+# pictures-26 freezes the pictures.
 M26SHOTS := 9 15 16.5 21.5 23.5 26.5 29 32 40 42
-M26PREP := echo "Music=/BIN/MUSIC.PRG" >> SYSTEM/PROGRAMS
-M26MD5  = $(if $(NOLAU),$(1)-nolau.md5,$(1).md5)
+M26PREP := echo "Music Player=/BIN/MUSIC.PRG" >> SYSTEM/PROGRAMS
+# (0.27) REV $0A: the meters and rows of a few shots differ by a moment: $(1)-rev10.md5 if it
+# exists; REV $07: the refusal with that board's free memory on the status line: $(1)-rev7.md5
+M26MD5  = $(if $(findstring --rev 7,$(EMUFLAGS)),$(1)-rev7.md5,$(if $(NOLAU),$(1)-nolau.md5,$(call REV10,$(1),$(1).md5)))
+M26SFX  = $(if $(findstring --rev 7,$(EMUFLAGS)),-rev7,$(if $(NOLAU),-nolau,$(if $(findstring -rev10,$(call M26MD5,music26)),-rev10,)))
 test-26: all $(EMU)
 	@rm -rf build/run-sd; cp -r $(SD) build/run-sd; touch build/run-sd/SYSTEM/NODESK
 	@$(EMU) $(EMUFLAGS) $(CARDDATE) --headless --sd build/run-sd --max-seconds 12 --keys "$$(python3 tests/keyscript.py tests/music-t.keys)" \
@@ -889,10 +930,65 @@ test-26: all $(EMU)
 pictures-26:
 	cp $(B)/music26.md5 tests/pictures/$(call M26MD5,music26)
 	cp $(B)/music26b.md5 tests/pictures/$(call M26MD5,music26b)
-	python3 -c "from PIL import Image; import glob; [Image.open(f).save('tests/pictures/' + f.split('/')[-1][:-4] + '$(if $(NOLAU),-nolau,).png') for f in sorted(glob.glob('$(B)/music26[0-9]*.ppm') + glob.glob('$(B)/music26b[0-9]*.ppm')) if not '$(NOLAU)' or f.endswith('1.ppm')]"
-	@# (without Lau: only the first picture of each session, the refusal, is kept as a PNG)
+	python3 -c "from PIL import Image; import glob; [Image.open(f).save('tests/pictures/' + f.split('/')[-1][:-4] + '$(M26SFX).png') for f in sorted(glob.glob('$(B)/music26[0-9]*.ppm') + glob.glob('$(B)/music26b[0-9]*.ppm')) if not '$(NOLAU)' or f.endswith('1.ppm')]"
+	@# (without Lau: only the first picture of each session, the refusal, is kept as a PNG;
+	@# (0.27) REV $0A: those of the -rev10 md5 files)
 
 .PHONY: test-26 pictures-26
+
+# (0.27) the OPL2 (REV $0C). OTEST on the text shell (tests/otest.keys, user/otest.s): opl_write's
+# probe, a write, EINVAL, one owner (EAGAIN for another task), the timer through the call, the
+# reset, the classic machine shown (only key-offs: tests/otest.err from emu816 --log-opl), the
+# release, the notes keyed off when the owner exits or is killed; before REV $0C ENODEV
+# (tests/otest-noopl.txt, no writes). MIDI in the music engine (tests/midrun.py: small files of
+# tools/mkmid.py, the register stream's notes and times against the files', broken files; before
+# REV $0C a polite refusal). MIDI heard (tests/midwav.py, REV $0C only): a small file played
+# with emu816's --wav, the pitches, a rest, a chord, silence after the end. A Desktop session
+# (tests/opl27.src): Music Player plays a MIDI file, OTEST's "otest h" in the Terminal finds the
+# chip taken (EAGAIN), Stop gives it back, "otest h" takes it, Music Player finds it taken
+# (REV $0C only; 0.27: OTEST replaces the OPL2 FM Synth program, removed). make pictures-27
+# freezes the pictures. Music Player's Volume and Stereo bars (tests/vol27.src, wherever there is Lau):
+# lowered and raised with the keys, the menu, a click and a drag, each bar measured in every
+# shot by tests/volbars.py (filled to its value, white after it; before 0.27 a lowered bar
+# kept its old length).
+OTESTTXT = $(if $(PRE12),otest-noopl.txt,otest.txt)
+OTESTERR = $(if $(PRE12),/dev/null,tests/otest.err)
+O27SHOTS := 13 18.5 24.5 28.5
+V27SHOTS := 15 17 19.5 21.5 24.5 26.5 28.5
+O27PREP := echo "Music Player=/BIN/MUSIC.PRG" >> SYSTEM/PROGRAMS && python3 ../../tools/mkmid.py Music > /dev/null
+test-27: all $(EMU)
+	@rm -rf build/run-sd; cp -r $(SD) build/run-sd; rm -rf build/run-sd/Music; touch build/run-sd/SYSTEM/NODESK
+	@$(EMU) $(EMUFLAGS) $(CARDDATE) --headless --log-opl --sd build/run-sd --max-seconds 9 \
+	    --keys "$$(python3 tests/keyscript.py tests/otest.keys)" \
+	    $(SD)/SYSTEM/HORIZON.SYS > $(B)/otest.out 2> $(B)/otest.err || true
+	@python3 -c "L = open('$(B)/otest.out', encoding='latin-1').read().split('\n'); i = [k for k, l in enumerate(L) if l.startswith('otest 1')][0]; j = [k for k, l in enumerate(L) if k > i and l.startswith('>')][0]; open('$(B)/otest.txt', 'w').write('\n'.join(L[i:j]) + '\n')"
+	@if python3 tests/compare.py tests/$(OTESTTXT) $(B)/otest.txt; then echo "PASS  0.27 opl_write: probe, a write, EINVAL, one owner (EAGAIN), the timer, reset, release, key-offs at exit and kill, ENODEV before REV \$$0C"; \
+	else echo "FAIL  OTEST ($(B)/otest.out)"; exit 1; fi
+	@if grep opl $(B)/otest.err | diff -u $(OTESTERR) -; then echo "PASS  0.27 OPL2 writes: the registers, the reset, only key-offs while the classic machine is shown, the release, the owner's notes off at its exit and kill"; \
+	else echo "FAIL  OTEST OPL2 log ($(B)/otest.err)"; exit 1; fi
+	@python3 tests/midrun.py $(EMU) $(SD) $(SD)/SYSTEM/HORIZON.SYS $(EMUFLAGS)
+	@if [ -z "$(PRE12)" ]; then python3 tests/midwav.py $(EMU) $(SD) $(SD)/SYSTEM/HORIZON.SYS $(EMUFLAGS); \
+	else echo "SKIP  0.27 MIDI heard (REV \$$0C only)"; fi
+	@if [ -z "$(PRE12)" ]; then \
+	  PREP='$(O27PREP)' KEEPMUSIC=1 DESK=1 sh tests/shots.sh "$(EMU) $(EMUFLAGS) $(CARDDATE)" $(SD) opl27 30 $(O27SHOTS); \
+	  if diff -u tests/pictures/opl27.md5 $(B)/opl27.md5; then echo "PASS  0.27 the OPL2 on the Desktop: MIDI in Music Player, another owner (otest h) refused, Stop giving the chip back, the other owner taking it, Music Player refused"; \
+	  else echo "FAIL  0.27 OPL2 pictures (look at $(B)/opl27*.ppm, then make pictures-27)"; exit 1; fi; \
+	  if grep -l 'emu816: blitter:' $(B)/opl27.err; then echo "FAIL  blitter rules (the 0.27 session)"; exit 1; \
+	  else echo "PASS  blitter rules: the 0.27 session"; fi; \
+	else echo "SKIP  0.27 OPL2 pictures (REV \$$0C only)"; fi
+	@if [ -z "$(NOLAU)" ]; then \
+	  PREP='$(M26PREP)' KEEPMUSIC=1 DESK=1 sh tests/shots.sh "$(EMU) $(EMUFLAGS) $(CARDDATE)" $(SD) vol27 29 $(V27SHOTS); \
+	  if python3 tests/volbars.py vol27; then echo "PASS  0.27 Music Player's Volume and Stereo bars follow each change, down as well as up (keys, menu, a click, a drag)"; \
+	  else echo "FAIL  0.27 Music Player's bars (look at $(B)/vol27*.ppm)"; exit 1; fi; \
+	  if grep -l 'emu816: blitter:' $(B)/vol27.err; then echo "FAIL  blitter rules (the bars' session)"; exit 1; \
+	  else echo "PASS  blitter rules: the bars' session"; fi; \
+	else echo "SKIP  0.27 Music Player's bars (Lau: REV \$$0A and later)"; fi
+
+pictures-27:
+	cp $(B)/opl27.md5 tests/pictures/opl27.md5
+	python3 -c "from PIL import Image; import glob; [Image.open(f).save('tests/pictures/' + f.split('/')[-1][:-4] + '.png') for f in sorted(glob.glob('$(B)/opl27[0-9]*.ppm'))]"
+
+.PHONY: test-27 pictures-27
 
 pictures-net:
 	cp $(B)/download.md5 tests/pictures/$(call REV7,download)

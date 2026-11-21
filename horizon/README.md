@@ -12,12 +12,13 @@ It boots into the Desktop (or, with `/SYSTEM/NODESK` on the card, into the text 
 
 | Folder | Contents |
 | --- | --- |
-| `/SYSTEM` | `HORIZON.SYS` (the kernel), `INIT.PRG`, the system programs `DESK.PRG` (the Desktop), `SH.PRG` (the shell), `ABOUT.PRG`, (0.23) `PRINTD.PRG` (sends a print job to the PC), (0.24) `SAVER.PRG` (the screen saver), (0.26) `MUSICD.PRG` (the music engine), the settings files `CONFIG` (Settings), `PROGRAMS` (the Desktop's Programs menu) and `NODESK` (optional: boot into the text shell), and (0.14) `ICONS` (the Desktop's icons, made from `sdfiles/icons.txt`), `CLOCK` (the last time set, written by the Desktop and the shell) and `LAYOUT` (where the desktop icons are), (0.22) `URLS` (the Downloader's last addresses) and `BBS.TXT` (the BBS terminal's address book). Files hides it and refuses to start its programs |
-| `/SYSTEM/TESTS` | Test and demo programs: SELFTEST, HELLO, COUNT, SPIN, TICK, REGS, CRASH, FTEST, PING, PONG, KEYS, MOUSE, MTEST, BENCH, WDEMO, LEAK, HOG, (0.15) KTEST, (0.17) STEST, (0.18) GTEST |
-| `/BIN` | The applications: WFILES (Files), TERM (Terminal), EDIT, WRITE, SHEET, PAINT, BASIC, CALC, SOLITAIR, (0.17) QUABRICK (Quabricks; its samples QUABRICK.SFX, its high scores QUABRICK.DAT), SETTINGS, (0.22) DOWNLOAD (the Downloader), BBS (the BBS terminal), (0.23) PRINTER (Printer), (0.25) FREECELL (FreeCell; its sounds FREECELL.SFX, its statistics FREECELL.DAT), (0.26) MUSIC (Music, the music player), and the shell's tools FILES (the text browser), CAT, DIR, MEM |
-| `/Music` | (0.26) Music to play: `HORIZON.MOD` (83 s) and `LAU.MOD` (13 s), original modules generated at build time by `tools/mkmod.py` |
+| `/SYSTEM` | `HORIZON.SYS` (the kernel), `INIT.PRG`, the system programs `DESK.PRG` (the Desktop), `SH.PRG` (the shell), `ABOUT.PRG`, (0.23) `PRINTD.PRG` (sends a print job to the PC), (0.24) `SAVER.PRG` (the screen saver), (0.26) `MUSICD.PRG` (the music engine; (0.27) with `OPL2.WOPL` next to it, if present, its
+General MIDI sound bank), the settings files `CONFIG` (Settings), `PROGRAMS` (the Desktop's Programs menu) and `NODESK` (optional: boot into the text shell), and (0.14) `ICONS` (the Desktop's icons, made from `sdfiles/icons.txt`), `CLOCK` (the last time set, written by the Desktop and the shell) and `LAYOUT` (where the desktop icons are), (0.22) `URLS` (the Downloader's last addresses) and `BBS.TXT` (the BBS terminal's address book). Files hides it and refuses to start its programs |
+| `/SYSTEM/TESTS` | Test and demo programs: SELFTEST, HELLO, COUNT, SPIN, TICK, REGS, CRASH, FTEST, PING, PONG, KEYS, MOUSE, MTEST, BENCH, WDEMO, LEAK, HOG, (0.15) KTEST, (0.17) STEST, (0.18) GTEST, (0.27) OTEST |
+| `/BIN` | The applications: WFILES (Files), TERM (Terminal), EDIT, WRITE, SHEET, PAINT, BASIC, CALC, SOLITAIR, (0.17) QUABRICK (Quabricks; its samples QUABRICK.SFX, its high scores QUABRICK.DAT), SETTINGS, (0.22) DOWNLOAD (the Downloader), BBS (the BBS terminal), (0.23) PRINTER (Printer), (0.25) FREECELL (FreeCell; its sounds FREECELL.SFX, its statistics FREECELL.DAT), (0.26) MUSIC (Music Player, the music player; "Music" before 0.27), and the shell's tools FILES (the text browser), CAT, DIR, MEM |
+| `/Music` | (0.26) Music to play: `HORIZON.MOD` (83 s) and `LAU.MOD` (13 s), original modules generated at build time by `tools/mkmod.py`; (0.27) MIDI files (`.MID`) play on the OPL2: `PRELUDE.MID`, `ELISE.MID`, `ENTERTNR.MID` and `THEME.MID`, written as notes at build time by `tools/mkmid.py --song` (see "Music Player", the card's songs) |
 | `/Desktop` | Created by the Desktop if missing: what is in it shows as icons on the desktop (0.14: shortcuts are `.LNK` files, below) |
-| `/atari.ini` | The classic machine's settings, read by the I/O processor at boot (Settings > Classic Atari edits it; 0.23: also the folder disk, `folder=` and `folderdrive=`) |
+| `/atari.ini` | The classic machine's settings, read by the I/O processor at boot (Settings > Classic Atari edits it; 0.23: also the folder disk, `folder=` and `folderdrive=`; 0.27: `basic=`, `fastdisk=`) |
 | `/Printouts` | (0.23) The print jobs, made by the I/O processor at the first one (see "Version 0.23") |
 
 The shell finds a command word in `/BIN`, then `/SYSTEM`, then `/SYSTEM/TESTS`.
@@ -181,9 +182,13 @@ the blitter: the software drawing paths; both must pass):
    Esc, letters in a menu, ctrl+W, Alt+Tab, Alt+F4, and `wdemo menu` (check marks, a dimmed
    item, shortcuts, win_mstate). Twelve pictures (`kmenu*.png`, `kmenu-rev7.md5`).
 15. **Settings, Classic Atari** (`tests/classic.keys`; the card gets `sdfiles/atari.ini`):
-   two values changed, Save, the restart alert; the saved `/atari.ini` must equal
-   `tests/atari-ini.txt` (only the lines of the changed keys rewritten, the missing key
-   appended). Four pictures (`classic*.png`, the same with and without the blitter).
+   two values changed (0.27: four, Disk boot and Disk loading too), Save, the restart alert;
+   the saved `/atari.ini` must equal `tests/atari-ini.txt` (only the lines of the changed
+   keys rewritten, the missing key appended). Four pictures (`classic*.png`, the same with
+   and without the blitter). (0.27) The same session on 0.26's sample file
+   (`tests/atari-old.ini`: a `stereo=0` line, no `basic` or `fastdisk`) must leave
+   `tests/atari-ini-old.txt`: the stereo lines as they were, `boot`, `basic=0` and
+   `fastdisk=0` added at the end.
 16. **Files** (0.13 session, sixteen pictures): the Up button, "..", the full path, a drag
    between windows, copy and paste, Rename and New folder (ui_ask, Tab through the buttons),
    a .MD file (Write, or its "not found" alert), Delete, View > Show system files, the
@@ -205,7 +210,8 @@ the blitter: the software drawing paths; both must pass):
    the shortcuts and /SYSTEM/CLOCK are checked too.
 19. **0.15 kernel** (`tests/ktest.src`, text shell, `--log-sound`): KTEST reads the joystick
    (SYS_JOY, and its test aid), times 30 vertical blanks (SYS_VSYNC: 500 ms), plays the four
-   chimes, lets a child write POKEY 2 and a DAC and exit (the kernel silences them), holds
+   chimes, lets a child write POKEY 2 and a DAC and exit (the kernel silences them; 0.27: on
+   REV $0C the DAC writes go nowhere, `tests/ktest-rev11.err` keeps them for older boards), holds
    all four channels and asks for a chime (channel 4 borrowed and given back); then, with
    the window system: a held key and a second window (the first one gets the key's release
    and WE_UNFOCUS, the second WE_FOCUS, the real release reaches nobody), a menu chosen with
@@ -365,12 +371,40 @@ the blitter: the software drawing paths; both must pass):
    missing; on REV $09 and below the polite refusal. The other sessions run on a card
    without `/Music` (`tests/shots.sh`: KEEPMUSIC=1 keeps it).
 
+32. **0.27 OPL2** (`make test-27`): OTEST (`tests/otest.keys`, text shell, `--log-opl`):
+   opl_write's probe, a register written, EINVAL, one owner (a child gets EAGAIN for a
+   write, a reset and a release; its probe answers), timer A through the call (its flag seen
+   by the probe after 50 ms, the IRQ reset, stopped), the reset, the classic machine shown
+   with a note on (the kernel writes only key-offs: `$B0 = $11`, `$BD = $E0`), the release,
+   the notes keyed off when a child that owns the chip exits or is killed; console
+   `tests/otest.txt` (`tests/otest-noopl.txt` before REV $0C: ENODEV), OPL2 writes
+   `tests/otest.err`. MIDI in the music engine (`tests/midrun.py`, at the board's timing):
+   small files made with `tools/mkmid.py`'s classes played by `musicd` from the shell with
+   `--log-opl-us`; the register stream gives every key-on and key-off with its pitch (from
+   F-number and block) and time: nine notes at 120 then 60 BPM within -1..+8 ms of the
+   file's times (the engine's 5 ms tick), a held chord not cut short by twelve drums,
+   Reset All Controllers releasing a note held by the pedal, SMPTE division (its Set Tempo
+   ignored); broken files (a chunk length that wraps the address, a delta of 2^28 - 1 ticks)
+   answered at once; a file of exactly 64 KB played to its end. Before REV $0C a polite
+   refusal. A Desktop session (`tests/opl27.src`, REV $0C only): Music Player plays a MIDI
+   file; in the Terminal, `otest h` (OTEST as another owner) gets EAGAIN; Stop gives the chip
+   back, `otest h` takes it, and Music Player's Play finds it taken (`opl27*.png`). MIDI heard (`tests/midwav.py`, REV $0C only): a small file
+   played by `musicd` with emu816's `--wav`; the pitch heard early and late in each of four
+   notes within 1 % of the note's, a rest, a chord, nothing before the first note and silence
+   after the end (no stuck note). Music Player's Volume and Stereo bars (`tests/vol27.src`,
+   wherever there is Lau: REV $0A and later): a module playing, the volume lowered with -,
+   Play > Softer, a click on its bar and a drag past its left end, Stereo lowered with a
+   click, the volume raised with +; `tests/volbars.py` measures both bars in each of the
+   seven pictures: filled from the left to value x width / 64, white for the rest (before
+   0.27 every one of them failed: a lowered bar kept its length).
+
 The Desktop sessions (`DESK=1` in `tests/shots.sh`) get `tests/desk.programs` as their
 Programs menu (the order of 0.12), so programs added to `sdfiles/PROGRAMS` do not change
 their pictures. `PREP=command` runs a command on the session's copy of the card first.
 
-The browser session also runs with `--log-sound`: `tests/browse.err` shows POKEY 2 and
-the DACs silenced before every boot of the classic machine.
+The browser session also runs with `--log-sound`: `tests/browse.err` shows POKEY's native
+register bank (POKEY 2 before REV $0C) silenced before every boot of the classic machine;
+(0.27) on older boards `tests/browse-rev11.err`, with the four DACs too (REV $0C has none).
 
 The SD cards also get a test tree, made by `tools/mktree.py`:
 
@@ -598,7 +632,7 @@ names with spaces: "in quotes"; ctrl-C stops the foreground job
 | `kernel/ws.s` | Window system: surfaces and the pixel core (fill, copy), clipped drawing (rectangles, frames, lines, text, blit), the compositor thread and damage list, the window manager, window syscalls |
 | `tools/mkuifont.py`, `tools/mkpalette.py` | Make `kernel/uifont.inc` (the proportional UI font, cut from the 8x12 art) and `kernel/palette.inc` (the system palette) |
 | `kernel/menu.s`, `kernel/term.s` | The menu bar and drop-downs; terminal windows (cells, control codes, key queue, the console syscalls of attached tasks) |
-| `kernel/sound.s` | REV $07 sound: POKEY 2 and the DACs, silenced before every unfreeze; beep (stopped by the tick), sound_write; (0.15) the chime, who owns each channel |
+| `kernel/sound.s` | REV $07 sound: POKEY 2 and the DACs (REV $0C: POKEY 1's native register bank, no DACs), silenced before every unfreeze; beep (stopped by the tick), sound_write; (0.15) the chime, who owns each channel; (0.27) the OPL2: opl_write ($6D), its one owner, its notes keyed off at the owner's end and (only key-offs) before the classic machine runs |
 | `kernel/vstate.s` | The video-state block at $01:F000 (ABI.md, "Video state"): NV_CTRL, NV_BASE, NV_STRIDE, the pointer and the palette as written, for tools reading memory from outside; the palette loader every palette write goes through |
 | `kernel/mouse.s` | Mouse events, pointer position, hardware pointer, event coalescing, the mouse_inject test syscall |
 | `kernel/pointer.txt` | The pointer image as text art. `tools/mkpointer.py` turns it into `kernel/pointer.inc` |
@@ -611,6 +645,10 @@ names with spaces: "in quotes"; ctrl-C stops the foreground job
 | `kernel/sys15.s` | (0.15) joystick, vsync |
 | `kernel/sys17.s` | (0.17) Lau, the sample player: sample_play / stop / stat / set, the range checks, voice ownership, the voices stopped at a task's end, at bank_free and before the classic machine runs, the master volume |
 | `user/stest.s` | (0.17) STEST, the test of the sample calls |
+| `user/otest.s` | (0.27) OTEST, the test of opl_write |
+| `user/midplay.s`, `user/midplay.inc`, `user/opl_gm.inc` | (0.27) the General MIDI player on the OPL2 (`build/midplay.o`, linked into the music engine): Standard MIDI Files 0 and 1, nine voices, the GM drums on channel 10, its built-in bank of 128 + 47 patches, a WOPL bank read at run time |
+| `tools/mkmid.py`, `tools/mkoplgm.py` | (0.27) the card's MIDI songs (`--song NAME FILE`: `/Music/*.MID`), two more demo songs (`OPLGROOVE.MID`, `BAROQUE.MID`, for the Desktop test; the MIDI tests make their files with its classes); the built-in GM bank `user/opl_gm.inc` |
+| `tests/midrun.py`, `tests/midwav.py` | (0.27) the MIDI tests: files played by the engine, the OPL2 register stream read back as notes and times; the sound heard in emu816's `--wav` |
 | `kernel/k2.s`, `kernel/k2*.s`, `kernel/k2.inc`, `kernel/kfar.s` | (0.18) the second code segment (bank 0): frame sync and the vertical blank (`k2vbl.s`), palette entries (`k2pal.s`), sprites (`k2spr.s`), full-screen mode, scrolling and the raster table (`k2fs.s`), draw lists (`k2list.s`); its imports and the bank $01 wrappers |
 | `kernel/k3.s` | (0.19) the third code segment (bank $7F): sheets (sheet_new, sheet_free, sheet_draw: the fast path and the full one), their cleanup at bank_free and at a task's end |
 | `tools/kspace.py` | (0.18) the kernel's space at every build |
@@ -816,7 +854,8 @@ Stage 3 (programs built on the shared controls library):
   it), saved to `/SYSTEM/CONFIG` (`key=value` lines; a key missing keeps its default) and
   applied at boot (`settings apply`, run by DESK). Classic Atari (0.13): the keys of `/atari.ini` that the
   I/O processor reads at boot (`ram`, `stereo`, `kbdlayout`, `joystick`, `scanlines`,
-  `hpos`, `boot`), written back keeping every other line, then "Restart now" / "Later".
+  `hpos`, `boot`; 0.27: no `stereo`, and `basic`, `fastdisk`), written back keeping every
+  other line, then "Restart now" / "Later".
 - **Controls library** (`user/ui*.s`, `user/ui.inc`, built as `build/ui.lib`): buttons,
   scroll bars, text field, list, alert box, file open/save dialog, drawing helpers; one
   look for all programs.
@@ -1045,10 +1084,119 @@ bus time (see emu/README.md, "Memory timing"). Expect the same factor on the CPU
   `user/uidate.s`), shortcuts (ui_lnkread, ui_mklink), program and file icons (ui_prog,
   ui_ficon). See ABI.md and ui.inc.
 
+## Version 0.27 (the OPL2)
+
+- **The OPL2** (YM3812, hardware revision $0C): an FM synthesiser at $00:DB30-$DB33 (register
+  select and status, data, the output sample), its timers on the native AUDIO interrupt. On
+  the same board POKEY 2 is gone: the native writes to $00:DB00-$DB0F (still only while the
+  classic machine is frozen) reach a separate native register bank inside POKEY 1, so
+  Horizon's chimes and `sound_write` work as before; the four DACs ($DB10-$DB13) no longer
+  exist (their writes do nothing), and the classic Atari's sound is mono. About says "Sound:
+  POKEY, Lau, OPL2".
+- **Kernel** (+385 bytes in bank $01; 877 left): `opl_write` ($6D, SYS_OPLW): A = a register
+  $00-$F5 and X its value, $FFFE the probe (the status, never anything else), $FFFF the
+  reset ($01-$F5 = 0), $FFFD the release; it returns the chip's status, ENODEV before REV
+  $0C, EINVAL for another A. It waits the YM3812's times (5 us after the select, 26 us after
+  the data). **One owner**, as the music timer: the first task that writes a register or
+  resets the chip owns it until it exits (the kernel keys every channel and the rhythm off) or
+  releases it; meanwhile another task's write, reset or release answers EAGAIN, and its
+  probe answers. Showing the classic machine keys the OPL2's notes off and nothing else (the
+  kernel keeps the last values of $B0-$B8 and $BD: pitch, block, the depths and rhythm mode
+  stay, the owner too), so a song goes on afterwards. See ABI.md.
+- **Music Player plays MIDI** (`user/midplay.s`, linked into the music engine): Standard MIDI
+  Files 0 and 1 (up to 32 tracks, any size in consecutive banks), General MIDI on nine OPL2
+  voices (128 melodic patches and 47 drums built in, `user/opl_gm.inc` from
+  `tools/mkoplgm.py`; a WOPL bank in `/SYSTEM/OPL2.WOPL` replaces them), sustain pedal,
+  volume, expression, pitch bend, the hi-hat choke, tempo changes with an exact 200 Hz clock,
+  the length found at load. Files opens `.MID` in Music Player. Fixes from a review before
+  the release: a chunk length that wrapped the address hung the load; the last byte of a file
+  ending at a bank's end was read as a word (the engine was killed); drums held their voices
+  until stolen, so melodic notes were cut (a drum now releases at once and frees its voice
+  after 300 ms; a voice taken is always keyed off first); a huge delta took minutes to
+  pre-scan (stopped at an hour and after 16,384 steps); Set Tempo was applied in SMPTE
+  division; Reset All Controllers did not release what the pedal held nor apply the bend's
+  reset; a truncated Set Tempo half-changed the tempo; a rejected WOPL file still changed the
+  depths, and a blank WOPL instrument became silent instead of keeping the built-in one; a
+  seek while paused sounded the notes of its first tick; running status now survives a meta
+  event or SysEx (some files rely on it). Music Player takes the OPL2 when a MIDI song plays
+  (one reset), gives it back when the song stops, ends or another kind of file is loaded, and
+  says so when another program has it; MIDI on REV $0A-$0B has its own message ("MIDI needs
+  the OPL2"), not "No Lau".
+- **Settings > Classic Atari** has no Stereo row any more (REV $0C's classic machine has one
+  POKEY; the core's `stereo` key does nothing): the rows below it move up, `stereo` is no
+  longer written to `/atari.ini` (a line already there is kept as it is), and the card's
+  sample `/atari.ini` lost it.
+- **Settings > Classic Atari: two new rows** for the I/O processor's new keys (core/README.md,
+  "/atari.ini"): **Disk boot** (With BASIC, the default and the real machine's way: `basic=1`;
+  Without BASIC: `basic=0`, a disk in D1: boots without BASIC, what most games need) and
+  **Disk loading** (Fast, the default: `fastdisk=1`, sector reads through the fast disk;
+  Serial port: `fastdisk=0`, every disk access over the serial port). A missing key reads as
+  1, as the firmware does (any non-zero value is 1). Like the other rows they take effect at
+  the next full restart: Save writes `/atari.ini` and offers "Restart now" / "Later". The
+  file is rewritten as before: the lines of the keys Settings knows get the new values, every
+  other line (comments, `folder=`, a 0.26 card's `stereo=0`, which the firmware ignores) stays
+  as it is, and the keys missing are added at the end. The card's sample `/atari.ini` has both
+  keys with their comments.
+- **Music is now "Music Player"** where it shows: the window title, the menu bar, the
+  Programs menu (`sdfiles/PROGRAMS`), the name `ui_launch` and desktop shortcuts give
+  `MUSIC.PRG`, Help > About Music Player..., the keys dialog, its alerts and messages, the
+  header of `/SYSTEM/MUSIC.CFG` and the Welcome document. The files keep their names
+  (`/BIN/MUSIC.PRG`, `/Music`, `musicd`, `/SYSTEM/MUSIC.CFG`). The menu bar still fits at 640
+  pixels: the bold name and File Play View Help end at x 455, the free memory starts at about
+  520.
+- **Music Player's Volume and Stereo bars** now follow the value both ways. The bar drawing
+  (`mu_draw.s`, `vbar`) kept the inside's width in `t4`, which `umul16` (value x width) uses
+  as its scratch and leaves at 0; the white rest of the bar was then 0 - filled pixels wide, a
+  negative width the library draws nothing for. So a lowered bar kept its old length (and
+  the empty part was never painted white: at the start the Stereo bar's rest was the window's
+  grey) whichever way the value changed: +/-, Play > Louder / Softer, a click or a drag, a
+  module, a WAV or a MIDI song alike (since 0.26). The sound followed; only the picture did
+  not.
+- **emu816**: REV $0C is the default (`--rev 11` and older as before): the OPL2's registers,
+  status and timers A and B against emulated time with JTOPL's flags and masks, its
+  interrupt on IRQ_STATUS bit 5, the chip reset with the CPU; `--log-opl`, `--log-opl-us`.
+  The DACs ignore writes on REV $0C. **The OPL2 sounds**: Nuked OPL3 (Nuke.YKT's
+  cycle-accurate emulation of the YMF262, LGPL-2.1-or-later, vendored unmodified in
+  `emu/nuked-opl3/`) runs in OPL2 mode at the board's 49,803 Hz and gets every register write
+  at its emulated cycle; around it, as JTOPL does on the board, the waveform-select enable bit
+  and JTOPL's sum (its per-channel levels, 17-bit sum, saturation). $DB32/$DB33 read its
+  output, and `--wav` records Lau plus the OPL2 mixed as the board's HDMI output mixes them
+  (without the classic machine's POKEY and GTIA). An SDL build plays the same mix live
+  (`--mute`: not). `emu/README.md`, "OPL2", has the details and the ways it can still differ
+  from the board. Its own tests: `OPLTEST.BIN` (status, timer and, now, tone parts),
+  `tests/asm/opltimer` (the periods, masks, the IRQ waking WAI) and `tests/asm/opltone` (a
+  440 Hz note in the WAV: its pitch, level, release to silence; the same bytes twice).
+- **Songs for the OPL2 on the card**: `/Music` has four MIDI files next to the two modules,
+  written as notes by `tools/mkmid.py --song` at build time: Bach's Prelude in C, Fur Elise,
+  The Entertainer and "Horizon" for FM (see "Music Player", the card's songs). The Desktop
+  sessions that keep `/Music` (Music's and the OPL2's: KEEPMUSIC=1) show them in Files' listing
+  of that folder; their pictures were looked at and only that listing changed (`music26*.png`,
+  `opl27*.png`).
+- **Tests**: item 32 of the list above (`make test-27`; `tests/midwav.py`, MIDI heard through
+  the WAV, on REV $0C). The pictures that show About have
+  REV $0C's sound line; the REV $0A-$0B ones are kept as `NAME-rev11.md5` (desk, system,
+  desk14, kmenu), and the sound logs of the browser session and KTEST as
+  `tests/browse-rev11.err`, `tests/ktest-rev11.err`. `EMUFLAGS="--rev 11"` now means REV $0B
+  everywhere in the Makefile (before, any `--rev` but 7 meant REV $08-$0A to the Files, PC
+  volume and screen saver pictures). Later in 0.27: `tests/vol27.src` with `tests/volbars.py`
+  (the bars, item 32); the Classic Atari session clicks the two new rows, and a second run
+  of it saves a 0.26 `/atari.ini` (item 15; `tests/shots.sh` takes `KEYS=FILE` for that);
+  `tests/opl27.src` uses `otest h` as the chip's other owner. Pictures looked at and
+  refreshed: `classic*` (the two rows; the saved file's new size in Files), `music26*` and
+  `opl27*` (the name, the Stereo bar's white rest), `music26b1` (the alert's text), `write1-4`
+  (the Welcome document's Music Player line), `files2-7` (Welcome.md one byte shorter),
+  `pcdesk9` (a moment's free memory) and `saver2`, `saver5` (the animation a moment later):
+  the last two because Settings, run at every boot (`settings apply`), is larger. The older
+  boards' own md5 files followed (`classic-rev7`, `files-rev7`, `files-rev10`,
+  `pcdesk-rev10`, `system-rev7`: system1's free memory; `music26*-nolau`, `music26*-rev7`:
+  the alert's name); REV $0A's Music session now gives the default pictures, so
+  `music26-rev10.md5` and its three pictures are gone.
+
 ## Version 0.26 (music)
 
 - **Music** (`/BIN/MUSIC.PRG`, Programs > Music, its own icon; a double click on a `.MOD` or
-  `.WAV` file in Files plays it): the music player. See "Music" below.
+  `.WAV` file in Files plays it): the music player. See "Music Player" below (its name since
+  0.27).
 - **The music engine**, `/SYSTEM/MUSICD.PRG` (`user/musicd.s`), and the **replayer
   library** (`user/modplay.s`, `build/modplay.o`, API `user/modplay.inc`): ProTracker
   modules (M.K. and its kin: 4, 6 or 8 channels, FLT4/FLT8, xCHN up to 8, the old
@@ -1852,9 +2000,11 @@ ABI.md, "The games round", has the rules; `user/gtest.s` tests them.
 - **Tests**: KTEST and the pop-up menu session (tests 19 and 20); `tests/mousegen.py` no
   longer lets a click overtake the move before it.
 
-## Music
+## Music Player
 
-Programs > Music (`/BIN/MUSIC.PRG`), or a double click on a `.MOD` or `.WAV` file in Files.
+Programs > Music Player (`/BIN/MUSIC.PRG`; "Music" before 0.27, the name shown only: the
+files, `/Music`, the engine `musicd` and `/SYSTEM/MUSIC.CFG` keep theirs), or a double click
+on a `.MOD`, `.WAV` or (0.27) `.MID` file in Files.
 
 - **Playing:** Play, Pause, Stop, Previous and Next buttons; the song's title (a module's own,
   else the file's name), its format, where it is (order, pattern, row) and the time played;
@@ -1873,9 +2023,29 @@ Programs > Music (`/BIN/MUSIC.PRG`), or a double click on a `.MOD` or `.WAV` fil
 - It plays on while it is minimised or another program is in front (the engine runs on its
   own at priority 0); closing its window stops the music. Without Lau (hardware before REV
   $0A) it says that it needs Lau and ends.
-- A file opened from Files while Music already runs reaches it through `/SYSTEM/OPEN.REQ`
-  (`ui_launch` writes the program's path and the file there when the kernel answers that the
-  single-instance program runs; Music reads it when it gets the focus, and once a second).
+- (0.27) **MIDI** (`.MID`, Standard MIDI Files 0 and 1) plays on the OPL2 (hardware REV $0C):
+  General MIDI, nine voices, the drums on channel 10, with the built-in bank or
+  `/SYSTEM/OPL2.WOPL` (a WOPL bank, versions 1-3). Music Player holds the chip while a MIDI
+  song plays or is paused and gives it back when it stops or ends; when another program has
+  it, the song says "The OPL2 is in use by another program." Before REV $0C a MIDI file says
+  "MIDI needs the OPL2 (hardware revision $0C)." 
+- A file opened from Files while Music Player already runs reaches it through
+  `/SYSTEM/OPEN.REQ` (`ui_launch` writes the program's path and the file there when the kernel
+  answers that the single-instance program runs; it reads it when it gets the focus, and once
+  a second).
+- **The card's songs** (`/Music`), all made at build time, nothing downloaded. The lengths are
+  as played by the music engine in emu816; the MIDI songs sound about 6 to 15 dB quieter than
+  `HORIZON.MOD` (RMS), as on the board, where one OPL2 voice reaches an eighth of full scale
+  and one Lau voice half of it:
+
+  | File | What | Length | Made by |
+  | --- | --- | --- | --- |
+  | `HORIZON.MOD` | "Horizon", a cheerful C-major tune (0.26) | 1:23 | `tools/mkmod.py`: original, samples synthesised |
+  | `LAU.MOD` | "Lau", a jingle in A major (0.26) | 0:13 | `tools/mkmod.py --jingle`: original |
+  | `PRELUDE.MID` | J. S. Bach, Prelude in C major BWV 846 (1722): the 35 bars on the piano, strings from bar 24, a ritardando | 1:56 | `tools/mkmid.py --song prelude`: our arrangement from the score (public domain) |
+  | `ELISE.MID` | L. van Beethoven, Fur Elise WoO 59 (1810): the theme on the piano, then the FM electric piano, the C-major episode with strings, the theme again; sustain pedal | 0:46 | `tools/mkmid.py --song elise`: our arrangement, shortened (public domain) |
+  | `ENTERTNR.MID` | S. Joplin, The Entertainer (1902): the first strain on the honky-tonk piano, then a little band (clarinet, tuba, piano, drums on channel 10) | 0:52 | `tools/mkmid.py --song entertainer`: our arrangement (public domain) |
+  | `THEME.MID` | "Horizon" for the OPL2: the module's tune, chords, bass and grooves row for row; square lead with vibrato and slides (pitch bend), a diving bass, electric piano, a pad swelling (CC 11), vibraphone, GM drums | 1:23 | `tools/mkmid.py --song horizon`: original |
 
 ## FreeCell
 

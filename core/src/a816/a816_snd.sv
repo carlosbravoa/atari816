@@ -15,8 +15,9 @@
 // the output changes a few cycles after the HDMI transmitter has sampled it. A sample that is
 // not ready then is counted in AU_LATE (the output holds).
 // CPU writes are registered once before they reach anything (the CPU's address decode is on
-// the clk_core critical path). Block RAMs: voice registers (CPU writes bytes, the engine reads
-// bytes), voice state {sample, tag, frac, pos}, the 8-byte sample blocks, the FIFO.
+// the clk_core critical path). Block RAMs (2 total): voice registers (pram, 128x8) and one
+// shared 64x32 SDPB (sram) packing voice state (3 words/voice), 8-byte sample blocks (2
+// words/voice) and the 4-entry output FIFO.
 `default_nettype none
 
 module a816_snd #(
@@ -94,7 +95,7 @@ end
 // ── engine ───────────────────────────────────────────────────────────────────
 typedef enum logic [4:0] {
     E_IDLE, E_V0, E_V1, E_V2, E_V3, E_V4, E_V5, E_V6, E_V7, E_V8, E_V9, E_V10, E_V11, E_V12,
-    E_V13, E_V14, E_F0, E_F1, E_RD, E_VOL, E_WB, E_NEXT, E_OUT
+    E_V13, E_V14, E_F0, E_F1, E_F2, E_RD, E_VOL, E_WB, E_WB1, E_WB2, E_NEXT, E_OUT
 } est_t;
 est_t st;
 
@@ -106,6 +107,7 @@ reg         force_ld, wrap;
 reg  [2:0]  c;                         // whole samples stepped this time
 reg  [1:0]  ctl;                       // LOOP, SIXTEEN
 reg  [7:0]  tmp8, voll, volr;
+reg  [31:0] blk_hi_tmp;                // upper 32 bits of SDRAM burst, written in E_F1
 reg  signed [15:0] s_cur;
 reg  signed [17:0] acc_l, acc_r;
 reg  [1:0]  wptr, rptr;
@@ -113,23 +115,18 @@ reg  [2:0]  cnt;                       // FIFO entries
 reg         pop_pend, pop_rd;
 logic [7:0] pl_n, ko_n, end_set;       // next PLAYING / key-on pending, AU_END bits to set
 
-// voice state {s_cur, tag, frac, pos}, written in E_WB, read in E_V0
-(* syn_ramstyle = "block_ram" *) reg [73:0] vs [0:7];
-reg [73:0] vs_q;
-always_ff @(posedge clk) begin
-    if (st == E_WB) vs[v] <= {s_cur, tag, frac, pos};
-    vs_q <= vs[v];
-end
-// sample blocks: written from the memory port, read in E_V14 / E_F1
-(* syn_ramstyle = "block_ram" *) reg [63:0] blk [0:7];
-reg [63:0] blk_q;
-always_ff @(posedge clk) begin
-    if (st == E_F0 && a_done) blk[v] <= a_rdata;
-    blk_q <= blk[v];
-end
-// output FIFO
-(* syn_ramstyle = "block_ram" *) reg [31:0] fifo [0:3];
-reg [31:0] fifo_q;
+// Shared 64x32 BSRAM (1 SDPB) packing vs, blk and fifo:
+//   00_vvv_0 : vs0[v] = {2'd0, frac[13:0], s_cur[15:0]}
+//   00_vvv_1 : vs1[v] = {8'd0, pos[23:0]}
+//   01_vvv_0 : vs2[v] = {12'd0, tag[19:0]}
+//   10_vvv_0 : blk[v][31:0]  (B[2] = 0)
+//   10_vvv_1 : blk[v][63:32] (B[2] = 1)
+//   11_00_pp : fifo[pp] = {out_l, out_r}
+(* syn_ramstyle = "block_ram" *) reg [31:0] sram [0:63];
+reg  [31:0] sram_q;
+logic       sr_we;
+logic [5:0] sr_wa, sr_ra;
+logic [31:0] sr_wd;
 
 // one adder for the position: pos + c, pos - LEN, pos + LOOP
 wire        p_sub = (st == E_V7);
@@ -140,8 +137,8 @@ wire [16:0] fsum  = {3'b000, frac} + {1'b0, pitch_w};
 wire [23:0] pos_sh = ctl[1] ? {pos[22:0], 1'b0} : pos;
 assign a_addr = {B[AW-1:3], 3'b000};
 
-// sample from the 8-byte block (little-endian); 8-bit samples become the high byte
-wire [15:0] half  = blk_q[{B[2:1], 4'b0000} +: 16];
+// sample from the selected 32-bit half of the 8-byte block (little-endian)
+wire [15:0] half  = B[1] ? sram_q[31:16] : sram_q[15:0];
 wire [7:0]  byte8 = B[0] ? half[15:8] : half[7:0];
 wire signed [15:0] s_new = ctl[1] ? half : {byte8, 8'h00};
 
@@ -161,9 +158,36 @@ reg [2:0] tk_s = 3'd0;
 always_ff @(posedge clk) tk_s <= {tk_s[1:0], smp_tgl_a};
 wire tick = tk_s[2] ^ tk_s[1];
 
+wire eng_sram_rd = (st == E_V0) || (st == E_V1) || (st == E_V2) || (st == E_V14) || (st == E_F2);
+wire pop_grant   = pop_pend && !pop_rd && !eng_sram_rd;
+
+always_comb begin
+    sr_we = 1'b0;
+    sr_wa = 6'd0;
+    sr_wd = 32'd0;
+    case (st)
+        E_F0:  if (a_done) begin sr_we = 1'b1; sr_wa = {2'b10, v, 1'b0}; sr_wd = a_rdata[31:0]; end
+        E_F1:  begin sr_we = 1'b1; sr_wa = {2'b10, v, 1'b1}; sr_wd = blk_hi_tmp; end
+        E_WB:  begin sr_we = 1'b1; sr_wa = {2'b00, v, 1'b0}; sr_wd = {2'd0, frac, s_cur}; end
+        E_WB1: begin sr_we = 1'b1; sr_wa = {2'b00, v, 1'b1}; sr_wd = {8'd0, pos}; end
+        E_WB2: begin sr_we = 1'b1; sr_wa = {2'b01, v, 1'b0}; sr_wd = {12'd0, tag}; end
+        E_OUT: begin sr_we = 1'b1; sr_wa = {4'b1100, wptr};  sr_wd = {mastered(acc_l, master), mastered(acc_r, master)}; end
+        default: ;
+    endcase
+
+    case (st)
+        E_V0:    sr_ra = {2'b00, v, 1'b0};
+        E_V1:    sr_ra = {2'b00, v, 1'b1};
+        E_V2:    sr_ra = {2'b01, v, 1'b0};
+        E_V14,
+        E_F2:    sr_ra = {2'b10, v, B[2]};
+        default: sr_ra = {4'b1100, rptr};
+    endcase
+end
+
 always_ff @(posedge clk) begin
-    if (st == E_OUT) fifo[wptr] <= {mastered(acc_l, master), mastered(acc_r, master)};
-    fifo_q <= fifo[rptr];
+    if (sr_we) sram[sr_wa] <= sr_wd;
+    sram_q <= sram[sr_ra];
 end
 
 // voice register byte for each state (the data is in pr_q one state later)
@@ -195,20 +219,21 @@ always_ff @(posedge clk or negedge reset_n) begin
         sel <= 3'd0; pos_live <= 24'd0; primed <= 1'b0;
         st <= E_IDLE; v <= 3'd0; pos <= 24'd0; B <= 24'd0; frac <= 14'd0; tag <= 20'd0;
         force_ld <= 1'b0; wrap <= 1'b0; c <= 3'd0; ctl <= 2'd0; tmp8 <= 8'd0; voll <= 8'd0; volr <= 8'd0;
+        blk_hi_tmp <= 32'd0;
         s_cur <= 16'sd0; acc_l <= 18'sd0; acc_r <= 18'sd0;
         wptr <= 2'd0; rptr <= 2'd0; cnt <= 3'd0; pop_pend <= 1'b0; pop_rd <= 1'b0;
         a_req <= 1'b0; out_l <= 16'sd0; out_r <= 16'sd0;
     end else begin
         pl_n = playing; ko_n = keyon; end_set = 8'd0;
 
-        // FIFO -> output after the HDMI sample clock
+        // FIFO -> output after the HDMI sample clock (borrows sram read port when idle)
         pop_rd <= 1'b0;
-        if (pop_pend && !pop_rd) begin         // fifo_q holds entry rptr in the next cycle
+        if (pop_grant) begin                   // sram_q holds fifo[rptr] in the next cycle
             pop_rd   <= 1'b1;
             pop_pend <= 1'b0;
         end
         if (pop_rd) begin
-            {out_l, out_r} <= fifo_q;
+            {out_l, out_r} <= sram_q;
             rptr <= rptr + 2'd1;
         end
         if (tick) begin
@@ -228,7 +253,7 @@ always_ff @(posedge clk or negedge reset_n) begin
             end
             E_V0: st <= E_V1;
             E_V1: begin
-                {s_cur, tag, frac, pos} <= vs_q;
+                {frac, s_cur} <= sram_q[29:0];
                 tmp8 <= pr_q;
                 st   <= E_V2;
             end
@@ -244,13 +269,14 @@ always_ff @(posedge clk or negedge reset_n) begin
                         c        <= 3'd0;
                         force_ld <= 1'b1;
                     end else begin
+                        pos      <= sram_q[23:0];
                         frac     <= fsum[13:0];
                         c        <= fsum[16:14];
                         force_ld <= 1'b0;
                     end
                 end
             end
-            E_V3: begin ctl <= pr_q[1:0]; pos <= p_sum[23:0]; wrap <= 1'b0; st <= E_V4; end
+            E_V3: begin tag <= sram_q[19:0]; ctl <= pr_q[1:0]; pos <= p_sum[23:0]; wrap <= 1'b0; st <= E_V4; end
             E_V4: begin B <= {pr_q, B[23:8]}; st <= E_V5; end
             E_V5: begin B <= {pr_q, B[23:8]}; st <= E_V6; end
             E_V6: begin B <= {pr_q, B[23:8]}; st <= E_V7; end
@@ -289,12 +315,14 @@ always_ff @(posedge clk or negedge reset_n) begin
                     st    <= E_F0;
                 end
             end
-            E_F0: if (a_done) begin            // the block is written in this cycle
-                a_req <= 1'b0;
-                tag   <= B[22:3];
-                st    <= E_F1;
+            E_F0: if (a_done) begin            // low 32 bits written in this cycle
+                a_req      <= 1'b0;
+                blk_hi_tmp <= a_rdata[63:32];
+                tag        <= B[22:3];
+                st         <= E_F1;
             end
-            E_F1: st <= E_RD;                  // read it back
+            E_F1: st <= E_F2;                  // high 32 bits written in this cycle
+            E_F2: st <= E_RD;                  // read the selected 32-bit half
             E_RD: begin s_cur <= s_new; st <= E_VOL; end
             E_VOL: begin
                 acc_l <= acc_l + 18'(vp_l >>> 9);
@@ -303,8 +331,10 @@ always_ff @(posedge clk or negedge reset_n) begin
             end
             E_WB: begin
                 if (v == sel) pos_live <= pos;
-                st <= E_NEXT;
+                st <= E_WB1;
             end
+            E_WB1: st <= E_WB2;
+            E_WB2: st <= E_NEXT;
             E_NEXT: begin
                 v  <= v + 3'd1;
                 st <= (v == 3'd7) ? E_OUT : E_V0;

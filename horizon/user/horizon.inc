@@ -92,6 +92,7 @@ SYS_SSET      = $6B   ; A = voice (the caller's), X = pitch, Y = left volume | r
 SYS_STIMER    = $6C   ; (0.26) the music timer: A = own port ($FFFF: off), X = period low 16 bits, Y = high 8 bits (us,
                       ;   >= 1000): at every period a message {u8 $FF, u8 0, u16 count} to the port; called again: the
                       ;   new period from the next one on. One owner (EAGAIN); REV $0A+ (ENODEV)
+SYS_OPLW      = $6D   ; (REV $0C) OPL2 (YM3812): A = reg $00-$F5 ($FFFE probe, $FFFF reset, $FFFD release), X = value -> A = OPL_STAT; one owner (EAGAIN); ENODEV before REV $0C
 SPB_ADDR  = 0         ; u24 the first sample (16-bit samples: an even address)
 SPB_LEN   = 3         ; u24 the length in samples (1 ..)
 SPB_LOOP  = 6         ; u24 loop start in samples (SPF_LOOP: length - loop >= 4)

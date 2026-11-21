@@ -157,6 +157,7 @@ ENTITY atari800core_simple_sdram is
 		RESET_RNMI : in STD_LOGIC;
 		ATARI800MODE : in STD_LOGIC := '0';
 		PBI_ROM_MODE : in STD_LOGIC := '0';
+		PBI_DISK_REQ : out STD_LOGIC;	-- Atari816: the PBI disk's request bit
 		XEX_LOADER_MODE : in STD_LOGIC := '0';
 		RTC : in std_logic_vector(64 downto 0);
 		VBXE_SWITCH : IN STD_LOGIC := '0';
@@ -419,6 +420,7 @@ PORT MAP
 	CLIP_SIDES => CLIP_SIDES,
 	ATARI800MODE => ATARI800MODE,
 	PBI_ROM_MODE => PBI_ROM_MODE,
+	PBI_DISK_REQ => PBI_DISK_REQ,
 	XEX_LOADER_MODE => XEX_LOADER_MODE,
 	RTC => RTC,
 	VBXE_SWITCH => VBXE_SWITCH,

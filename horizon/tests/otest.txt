@@ -1,0 +1,25 @@
+otest 1: probe: status 06
+otest 2: $A0 = $41: status 06
+otest 3: refused
+  $F6: error 01
+  $FFFC: error 01
+otest 4: one owner
+  child: write: error 06
+  child: reset: error 06
+  child: release: error 06
+  child: probe: status 06
+otest 5: timer A
+  started: status 06
+  50 ms later: status C6
+  IRQ reset: status 06
+  stopped: status 06
+otest 6: reset: status 06
+otest 7: notes on, the classic machine shown: status 00
+  back: status 06
+otest 8: release: status 06
+  again: status 06
+otest 9: a child plays and exits
+  its notes keyed off
+otest 10: a child plays and is killed
+  its notes keyed off
+otest: done

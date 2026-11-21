@@ -346,6 +346,8 @@ ch_t:       .res    2           ; its tick
 ch_f:       .res    2           ; its notes (AUDF of note 1, note 2)
 ch_pk:      .res    2           ; its peak volume
 ch_amask:   .res    2           ; AUDCTL without the bits that change its channel
+opl_owner:  .res    2           ; (REV $0C) OPL2 owner (slot*2 + 1, 0 = none)
+opl_bsh:    .res    12          ; (0.27) the last values written to $B0-$B8 and $BD (bytes 0-9)
 vs_armed:   .res    2           ; vsync: a vertical blank is awaited
 vs_frame:   .res    2           ; vertical blanks waited for
 au_own:     .res    8*2         ; (0.17) Lau voices: owner (slot*2 + 1, 0 none)

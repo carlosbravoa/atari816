@@ -99,7 +99,6 @@ add_file "$src_dir/picorv32.v"
 add_file "$src_dir/iosys_picorv32.v"
 add_file "$src_dir/simplespimaster.v"
 add_file "$src_dir/spi_master.v"
-add_file "$src_dir/spiflash.v"
 add_file "$src_dir/simpleuart.v"
 
 # ── Block RAM init files: $readmemh looks for them in the project directory ──
@@ -111,7 +110,6 @@ file copy -force "$src_dir/fw_lane2.hex" "$tang_dir/impl/atari800_tn20k/"
 file copy -force "$src_dir/fw_lane3.hex" "$tang_dir/impl/atari800_tn20k/"
 # rpll_12m replaced by rpll_108m (dual-output: 108 MHz + 12 MHz from a single PLL)
 add_file "$src_dir/usb_to_atari800.sv"
-add_file "$src_dir/uart_kbd_ch9350.sv"
 add_file "$src_dir/fw_bram.v"
 
 # ── Stage 5: POKEY audio — sigma-delta DAC ────────────────────────────────────
@@ -122,8 +120,12 @@ add_file "$src_dir/gw2ar_sdram.sv"
 add_file "$src_dir/sdram_nestang.v"
 
 # ── Atari816: 65C816 (from SNES_FPGA via SNESTang, GPL-3) + cache/I-O wrapper ──
-foreach f {common.sv mcode_packed.sv ALU.v AddSubBCD.v AddrGen.v BCDAdder.v adder4.v bit_adder.v P65C816.v a816_sys.sv a816_nvc.sv a816_blit.sv a816_snd.sv} {
+foreach f {common.sv mcode_packed.sv ALU.v AddSubBCD.v AddrGen.v BCDAdder.v adder4.v bit_adder.v P65C816.v a816_sys.sv a816_nvc.sv a816_blit.sv a816_snd.sv a816_opl.sv} {
     add_file "$src_dir/a816/$f"
+}
+# ── OPL2 (YM3812) FM synthesizer: JTOPL (GPL-3.0, Jose Tejada Gomez) ─────────
+foreach f {jtopl.v jtopl2.v jtopl_acc.v jtopl_csr.v jtopl_div.v jtopl_eg.v jtopl_eg_cnt.v jtopl_eg_comb.v jtopl_eg_ctrl.v jtopl_eg_final.v jtopl_eg_pure.v jtopl_eg_step.v jtopl_exprom.v jtopl_lfo.v jtopl_logsin.v jtopl_mmr.v jtopl_noise.v jtopl_op.v jtopl_pg.v jtopl_pg_comb.v jtopl_pg_inc.v jtopl_pg_rhy.v jtopl_pg_sum.v jtopl_pm.v jtopl_reg.v jtopl_reg_ch.v jtopl_sh.v jtopl_sh_rst.v jtopl_single_acc.v jtopl_slot_cnt.v jtopl_timers.v} {
+    add_file "$src_dir/a816/jtopl/$f"
 }
 
 # ── Tang Nano top-level ───────────────────────────────────────────────────────

@@ -1,0 +1,58 @@
+# (0.27) the OPL2 on the Desktop (DESK=1; tests/mousegen.py makes tests/opl27.keys from this;
+# the card's Programs menu gets "Music Player", /Music the two songs of tools/mkmid.py next
+# to the card's own). The chip's other owner is OTEST's "otest h" (user/otest.s), typed in
+# the Terminal (0.27: the OPL2 FM Synth program, the other owner before, was removed).
+# Shots (s):
+#   1  13.0  Music Player plays /Music/OPLGROOVE.MID (opened in Files): MIDI on the OPL2, its
+#            title, the time, the meters
+#   2  18.5  Programs > Terminal, "otest h" while Music Player has the chip: EAGAIN ("error
+#            06"), "the OPL2 is not free"
+#   3  24.5  Music Player in front (its status line clicked), Stop (the chip given back); the
+#            Terminal again, "otest h": the chip is its own
+#   4  28.5  Music Player in front, Play: "The OPL2 is in use by another program."
+6000 M -100:-100:0:0
+6050 M -100:-72:0:0
+6100 M -15:0:0:0
+6400 M 0:0:0:1
+6480 M 0:0:0:0
+6800 M -8:99:0:0
+7200 M 0:0:0:1
+7280 M 0:0:0:0
+9000 M -37:-76:0:0
+9200 M 0:0:0:1
+9280 M 0:0:0:0
+10000 music\n
+11500 opl\n
+14000 M 45:-23:0:0
+14400 M 0:0:0:1
+14480 M 0:0:0:0
+14800 M -8:57:0:0
+15200 M 0:0:0:1
+15280 M 0:0:0:0
+17000 otest h\n
+19500 M 100:100:0:0
+19550 M 100:100:0:0
+19600 M 100:80:0:0
+19650 M 3:0:0:0
+19700 M 0:0:0:1
+19780 M 0:0:0:0
+20500 M -100:-100:0:0
+20550 M -55:-85:0:0
+20700 M 0:0:0:1
+20780 M 0:0:0:0
+22000 M -100:40:0:0
+22050 M -85:0:0:0
+22200 M 0:0:0:1
+22280 M 0:0:0:0
+23000 otest h\n
+25500 M 100:100:0:0
+25550 M 100:45:0:0
+25600 M 100:0:0:0
+25650 M 40:0:0:0
+25700 M 0:0:0:1
+25780 M 0:0:0:0
+26500 M -100:-100:0:0
+26550 M -100:-85:0:0
+26600 M -23:0:0:0
+26700 M 0:0:0:1
+26780 M 0:0:0:0

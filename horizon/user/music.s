@@ -1,4 +1,5 @@
-; MUSIC - the music player (/BIN/MUSIC.PRG, Horizon 0.26): the window "Music".
+; MUSIC - the music player (/BIN/MUSIC.PRG, Horizon 0.26): the window "Music Player"
+; (0.27; "Music" before: the name shown, the files keep theirs).
 ;   music               the player with the playlist of the last session
 ;   music PATH          PATH (a MOD or WAV file, a folder, or a URL) added to the playlist and
 ;                       played at once (Files and the Desktop open .MOD and .WAV files so)
@@ -889,7 +890,7 @@ a_seekby:
         lda     info+MI_KIND
         and     #$00FF
         cmp     #2
-        beq     @wav
+        bcs     @wav
         lda     st+2                    ; the order now
         and     #$00FF
         clc
@@ -951,7 +952,7 @@ a_seekx:
         lda     info+MI_KIND
         and     #$00FF
         cmp     #2
-        beq     @wav
+        bcs     @wav
         lda     info+MI_SLEN            ; order = x * length / width
         and     #$00FF
         beq     @out

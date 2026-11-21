@@ -103,9 +103,10 @@ module iosys_picorv32 #(
     // Video options (scanlines etc.)
     output wire [1:0]  scanline_level_out,   // 0=off,1=25%,2=50%,3=75%
     output wire [7:0]  h_offset_out,         // horizontal picture position (front porch 0..80)
-    output wire        stereo_out,           // dual-POKEY stereo enable (video_opts bit 2)
     output wire        kbd_pc_layout_out,    // keyboard: 1 = US-PC symbolic layout (video_opts bit 3)
     output wire [2:0]  ram_select_out,       // Atari RAM size code (core RAM_SELECT)
+    output wire        pbi_en_out,           // the classic machine's PBI disk present (video_opts bit 2)
+    input              pbi_req,              // other clock: its request bit (video_opts bit 8, read)
 
     // Virtual Keyboard outputs
     output wire [7:0]  virt_kbd_mod_out,
@@ -115,44 +116,24 @@ module iosys_picorv32 #(
     output wire [7:0]  virt_kbd_key4_out,
     output wire [7:0]  cart_mode_out,      // emulated cartridge mapper select (0 = none)
     output wire        usb_host_enable_out,
-    output wire        joystick_mode_out,    // 1 = arrow keys drive Joystick 1 (Left-Alt = fire)
-
-    // DIAGNOSTIC: heartbeat that toggles every time firmware reads reg_joystick
-    // (i.e. every joy_get() call in the background loop). If this toggles, the
-    // firmware loop is reaching the S2/F12 check.
-    output reg         joy_poll_dbg,
-
-    // DIAGNOSTIC: toggles on every completed CPU memory transaction. If this is
-    // blinking, the PicoRV32 is executing (so a dark joy_poll_dbg means it is
-    // stuck in a firmware loop). If this is dark, the CPU is hung (e.g. SDRAM
-    // access never completing).
-    output reg         cpu_progress_dbg,
-
-    // DIAGNOSTIC: classification of a persistent CPU bus stall (sticky).
-    output wire        dbg_stall_undec_out, // stuck on undecoded address
-    output wire        dbg_stall_peri_out,  // stuck on a peripheral wait handshake
-    output wire        dbg_stall_ram_out    // stuck on a RAM access
+    output wire        joystick_mode_out    // 1 = arrow keys drive Joystick 1 (Left-Alt = fire)
 );
 
 /* verilator lint_off PINMISSING */
 /* verilator lint_off WIDTHTRUNC */
 
-localparam FIRMWARE_SIZE = 256*1024;
-
-// Firmware now lives in BSRAM (loaded at FPGA config time via $readmemh), so the
-// old "copy 256 KB from SPI flash into SDRAM at boot" state machine is GONE. The
-// spiflash module is retained only for its optional MMIO register interface
-// (reg_spiflash_*); the auto-load (flash_start/flash_loading) is tied off.
-// flash_loaded reports 1 / flash_loading 0 so any status read looks "done".
-wire [7:0] flash_dout;          // unused (no auto-load)
-wire flash_out_strb;            // unused
-wire flash_start = 1'b0;        // never trigger a flash read
-assign flash_spi_hold_n = 1;
-assign flash_spi_wp_n = 1;      // disable write protection
-wire [31:0] spiflash_reg_do;
-wire spiflash_reg_wait;
-wire flash_loaded  = 1'b1;      // firmware already in BSRAM
-wire flash_loading = 1'b0;
+// SPI flash bit-bang GPIO (0x0200_0078): W [2:0] = {MOSI, CLK, CS_N}, R [0] = MISO.
+// Replaces the hardware spiflash master (~138 LUTs, 110 FFs); only used once at boot.
+assign flash_spi_hold_n = 1'b1;
+assign flash_spi_wp_n   = 1'b1;
+reg [2:0] flash_gpio = 3'b001;          // CS_N=1, CLK=0, MOSI=0
+assign flash_spi_cs_n = flash_gpio[0];
+assign flash_spi_clk  = flash_gpio[1];
+assign flash_spi_mosi = flash_gpio[2];
+always @(posedge clk) begin
+    if (!resetn) flash_gpio <= 3'b001;
+    else if (spiflash_reg_ctrl_sel && mem_wstrb[0]) flash_gpio <= mem_wdata[2:0];
+end
 
 // picorv32 softcore
 wire mem_valid /* synthesis syn_keep=1 */;
@@ -229,8 +210,6 @@ wire        video_diag_sel = mem_valid && (mem_addr == 32'h0200_0064);
 wire        sio_cap_idx_sel  = mem_valid && (mem_addr == 32'h0200_0068);
 wire        sio_cap_data_sel = mem_valid && (mem_addr == 32'h0200_006c);
 
-wire        spiflash_reg_byte_sel = mem_valid && (mem_addr == 32'h0200_0070);
-wire        spiflash_reg_word_sel = mem_valid && (mem_addr == 32'h0200_0074);
 wire        spiflash_reg_ctrl_sel = mem_valid && (mem_addr == 32'h0200_0078);
 
 wire        virt_kbd_reg0_sel = mem_valid && (mem_addr == 32'h0200_00a0);
@@ -373,50 +352,11 @@ assign mem_ready = bram_ready || ram_ready || textdisp_reg_char_sel || simpleuar
             (simpleuart_reg_dat_sel && !simpleuart_reg_dat_wait) ||
             ((simplespimaster_reg_byte_sel || simplespimaster_reg_word_sel) && !simplespimaster_reg_wait) ||
             simplespimaster_reg_cs_sel || simplespimaster_reg_clkdiv_sel ||
-            (spiflash_reg_byte_sel || spiflash_reg_word_sel) && !spiflash_reg_wait ||
             spiflash_reg_ctrl_sel || sio_ready || virt_kbd_reg0_sel || virt_kbd_reg1_sel ||
             cart_reg_sel || sio_cap_idx_sel || sio_cap_data_sel || siocmd_a_sel || siocmd_b_sel ||
             a816_ctrl_sel || a816_dbg_sel || a816_mbq_sel || a816_mbr_sel || a816_mbi_sel ||
             a816_key_sel || a816_kmod_sel ||
             video_opts_sel || h_offset_sel || ram_select_sel || blrx_sel || blrxd_sel;
-
-// ── BUS-STALL DETECTOR (diagnostic) ──────────────────────────────────────────
-// The CPU hangs if mem_valid stays high but mem_ready never asserts. Classify a
-// persistent stall three ways so we know WHICH kind of access wedged the CPU:
-//   dbg_stall_undec : mem_valid high, NO select matched (undecoded address)
-//   dbg_stall_peri  : a peripheral select matched but mem_ready still low
-//                     (a *_wait / *_ready handshake that never completes)
-//   dbg_stall_ram   : stalled on a RAM access (ram_sel high, ram_ready low)
-// Sticky once latched. ~0.5 ms threshold (huge vs any legit access).
-wire any_sel_dbg = bram_sel || ram_sel || textdisp_reg_char_sel || simpleuart_reg_div_sel ||
-            simpleuart_reg_dat_sel || simplespimaster_reg_byte_sel || simplespimaster_reg_word_sel ||
-            simplespimaster_reg_cs_sel || simplespimaster_reg_clkdiv_sel ||
-            romload_reg_ctrl_sel || romload_reg_data_sel || joystick_reg_sel ||
-            time_reg_sel || cycle_reg_sel || id_reg_sel ||
-            spiflash_reg_byte_sel || spiflash_reg_word_sel || spiflash_reg_ctrl_sel ||
-            sio_reg_sel || virt_kbd_reg0_sel || virt_kbd_reg1_sel || cart_reg_sel || blrx_sel || blrxd_sel ||
-            a816_ctrl_sel || a816_dbg_sel || a816_mbq_sel || a816_mbr_sel || a816_mbi_sel ||
-            a816_key_sel || a816_kmod_sel;
-reg        dbg_stall_undec = 1'b0;
-reg        dbg_stall_peri  = 1'b0;
-reg        dbg_stall_ram   = 1'b0;
-reg [15:0] dbg_stall_cnt   = 16'd0;
-always @(posedge clk) begin
-    if (~resetn) begin
-        dbg_stall_undec <= 1'b0; dbg_stall_peri <= 1'b0; dbg_stall_ram <= 1'b0;
-        dbg_stall_cnt   <= 16'd0;
-    end else if (mem_valid && !mem_ready) begin
-        if (dbg_stall_cnt == 16'hFFFF) begin
-            if      (!any_sel_dbg) dbg_stall_undec <= 1'b1;   // no decoder matched
-            else if (ram_sel)      dbg_stall_ram   <= 1'b1;   // RAM access not completing
-            else                   dbg_stall_peri  <= 1'b1;   // peripheral wait stuck
-        end else begin
-            dbg_stall_cnt <= dbg_stall_cnt + 16'd1;
-        end
-    end else begin
-        dbg_stall_cnt <= 16'd0;   // access completed; reset timer (flags stay sticky)
-    end
-end
 
 assign mem_rdata = bram_ready ? bram_rdata :
         ram_ready ? ram_rdata :
@@ -431,15 +371,14 @@ assign mem_rdata = bram_ready ? bram_rdata :
         simplespimaster_reg_cs_sel ? {31'b0, sd_cs_reg} :
         simplespimaster_reg_clkdiv_sel ? {24'b0, sd_clkdiv_reg} :
         (simplespimaster_reg_byte_sel | simplespimaster_reg_word_sel) ? simplespimaster_reg_do : 
-        spiflash_reg_byte_sel || spiflash_reg_word_sel ? spiflash_reg_do : 
-        spiflash_reg_ctrl_sel ? {30'h0000_0000, flash_loaded, flash_loading} :
+        spiflash_reg_ctrl_sel ? {31'b0, flash_spi_miso} :
         sio_reg_sel ? {16'h0000, sio_reg_rdata} :
         virt_kbd_reg0_sel ? {virt_kbd_key3, virt_kbd_key2, virt_kbd_key1, virt_kbd_mod} :
         virt_kbd_reg1_sel ? {22'b0, joystick_mode, usb_host_enable, virt_kbd_key4} :
         cart_reg_sel ? {24'b0, cart_mode_reg} :
         siocmd_a_sel ? siocmd_bytes[31:0] :
         siocmd_b_sel ? {8'b0, siocmd_seq, siocmd_status, siocmd_bytes[39:32]} :
-        video_opts_sel ? {24'b0, video_opts_reg} :
+        video_opts_sel ? {23'b0, pbi_req_s[1], video_opts_reg} :
         h_offset_sel ? {24'b0, h_offset_reg} :
         ram_select_sel ? {29'b0, ram_select_reg} :
         a816_ctrl_sel ? {31'b0, a816_run} :
@@ -519,50 +458,17 @@ simplespimaster simplespi (
     .reg_wait(simplespimaster_reg_wait)
 );
 
-// ROM loading I/O. 2 cycles for a byte and 2 cycles idles.
-reg [3:0] rom_cnt;
-reg [31:0] rom_do_buf;
-assign rom_do = rom_do_buf[7:0];
+// ROM loading control (rom_do / rom_do_valid unused; ROMs written directly to SDRAM)
+assign rom_do = 8'd0;
 always @(posedge clk) begin
-    if (rom_cnt != 0)
-        rom_cnt <= rom_cnt - 2'd1;
-    // data register
-    if (romload_reg_data_sel && mem_wstrb) begin
-        rom_do_buf <= mem_wdata;
-        rom_cnt <= 4'd15;
-        rom_do_valid <= 1;
-    end
-    if (rom_cnt[1:0] == 2'd3)
-        rom_do_valid <= 0;
-    if (rom_cnt[1:0] == 2'd0 && rom_cnt[3:2] != 0) begin
-        rom_do_buf[23:0] <= rom_do_buf[31:8];
-        rom_do_valid <= 1;
-    end
-end
-always @(posedge clk) begin
+    rom_do_valid <= 1'b0;
     if (romload_reg_ctrl_sel && mem_wstrb) begin
-        // control register
         if (mem_wdata[7:0] == 8'd1)
-            rom_loading <= 1;
+            rom_loading <= 1'b1;
         if (mem_wdata[7:0] == 8'd0)
-            rom_loading <= 0;
-    end    
+            rom_loading <= 1'b0;
+    end
 end
-
-// SPI flash @ 0x02000_0070
-// Load 256KB of ROM from flash address 0x500000 into SDRAM at address 0x0
-spiflash #(.ADDR(24'h500000), .LEN(FIRMWARE_SIZE)) flash (
-    .clk(clk), .resetn(resetn),
-    .ncs(flash_spi_cs_n), .miso(flash_spi_miso), .mosi(flash_spi_mosi),
-    .sck(flash_spi_clk), 
-
-    .start(flash_start), .dout(flash_dout), .dout_strb(flash_out_strb), .busy(),
-
-    .reg_byte_we(spiflash_reg_byte_sel ? mem_wstrb[0] : 1'b0),
-    .reg_word_we(spiflash_reg_word_sel ? mem_wstrb[0] : 1'b0),
-    .reg_ctrl_we(spiflash_reg_ctrl_sel ? mem_wstrb[0] : 1'b0),
-    .reg_di(mem_wdata), .reg_do(spiflash_reg_do), .reg_wait(spiflash_reg_wait)
-);
 
 // RV memory access — SDRAM now serves ONLY the high part of the low region
 // (ram_sel = addr>=64KB: Atari memory / ROM load). Firmware code/data is in
@@ -610,11 +516,13 @@ reg [7:0] virt_kbd_key4 = 8'h00;
 reg       usb_host_enable = 1'b1;
 reg       joystick_mode = 1'b0;
 reg [7:0] cart_mode_reg = 8'h00;   // CartLogic mapper code; 0 = no cartridge
-reg [7:0] video_opts_reg = 8'h00;  // [1:0] = scanline level, [2] = stereo enable
+reg [7:0] video_opts_reg = 8'h00;  // [1:0] = scanline level, [2] = unused, [3] = PC keyboard layout
 reg [7:0] h_offset_reg   = 8'd0;   // horizontal position (capture-skip pixels); 0 = no pan
 assign    scanline_level_out = video_opts_reg[1:0];
-assign    stereo_out         = video_opts_reg[2];
 assign    kbd_pc_layout_out  = video_opts_reg[3];
+assign    pbi_en_out         = video_opts_reg[2];
+reg [1:0] pbi_req_s = 2'b00;
+always @(posedge clk) pbi_req_s <= {pbi_req_s[0], pbi_req};
 assign    h_offset_out       = h_offset_reg;
 reg [2:0] ram_select_reg = 3'b001;   // default 128 KB (matches firmware default)
 assign    ram_select_out     = ram_select_reg;
@@ -651,19 +559,6 @@ always @(posedge clk) begin
     end
 end
 
-// DIAGNOSTIC: toggle joy_poll_dbg on each reg_joystick read so a slow human-
-// visible heartbeat can be derived in tang_top from the firmware poll rate.
-always @(posedge clk) begin
-    if (~resetn) joy_poll_dbg <= 1'b0;
-    else if (joystick_reg_sel) joy_poll_dbg <= ~joy_poll_dbg;
-end
-
-// DIAGNOSTIC: CPU memory-transaction progress
-always @(posedge clk) begin
-    if (~resetn) cpu_progress_dbg <= 1'b0;
-    else if (mem_valid && mem_ready) cpu_progress_dbg <= ~cpu_progress_dbg;
-end
-
 assign virt_kbd_mod_out  = virt_kbd_mod;
 assign virt_kbd_key1_out = virt_kbd_key1;
 assign virt_kbd_key2_out = virt_kbd_key2;
@@ -672,10 +567,6 @@ assign virt_kbd_key4_out = virt_kbd_key4;
 assign usb_host_enable_out = usb_host_enable;
 assign joystick_mode_out   = joystick_mode;
 assign cart_mode_out       = cart_mode_reg;
-
-assign dbg_stall_undec_out = dbg_stall_undec;
-assign dbg_stall_peri_out  = dbg_stall_peri;
-assign dbg_stall_ram_out   = dbg_stall_ram;
 
 endmodule
 

@@ -5,7 +5,10 @@
  * positions and KEYON run up to 4 samples (83 us) later than the hardware's. AU_LATE stays 0.
  * No interpolation: the output of a voice is its last sample read.
  * The per-voice 8-byte block is modelled: a voice plays the bytes of its block as they were
- * when it read them, like the hardware. Steps only happen while a voice plays (or --wav). */
+ * when it read them, like the hardware. Steps only happen while a voice plays (or --wav, or the
+ * SDL build's live sound).
+ * --wav and the live sound get the HDMI mix of tang_top.sv without its classic part: Lau's L / R
+ * plus the OPL2's latest sample at this sample's cycle (opl.c; REV $0C), saturated. */
 #include "machine.h"
 #include <string.h>
 
@@ -17,12 +20,14 @@ void audio_reset(void)
 {
     FILE *w = A.wav;
     uint64_t wn = A.wav_n;
+    int live = A.live;
     memset(&A, 0, sizeof A);
     A.wav = w;
     A.wav_n = wn;
+    A.live = live;
     A.master = 0xC0;
     A.k = M.cpu.cycles * 40 / 11953 + 1;
-    A.next = A.wav ? smp_cycle(A.k) : UINT64_MAX;
+    A.next = (A.wav || A.live) ? smp_cycle(A.k) : UINT64_MAX;
 }
 
 int audio_irq(void) { return M.sys.rev >= 10 && (A.end & A.irq_en) != 0; }
@@ -31,7 +36,7 @@ static uint32_t r24(const uint8_t *r) { return r[0] | r[1] << 8 | (uint32_t)r[2]
 
 static int16_t sat16(int64_t x) { return x > 32767 ? 32767 : x < -32768 ? -32768 : (int16_t)x; }
 
-static void step(void)
+static void step(uint64_t at)
 {
     int64_t acc_l = 0, acc_r = 0;
     for (int n = 0; n < 8; n++) {
@@ -76,19 +81,45 @@ static void step(void)
     A.out_l = sat16((acc_l * A.master) >> 8);
     A.out_r = sat16((acc_r * A.master) >> 8);
     A.n_samples++;
-    if (A.wav) {
-        uint8_t b[4] = { A.out_l & 0xFF, (uint16_t)A.out_l >> 8, A.out_r & 0xFF, (uint16_t)A.out_r >> 8 };
-        fwrite(b, 1, 4, A.wav);
-        A.wav_n++;
+    if (A.wav || A.live) {
+        int16_t fm = opl_sample(at);                     /* both channels, full scale */
+        int16_t l = sat16((int64_t)A.out_l + fm), r = sat16((int64_t)A.out_r + fm);
+        if (A.wav) {
+            uint8_t b[4] = { l & 0xFF, (uint16_t)l >> 8, r & 0xFF, (uint16_t)r >> 8 };
+            fwrite(b, 1, 4, A.wav);
+            A.wav_n++;
+        }
+        if (A.live && A.live_w - A.live_r < LIVE_N) {    /* (full: the host is not taking them) */
+            A.live_buf[A.live_w % LIVE_N][0] = l;
+            A.live_buf[A.live_w % LIVE_N][1] = r;
+            A.live_w++;
+        }
     }
+}
+
+/* the SDL build: up to max samples (L, R) made since the last call */
+int audio_live_take(int16_t *buf, int max)
+{
+    int n = 0;
+    for (; n < max && A.live_r != A.live_w; n++, A.live_r++) {
+        buf[2 * n] = A.live_buf[A.live_r % LIVE_N][0];
+        buf[2 * n + 1] = A.live_buf[A.live_r % LIVE_N][1];
+    }
+    return n;
+}
+
+void audio_live_on(void)
+{
+    A.live = 1;
+    if (A.next == UINT64_MAX) { A.k = M.cpu.cycles * 40 / 11953 + 1; A.next = smp_cycle(A.k); }
 }
 
 void audio_update(uint64_t now)
 {
     while (A.next <= now) {
-        step();
+        step(A.next);
         A.k++;
-        A.next = (A.playing || A.wav) ? smp_cycle(A.k) : UINT64_MAX;
+        A.next = (A.playing || A.wav || A.live) ? smp_cycle(A.k) : UINT64_MAX;
     }
 }
 
@@ -97,6 +128,7 @@ uint64_t audio_next_event(void) { return A.next; }
 uint8_t audio_read(uint32_t a)
 {
     if (M.sys.rev < 10) return 0;
+    if (M.sys.rev >= 12 && (a & 0xFC) == 0x30) return opl_read(a);   /* REV $0C OPL2 */
     switch (a & 0xFF) {
     case 0x22: return A.playing;
     case 0x23: return A.end;

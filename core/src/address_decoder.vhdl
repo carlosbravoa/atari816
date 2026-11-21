@@ -93,6 +93,7 @@ PORT
 
 	atari800mode : in std_logic := '0';
 	pbi_rom_mode : in std_logic := '0';
+	PBI_DISK_REQ : out std_logic;	-- Atari816: the PBI disk's request bit ($D1FE)
 	xex_loader_mode : in std_logic := '0';
 
 	cart_select : in std_logic_vector(7 downto 0);
@@ -478,7 +479,8 @@ BEGIN
 		pbi_rom_address_enable => emu_pbi_rom_address_enable,
 		data_out => emu_pbi_data_out,
 		cache_data_out => emu_pbi_cache_data_out,
-		data_out_enable => emu_pbi_data_out_enable
+		data_out_enable => emu_pbi_data_out_enable,
+		req => PBI_DISK_REQ
 	);	
 
 	process(emu_cart_passthru,atari800mode,cart2_select,emu_cart_s4_n,emu_cart_s5_n,emu_cart1_rd4,emu_cart2_rd4,emu_cart1_rd5,emu_cart2_rd5,emu_cart1_address,emu_cart1_address_enable,emu_cart2_address,emu_cart2_address_enable,

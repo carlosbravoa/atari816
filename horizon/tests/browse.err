@@ -4,20 +4,12 @@ sound $DB01 = $00
 sound $DB03 = $00
 sound $DB05 = $00
 sound $DB07 = $00
-sound $DB10 = $00
-sound $DB11 = $00
-sound $DB12 = $00
-sound $DB13 = $00
 emu816: CLASSIC_EJECT kind 3 slot 0 - -> 00
 emu816: CLASSIC_MOUNT kind 2 slot 0 /many/Alpha delta 032 (Demo) [!].xex -> 00
 sound $DB01 = $00
 sound $DB03 = $00
 sound $DB05 = $00
 sound $DB07 = $00
-sound $DB10 = $00
-sound $DB11 = $00
-sound $DB12 = $00
-sound $DB13 = $00
 emu816: CLASSIC_BOOT kind 0 slot 0 - -> 00
 emu816: CLASSIC_EJECT kind 2 slot 0 - -> 00
 emu816: CLASSIC_EJECT kind 1 slot 0 - -> 00
@@ -26,10 +18,6 @@ sound $DB01 = $00
 sound $DB03 = $00
 sound $DB05 = $00
 sound $DB07 = $00
-sound $DB10 = $00
-sound $DB11 = $00
-sound $DB12 = $00
-sound $DB13 = $00
 emu816: CLASSIC_BOOT kind 0 slot 0 - -> 00
 emu816: CLASSIC_EJECT kind 3 slot 0 - -> 00
 emu816: CLASSIC_MOUNT kind 1 slot 0 /disks/Caverns of Mars.atr -> 00
@@ -37,8 +25,4 @@ sound $DB01 = $00
 sound $DB03 = $00
 sound $DB05 = $00
 sound $DB07 = $00
-sound $DB10 = $00
-sound $DB11 = $00
-sound $DB12 = $00
-sound $DB13 = $00
 emu816: CLASSIC_BOOT kind 0 slot 0 - -> 00

@@ -18,7 +18,7 @@ complete, cycle-exact Atari 8-bit inside it.
 | Memory | 8 MB (banks of 64 KB); hardware memory protection between programs |
 | Video | Marga, the video chip: 640 x 360, 256 colours (8 bpp), shown 2 x 2 on 1280 x 720 HDMI at 60 Hz; a 32 x 32 hardware pointer; also 640 x 360 x 4 bpp and 320 x 180 x 8 bpp (programs get all three in full-screen mode, Horizon 0.18); 16 hardware sprites and fine scrolling with wrap and a split (REV $0B) |
 | Blitter | Ali, the blitter: fill, copy, keyed (transparent) copy, 1-to-8 bpp expansion: about 14 million pixels a second filled, 7.7 million copied; command lists (programs: draw lists, Horizon 0.18) |
-| Sound | POKEY 2, the second POKEY of the classic machine (4 voices: tones, noise), and four 8-bit DACs; Lau, the 8-voice sample player (REV $0A; Horizon 0.17: SYS_SPLAY and friends) |
+| Sound | POKEY, the classic machine's sound chip, lent while that machine is frozen (4 voices: tones, noise; before REV $0C its second POKEY, with four 8-bit DACs that REV $0C no longer has); Lau, the 8-voice sample player (REV $0A; Horizon 0.17: SYS_SPLAY and friends); the OPL2, a YM3812 FM synthesizer (REV $0C; Horizon 0.27: SYS_OPLW) |
 | Input | USB keyboard and mouse; two Atari joystick ports (SYS_JOY, Horizon 0.15) |
 | Storage | SD card, FAT32 (long names) |
 | Classic | an Atari 400/800/XL/XE: run disk images, executables, cartridges; F12 switches between it and the desktop |
@@ -93,8 +93,8 @@ Written for Horizon 0.13 and brought up to 0.18 ("the games round", November 202
 Verified in the emulator (REV $0B, its default): every template and example builds and
 passes its scripted test, every reference example assembles and links, and the reference
 matches horizon.inc and the kernel's syscall tables. Not verified: the real board (no access
-while writing), sound (the emulator only logs it, and writes Lau's output to a WAV file),
-the PC link scripts, the C compiler notes. The internet examples (Fetch, Echo, Horizon 0.22)
-are tested in the emulator only (`--net-root` stands in for the web, a local echo server
-for TCP), not yet through the real gateway. Where a document states something that was not checked,
+while writing), sound (the emulator logs it, and writes Lau's and, since Horizon 0.27, the
+OPL2's output to a WAV file; POKEY is only logged), the PC link scripts, the C compiler
+notes. The internet examples (Fetch, Echo, Horizon 0.22) are tested in the emulator only
+(`--net-root` stands in for the web, a local echo server for TCP), not yet through the real gateway. Where a document states something that was not checked,
 it says so.

@@ -636,11 +636,15 @@ rd_info:
         lda     info+MI_KIND
         and     #$00FF
         cmp     #1
+        beq     :+
+        cmp     #3
         bne     @out
-        lda     info+MI_NSMP
+        stz     nsmp
+        bra     @rd_t
+:       lda     info+MI_NSMP
         and     #$00FF
         sta     nsmp
-        lda     #2                      ; the title: 20 bytes of area 0 at 0
+@rd_t:  lda     #2                      ; the title: 20 bytes of area 0 at 0
         sta     rd_ph
         stz     rd_off
         stz     rd_area
@@ -668,6 +672,11 @@ rd_title:
         ldy     #.loword(tstr)
         jsr     ui_strcpy
         jsr     draw_title
+:       lda     info+MI_KIND
+        and     #$00FF
+        cmp     #1
+        beq     :+
+        rts
 :       lda     #3                      ; 31 x 30 bytes of area 0 from 20
         sta     rd_ph
         lda     #20

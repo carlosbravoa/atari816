@@ -12,6 +12,7 @@
 #include "prnconv.h"      // (step 3) the classic Atari's printer output as text
 #include "fdisk.h"        // (step 3) a folder as a DOS 2 disk
 #include "bas_loader.h"   // (step 3) the boot program of "Run in Atari"
+#include "pbi_disk.h"     // the ROM of the classic machine's PBI disk
 
 uint32_t CORE_ID;
 #define HOT_FN __attribute__((section(".text.hot")))   // runs from block RAM (baremetal.ld)
@@ -27,7 +28,6 @@ DWORD fat_from2000(uint32_t t);  // seconds since 2000 -> FAT time (defined belo
 int option_arrow_joystick = 0;              // 1 = arrow keys drive Joystick 1 (Left-Alt = fire)
 int option_scanline_level = 0;              // 0=off,1=25%,2=50%,3=75% scanline brightness
 int option_h_offset = 0;                    // horizontal pan: capture-skip pixels (0..48)
-int option_stereo = 0;                      // 1 = dual-POKEY stereo (POKEY2 @ $D210 -> right); default mono
 int option_kbd_layout = 0;                  // 0 = Atari-positional keys (default), 1 = US-PC symbolic
 int option_folderdrive = 0;                  // (step 3) "folderdrive=N": the folder disk on DN: (0 none)
 static char option_folder[128] __attribute__((section(".sdbuf")));   // "folder=PATH"
@@ -59,10 +59,21 @@ static inline void apply_input_options(void) {
     kv_set1((option_arrow_joystick ? 0x200 : 0x000));
 }
 
+// The classic machine's PBI disk (/atari.ini "fastdisk", default on): sector reads of the OS
+// without the serial transfer (pbi_poll). pbi_on follows the option only while the core is
+// held in reset (load_system_roms): the OS finds the device at its start and would call into
+// the math pack if the device went away under it.
+int option_fastdisk = 1;
+// /atari.ini "basic": 0 = a disk in D1: is booted without BASIC (OPTION held during the
+// start, as for an executable): what most games need. 1 (the default) = as the real machine.
+int option_basic = 1;
+static uint8_t pbi_on, pbi_done;
+uint32_t pbi_count;
+
 // Push video options into the hardware config registers.
 static inline void apply_video_options(void) {
     reg_video_opts = (option_scanline_level & 0x3)  // 0x B4 [1:0] scanline level
-                   | ((option_stereo & 1) << 2)     //      [2]   dual-POKEY stereo enable
+                   | (pbi_on << 2)                  //      [2]   the PBI disk present
                    | ((option_kbd_layout & 1) << 3); //      [3]   keyboard: PC symbolic layout
     reg_h_offset   = option_h_offset & 0xFF;        // 0x B8 [7:0] horizontal position
 }
@@ -210,8 +221,11 @@ int load_option()  {
             if (v > 48) v = 48;
             option_h_offset = v;
         }
-        if (strcmp(key, "stereo") == 0) {
-            option_stereo = (atoi(value) != 0);
+        if (strcmp(key, "basic") == 0) {
+            option_basic = (atoi(value) != 0);
+        }
+        if (strcmp(key, "fastdisk") == 0) {
+            option_fastdisk = (atoi(value) != 0);
         }
         if (strcmp(key, "kbdlayout") == 0) {
             option_kbd_layout = (atoi(value) != 0);
@@ -703,6 +717,16 @@ int load_system_roms(void) {
 
     // Force cold boot on next boot
     *(volatile uint8_t *)(0x00200000 + 0x0244) = 1; // COLDST = 1
+
+    // The PBI disk's ROM (physical 0x1F2000, between BASIC and the OS) and its presence
+    {
+        volatile uint8_t *rom = (volatile uint8_t *)0x003F2000;
+        for (int i = 0; i < 0x800; i++)
+            rom[i] = i < (int)sizeof pbi_disk_img ? pbi_disk_img[i] : i >= PBI_P_DONE ? 0 : 0xFF;
+        pbi_done = 0;
+        pbi_on = option_fastdisk ? 1 : 0;
+        apply_video_options();
+    }
     
     // Load OS.ROM
     r = f_open(&f, "/ATARIXL.ROM", FA_READ);
@@ -835,9 +859,18 @@ static void bootwd_poll(void) {
     }
 }
 
+// The transmitter is clocked by the classic machine's POKEY tick, which stops when Horizon
+// freezes that machine (F12 during a disk load): a full FIFO then never drains. Waiting for it
+// without a bound hung the firmware, and with it Horizon's keyboard and mouse. A byte leaves
+// the FIFO every 0.5 ms at 19,200 baud: after 5 ms the rest of this answer is dropped (the
+// Atari's OS repeats the command when it runs again).
+static int sio_tx_dead;
 void sio_tx_byte(uint8_t b) {
+    if (sio_tx_dead) return;
+    uint32_t start = reg_cycle;
     while (reg_sio_tx_stat & 0x200) {
         // Wait until TX FIFO is not full
+        if ((uint32_t)(reg_cycle - start) > 27u * 5000u) { sio_tx_dead = 1; return; }
     }
     reg_sio_tx = b;
 }
@@ -925,7 +958,66 @@ static void name_from_path(char *dst, const char *path) {
     dst[15] = '\0';
 }
 
+static void sio_status_block(uint8_t *b, int prn, int slot) {
+    b[0] = prn ? 0 : 0x10;                                  // Drive active (bit 4)
+    if (!prn && atr_sector_size[slot] == 256) b[0] |= 0x20; // Double density (bit 5)
+    if (!prn && atr_readonly[slot]) b[0] |= 0x08;           // Write protected (bit 3)
+    b[1] = 0xFF;                                            // Hardware status
+    b[2] = 0xE0;                                            // Timeout
+    b[3] = 0x00;
+}
+
+// The classic machine's PBI disk (pbi_disk.s). Its ROM offers us every "read sector" and
+// "status" the OS's SIO is asked for on D1:-D8: by flipping the request bit ($D1FE, read
+// here in reg_video_opts bit 8) and waits for the same value in the ROM's P_DONE. The
+// request itself is the caller's DCB ($0300). We answer in the ROM, never in the Atari's
+// RAM (the 6502 copies the bytes to the caller's buffer, wherever PORTB has put it):
+// P_RESULT 1 with the bytes in P_BUF, or 0 = not ours, and the OS uses the serial port as
+// if this device were not there (no disk in that drive, a length that is not the sector's,
+// a read error: the serial path then reports it as it always did).
+static void pbi_poll(void) {
+    static uint8_t busy;
+    if (!pbi_on || busy) return;
+    uint8_t req = (reg_video_opts >> 8) & 1;
+    if (req == pbi_done) return;
+    busy = 1;                                   // (the SD card's waits come back here)
+    volatile uint8_t *dcb = (volatile uint8_t *)(0x00200000 + 0x0300);
+    volatile uint8_t *rom = (volatile uint8_t *)0x003F2000;
+    uint8_t dev = dcb[0], cmd = dcb[2], res = 0;
+    int slot = (int)dcb[1] - 1;
+    int len = dcb[8] | (dcb[9] << 8);
+    uint16_t sector = dcb[10] | (dcb[11] << 8);
+    if (dev == 0x31 && slot >= 0 && slot < ATR_DRIVES
+        && (atr_mounted[slot] || (slot == 0 && xex_active) || rd_kind[slot])) {
+        uint8_t *buf = sio_sector_buf;
+        int n = 0;
+        if (cmd == 0x53) {
+            sio_status_block(buf, 0, slot);
+            n = 4;
+        } else if (cmd == 0x52) {
+            int sl = 128;
+            int r = (slot == 0 && xex_active) ? xex_read_sector(sector, buf, &sl)
+                  : rd_kind[slot] ? rd_read(slot, sector, buf)
+                  : atr_read_sector(slot, sector, buf, &sl);
+            if (r == 0) n = sl;
+        }
+        if (n && n == len) {
+            for (int i = 0; i < n; i++) rom[PBI_P_BUF + i] = buf[i];
+            res = 1;
+            pbi_count++;
+            dbg_last_sio_cmd = cmd;
+            dbg_last_sio_sector = sector;
+            dbg_last_sio_status = 0;
+        }
+    }
+    rom[PBI_P_RESULT] = res;
+    pbi_done = req;
+    rom[PBI_P_DONE] = req;
+    busy = 0;
+}
+
 void sio_process_command(void) {
+    sio_tx_dead = 0;
     // NOTE: auto-baud tuning removed (T2) — it read reg_sio_divisor, which is a
     // *different* (measured-receive) register than the TX divisor it writes, and
     // could silently corrupt the TX baud. TX divisor stays fixed (set in sio_init).
@@ -981,17 +1073,7 @@ void sio_process_command(void) {
             
             // 2. Prepare status block (4 bytes)
             uint8_t status_block[4];
-            status_block[0] = prn ? 0 : 0x10; // Drive active (bit 4)
-            if (!prn && atr_sector_size[slot] == 256) {
-                status_block[0] |= 0x20; // Double density (bit 5)
-            }
-            if (!prn && atr_readonly[slot]) {
-                status_block[0] |= 0x08; // Write protected (bit 3)
-            }
-            
-            status_block[1] = 0xFF; // Hardware status
-            status_block[2] = 0xE0; // Timeout
-            status_block[3] = 0x00;
+            sio_status_block(status_block, prn, slot);
             
             // Calculate status block checksum (Atari end-around carry)
             uint8_t sum = sio_checksum(status_block, 4);
@@ -1217,6 +1299,7 @@ static void sio_poll_hwcapture(void) {
 // We reset if too much time passes without completing a frame (line glitch recovery).
 void sio_poll(void) {
 #ifndef SIO_SW_FALLBACK
+    pbi_poll();
     sio_poll_hwcapture();
     return;
 #endif
@@ -1308,6 +1391,13 @@ static int cold_boot_atari(void) {             // returns load_system_roms() (0 
     sio_init();
     load_default_cart();                            // boot=ash and slot empty -> /ASH.CAR
     *(volatile uint8_t *)(0x00200000 + 0x0244) = 1; // COLDST = 1 (Cold start)
+    if (!option_basic && (atr_mounted[0] || rd_kind[0])) {   // basic=0: a disk boots without BASIC
+        kv_set0(0x00410000);                        // hold OPTION
+        int r = load_system_roms();
+        sio_delay(600);                             // (as cold_boot_xex)
+        kv_set0(0x00000000);
+        return r;
+    }
     return load_system_roms();                      // long clean reset + release
 }
 
@@ -1648,7 +1738,7 @@ static void sys_do_restart(int full) {
         uart_printf("sys: full restart\n");
         // power-on defaults, then /atari.ini (keys left out of the file go back to default)
         option_arrow_joystick = 0; option_scanline_level = 0; option_h_offset = 0;
-        option_stereo = 0; option_kbd_layout = 0; option_ram_idx = 0; option_boot_ash = 0;
+        option_kbd_layout = 0; option_ram_idx = 0; option_boot_ash = 0; option_fastdisk = 1; option_basic = 1;
         int r = load_option();
         for (int a = 0; r < 0 && a < 5; a++) {
             delay(50); f_mount(0, "", 0); delay(20);
@@ -2777,7 +2867,7 @@ void pl_dev_request(const uint8_t *p, uint32_t n) {
         uart_printf("ST u:%d bs:%d rom:%d x:%d m:%d%d%d%d c:%b s:%d st:%d e:%d cn:%d br:%d"
                     " link rx:%d bad:%d retry:%d pc:%d"
                     " in gap:%d ev:%d ksent:%d klost:%d msent:%d mlost:%d stk:%d"
-                    " prn:%d fd:%d/%d/%d\n",
+                    " prn:%d fd:%d/%d/%d pbi:%d\n",
                     (int)time_millis(), bridge_boot_stage, bridge_rom_ok, xex_active ? 1 : 0,
                     atr_mounted[0] ? 1 : 0, atr_mounted[1] ? 1 : 0,
                     atr_mounted[2] ? 1 : 0, atr_mounted[3] ? 1 : 0,
@@ -2787,7 +2877,7 @@ void pl_dev_request(const uint8_t *p, uint32_t n) {
                     (int)pl_rx_bytes(), (int)pl_rx_bad(), (int)pl_retries(), pl_files(),
                     (int)(in_gap / 27), (int)in_nev, (int)gk_sent, (int)gk_lost,
                     (int)gm_sent, (int)gm_lost, stack_used(),
-                    (int)prn_count, fd_slot + 1, fd_slot >= 0 ? FD_ST->pending : 0, fd_slot >= 0 ? (int)FD_ST->conflicts : 0);
+                    (int)prn_count, fd_slot + 1, fd_slot >= 0 ? FD_ST->pending : 0, fd_slot >= 0 ? (int)FD_ST->conflicts : 0, (int)pbi_count);
         in_gap = 0; in_nev = 0;                         // (the meters start again)
         dv_n = uart_catch_n;
         uart_catch = 0;

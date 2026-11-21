@@ -12,6 +12,8 @@ typedef struct AVoice {
     uint8_t  blk[8];                /* the voice's last 8-byte block */
 } AVoice;
 
+#define LIVE_N 16384                /* the live sound's buffer: 341 ms */
+
 typedef struct Audio {
     uint8_t  pram[128];             /* voice registers as written */
     AVoice   v[8];
@@ -20,8 +22,11 @@ typedef struct Audio {
     uint64_t k;                     /* next output sample number */
     uint64_t next;                  /* its CPU cycle (UINT64_MAX: idle) */
     int16_t  out_l, out_r;
-    FILE    *wav;                   /* --wav: the sample player's output */
+    FILE    *wav;                   /* --wav: the sample player's output plus the OPL2's */
     uint64_t wav_n;
+    int      live;                  /* the SDL build's live sound: the same samples */
+    int16_t  live_buf[LIVE_N][2];
+    uint32_t live_w, live_r;
     uint64_t n_samples, n_keyon;
 } Audio;
 
@@ -33,5 +38,7 @@ void    audio_write(uint32_t a, uint8_t v);
 int     audio_irq(void);
 int     audio_wav_open(const char *path);
 void    audio_wav_close(void);
+void    audio_live_on(void);
+int     audio_live_take(int16_t *buf, int max);
 
 #endif

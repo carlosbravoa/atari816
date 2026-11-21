@@ -5,8 +5,11 @@ LDLIBS  = -lm
 # (Horizon 0.23) the firmware's converter of the classic Atari's printer output (plain C; no -I
 # there: core/firmware has its own bare-metal stdlib.h, string.h)
 FW      = ../core/firmware
-SRCS    = main.c cpu65816.c freddie.c sysblock.c mailbox.c net.c nvc.c blitter.c audio.c $(FW)/prnconv.c
-HDRS    = nvc_palette.h machine.h cpu65816.h freddie.h sysblock.h mailbox.h net.h nvc.h blitter.h audio.h $(FW)/prnconv.h
+# (Horizon 0.27) the OPL2's sound: Nuked OPL3 (nuked-opl3/, LGPL-2.1-or-later, unmodified)
+SRCS    = main.c cpu65816.c freddie.c sysblock.c mailbox.c net.c nvc.c blitter.c audio.c opl.c $(FW)/prnconv.c \
+          nuked-opl3/opl3.c
+HDRS    = nvc_palette.h machine.h cpu65816.h freddie.h sysblock.h mailbox.h net.h nvc.h blitter.h audio.h opl.h $(FW)/prnconv.h \
+          nuked-opl3/opl3.h
 
 ifeq ($(SDL),1)
 CFLAGS  += -DHAVE_SDL $(shell sdl2-config --cflags)
@@ -24,7 +27,8 @@ tests/cputest: tests/cputest.c cpu65816.c cpu65816.h
 
 ASMTESTS = tests/asm/mbdemo.bin tests/asm/nvcdemo.bin tests/asm/cpuirq.bin tests/asm/nvcmode1.bin tests/asm/nvcmode2.bin \
            tests/asm/copabort.bin tests/asm/eirq.bin tests/asm/kbtest.bin tests/asm/nmihold.bin tests/asm/mousetest.bin tests/asm/pctest.bin \
-           tests/asm/slowtest.bin tests/asm/nettest1.bin tests/asm/nettest2.bin tests/asm/nettest3.bin
+           tests/asm/slowtest.bin tests/asm/nettest1.bin tests/asm/nettest2.bin tests/asm/nettest3.bin \
+           tests/asm/opltimer.bin tests/asm/opltone.bin
 
 # the test programs are rebuilt when ca65 is available (the .bin files are kept)
 tests/asm/%.bin: tests/asm/%.s tests/asm/common.inc tests/asm/a816.cfg

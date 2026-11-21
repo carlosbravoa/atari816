@@ -1,18 +1,29 @@
 # Sound
 
-Native sound on the current boards (hardware REV $07 and later) is the **second POKEY of
-the classic machine** (four square-wave / noise voices) and **four 8-bit DACs** (two left,
-two right). Programs reach them only through two syscalls; the kernel lets the writes
-through while the classic machine is frozen (always, while the desktop is shown).
+Native sound on the current boards (hardware REV $07 and later) is the **POKEY of the
+classic machine** (four square-wave / noise voices), lent to Horizon while that machine is
+frozen (always, while the desktop is shown). Programs reach it only through two syscalls.
+REV $07 to $0B had a second POKEY ("POKEY 2") for this, and **four 8-bit DACs** (two left,
+two right); REV $0C has one POKEY with a register bank of its own for Horizon, mono, and no
+DACs (writes to them do nothing: use Lau). Code written for POKEY 2 runs unchanged.
 
 Hardware REV $0A adds **Lau**, the 8-voice sample player (`Docs/02-register-spec.md`,
 "Lau"): signed 8- or 16-bit PCM from RAM, 48 kHz output, a pitch and two volumes per voice,
 loops. Horizon 0.17 gives programs four calls for it ($68-$6B, below). On older boards they
-return ENODEV: ask SYS_SSTAT once at the start and fall back to POKEY 2.
+return ENODEV: ask SYS_SSTAT once at the start and fall back to POKEY.
 
-The emulator makes no sound. `run816.py --log-sound` (emu816 `--log-sound`) logs every
+Hardware REV $0C adds the **OPL2**, a YM3812 FM synthesizer (the AdLib's chip: nine
+two-operator voices; `Docs/02-register-spec.md`, "OPL2"). Horizon 0.27 gives programs one
+call for it ($6D, below) and plays MIDI files on it.
+
+The emulator makes no POKEY sound. `run816.py --log-sound` (emu816 `--log-sound`) logs every
 accepted write (`sound $DB01 = $AC`) in `emu.err`, `run816.py --log-lau` every write to Lau
-(`lau $DB20 = $00`): test your sound code with those (`emu816 --wav FILE` records Lau).
+(`lau $DB20 = $00`), emu816 `--log-opl` every OPL2 register write (`opl $B0 = $31`): test
+your sound code with those. Lau and (Horizon 0.27) the OPL2 do sound: `emu816 --wav FILE`
+(`run816.py --wav`) records them mixed as the board's HDMI output mixes them (without the
+classic machine's POKEY), and emu816 built with SDL plays them live in its window. The OPL2's
+sound comes from Nuked OPL3, an accurate emulation of the chip family; the board's JTOPL
+core may differ in small details, so check a sound that matters on the board.
 
 ### $65 beep (SYS_BEEP)
 In: A = pitch (POKEY AUDF value), X = duration in 10 ms ticks (0 = silence: channel 1
@@ -28,8 +39,8 @@ SYS_CHIME, Horizon 0.15), on a channel no program uses.
 ```
 
 ### $66 sound_write (SYS_SNDW)
-In: A = register $00-$13, X = value (low byte). A raw write to $00:DB00 + A: $00-$0F POKEY 2,
-$10-$13 the DACs (0 and 1 left, 2 and 3 right). EINVAL above $13. Each call costs about
+In: A = register $00-$13, X = value (low byte). A raw write to $00:DB00 + A: $00-$0F POKEY,
+$10-$13 the DACs (0 and 1 left, 2 and 3 right; none on REV $0C). EINVAL above $13. Each call costs about
 50 us (emulator), so a note change is cheap, sample playback through the DACs is not.
 ```asm
         lda     #$00            ; AUDF1: the pitch of channel 1
@@ -48,10 +59,9 @@ tone left on kept playing. Within a program, turn a voice off with its AUDC = 0:
         ldx     #0              ; volume 0
         sys     SYS_SNDW
 ```
-If you changed AUDCTL ($08), set it back to 0 when the music stops (the classic machine's
-stereo POKEY is this chip).
+If you changed AUDCTL ($08), set it back to 0 when the music stops.
 
-## POKEY 2 registers (writes through SYS_SNDW)
+## POKEY registers (writes through SYS_SNDW)
 
 | Register | Name | Meaning |
 | --- | --- | --- |
@@ -60,6 +70,9 @@ stereo POKEY is this chip).
 | $08 | AUDCTL | bit 0 15 kHz base clock (else 64 kHz), 1 high-pass filter on channel 2 by 4, 2 high-pass on 1 by 3, 3 join channels 4 + 3 (16 bits), 4 join 2 + 1, 5 channel 3 from 1.79 MHz, 6 channel 1 from 1.79 MHz, 7 the 9-bit noise polynomial (else 17-bit) |
 | $09 | STIMER | (any value) restart the channel counters together |
 | $0F | SKCTL | serial / keyboard control; the kernel writes 3 at boot (POKEY out of reset). Leave it |
+
+REV $0C takes exactly these registers (of SKCTL, bits 0 and 1); the others never did anything
+useful for sound.
 
 Distortion (the high nibble of AUDC) in practice:
 
@@ -76,7 +89,7 @@ Pitch: on the 64 kHz clock, f = 63921 / (2 x (AUDF + 1)) Hz, so AUDF = 31960 / f
 of 63921. With a channel on 1.79 MHz (AUDCTL bits 5 / 6), f = 1789790 / (2 x (AUDF + 4));
 joined 16-bit pairs (bits 3 / 4, low byte in the lower channel): f = 1789790 / (2 x
 (AUDF16 + 7)), fine tuning for music. (Standard Atari POKEY formulas with the NTSC clock;
-the board's POKEY 2 runs from the 1.79 MHz classic clock tick. Not measured here.)
+the board's POKEY runs from the 1.79 MHz classic clock tick. Not measured here.)
 
 Notes (64 kHz clock, pure tone): AUDF for an octave from middle C:
 
@@ -85,10 +98,10 @@ Notes (64 kHz clock, pure tone): AUDF for an octave from middle C:
 | Hz | 262 | 294 | 330 | 349 | 392 | 440 | 494 | 523 |
 | AUDF | 121 | 108 | 96 | 91 | 81 | 72 | 64 | 60 |
 
-## The DACs
+## The DACs (REV $07 to $0B only)
 
 `SYS_SNDW` registers $10-$13: four 8-bit DACs (0, 1 left; 2, 3 right), the value is the
-output level. Without a timer interrupt or DMA for programs, a program can only change a
+output level. REV $0C does not have them. Without a timer interrupt or DMA for programs, a program can only change a
 level per syscall (about 50 us each): clicks, ramps, a few hundred Hz of a coarse wave
 while the program does nothing else. Lau, the sample player, is the answer (REV $0A,
 Horizon 0.17: below).
@@ -130,7 +143,7 @@ is killed) and when you free a bank one of them plays from; all voices stop whil
 classic machine is shown. **The sound volume** (Horizon 0.18: setting 4, `SYS_SETTING`,
 0-15, default 8; [system.md](system.md)) is Lau's master volume, x 17: the user's choice for
 every program's samples, separate from the alert volume (setting 1, the beeps and chimes on
-POKEY 2; 0.17 used that one for Lau too). At the default one voice at 255 reaches about a
+POKEY; 0.17 used that one for Lau too). At the default one voice at 255 reaches about a
 quarter of full scale; leave the setting to the user and choose your voices' volumes.
 
 The pitch is the step per 48 kHz output sample in 2.14 fixed point: $4000 plays a 48 kHz
@@ -138,8 +151,8 @@ recording at its own pitch, $2000 a 24 kHz one, $1555 a 16 kHz one; a semitone u
 1.0595. There is no interpolation: samples made near 48 kHz, or played near their own rate,
 sound cleanest. 16 kHz 8-bit is a good size for game effects (16 KB a second).
 
-The emulator plays Lau exactly (`emu816 --wav FILE` writes its output, `--log-lau` logs the
-writes; `run816.py --log-lau` passes that on). `sdk/examples/deepdive` makes its two samples
+The emulator plays Lau exactly (`emu816 --wav FILE` writes its output, with the OPL2's from
+REV $0C; `--log-lau` logs the writes, `run816.py --log-lau` passes that on). `sdk/examples/deepdive` makes its two samples
 at run time (`makesound`) and plays them with SP_ANY.
 
 ### $68 sample_play (SYS_SPLAY)
@@ -152,7 +165,7 @@ odd 16-bit address, a loop shorter than 4 samples, a voice above 7; EAGAIN the v
 for another program (SP_ANY: all eight play and none is yours).
 ```asm
         ptr     boom
-        sys     SYS_SPLAY       ; A = the voice (C set: A = ENODEV -> POKEY 2)
+        sys     SYS_SPLAY       ; A = the voice (C set: A = ENODEV -> POKEY)
         rts
 boom:   .faraddr boom_pcm       ; the samples (here in the code bank)
         .faraddr 3200           ; 3200 samples: 0.2 s at 16 kHz
@@ -177,7 +190,7 @@ Out: A = your voices still playing (bit n = voice n), X = all voices playing. EN
 Lau: the cheapest test for it.
 ```asm
         sys     SYS_SSTAT
-        bcs     :+              ; no Lau: use POKEY 2
+        bcs     :+              ; no Lau: use POKEY
         lda     #1
         sta     have_lau
 :       rts
@@ -221,7 +234,63 @@ whatever other programs do. 1 ms is the shortest period.
 `SPF_KEEP` (4, Horizon 0.26) in sample_play's flags marks a voice as music: it plays on while
 the classic Atari is shown (the others stop).
 
-## Music: modules and WAV files (Horizon 0.26)
+## FM: the OPL2 (Horizon 0.27, REV $0C)
+
+### $6D opl_write (SYS_OPLW)
+In: A = an OPL2 register $00-$F5 and X = its value; or A = $FFFE (probe: nothing written),
+$FFFF (reset: every register 0, about 10 ms) or $FFFD (release). Out: A = the chip's status
+($06 when idle). Each write costs about 45 us (the kernel waits as a YM3812 needs). **One
+owner**: the first program that writes or resets owns the chip until it ends or releases it;
+another program's write gets EAGAIN meanwhile (the probe always answers). When the owner ends
+or releases, all notes are keyed off; while the classic machine is shown the notes are keyed
+off too, the rest stays. Errors: ENODEV before REV $0C, EINVAL another A above $F5, EAGAIN.
+The registers are the YM3812's (any AdLib programming guide applies).
+```asm
+        lda     #$FFFE
+        sys     SYS_OPLW        ; C set: no OPL2 (ENODEV)
+        bcs     nofm
+        lda     #$FFFF
+        sys     SYS_OPLW        ; reset: the chip is ours (C set: EAGAIN, in use)
+        bcs     nofm
+        lda     #$20            ; modulator of channel 0: multiple 1
+        ldx     #$01
+        sys     SYS_OPLW
+        lda     #$40            ; its level: -24 dB
+        ldx     #$10
+        sys     SYS_OPLW
+        lda     #$60            ; attack 15, decay 0
+        ldx     #$F0
+        sys     SYS_OPLW
+        lda     #$80            ; sustain 0 dB, release 7
+        ldx     #$07
+        sys     SYS_OPLW
+        lda     #$23            ; the carrier: the same, full level
+        ldx     #$01
+        sys     SYS_OPLW
+        lda     #$43
+        ldx     #$00
+        sys     SYS_OPLW
+        lda     #$63
+        ldx     #$F0
+        sys     SYS_OPLW
+        lda     #$83
+        ldx     #$07
+        sys     SYS_OPLW
+        lda     #$A0            ; 440 Hz: F-number $241, block 4
+        ldx     #$41
+        sys     SYS_OPLW
+        lda     #$B0            ; key on
+        ldx     #$32
+        sys     SYS_OPLW
+        ; ... later
+        lda     #$FFFD
+        sys     SYS_OPLW        ; notes off, the chip is free again
+nofm:   rts
+```
+`horizon/user/midplay.s`, the MIDI player of the music engine, uses this call;
+`horizon/user/otest.s` tests it.
+
+## Music: modules, WAV and MIDI files (Horizon 0.26, 0.27)
 
 Two ways to have music in a program.
 
@@ -231,9 +300,10 @@ arguments `-p PORT` (a port you created). It answers `MS_HELLO` with its own por
 `MC_PLAY`, `MC_PAUSE`, `MC_STOP`, `MC_SEEK`, `MC_VOL`, `MC_SEP`, `MC_LOOP`, `MC_READ` (bytes of
 the module or of its info block), `MC_QUIT`; it sends `MS_STATUS` (state, order, row,
 pattern, time, the level of each channel) after every tick. `horizon/user/music.inc` has the
-whole protocol; `horizon/user/music.s` (the Music program) uses all of it. It plays MOD files
-(4-8 channels, 15 or 31 samples) and WAV files (PCM 8/16-bit, mono or stereo, read whole into
-memory), from the card, `/PC:` or an `http(s)://` / `ftp://` URL. It ends with your program.
+whole protocol; `horizon/user/music.s` (the Music Player program) uses all of it. It plays MOD files
+(4-8 channels, 15 or 31 samples), WAV files (PCM 8/16-bit, mono or stereo, read whole into
+memory) and, on REV $0C (Horizon 0.27), MIDI files (.MID, on the OPL2, which it owns while
+such a song plays), from the card, `/PC:` or an `http(s)://` / `ftp://` URL. It ends with your program.
 Nothing to link; your program keeps its own loop.
 
 **The replayer library**, `horizon/build/modplay.o` (`horizon/user/modplay.s`, API in
@@ -263,7 +333,7 @@ order), `mp_setvol` (0-64), `mp_setsep` (stereo separation 0-64, default 32). St
 `mp_play`, then wait for the timer and `mp_tick` until `MPF_END`.
 
 More modules: copy `.MOD` files to the card, or fetch one in the shell with
-`get http://... /Music/NAME.MOD`; double-click it in Files to play it in Music.
+`get http://... /Music/NAME.MOD`; double-click it in Files to play it in Music Player.
 
 ## BASIC
 
@@ -277,7 +347,7 @@ or a name such as `"C#5"`; one `sample_play` each), `PLAY OFF` stops them, `NOTE
 ### $67 sound_chime (SYS_CHIME)
 In: A = CH_INFO 0, CH_WARN 1, CH_QUESTION 2 or CH_ERROR 3; X = volume 0-15 ($FFFF: the
 user's alert volume setting). Horizon 0.15: the soft two-note chime of the user interface
-(pure tone, the volume falling every 10 ms, 0.22 s). It plays on a POKEY 2 channel no
+(pure tone, the volume falling every 10 ms, 0.22 s). It plays on a POKEY channel no
 program owns; if a program owns all four, it borrows channel 4 and gives the program's
 values back after it. The controls library's alerts and `ui_beep` use it.
 ```asm
@@ -286,7 +356,7 @@ values back after it. The controls library's alerts and `ui_beep` use it.
         sys     SYS_CHIME
 ```
 
-Sound ownership (Horizon 0.15): every channel, DAC and the rest of POKEY 2 (AUDCTL, SKCTL)
+Sound ownership (Horizon 0.15): every channel, DAC and the rest of POKEY (AUDCTL, SKCTL)
 remembers the task that wrote it last; when that task ends, its channels and DACs are
 silenced (AUDCTL and SKCTL go back to 0 and 3), so a game killed while it plays leaves no
 tone hanging.

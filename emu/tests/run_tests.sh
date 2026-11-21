@@ -22,6 +22,7 @@ BLITTEST=$T/BLITTEST.BIN; [ -f $SW/BLITTEST.BIN ] && BLITTEST=$SW/BLITTEST.BIN
 BLITLIST=$T/BLITLIST.BIN; [ -f $SW/BLITLIST.BIN ] && BLITLIST=$SW/BLITLIST.BIN
 SAMPLER=$T/SAMPLER.BIN; [ -f $SW/SAMPLER.BIN ] && SAMPLER=$SW/SAMPLER.BIN
 SPRTEST=$T/SPRTEST.BIN; [ -f $SW/SPRTEST.BIN ] && SPRTEST=$SW/SPRTEST.BIN
+OPLTEST=$T/OPLTEST.BIN; [ -f $SW/OPLTEST.BIN ] && OPLTEST=$SW/OPLTEST.BIN
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
 
@@ -125,6 +126,37 @@ if [ $REVN -ge 11 ]; then
     done
     [ -z "$bad_sc" ] && ok "sprscene 1-10 (sprites, scrolling, split: identical to the RTL's frames)" || bad "sprscene pictures differ:$bad_sc"
 else skip "SPRTEST.BIN and the sprite scenes (REV 0B)"; fi
+
+# ── OPL2 REV $0C. OPLTEST is the hardware self test: STAT, TIMER and TONE (OPL_OUT, $DB32/$DB33,
+# swings both ways while a note plays: the sound of Nuked OPL3, nuked-opl3/) must pass.
+# tests/asm/opltimer: the timers' periods (A 1,285 us and B 5,140 us at
+# $F0), a masked flag, IRQ_STATUS bit 5 waking WAI, a new value at the next overflow, a
+# stopped timer; with --log-sound only $DB00 of its two frozen writes is taken (no DACs).
+# tests/asm/opltone: a 440 Hz sine keyed on for 1 s and released, recorded with --wav
+# (tests/oplwav.py: pitch, level, length, the release to silence), twice: the same bytes.
+# Before REV $0C the same program records silence ──
+if [ $REVN -ge 12 ]; then
+    out=$($EMU --max-seconds 5 $OPLTEST 2>/dev/null)
+    [ "$out" = "$(printf 'OPL2 TEST REV %s\nSTAT OK\nTIMER OK\nTONE OK\nOPL2 PASS\nDONE' "$REV")" ] \
+        && ok "OPLTEST.BIN (status \$06, AdLib timer detection, AUDIO IRQ, a tone on OPL_OUT)" || bad "OPLTEST.BIN" "$out"
+    out=$($EMU --max-seconds 5 --log-sound $T/asm/opltimer.bin 2>"$TMP/opl.err")
+    if [ "$out" = "$(sed "s/REV 0C/REV $REV/" $T/expected/opltimer.txt)" ] && [ "$(cat "$TMP/opl.err")" = 'sound $DB00 = $12' ]; then
+        ok "opltimer (timer periods, masks, AUDIO IRQ and WAI, reload, stop; no DACs)"; else bad "opltimer" "$out
+$(cat "$TMP/opl.err")"; fi
+    if command -v python3 >/dev/null 2>&1; then
+        $EMU --max-seconds 5 --wav "$TMP/tone1.wav" $T/asm/opltone.bin >/dev/null 2>&1
+        $EMU --max-seconds 5 --wav "$TMP/tone2.wav" $T/asm/opltone.bin >/dev/null 2>&1
+        out=$(python3 $T/oplwav.py "$TMP/tone1.wav") && cmp -s "$TMP/tone1.wav" "$TMP/tone2.wav" \
+            && ok "opltone (--wav: 440 Hz on the OPL2, its level, key-off to silence; the same bytes twice: $out)" \
+            || bad "opltone" "$out"
+    else skip "opltone (no python3)"; fi
+else
+    out=$($EMU --max-seconds 5 $OPLTEST 2>/dev/null)
+    printf '%s\n' "$out" | grep -qx "STAT FAIL 00" && ok "OPLTEST.BIN before REV 0C: no OPL2 (status reads 00)" || bad "OPLTEST.BIN (no OPL2)" "$out"
+    $EMU --max-seconds 5 --wav "$TMP/tone1.wav" $T/asm/opltone.bin >/dev/null 2>&1
+    [ "$(tail -c +45 "$TMP/tone1.wav" | tr -d '\000' | wc -c)" -eq 0 ] && [ "$(stat -c %s "$TMP/tone1.wav")" -gt 300000 ] \
+        && ok "opltone before REV 0C: --wav records silence" || bad "opltone before REV 0C: not silent"
+fi
 
 # ── fixed RTL issues (see README): the aborted COP stays in user mode, E-mode IRQ pushes B=0 ──
 out=$($EMU --max-seconds 5 $T/asm/copabort.bin)

@@ -15,7 +15,7 @@ the kernel's syscall table, and assembles every example.
 | [drawing.md](drawing.md) | win_draw: fills, frames, lines, text, blits (plain, keyed, with stride), copy; fonts; the system palette; win_draw or a draw list |
 | [controls.md](controls.md) | The controls library (ui.lib): buttons, fields, lists, scroll bars, alerts, the file dialog |
 | [ulib.md](ulib.md) | The user library and the macros of horizon.inc |
-| [sound.md](sound.md) | beep, sound_write, POKEY 2 and the DACs; samples on Lau; the sound volume |
+| [sound.md](sound.md) | beep, sound_write, POKEY and the DACs; samples on Lau; FM on the OPL2; the sound volume |
 | [classic.md](classic.md) | The classic Atari: mount, eject, boot, show; (0.23) Run in Atari, the folder disk |
 | [printing.md](printing.md) | (0.23) Printing: `/PRN:NAME` jobs, watching for new ones, PDFs on the PC |
 | [games.md](games.md) | Horizon 0.18, the games round: frame sync (vsync, frame, WE_VBL), palette entries, Marga's sprites, full-screen mode (own framebuffer, scrolling with wrap and split, raster table), draw lists |
@@ -86,6 +86,7 @@ the kernel's syscall table, and assembles every example.
 | $6A | sample_stat | SYS_SSTAT | [sound](sound.md) |
 | $6B | sample_set | SYS_SSET | [sound](sound.md) |
 | $6C | sample_timer | SYS_STIMER | [sound](sound.md) |
+| $6D | opl_write | SYS_OPLW | [sound](sound.md) |
 | $70 | ws_start | SYS_WSSTART | [windows](windows.md) |
 | $71 | ws_stop | SYS_WSSTOP | [windows](windows.md) |
 | $72 | win_open | SYS_WOPEN | [windows](windows.md) |

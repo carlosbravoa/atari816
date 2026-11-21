@@ -14,10 +14,10 @@ syscalls cost and why the rules are what they are. The definition is
 | Memory | 8 MB SDRAM on the Tang Nano 20K (16 MB in the spec): banks $00-$7F; 2-4 KB CPU cache |
 | Video | Marga, the video chip: 640 x 360 at 8 bpp (the desktop), 640 x 360 at 4 bpp, 320 x 180 at 8 bpp, shown on 1280 x 720 at 60 Hz (HDMI); hardware pointer 32 x 32; (REV $0B) 16 sprites, fine scrolling with wrap and a split |
 | Blitter | Ali, the blitter: rectangle fill, copy, keyed copy, 1-to-8 bpp expand; 8 bpp only; (REV $09) command lists |
-| Sound | POKEY 2 of the classic machine (4 voices) + four 8-bit DACs (REV $07+); Lau, the 8-voice sample player (REV $0A; Horizon 0.17: SYS_SPLAY ...) |
+| Sound | POKEY of the classic machine (4 voices; REV $07 to $0B: its second POKEY, and four 8-bit DACs); the OPL2, a YM3812 FM synthesizer (REV $0C; Horizon 0.27: SYS_OPLW); Lau, the 8-voice sample player (REV $0A; Horizon 0.17: SYS_SPLAY ...) |
 | Input | USB keyboard and mouse through the I/O processor; two DB9 joystick ports (classic side) |
 | Storage | SD card (FAT32) through the I/O processor (a PicoRV32 in the FPGA) |
-| Classic machine | a cycle-exact Atari 800/XL/XE (NMOS 6502, ANTIC, GTIA, two POKEYs, PIA) |
+| Classic machine | a cycle-exact Atari 800/XL/XE (NMOS 6502, ANTIC, GTIA, POKEY, PIA) |
 
 Revisions (SYS_REV; `ws_config` with A = 0 returns it in X):
 
@@ -28,6 +28,8 @@ Revisions (SYS_REV; `ws_config` with A = 0 returns it in X):
 | $08 | Ali, the blitter |
 | $09 | Ali's command lists, Marga's VBLANK interrupt and frame counter (NV_FRAME), raster (LINE) events at the beam |
 | $0A | Lau, the sample player |
+| $0B | Marga's 16 sprites and fine scrolling |
+| $0C | the OPL2 (YM3812); one POKEY, mono: POKEY 2 and the DACs are gone, native sound uses POKEY's second register bank |
 | $0B | Marga's 16 sprites and fine scrolling (scroll registers, wrap, split) |
 
 **emu816 models REV $0B by default**; `--rev 10`, `9`, `8` or `7` (also `run816.py --rev N`)
@@ -110,8 +112,9 @@ pixels a second for a copy; plus 8 + 2 per line CPU cycles. See
 
 | Address | | From a program |
 | --- | --- | --- |
-| $DB00-$DB0F | POKEY 2 (write only): AUDF1-4, AUDC1-4, AUDCTL, STIMER, SKCTL | `SYS_SNDW` A = $00-$0F |
-| $DB10-$DB13 | four 8-bit DACs: 0, 1 left; 2, 3 right | `SYS_SNDW` A = $10-$13 |
+| $DB00-$DB0F | POKEY (write only): AUDF1-4, AUDC1-4, AUDCTL, STIMER, SKCTL | `SYS_SNDW` A = $00-$0F |
+| $DB10-$DB13 | four 8-bit DACs: 0, 1 left; 2, 3 right (REV $07 to $0B) | `SYS_SNDW` A = $10-$13 |
+| $DB30-$DB31 | the OPL2: register select / status, data (REV $0C) | `SYS_OPLW` |
 
 The writes are taken only while the classic machine is frozen (it is, whenever the desktop
 is shown). The kernel silences AUDC1-4 and the DACs before the classic machine runs. Lau,

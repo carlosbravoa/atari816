@@ -82,7 +82,7 @@ All 16 MB is one flat RAM pool on the 65C816's 24-bit bus; there is no ROM in th
 | --- | --- | --- |
 | $00:0000 to $00:CFFF | 52 KB | Bank 0 RAM: direct pages and stacks (the 65C816 requires both in bank 0), interrupt trampolines |
 | $00:D000 to $00:D7FF | 2 KB | Classic chipset window (GTIA, POKEY, PIA, ANTIC), usable by native code only when no classic session owns the chips |
-| $00:D800 to $00:DFFF | 2 KB | Native I/O: FREDDIE II, Marga, Ali, audio (POKEY 2, Lau), interrupt controller, timers, SD, companion link, classic supervisor |
+| $00:D800 to $00:DFFF | 2 KB | Native I/O: FREDDIE II, Marga, Ali, audio (POKEY, Lau, OPL2), interrupt controller, timers, SD, companion link, classic supervisor |
 | $00:E000 to $00:FFFF | 8 KB | Kernel entry points and 65C816 vectors, in RAM, write-protected after boot |
 | $01:0000 to $0F:FFFF | 960 KB | Kernel, drivers, GUI toolkit, fonts, disk cache |
 | $10:0000 to $FF:FFFF | 15 MB | General pool in 64 KB banks: apps, documents, framebuffers, classic sessions, ROM images |
@@ -139,8 +139,8 @@ Everything leaves the machine as one standard 1280x720 at 60 Hz raster. The desk
 
 ### Sound
 
-- **Classic:** POKEY as original, with an optional second POKEY for stereo (the common stereo upgrade layout).
-- **Native:** Lau, an 8-channel DMA sample engine (8 or 16 bit, up to 48 kHz) for desktop sounds, music and speech, plus a native-side POKEY for chiptune apps.
+- **Classic:** POKEY as original. (Until REV $0B there was an optional second POKEY for stereo, the common stereo upgrade layout; it made room for the OPL2 in REV $0C.)
+- **Native:** Lau, an 8-channel DMA sample engine (8 or 16 bit, up to 48 kHz) for desktop sounds, music and speech, plus a native-side POKEY for chiptune apps (the classic machine's own, playing a second register bank while that machine is frozen) and, from REV $0C, an OPL2 (YM3812) FM synthesizer for MIDI music.
 - A mixer combines both sides, with per-session volume. Output over HDMI audio and a line-out (I2S DAC or PWM).
 
 ## Input, storage and networking

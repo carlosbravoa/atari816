@@ -50,7 +50,7 @@ int atoi(const char *str);
 // Phase B: hardware SIO command-frame capture
 #define reg_siocmd_a       (*(volatile uint32_t*)0x020000ac)  // R: {aux2,aux1,cmd,device}
 #define reg_siocmd_b       (*(volatile uint32_t*)0x020000b0)  // R: [7:0]=checksum [15:8]=status [23:16]=seq; W: ack
-#define reg_video_opts     (*(volatile uint32_t*)0x020000b4)  // [1:0] = scanline level (0=off,1=25,2=50,3=75%), [2] = stereo (dual POKEY)
+#define reg_video_opts     (*(volatile uint32_t*)0x020000b4)  // [1:0] = scanline level (0=off,1=25,2=50,3=75%), [2] = the classic machine's PBI disk present, [3] = keyboard: PC layout; R [8] = its request bit ($D1FE)
 #define reg_h_offset       (*(volatile uint32_t*)0x020000b8)  // [7:0] = horizontal position (0..80)
 #define reg_ram_select     (*(volatile uint32_t*)0x020000bc)  // [2:0] = core RAM_SELECT (1=128K,3=320K,5=576K,6=1088K)
 // Atari816 bring-up: 65C816 run control and debug byte port

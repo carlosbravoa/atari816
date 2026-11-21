@@ -15,10 +15,11 @@ module tb_a816;
     wire c_req, c_we, c_done; wire [AW-1:0] c_addr; wire [7:0] c_wdata;
     wire xio_wr, xio_rd; wire [7:0] xio_addr, xio_wdata, xio_rdata; wire irq_vblank, irq_line;
     wire blt_wr, irq_blit; wire [7:0] blt_rdata;
-    wire aud_wr, aud_rd, irq_audio; wire [7:0] aud_rdata;
-    wire a_req, a_done; wire [AW-1:0] a_addr; wire signed [15:0] out_l, out_r;
+    wire aud_wr, aud_rd, irq_audio, opl_irq; wire [7:0] aud_rdata, opl_rdata;
+    wire a_req, a_done; wire [AW-1:0] a_addr; wire signed [15:0] out_l, out_r, opl_snd;
     wire b_req, b_gnt, b_we, b_long, b_done; wire [AW-1:0] b_addr; wire [31:0] b_wdata; wire [3:0] b_wmask;
-    a816_sys #(.AW(AW), .WDOG_US(20000)) dut (.*, .sys_key(1'b0), .kb_route(), .joy_n_a(10'h3FF), .dbg_ack_tgl(dbg_ack),
+    a816_sys #(.AW(AW), .REV(8'h0C), .WDOG_US(20000)) dut (.*, .aud_rdata(aud_rdata | opl_rdata), .irq_audio(irq_audio | opl_irq),
+        .sys_key(1'b0), .kb_route(), .joy_n_a(10'h3FF), .dbg_ack_tgl(dbg_ack),
         .sd_req(c_req), .sd_we(c_we), .sd_addr(c_addr), .sd_wdata(c_wdata), .sd_done(c_done), .sd_rdata(sd_rdata[63:0]));
 
     // NVC with a free-running raster like the scandoubler's (1572 x 760, active from line 30)
@@ -35,6 +36,8 @@ module tb_a816;
         if (smp_acc + 14'd8 >= 14'd11953) begin smp_acc <= smp_acc + 14'd8 - 14'd11953; smp_tgl <= ~smp_tgl; end
         else smp_acc <= smp_acc + 14'd8;
     end
+    a816_opl opl (.clk, .reset_n, .run, .xio_wr(aud_wr), .xio_addr, .xio_wdata,
+        .xio_rdata(opl_rdata), .irq(opl_irq), .snd(opl_snd));
     a816_snd #(.AW(AW)) snd (.clk, .reset_n, .run, .xio_wr(aud_wr), .xio_addr, .xio_wdata,
         .xio_rdata(aud_rdata), .irq(irq_audio), .smp_tgl_a(smp_tgl), .a_req, .a_addr, .a_done,
         .a_rdata(sd_rdata[63:0]), .out_l, .out_r);

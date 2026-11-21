@@ -8,7 +8,7 @@ and it runs on a Sipeed Tang Nano 20K FPGA board. Horizon is a preemptive multit
 with memory protection and a mouse-driven desktop (windows, icons, a terminal, and
 applications such as Files, Edit, Write, Sheet, Paint, BASIC, a Downloader and a BBS terminal). Its own custom chips are
 FREDDIE II, the memory manager, Marga, the video chip, Ali, the blitter, and Lau, an 8-voice
-sample player, next to a second POKEY (POKEY 2).
+sample player, next to an OPL2 FM synthesizer (YM3812) and the classic machine's POKEY.
 
 Inside the same FPGA is a complete, cycle-exact Atari 8-bit computer (400/800/XL/XE), so
 original 8-bit software runs on its own hardware; F12 switches between it and the desktop.
@@ -22,7 +22,7 @@ original 8-bit software runs on its own hardware; F12 switches between it and th
 ![Architecture of the Atari816](Docs/images/architecture.svg)
 
 - **One FPGA holds two computers.** The 16-bit machine is a 65C816 with 8 MB of RAM and its
-  own chips: Marga draws the picture, Ali moves pixels fast, Lau and POKEY 2 make the sound.
+  own chips: Marga draws the picture, Ali moves pixels fast, Lau, an OPL2 and POKEY make the sound.
   Next to it is a complete classic Atari 8-bit that runs original software unchanged.
 - **FREDDIE II** decides who may use which memory. It protects programs from each other and
   gives the classic Atari its own 64 KB view of the same RAM.
@@ -145,7 +145,7 @@ in [`LICENSES/`](LICENSES/) and [`core/LICENSES/`](core/LICENSES/). See [`LICENS
 | Directory | Licence |
 | --- | --- |
 | `horizon/` | GPL-3.0-or-later |
-| `emu/` | GPL-3.0-or-later |
+| `emu/` | GPL-3.0-or-later (third-party: `emu/nuked-opl3/`, Nuked OPL3, LGPL-2.1-or-later, listed in [`emu/LICENSE`](emu/LICENSE)) |
 | `tools/` | GPL-3.0-or-later |
 | `sdk/` | MIT |
 | `Docs/` | CC-BY-SA-4.0 |
@@ -178,6 +178,9 @@ The hardware builds on the work of others (details and licences in
 - Sameer Puri: the HDMI library (hdl-util/hdmi).
 - WangXuan95: the SD-card reader.
 - Avery Lee: the Altirra palettes.
+
+The emulator, emu816, makes the OPL2's sound with Nuke.YKT's
+[Nuked OPL3](https://github.com/nukeykt/Nuked-OPL3) (details in [`emu/LICENSE`](emu/LICENSE)).
 
 ## Disclaimer
 

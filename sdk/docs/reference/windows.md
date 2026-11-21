@@ -410,7 +410,7 @@ In: A = bit 0 blitter off, bit 1 the compositor sleeps on the blitter interrupt,
 direct drawing. Out: A = 1 if the blitter (Ali) is in use; X = the hardware revision
 (SYS_REV, Horizon 0.16). For measurements and tests: it changes how everything is drawn.
 `lda #0` restores the default and tells you whether the machine has a blitter (REV $08
-and later); X tells the rest (POKEY 2 on REV $07+, Lau, the sample player, on REV $0A+).
+and later); X tells the rest (POKEY sound on REV $07+, Lau, the sample player, on REV $0A+, the OPL2 on REV $0C+).
 ```asm
         lda     #0
         sys     SYS_WSCONFIG    ; -> A = 1: the blitter draws
