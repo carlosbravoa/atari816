@@ -1,4 +1,4 @@
-# Atari816
+# Atari816 + Horizon OS
 
 **A 16-bit Atari and desktop on the 65C816, with original 8-bit Atari compatibility.**
 
