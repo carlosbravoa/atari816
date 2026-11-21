@@ -405,7 +405,7 @@ t_cpu:  .byte   "65C816 at 14.3 MHz", 0
 t_gfx:  .byte   "Video: Marga, 640 x 360, 256 colours", 0
 t_blit_on:  .byte "Blitter: Ali", 0
 t_blit_off: .byte "Blitter: none (the CPU draws)", 0
-t_snd_opl:  .byte "Sound: Lau, OPL2", 0
+t_snd_opl:  .byte "Sound: POKEY, Lau, OPL2", 0
 t_snd_lau:  .byte "Sound: POKEY 2, Lau", 0
 t_snd_p2:   .byte "Sound: POKEY 2", 0
 t_snd_none: .byte "Sound: none", 0

@@ -447,20 +447,23 @@ PORT MAP(CLK => CLK,
 		 DATA_OUT => ANTIC_DO,
 		 dma_address_out => ANTIC_ADDR);
 
--- Atari816 (opl2 branch): POKEY 2 removed (mono classic POKEY 1; OPL2 replaces POKEY 2 for
--- native sound). Keep a free-running 1.79 MHz tick so freezing the classic machine (A816_SND=1)
--- cleanly mutes POKEY 1 / GTIA through the low-pass filter instead of holding a DC offset.
+-- Atari816 (opl2 branch): POKEY 2 removed (mono classic POKEY 1; OPL2 added for native FM).
+-- While the classic machine is frozen (A816_SND=1), route native $00:DB00-$DB0F writes to
+-- POKEY 1's isolated native audio register bank so Horizon chimes/alerts/beeps work without
+-- disturbing classic Atari's AUDF/AUDC/AUDCTL/SKCTL/IRQ/SIO/keyboard/POT state.
 snd_free_div : entity work.enable_divider
 	generic map (COUNT=>cycle_length)
 	port map(clk=>CLK,reset_n=>RESET_N,enable_in=>'1',enable_out=>snd_free_179);
 snd_mix_en   <= snd_free_179 when A816_SND = '1' else ANTIC_ENABLE_179;
+snd_p2_wr    <= (A816_SND_WR and not A816_SND_ADDR(4)) when A816_SND = '1' else POKEY_WRITE_ENABLE;
+snd_p2_addr  <= A816_SND_ADDR(3 downto 0) when A816_SND = '1' else PBI_ADDR_INT(3 downto 0);
 snd_cvx_wr   <= (A816_SND_WR and A816_SND_ADDR(4)) when A816_SND = '1' else covox_write_enable;
 snd_cvx_addr <= A816_SND_ADDR(1 downto 0) when A816_SND = '1' else pbi_addr_int(1 downto 0);
 snd_data     <= A816_SND_DATA when A816_SND = '1' else WRITE_DATA(7 DOWNTO 0);
-snd_l0 <= (others => '0') when A816_SND = '1' else POKEY1_CHANNEL0;
-snd_l1 <= (others => '0') when A816_SND = '1' else POKEY1_CHANNEL1;
-snd_l2 <= (others => '0') when A816_SND = '1' else POKEY1_CHANNEL2;
-snd_l3 <= (others => '0') when A816_SND = '1' else POKEY1_CHANNEL3;
+snd_l0 <= POKEY1_CHANNEL0;
+snd_l1 <= POKEY1_CHANNEL1;
+snd_l2 <= POKEY1_CHANNEL2;
+snd_l3 <= POKEY1_CHANNEL3;
 snd_stereo <= GTIA_SOUND and not A816_SND;
 POKEY2_CHANNEL0 <= (others => '0');
 POKEY2_CHANNEL1 <= (others => '0');
@@ -669,15 +672,15 @@ PORT MAP(CLK => CLK,
 
 pokey1 : entity work.pokey
 PORT MAP(CLK => CLK,
-		 ENABLE_179 => ANTIC_ENABLE_179,
-		 WR_EN => POKEY_WRITE_ENABLE,
+		 ENABLE_179 => snd_mix_en,
+		 WR_EN => snd_p2_wr,
 		 RESET_N => RESET_N,
 		 SIO_IN1 => SIO_RXD,
 		 SIO_CLOCKIN_IN => SIO_CLOCKIN_IN,
 		 SIO_CLOCKIN_OUT => SIO_CLOCKIN_OUT,
 		 SIO_CLOCKIN_OE => SIO_CLOCKIN_OE,
-		 ADDR => PBI_ADDR_INT(3 DOWNTO 0),
-		 DATA_IN => WRITE_DATA(7 DOWNTO 0),
+		 ADDR => snd_p2_addr,
+		 DATA_IN => snd_data,
 		 keyboard_response => KEYBOARD_RESPONSE,
 		 POT_IN => POT_IN,
 		 IRQ_N_OUT => POKEY_IRQ,
@@ -686,6 +689,7 @@ PORT MAP(CLK => CLK,
 		 SIO_OUT3 => open,
 		 SIO_CLOCKOUT => SIO_CLOCKOUT,
 		 POT_RESET => POT_RESET,
+		 NATIVE_MODE => A816_SND,
 		 CHANNEL_0_OUT => POKEY1_CHANNEL0,
 		 CHANNEL_1_OUT => POKEY1_CHANNEL1,
 		 CHANNEL_2_OUT => POKEY1_CHANNEL2,

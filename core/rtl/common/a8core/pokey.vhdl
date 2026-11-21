@@ -56,7 +56,8 @@ PORT
 	SIO_CLOCKIN_OE : OUT std_logic;
 	SIO_CLOCKOUT : OUT std_logic;
 	
-	POT_RESET : out std_logic
+	POT_RESET : out std_logic;
+	NATIVE_MODE : in std_logic := '0'
 );
 END pokey;
 
@@ -245,6 +246,22 @@ ARCHITECTURE vhdl OF pokey IS
 	signal audf3_next : std_logic_vector(7 downto 0);
 	signal audc3_next : std_logic_vector(7 downto 0);
 	signal audctl_next : std_logic_vector(7 downto 0);
+
+	-- Atari816 (opl2 branch): separate native audio register bank so Horizon system sounds
+	-- share POKEY 1 while the classic machine is frozen (NATIVE_MODE=1) without clobbering
+	-- classic Atari's AUDF/AUDC/AUDCTL/SKCTL/IRQ/SIO/keyboard/POT state.
+	signal n_audf0_reg, n_audc0_reg, n_audf1_reg, n_audc1_reg : std_logic_vector(7 downto 0);
+	signal n_audf2_reg, n_audc2_reg, n_audf3_reg, n_audc3_reg : std_logic_vector(7 downto 0);
+	signal n_audctl_reg : std_logic_vector(7 downto 0);
+	signal n_audf0_next, n_audc0_next, n_audf1_next, n_audc1_next : std_logic_vector(7 downto 0);
+	signal n_audf2_next, n_audc2_next, n_audf3_next, n_audc3_next : std_logic_vector(7 downto 0);
+	signal n_audctl_next : std_logic_vector(7 downto 0);
+	signal n_init_reg, n_init_next : std_logic;
+	signal audf0_act, audc0_act, audf1_act, audc1_act : std_logic_vector(7 downto 0);
+	signal audf2_act, audc2_act, audf3_act, audc3_act : std_logic_vector(7 downto 0);
+	signal audctl_act : std_logic_vector(7 downto 0);
+	signal audio_initmode : std_logic;
+	signal classic_enable_15 : std_logic;
 
 	signal audf0_pulse_raw : std_logic;
 	signal audf1_pulse_raw : std_logic;
@@ -460,6 +477,16 @@ BEGIN
 			audf3_reg <= X"00";
 			audc3_reg <= X"00";
 			audctl_reg <= X"00";
+			n_audf0_reg <= X"00";
+			n_audc0_reg <= X"00";
+			n_audf1_reg <= X"00";
+			n_audc1_reg <= X"00";
+			n_audf2_reg <= X"00";
+			n_audc2_reg <= X"00";
+			n_audf3_reg <= X"00";
+			n_audc3_reg <= X"00";
+			n_audctl_reg <= X"00";
+			n_init_reg <= '1';
 			
 			irqen_reg <= X"00";
 			irqst_reg <= X"FF";
@@ -541,6 +568,16 @@ BEGIN
 			audf3_reg <= audf3_next;
 			audc3_reg <= audc3_next;
 			audctl_reg <= audctl_next;
+			n_audf0_reg <= n_audf0_next;
+			n_audc0_reg <= n_audc0_next;
+			n_audf1_reg <= n_audf1_next;
+			n_audc1_reg <= n_audc1_next;
+			n_audf2_reg <= n_audf2_next;
+			n_audc2_reg <= n_audc2_next;
+			n_audf3_reg <= n_audf3_next;
+			n_audc3_reg <= n_audc3_next;
+			n_audctl_reg <= n_audctl_next;
+			n_init_reg <= n_init_next;
 			
 			irqen_reg <= irqen_next;
 			irqst_reg <= irqst_next;
@@ -654,21 +691,31 @@ BEGIN
 		end if;
 	end process;
 
+	audf0_act  <= n_audf0_reg  when NATIVE_MODE = '1' else audf0_reg;
+	audc0_act  <= n_audc0_reg  when NATIVE_MODE = '1' else audc0_reg;
+	audf1_act  <= n_audf1_reg  when NATIVE_MODE = '1' else audf1_reg;
+	audc1_act  <= n_audc1_reg  when NATIVE_MODE = '1' else audc1_reg;
+	audf2_act  <= n_audf2_reg  when NATIVE_MODE = '1' else audf2_reg;
+	audc2_act  <= n_audc2_reg  when NATIVE_MODE = '1' else audc2_reg;
+	audf3_act  <= n_audf3_reg  when NATIVE_MODE = '1' else audf3_reg;
+	audc3_act  <= n_audc3_reg  when NATIVE_MODE = '1' else audc3_reg;
+	audctl_act <= n_audctl_reg when NATIVE_MODE = '1' else audctl_reg;
+
 	audf0_delay : entity work.wide_delay_line
 		generic map (COUNT=>1, WIDTH=>8)
-		port map(clk=>clk,sync_reset=>'0',data_in=>audf0_reg(7 downto 0),enable=>enable_179,reset_n=>reset_n,data_out=>audf0_delayed_reg(7 downto 0));	
+		port map(clk=>clk,sync_reset=>'0',data_in=>audf0_act(7 downto 0),enable=>enable_179,reset_n=>reset_n,data_out=>audf0_delayed_reg(7 downto 0));	
 	audf1_delay : entity work.wide_delay_line
 		generic map (COUNT=>1, WIDTH=>8)
-		port map(clk=>clk,sync_reset=>'0',data_in=>audf1_reg(7 downto 0),enable=>enable_179,reset_n=>reset_n,data_out=>audf1_delayed_reg(7 downto 0));	
+		port map(clk=>clk,sync_reset=>'0',data_in=>audf1_act(7 downto 0),enable=>enable_179,reset_n=>reset_n,data_out=>audf1_delayed_reg(7 downto 0));	
 	audf2_delay : entity work.wide_delay_line
 		generic map (COUNT=>1, WIDTH=>8)
-		port map(clk=>clk,sync_reset=>'0',data_in=>audf2_reg(7 downto 0),enable=>enable_179,reset_n=>reset_n,data_out=>audf2_delayed_reg(7 downto 0));	
+		port map(clk=>clk,sync_reset=>'0',data_in=>audf2_act(7 downto 0),enable=>enable_179,reset_n=>reset_n,data_out=>audf2_delayed_reg(7 downto 0));	
 	audf3_delay : entity work.wide_delay_line
 		generic map (COUNT=>1, WIDTH=>8)
-		port map(clk=>clk,sync_reset=>'0',data_in=>audf3_reg(7 downto 0),enable=>enable_179,reset_n=>reset_n,data_out=>audf3_delayed_reg(7 downto 0));	
+		port map(clk=>clk,sync_reset=>'0',data_in=>audf3_act(7 downto 0),enable=>enable_179,reset_n=>reset_n,data_out=>audf3_delayed_reg(7 downto 0));	
 	audctl_delay : entity work.wide_delay_line
 		generic map (COUNT=>1, WIDTH=>8)
-		port map(clk=>clk,sync_reset=>'0',data_in=>audctl_reg(7 downto 0),enable=>enable_179,reset_n=>reset_n,data_out=>audctl_delayed_reg(7 downto 0));	
+		port map(clk=>clk,sync_reset=>'0',data_in=>audctl_act(7 downto 0),enable=>enable_179,reset_n=>reset_n,data_out=>audctl_delayed_reg(7 downto 0));	
 	
 	-- Instantiate timers
 	timer0 : pokey_countdown_timer
@@ -704,7 +751,7 @@ BEGIN
 --	twotone_reset_delayed <= twotone_reset;
 	
 	-- Writes to registers
-	process(data_in,wr_en,addr_decoded,audf0_reg,audc0_reg,audf1_reg,audc1_reg,audf2_reg,audc2_reg,audf3_reg,audc3_reg,audf0_enable,audf1_enable,audf2_enable,audf3_enable,audctl_reg, irqen_reg, skctl_reg, serout_holding_reg)
+	process(data_in,wr_en,addr_decoded,NATIVE_MODE,audf0_reg,audc0_reg,audf1_reg,audc1_reg,audf2_reg,audc2_reg,audf3_reg,audc3_reg,audf0_enable,audf1_enable,audf2_enable,audf3_enable,audctl_reg, irqen_reg, skctl_reg, serout_holding_reg, n_audf0_reg, n_audc0_reg, n_audf1_reg, n_audc1_reg, n_audf2_reg, n_audc2_reg, n_audf3_reg, n_audc3_reg, n_audctl_reg, n_init_reg)
 	begin
 		audf0_next <= audf0_reg;
 		audc0_next <= audc0_reg;
@@ -715,6 +762,17 @@ BEGIN
 		audf3_next <= audf3_reg;
 		audc3_next <= audc3_reg;
 		audctl_next <= audctl_reg;		
+
+		n_audf0_next <= n_audf0_reg;
+		n_audc0_next <= n_audc0_reg;
+		n_audf1_next <= n_audf1_reg;
+		n_audc1_next <= n_audc1_reg;
+		n_audf2_next <= n_audf2_reg;
+		n_audc2_next <= n_audc2_reg;
+		n_audf3_next <= n_audf3_reg;
+		n_audc3_next <= n_audc3_reg;
+		n_audctl_next <= n_audctl_reg;
+		n_init_next <= n_init_reg;
 		
 		irqen_next <= irqen_reg;
 		skctl_next <= skctl_reg;
@@ -728,67 +786,80 @@ BEGIN
 		potgo_write <= '0';
 		
 		if (wr_en = '1') then
-			if(addr_decoded(0) = '1') then
-				audf0_next <= data_in;
-			end if;
-			
-			if(addr_decoded(1) = '1') then
-				audc0_next <= data_in;
-			end if;
-			
-			if(addr_decoded(2) = '1') then
-				audf1_next <= data_in;
-			end if;
+			if (NATIVE_MODE = '1') then
+				if(addr_decoded(0) = '1') then n_audf0_next <= data_in; end if;
+				if(addr_decoded(1) = '1') then n_audc0_next <= data_in; end if;
+				if(addr_decoded(2) = '1') then n_audf1_next <= data_in; end if;
+				if(addr_decoded(3) = '1') then n_audc1_next <= data_in; end if;
+				if(addr_decoded(4) = '1') then n_audf2_next <= data_in; end if;
+				if(addr_decoded(5) = '1') then n_audc2_next <= data_in; end if;
+				if(addr_decoded(6) = '1') then n_audf3_next <= data_in; end if;
+				if(addr_decoded(7) = '1') then n_audc3_next <= data_in; end if;
+				if(addr_decoded(8) = '1') then n_audctl_next <= data_in; end if;
+				if(addr_decoded(9) = '1') then stimer_write <= '1'; end if;
+				if(addr_decoded(15) = '1') then n_init_next <= data_in(1) nor data_in(0); end if;
+			else
+				if(addr_decoded(0) = '1') then
+					audf0_next <= data_in;
+				end if;
+				
+				if(addr_decoded(1) = '1') then
+					audc0_next <= data_in;
+				end if;
+				
+				if(addr_decoded(2) = '1') then
+					audf1_next <= data_in;
+				end if;
 
-			if(addr_decoded(3) = '1') then
-				audc1_next <= data_in;
-			end if;
-			
-			if(addr_decoded(4) = '1') then
-				audf2_next <= data_in;
-			end if;
+				if(addr_decoded(3) = '1') then
+					audc1_next <= data_in;
+				end if;
+				
+				if(addr_decoded(4) = '1') then
+					audf2_next <= data_in;
+				end if;
 
-			if(addr_decoded(5) = '1') then
-				audc2_next <= data_in;
-			end if;
-			
-			if(addr_decoded(6) = '1') then
-				audf3_next <= data_in;
-			end if;		
+				if(addr_decoded(5) = '1') then
+					audc2_next <= data_in;
+				end if;
+				
+				if(addr_decoded(6) = '1') then
+					audf3_next <= data_in;
+				end if;		
 
-			if(addr_decoded(7) = '1') then
-				audc3_next <= data_in;
-			end if;
-			
-			if(addr_decoded(8) = '1') then
-				audctl_next <= data_in;
-			end if;
-			
-			if (addr_decoded(9) = '1') then --STIMER
-				stimer_write <= '1';
-			end if;
-			
-			if (addr_decoded(10) = '1') then -- skrest - resets the serial input problems - overflow etc
-				skrest_write <= '1';
-			end if;
+				if(addr_decoded(7) = '1') then
+					audc3_next <= data_in;
+				end if;
+				
+				if(addr_decoded(8) = '1') then
+					audctl_next <= data_in;
+				end if;
+				
+				if (addr_decoded(9) = '1') then --STIMER
+					stimer_write <= '1';
+				end if;
+				
+				if (addr_decoded(10) = '1') then -- skrest - resets the serial input problems - overflow etc
+					skrest_write <= '1';
+				end if;
 
-			if (addr_decoded(11) = '1') then -- POTGO - start POT scan
-				potgo_write <= '1';
-			end if;
-			
-			if (addr_decoded(13) = '1') then --SEROUT								
-				serout_holding_next <= data_in;
-				serout_holding_load <= '1';
-			end if;
-			
-			if (addr_decoded(14) = '1') then --IRQEN
-				irqen_next <= data_in;
-			end if;
+				if (addr_decoded(11) = '1') then -- POTGO - start POT scan
+					potgo_write <= '1';
+				end if;
+				
+				if (addr_decoded(13) = '1') then --SEROUT								
+					serout_holding_next <= data_in;
+					serout_holding_load <= '1';
+				end if;
+				
+				if (addr_decoded(14) = '1') then --IRQEN
+					irqen_next <= data_in;
+				end if;
 
-			if (addr_decoded(15) = '1') then --SKCTL
-				skctl_next <= data_in;
-			end if;	
-	
+				if (addr_decoded(15) = '1') then --SKCTL
+					skctl_next <= data_in;
+				end if;	
+			end if;
 		end if;
 	end process;
 	
@@ -856,58 +927,61 @@ BEGIN
 		
 	end process;
 	
-	-- Fire interrupts
-	process (irqen_reg, irqst_reg, audf0_pulse, audf1_pulse, audf3_pulse, other_key_irq, serial_ip_ready_interrupt, serout_active_reg, serial_op_needed_interrupt, serial_op_needed_interrupt_delayed_reg, break_irq, enable_179)
+	-- Fire interrupts (frozen while NATIVE_MODE=1 so classic Atari never sees stray IRQs)
+	process (NATIVE_MODE, irqen_reg, irqst_reg, irq_n_reg, audf0_pulse, audf1_pulse, audf3_pulse, other_key_irq, serial_ip_ready_interrupt, serout_active_reg, serial_op_needed_interrupt, serial_op_needed_interrupt_delayed_reg, break_irq, enable_179)
 	begin
 		serial_op_needed_interrupt_delayed_next <= serial_op_needed_interrupt_delayed_reg;
-		if (enable_179='1') then
-			serial_op_needed_interrupt_delayed_next(1)<=serial_op_needed_interrupt_delayed_reg(0);
-			serial_op_needed_interrupt_delayed_next(0)<='0';
-		end if;
-		if (serial_op_needed_interrupt ='1') then
-			serial_op_needed_interrupt_delayed_next(0)<='1';
-		end if;
+		irqst_next <= irqst_reg;
+		irq_n_next <= irq_n_reg;
+		if (NATIVE_MODE = '0') then
+			if (enable_179='1') then
+				serial_op_needed_interrupt_delayed_next(1)<=serial_op_needed_interrupt_delayed_reg(0);
+				serial_op_needed_interrupt_delayed_next(0)<='0';
+			end if;
+			if (serial_op_needed_interrupt ='1') then
+				serial_op_needed_interrupt_delayed_next(0)<='1';
+			end if;
 
-		-- clear interrupts
-		irqst_next <= irqst_reg or not(irqen_reg);
-				
-		irq_n_next <= '0';
+			-- clear interrupts
+			irqst_next <= irqst_reg or not(irqen_reg);
+					
+			irq_n_next <= '0';
 
-		if ((irqst_reg or "0000"&not(irqen_reg(3))&"000") = X"FF") then
-			irq_n_next <= '1';
-		end if;
-	
-		-- set interrupts
-		if (audf0_pulse = '1') then
-			irqst_next(0) <= not(irqen_reg(0));
-		end if;
+			if ((irqst_reg or "0000"&not(irqen_reg(3))&"000") = X"FF") then
+				irq_n_next <= '1';
+			end if;
+		
+			-- set interrupts
+			if (audf0_pulse = '1') then
+				irqst_next(0) <= not(irqen_reg(0));
+			end if;
 
-		if (audf1_pulse = '1') then
-			irqst_next(1) <= not(irqen_reg(1));
-		end if;
+			if (audf1_pulse = '1') then
+				irqst_next(1) <= not(irqen_reg(1));
+			end if;
 
-		if (audf3_pulse = '1') then
-			irqst_next(2) <= not(irqen_reg(2));
+			if (audf3_pulse = '1') then
+				irqst_next(2) <= not(irqen_reg(2));
+			end if;
+			
+			if (other_key_irq = '1') then
+				irqst_next(6) <= not(irqen_reg(6));			
+			end if;
+			
+			if (break_irq = '1') then
+				irqst_next(7) <= not(irqen_reg(7));			
+			end if;		
+		
+			if (serial_ip_ready_interrupt = '1') then
+				irqst_next(5) <= not(irqen_reg(5));
+			end if;
+			
+			irqst_next(3) <= serout_active_reg;
+			
+			if (serial_op_needed_interrupt_delayed_reg(1) = '1') then
+				irqst_next(4) <= not(irqen_reg(4));
+			end if;
 		end if;
-		
-		if (other_key_irq = '1') then
-			irqst_next(6) <= not(irqen_reg(6));			
-		end if;
-		
-		if (break_irq = '1') then
-			irqst_next(7) <= not(irqen_reg(7));			
-		end if;		
-	
-		if (serial_ip_ready_interrupt = '1') then
-			irqst_next(5) <= not(irqen_reg(5));
-		end if;
-		
-		irqst_next(3) <= serout_active_reg;
-		
-		if (serial_op_needed_interrupt_delayed_reg(1) = '1') then
-			irqst_next(4) <= not(irqen_reg(4));
-		end if;
-		
 	end process;
 	
 	-- Instantiate delay for stimer reload_request
@@ -919,13 +993,13 @@ BEGIN
 	
 	-- Instantiate audio noise filters
 	pokey_noise_filter0 : pokey_noise_filter
-		port map(clk=>clk,reset_n=>reset_n,noise_select=>audc0_reg(7 downto 5),pulse_in=>audf0_pulse,pulse_out=>audf0_pulse_noise,noise_4=>noise_4,noise_5=>noise_5,noise_large=>noise_large, sync_reset=>stimer_write_delayed);
+		port map(clk=>clk,reset_n=>reset_n,noise_select=>audc0_act(7 downto 5),pulse_in=>audf0_pulse,pulse_out=>audf0_pulse_noise,noise_4=>noise_4,noise_5=>noise_5,noise_large=>noise_large, sync_reset=>stimer_write_delayed);
 	pokey_noise_filter1 : pokey_noise_filter
-		port map(clk=>clk,reset_n=>reset_n,noise_select=>audc1_reg(7 downto 5),pulse_in=>audf1_pulse,pulse_out=>audf1_pulse_noise,noise_4=>noise_4_reg(0),noise_5=>noise_5_reg(0),noise_large=>noise_large_reg(0), sync_reset=>stimer_write_delayed);
+		port map(clk=>clk,reset_n=>reset_n,noise_select=>audc1_act(7 downto 5),pulse_in=>audf1_pulse,pulse_out=>audf1_pulse_noise,noise_4=>noise_4_reg(0),noise_5=>noise_5_reg(0),noise_large=>noise_large_reg(0), sync_reset=>stimer_write_delayed);
 	pokey_noise_filter2 : pokey_noise_filter
-		port map(clk=>clk,reset_n=>reset_n,noise_select=>audc2_reg(7 downto 5),pulse_in=>audf2_pulse,pulse_out=>audf2_pulse_noise,noise_4=>noise_4_reg(1),noise_5=>noise_5_reg(1),noise_large=>noise_large_reg(1), sync_reset=>stimer_write_delayed);
+		port map(clk=>clk,reset_n=>reset_n,noise_select=>audc2_act(7 downto 5),pulse_in=>audf2_pulse,pulse_out=>audf2_pulse_noise,noise_4=>noise_4_reg(1),noise_5=>noise_5_reg(1),noise_large=>noise_large_reg(1), sync_reset=>stimer_write_delayed);
 	pokey_noise_filter3 : pokey_noise_filter
-		port map(clk=>clk,reset_n=>reset_n,noise_select=>audc3_reg(7 downto 5),pulse_in=>audf3_pulse,pulse_out=>audf3_pulse_noise,noise_4=>noise_4_reg(2),noise_5=>noise_5_reg(2),noise_large=>noise_large_reg(2), sync_reset=>stimer_write_delayed);
+		port map(clk=>clk,reset_n=>reset_n,noise_select=>audc3_act(7 downto 5),pulse_in=>audf3_pulse,pulse_out=>audf3_pulse_noise,noise_4=>noise_4_reg(2),noise_5=>noise_5_reg(2),noise_large=>noise_large_reg(2), sync_reset=>stimer_write_delayed);
 	
 	-- Audio output stage
 	-- (toggling now handled in the noise filter - the subtlety on when to toggle and when to sample is important)
@@ -980,23 +1054,24 @@ BEGIN
 	-- resetcount 6/33
 	enable_64_div : syncreset_enable_divider
 		generic map (COUNT=>28,RESETCOUNT=>7) -- 28-22
-		port map(clk=>clk,syncreset=>initmode,reset_n=>reset_n,enable_in=>enable_179,enable_out=>enable_64);
+		port map(clk=>clk,syncreset=>audio_initmode,reset_n=>reset_n,enable_in=>enable_179,enable_out=>enable_64);
 		
 	enable_15_div : syncreset_enable_divider
 		generic map (COUNT=>114,RESETCOUNT=>34) -- 114-81
-		port map(clk=>clk,syncreset=>initmode,reset_n=>reset_n,enable_in=>enable_179,enable_out=>enable_15);
+		port map(clk=>clk,syncreset=>audio_initmode,reset_n=>reset_n,enable_in=>enable_179,enable_out=>enable_15);
 		
 	-- Instantiate pokey noise circuits (lfsr)
 	initmode <= skctl_next(1) nor skctl_next(0);
-	serial_reset <= initmode;
+	audio_initmode <= n_init_next when NATIVE_MODE = '1' else initmode;
+	serial_reset <= initmode and not NATIVE_MODE;
 	poly_17_19_lfsr : pokey_poly_17_9
-		port map(clk=>clk,reset_n=>reset_n,init=>initmode,enable=>enable_179,select_9_17=>audctl_delayed_reg(7),bit_out=>noise_large,rand_out=>rand_out);
+		port map(clk=>clk,reset_n=>reset_n,init=>audio_initmode,enable=>enable_179,select_9_17=>audctl_delayed_reg(7),bit_out=>noise_large,rand_out=>rand_out);
 		
 	poly_5_lfsr : pokey_poly_5
-		port map(clk=>clk,reset_n=>reset_n,init=>initmode,enable=>enable_179,bit_out=>noise_5);
+		port map(clk=>clk,reset_n=>reset_n,init=>audio_initmode,enable=>enable_179,bit_out=>noise_5);
 		
 	poly_4_lfsr : pokey_poly_4
-		port map(clk=>clk,reset_n=>reset_n,init=>initmode,enable=>enable_179,bit_out=>noise_4);
+		port map(clk=>clk,reset_n=>reset_n,init=>audio_initmode,enable=>enable_179,bit_out=>noise_4);
 
 	-- Delay between feeding noise between channels
 	process(noise_large_reg, noise_5_reg, noise_4_reg, noise_large, noise_5, noise_4, enable_179)
@@ -1013,34 +1088,34 @@ BEGIN
 	end process;
 	
 	--AUDIO_LEFT <= "000"&count_reg(15 downto 3);
-	process(chan0_output_del_reg, chan1_output_del_reg, chan2_output_reg, chan3_output_reg, audc0_reg, audc1_reg, audc2_reg, audc3_reg, highpass0_reg, highpass1_reg)
+	process(chan0_output_del_reg, chan1_output_del_reg, chan2_output_reg, chan3_output_reg, audc0_act, audc1_act, audc2_act, audc3_act, highpass0_reg, highpass1_reg)
 	begin
 		volume_channel_0_next <= "0000";
 		volume_channel_1_next <= "0000";
 		volume_channel_2_next <= "0000";
 		volume_channel_3_next <= "0000";
 			
-		if (((chan0_output_del_reg xor highpass0_reg) or audc0_reg(4)) = '1') then
-			volume_channel_0_next <= audc0_reg(3 downto 0);
+		if (((chan0_output_del_reg xor highpass0_reg) or audc0_act(4)) = '1') then
+			volume_channel_0_next <= audc0_act(3 downto 0);
 		end if;
 		
-		if (((chan1_output_del_reg xor highpass1_reg) or audc1_reg(4)) = '1') then
-			volume_channel_1_next <= audc1_reg(3 downto 0);
+		if (((chan1_output_del_reg xor highpass1_reg) or audc1_act(4)) = '1') then
+			volume_channel_1_next <= audc1_act(3 downto 0);
 		end if;
 		
-		if ((chan2_output_reg or audc2_reg(4)) = '1') then
-			volume_channel_2_next <= audc2_reg(3 downto 0);
+		if ((chan2_output_reg or audc2_act(4)) = '1') then
+			volume_channel_2_next <= audc2_act(3 downto 0);
 		end if;
 		
-		if ((chan3_output_reg or audc3_reg(4)) = '1') then
-			volume_channel_3_next <= audc3_reg(3 downto 0);
+		if ((chan3_output_reg or audc3_act(4)) = '1') then
+			volume_channel_3_next <= audc3_act(3 downto 0);
 		end if;
 		
 	end process;
 	
 	-- serial port output	
 	-- urghhh (TODO: If timers are cleared with stimer_write, some clocks are still triggering. This workaround fixes the acid test. Investigate the proper fix)
-        serout_sync_reset <= serial_reset or stimer_write_delayed;
+	serout_sync_reset <= serial_reset or (stimer_write_delayed and not NATIVE_MODE);
 	serout_clock_delay : delay_line
 		generic map (count=>2)
 		port map (clk=>clk, sync_reset=>serout_sync_reset,data_in=>serout_enable, enable=>enable_179, reset_n=>reset_n, data_out=>serout_enable_delayed);
@@ -1050,7 +1125,7 @@ BEGIN
 		port map (clk=>clk, sync_reset=>serout_sync_reset,data_in=>serin_enable, enable=>enable_179, reset_n=>reset_n, data_out=>serin_enable_delayed);
 		
 	
-	process(serout_enable_delayed, skctl_reg, serout_active_reg, serout_clock_last_reg,serout_clock_reg, serout_holding_load, serout_holding_reg, serout_holding_full_reg, serout_shift_reg, serout_bitcount_reg, serial_out_reg, twotone_reg, audf0_pulse, audf1_pulse, serial_reset)
+	process(NATIVE_MODE, serout_enable_delayed, skctl_reg, serout_active_reg, serout_clock_last_reg,serout_clock_reg, serout_holding_load, serout_holding_reg, serout_holding_full_reg, serout_shift_reg, serout_bitcount_reg, serial_out_reg, twotone_reg, audf0_pulse, audf1_pulse, serial_reset)
 	begin
 		serout_clock_next <= serout_clock_reg;
 		serout_clock_last_next <= serout_clock_reg;
@@ -1067,7 +1142,7 @@ BEGIN
 		twotone_next <= twotone_reg;
 		twotone_reset <= '0';
 		
-		if ((audf1_pulse or (audf0_pulse and (serial_out_reg and not skctl_reg(7)))) = '1') then
+		if (NATIVE_MODE = '0' and ((audf1_pulse or (audf0_pulse and (serial_out_reg and not skctl_reg(7)))) = '1')) then
 			twotone_next <= not(twotone_reg);
 			twotone_reset <= skctl_reg(3);
 		end if;
@@ -1134,7 +1209,7 @@ BEGIN
 	sio_in_next <= sio_in2_reg;
 		
 	waiting_for_start_bit <= '1' when serin_bitcount_reg = X"9" else '0';
-	process(serin_enable_delayed,serin_clock_last_reg,serin_clock_reg, sio_in_reg, serin_reg,serin_shift_reg, serin_bitcount_reg, serial_ip_overrun_reg, serial_ip_framing_reg, skrest_write, irqst_reg, skctl_reg, waiting_for_start_bit, serial_reset)
+	process(NATIVE_MODE, serin_enable_delayed,serin_clock_last_reg,serin_clock_reg, sio_in_reg, serin_reg,serin_shift_reg, serin_bitcount_reg, serial_ip_overrun_reg, serial_ip_framing_reg, skrest_write, irqst_reg, skctl_reg, waiting_for_start_bit, serial_reset)
 	begin
 		serin_clock_next <= serin_clock_reg;
 		serin_clock_last_next <= serin_clock_reg;
@@ -1155,7 +1230,7 @@ BEGIN
 		end if;
 		
 		-- resync clock on receipt of start bit
-		if ((skctl_reg(4) and sio_in_reg and waiting_for_start_bit)= '1') then
+		if (NATIVE_MODE = '0' and ((skctl_reg(4) and sio_in_reg and waiting_for_start_bit)= '1')) then
 			async_serial_reset <= '1';
 			serin_clock_next <= '1';
 		end if;
@@ -1200,8 +1275,8 @@ BEGIN
 		end if;		
 	end process;
 	
-	-- serial clocks
-	process(sio_clockin_in1_reg,skctl_reg,clock_reg,clock_sync_reg,audf1_pulse,audf2_pulse,audf3_pulse,enable_179)
+	-- serial clocks (frozen while NATIVE_MODE=1)
+	process(NATIVE_MODE, sio_clockin_in1_reg,skctl_reg,clock_reg,clock_sync_reg,audf1_pulse,audf2_pulse,audf3_pulse,enable_179)
 		variable clk_edge : std_logic;
 	begin
 		clock_next <= clock_reg;
@@ -1209,7 +1284,7 @@ BEGIN
 
 		clk_edge := (not(clock_sync_reg) and clock_reg) or (clock_sync_reg and not(clock_reg));
 
-		if (enable_179='1') then
+		if (enable_179='1' and NATIVE_MODE='0') then
 			clock_next <= sio_clockin_in1_reg;
 			clock_sync_next <= clock_reg;
 		end if;
@@ -1218,36 +1293,38 @@ BEGIN
 		serin_enable <= '0';
 		clock_input <= '1'; -- when output, outputs channel 4
 		
-		case skctl_reg(6 downto 4) is
-			when "000" =>
-				serin_enable <= clk_edge;
-				serout_enable <= clk_edge;
-			when "001" =>
-				serin_enable <= audf3_pulse;
-				serout_enable <= clk_edge;
-			when "010" =>
-				serin_enable <= audf3_pulse;
-				serout_enable <= audf3_pulse;
-				clock_input <= '0';
-			when "011" =>
-				serin_enable <= audf3_pulse;
-				serout_enable <= audf3_pulse;
-			when "100" =>
-				serin_enable <= clk_edge;
-				serout_enable <= audf3_pulse;
-			when "101" =>
-				serin_enable <= audf3_pulse;
-				serout_enable <= audf3_pulse;
-			when "110" =>
-				serin_enable <= audf3_pulse;
-				serout_enable <= audf1_pulse;
-				clock_input <= '0';
-			when "111" =>			
-				serin_enable <= audf3_pulse;
-				serout_enable <= audf1_pulse;
-			when others =>
-				-- nop
-		end case;
+		if (NATIVE_MODE = '0') then
+			case skctl_reg(6 downto 4) is
+				when "000" =>
+					serin_enable <= clk_edge;
+					serout_enable <= clk_edge;
+				when "001" =>
+					serin_enable <= audf3_pulse;
+					serout_enable <= clk_edge;
+				when "010" =>
+					serin_enable <= audf3_pulse;
+					serout_enable <= audf3_pulse;
+					clock_input <= '0';
+				when "011" =>
+					serin_enable <= audf3_pulse;
+					serout_enable <= audf3_pulse;
+				when "100" =>
+					serin_enable <= clk_edge;
+					serout_enable <= audf3_pulse;
+				when "101" =>
+					serin_enable <= audf3_pulse;
+					serout_enable <= audf3_pulse;
+				when "110" =>
+					serin_enable <= audf3_pulse;
+					serout_enable <= audf1_pulse;
+					clock_input <= '0';
+				when "111" =>			
+					serin_enable <= audf3_pulse;
+					serout_enable <= audf1_pulse;
+				when others =>
+					-- nop
+			end case;
+		end if;
 	end process;
 	
 	-- keyboard overrun (i.e. second key pressed before interrupt cleared)
@@ -1274,7 +1351,8 @@ gen_scan_off : if custom_keyboard_scan=2 generate
 		  keyboard_scan <= (others=>'0');
 end generate;
 
-keyboard_scan_update <= skctl_reg(1) and enable_15;
+classic_enable_15 <= enable_15 and not NATIVE_MODE;
+keyboard_scan_update <= skctl_reg(1) and classic_enable_15;
 gen_custom_scan : if custom_keyboard_scan=1 generate
 	pokey_keyboard_scanner1 : pokey_keyboard_scanner
 		port map (clk=>clk, reset_n=>reset_n, enable=>keyboard_scan_enable, keyboard_response=>keyboard_response, debounce_disable=>not(skctl_reg(0)), scan_enable=>skctl_reg(1), keyboard_scan=>keyboard_scan, key_held=>key_held, shift_held=>shift_held, keycode=>kbcode, other_key_irq=>other_key_irq, break_irq=>break_irq);
@@ -1282,11 +1360,11 @@ end generate;
 
 gen_normal_scan : if custom_keyboard_scan=0 generate
 	pokey_keyboard_scanner1 : pokey_keyboard_scanner
-		port map (clk=>clk, reset_n=>reset_n, enable=>enable_15, keyboard_response=>keyboard_response, debounce_disable=>not(skctl_reg(0)), scan_enable=>skctl_reg(1), keyboard_scan=>keyboard_scan, key_held=>key_held, shift_held=>shift_held, keycode=>kbcode, other_key_irq=>other_key_irq, break_irq=>break_irq);
+		port map (clk=>clk, reset_n=>reset_n, enable=>classic_enable_15, keyboard_response=>keyboard_response, debounce_disable=>not(skctl_reg(0)), scan_enable=>skctl_reg(1), keyboard_scan=>keyboard_scan, key_held=>key_held, shift_held=>shift_held, keycode=>kbcode, other_key_irq=>other_key_irq, break_irq=>break_irq);
 end generate;
 
-	-- POT scan
-	process(potgo_write, pot_reset_reg, pot_counter_reg, pot_in, enable_15, enable_179, skctl_reg, pot0_reg, pot1_reg, pot2_reg, pot3_reg, pot4_reg, pot5_reg, pot6_reg, pot7_reg, allpot_reg)
+	-- POT scan (frozen while NATIVE_MODE=1)
+	process(NATIVE_MODE, potgo_write, pot_reset_reg, pot_counter_reg, pot_in, enable_15, enable_179, skctl_reg, pot0_reg, pot1_reg, pot2_reg, pot3_reg, pot4_reg, pot5_reg, pot6_reg, pot7_reg, allpot_reg)
 	begin	
 		pot0_next <= pot0_reg;
 		pot1_next <= pot1_reg;
@@ -1303,7 +1381,7 @@ end generate;
 		
 		pot_counter_next <= pot_counter_reg;
 		
-		if (((enable_15 and not(skctl_reg(2))) or (enable_179 and skctl_reg(2))) = '1') then
+		if (NATIVE_MODE = '0' and (((enable_15 and not(skctl_reg(2))) or (enable_179 and skctl_reg(2))) = '1')) then
 			pot_counter_next <= std_logic_vector(unsigned(pot_counter_reg) + 1);
 
 			if (pot_reset_reg = '0') then
