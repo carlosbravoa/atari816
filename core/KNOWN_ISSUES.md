@@ -23,6 +23,12 @@ Two consequences: a POKEY write of the 6502 in the very clock where the freeze b
 in the middle of a frame (the OS's retries recover it). The freeze should take effect at the
 end of a 6502 cycle and, better, between SIO frames; FROZEN would then tell Horizon when.
 
+## ROADMAP: "With BASIC / Without BASIC" in the Atari window
+
+Asked 2026-11-21. The Atari window of the Desktop (where disks are attached and ejected)
+should also offer the disk-boot choice that Settings has (`basic` in `/atari.ini`), so it
+can be changed where the disk is attached.
+
 ## FIXED (v3.2): about one reset in fifteen left the machine dead (cold-boot / reset lottery)
 
 Any reset path (power-on, Hard Reset, Boot OS/BASIC, cartridge attach, F9/Soft, PC Link
