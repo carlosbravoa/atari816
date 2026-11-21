@@ -64,6 +64,9 @@ static inline void apply_input_options(void) {
 // held in reset (load_system_roms): the OS finds the device at its start and would call into
 // the math pack if the device went away under it.
 int option_fastdisk = 1;
+// /atari.ini "basic": 0 = a disk in D1: is booted without BASIC (OPTION held during the
+// start, as for an executable): what most games need. 1 (the default) = as the real machine.
+int option_basic = 1;
 static uint8_t pbi_on, pbi_done;
 uint32_t pbi_count;
 
@@ -217,6 +220,9 @@ int load_option()  {
             if (v < 0) v = 0;
             if (v > 48) v = 48;
             option_h_offset = v;
+        }
+        if (strcmp(key, "basic") == 0) {
+            option_basic = (atoi(value) != 0);
         }
         if (strcmp(key, "fastdisk") == 0) {
             option_fastdisk = (atoi(value) != 0);
@@ -1385,6 +1391,13 @@ static int cold_boot_atari(void) {             // returns load_system_roms() (0 
     sio_init();
     load_default_cart();                            // boot=ash and slot empty -> /ASH.CAR
     *(volatile uint8_t *)(0x00200000 + 0x0244) = 1; // COLDST = 1 (Cold start)
+    if (!option_basic && (atr_mounted[0] || rd_kind[0])) {   // basic=0: a disk boots without BASIC
+        kv_set0(0x00410000);                        // hold OPTION
+        int r = load_system_roms();
+        sio_delay(600);                             // (as cold_boot_xex)
+        kv_set0(0x00000000);
+        return r;
+    }
     return load_system_roms();                      // long clean reset + release
 }
 
@@ -1725,7 +1738,7 @@ static void sys_do_restart(int full) {
         uart_printf("sys: full restart\n");
         // power-on defaults, then /atari.ini (keys left out of the file go back to default)
         option_arrow_joystick = 0; option_scanline_level = 0; option_h_offset = 0;
-        option_kbd_layout = 0; option_ram_idx = 0; option_boot_ash = 0; option_fastdisk = 1;
+        option_kbd_layout = 0; option_ram_idx = 0; option_boot_ash = 0; option_fastdisk = 1; option_basic = 1;
         int r = load_option();
         for (int a = 0; r < 0 && a < 5; a++) {
             delay(50); f_mount(0, "", 0); delay(20);

@@ -84,6 +84,7 @@ edits it. One `key=value` per line; `#` starts a comment.
 | `scanlines` | `0` off, `1` 25%, `2` 50%, `3` 75% |
 | `hpos` | Horizontal picture position, 0 to 48 |
 | `boot` | `ash` = `/ASH.CAR` is the default cartridge |
+| `basic` | `0` = a disk in D1: boots without BASIC (OPTION held for it, what most games need); `1` (the default) = BASIC present, as on the real machine. Executables always boot without it |
 | `fastdisk` | `1` (the default) = the fast disk below; `0` = every disk access over the serial port |
 
 ## The 8-bit Atari
