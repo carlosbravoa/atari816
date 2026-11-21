@@ -4,8 +4,9 @@ Inside the Atari816 runs a complete Atari 8-bit (400/800/XL/XE) with its own 650
 GTIA, POKEYs and memory. It is frozen while the desktop is shown. A program can mount disk
 images, executables and cartridges, boot the classic machine and show it; F12 always
 returns to Horizon with the desktop exactly as it was. The classic machine's settings
-(memory, stereo, keyboard layout, joystick from the arrow keys, ...) are in `/atari.ini`
-(Settings > Classic Atari edits it; they apply after a full restart).
+(memory, keyboard layout, joystick from the arrow keys, (0.27) BASIC when a disk boots,
+fast disk loading, ...) are in `/atari.ini` (Settings > Classic Atari edits it; they apply
+after a full restart).
 
 Kinds: `CK_AUTO` 0 (by the extension), `CK_DISK` 1 (.ATR .XFD), `CK_XEX` 2 (.XEX .COM
 .EXE), `CK_CART` 3 (.CAR .ROM .BIN), (0.23) `CK_BASRUN` 4 (a BASIC program: "Run in Atari")

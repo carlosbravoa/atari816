@@ -10,5 +10,10 @@ joystick=0
 scanlines=2
 # hpos: horizontal position of the picture, 0-48
 hpos=0
+# basic: 1 = BASIC present when a disk boots (as the real machine), 0 = a disk in D1: boots
+# without BASIC (what most games need)
+basic=0
+# fastdisk: 1 = sector reads through the fast disk, 0 = every disk access over the serial port
+fastdisk=0
 # boot=ash: /ASH.CAR is the default cartridge (else BASIC)
 boot=basic

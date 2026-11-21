@@ -924,7 +924,7 @@ vbar:   sta     z:ui_x
         lda     z:ui_w
         dec     a
         dec     a
-        sta     z:t4                    ; the inside's width
+        sta     z:t6                    ; the inside's width (umul16 uses t3, t4)
         ldx     z:t5                    ; filled: value * width / 64
         jsr     umul16
         lsr     a
@@ -938,7 +938,7 @@ vbar:   sta     z:ui_x
         sta     z:ui_w
         lda     #WD_FILL | (C_SELECT << 8)
         jsr     ui_rect
-:       lda     z:t4
+:       lda     z:t6                    ; the rest: white
         sec
         sbc     z:t3
         beq     :+

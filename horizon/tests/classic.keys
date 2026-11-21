@@ -1,7 +1,7 @@
 # Settings, Classic Atari page (Desktop session: DESK=1; the card has the sample /atari.ini,
-# sdfiles/atari.ini). Two values changed, Save, the restart alert, Later; then
-# build/run-pic/atari.ini must be tests/atari-ini.txt.
-#   DESK=1 sh tests/shots.sh EMU SD classic 16 7 9.8 12 14.5
+# sdfiles/atari.ini). Two values changed (0.27: four, the two new rows too), Save, the restart
+# alert, Later; then build/run-pic/atari.ini must be tests/atari-ini.txt.
+#   DESK=1 sh tests/shots.sh EMU SD classic 16 7 10.2 12 14.5
 # The pointer starts at (320, 180); moves of at most 100. The panel's content is at
 # (140, 36) on the screen (0.24: 40 before). (A key event: the emulator needs one.)
 1000 {de1}{ue1}
@@ -29,9 +29,15 @@
 8800 M -30:72:0:0
 +300 M 0:0:0:1
 +100 M 0:0:0:0
+# (0.27) Disk boot: Without BASIC (429, 230), Disk loading: Serial port (429, 254)
+9300 M 29:68:0:0
++200 M 0:0:0:1
++100 M 0:0:0:0
+9700 M 0:24:0:0
++200 M 0:0:0:1
++100 M 0:0:0:0
 # Save (456, 334; 0.18: the panel is a row taller; 0.24: one more, the Screen saver)
-10500 M 56:100:0:0
-+50 M 0:72:0:0
+10500 M 27:80:0:0
 +300 M 0:0:0:1
 +100 M 0:0:0:0
 # the alert: Later (298, 209)

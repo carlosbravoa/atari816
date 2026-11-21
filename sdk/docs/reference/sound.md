@@ -287,8 +287,8 @@ The registers are the YM3812's (any AdLib programming guide applies).
         sys     SYS_OPLW        ; notes off, the chip is free again
 nofm:   rts
 ```
-`horizon/user/opldemo.s` (the OPL2 program) is a small synthesizer on this call;
-`horizon/user/midplay.s` is the MIDI player of the music engine.
+`horizon/user/midplay.s`, the MIDI player of the music engine, uses this call;
+`horizon/user/otest.s` tests it.
 
 ## Music: modules, WAV and MIDI files (Horizon 0.26, 0.27)
 
@@ -300,7 +300,7 @@ arguments `-p PORT` (a port you created). It answers `MS_HELLO` with its own por
 `MC_PLAY`, `MC_PAUSE`, `MC_STOP`, `MC_SEEK`, `MC_VOL`, `MC_SEP`, `MC_LOOP`, `MC_READ` (bytes of
 the module or of its info block), `MC_QUIT`; it sends `MS_STATUS` (state, order, row,
 pattern, time, the level of each channel) after every tick. `horizon/user/music.inc` has the
-whole protocol; `horizon/user/music.s` (the Music program) uses all of it. It plays MOD files
+whole protocol; `horizon/user/music.s` (the Music Player program) uses all of it. It plays MOD files
 (4-8 channels, 15 or 31 samples), WAV files (PCM 8/16-bit, mono or stereo, read whole into
 memory) and, on REV $0C (Horizon 0.27), MIDI files (.MID, on the OPL2, which it owns while
 such a song plays), from the card, `/PC:` or an `http(s)://` / `ftp://` URL. It ends with your program.
@@ -333,7 +333,7 @@ order), `mp_setvol` (0-64), `mp_setsep` (stereo separation 0-64, default 32). St
 `mp_play`, then wait for the timer and `mp_tick` until `MPF_END`.
 
 More modules: copy `.MOD` files to the card, or fetch one in the shell with
-`get http://... /Music/NAME.MOD`; double-click it in Files to play it in Music.
+`get http://... /Music/NAME.MOD`; double-click it in Files to play it in Music Player.
 
 ## BASIC
 

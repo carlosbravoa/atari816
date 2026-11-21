@@ -18,6 +18,11 @@
 ;  10. a child keys a note on and is killed: the same; the parent, which owns nothing then,
 ;      exits without key-offs
 ; Before REV $0C: the probe returns ENODEV, and that is all.
+;
+; "otest h" (the Desktop session tests/opl27.src, from the Terminal): another owner for the
+; chip. It writes $A0 = $41 (no note): EAGAIN while Music Player holds the chip (it says so
+; and ends); else the chip is its own for a minute (Music Player is refused meanwhile), then
+; released.
         .include "horizon.inc"
 
         .segment "CODE"
@@ -173,10 +178,12 @@ res_e:  pha
         jmp     put_nl
 
 ; the children: "b" tries the chip its parent owns; a note on channel 0 ($A0, $B0 key-on),
-; then "x" exits, "k" sleeps
+; then "x" exits, "k" sleeps; (0.27) "h" holds the chip (see the top)
 child:  lda     f:0,x
         sta     z:kid
         and     #$00FF
+        cmp     #'h'
+        jeq     hold
         cmp     #'b'
         jne     @note
         print   "  child: write: "
@@ -210,6 +217,28 @@ child:  lda     f:0,x
         exit    0
 @k:     lda     #10000
         sys     SYS_SLEEP
+        exit    0
+
+hold:   print   "otest h: $A0 = $41: "
+        lda     #$A0
+        ldx     #$41
+        sys     SYS_OPLW
+        php
+        jsr     res
+        plp
+        bcc     :+
+        print   "otest h: the OPL2 is not free\n"
+        exit    1
+:       print   "otest h: the OPL2 is ours for a minute\n"
+        lda     #6
+        sta     z:kid
+:       lda     #10000
+        sys     SYS_SLEEP
+        dec     z:kid
+        bne     :-
+        lda     #$FFFD
+        sys     SYS_OPLW
+        print   "otest h: released\n"
         exit    0
 
         .segment "RODATA"

@@ -6,6 +6,7 @@
 set -e
 emu=$1 sd=$2 name=$3 secs=$4
 shift 4
+keys=${KEYS:-tests/$name.keys}         # (0.27) KEYS=FILE: another session's script
 rm -rf build/run-pic
 cp -r "$sd" build/run-pic
 # (0.26) without /Music unless KEEPMUSIC=1 (the root listings stay as in the frozen pictures)
@@ -18,8 +19,8 @@ cp -r "$sd" build/run-pic
 n=0 args=""
 for t in "$@"; do n=$((n + 1)); args="$args --shot build/$name$n.ppm --shot-at $t"; done
 $emu --headless --sd build/run-pic --max-seconds "$secs" \
-    --keys "$(python3 tests/keyscript.py "tests/$name.keys")" \
-    --mouse "$(python3 tests/keyscript.py --mouse "tests/$name.keys")" \
+    --keys "$(python3 tests/keyscript.py "$keys")" \
+    --mouse "$(python3 tests/keyscript.py --mouse "$keys")" \
     $args "$sd/SYSTEM/HORIZON.SYS" > "build/$name.out" 2> "build/$name.err" || true
 files=$(i=0; while [ $i -lt $n ]; do i=$((i + 1)); echo "$name$i.ppm"; done | LC_ALL=C sort)
 (cd build && md5sum $files) > "build/$name.md5"   # (exactly these: desk14*.ppm are not desk1*)

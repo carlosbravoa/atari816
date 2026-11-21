@@ -1,5 +1,13 @@
 # Known issues
 
+## OPEN: crackling while the Music Player plays
+
+Reported 2026-11-21 on the board (REV $0C, Horizon 0.27). Not looked at yet, on purpose:
+to be chased on a settled build. To find out first: MODs (Lau), MIDI (OPL2) or both; whether
+it follows the mouse, window redraws or card access; whether the emulator's `--wav` of the
+same song has it (then it is software) or not (then the board: Lau's FIFO underrun counter
+AU\_LATE, the HDMI audio sample path, the OPL2's sample crossing to the 48 kHz side).
+
 ## OPEN: Horizon without keyboard and mouse after F12 during an ATR load
 
 Reported 2026-11-21 (REV $0C, Horizon 0.27, but older than both): F12 pressed while the classic

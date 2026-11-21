@@ -54,8 +54,8 @@ PROGS  += freecell
 UIPROGS += freecell
 # (0.26) Music (the player's window: user/music.s, mu_*.s) and its engine /SYSTEM/MUSICD.PRG
 # (user/musicd.s with the replayer library user/modplay.s, build/modplay.o; protocol user/music.inc)
-PROGS  += music opldemo
-UIPROGS += music opldemo
+PROGS  += music
+UIPROGS += music
 
 # self test keys: 'a' 1.0-1.2 s with F12 (system key NMI) in between. SELFTEST holds the
 # keyboard from its start, so they queue up whenever they come; KEYS reads them at the end.
@@ -76,8 +76,10 @@ DSHOTS := 5 7 10 15.8 17.2 19 11.3
 PSHOTS := 12.1 13.2 15.4 16.4 17.9 21.9 24.5 25.9
 SSHOTS := 8.8 10.4 12.4 17.2 20.5
 # Settings, the Classic Atari page (tests/classic.keys; the card gets sdfiles/atari.ini, a
-# sample of the I/O processor's file): shot times; /atari.ini must then be tests/atari-ini.txt
-CLSHOTS := 7 9.8 12 14.5
+# sample of the I/O processor's file): shot times; /atari.ini must then be tests/atari-ini.txt.
+# (0.27) The same session on 0.26's sample (tests/atari-old.ini: a stereo line, no basic or
+# fastdisk key) must leave tests/atari-ini-old.txt: the stereo line as it was, the keys added
+CLSHOTS := 7 10.2 12 14.5
 # Files (Desktop session; it moves, copies, renames and deletes on its copy of the card; 16 shots: emu816's most)
 FSHOTS := 5.4 10.6 11.2 15.8 17.6 19.0 19.8 22 26.6 29.5 32.5 35.5 39.5 42.2 43.9 45.5
 # BASIC: the -t script run (tests/basic-t.keys), emulated seconds; the picture session
@@ -480,6 +482,9 @@ test: all $(EMU)
 	else echo "FAIL  Settings pictures, Classic Atari (look at $(B)/classic*.ppm, then make pictures)"; exit 1; fi
 	@if cmp $(B)/run-pic/atari.ini tests/atari-ini.txt; then echo "PASS  Settings: the /atari.ini it saved"; \
 	else echo "FAIL  Settings: build/run-pic/atari.ini is not tests/atari-ini.txt"; exit 1; fi
+	@KEYS=tests/classic.keys PREP='cp ../../tests/atari-old.ini atari.ini' DESK=1 sh tests/shots.sh "$(EMU) $(EMUFLAGS) $(CARDDATE)" $(SD) classicold 16 14.5
+	@if cmp $(B)/run-pic/atari.ini tests/atari-ini-old.txt; then echo "PASS  0.27 Settings: a 0.26 /atari.ini saved (its stereo line kept as it was, the keys it lacks added)"; \
+	else echo "FAIL  Settings: build/run-pic/atari.ini (from tests/atari-old.ini) is not tests/atari-ini-old.txt"; exit 1; fi
 	@DESK=1 sh tests/shots.sh "$(EMU) $(EMUFLAGS) $(CARDDATE)" $(SD) files 46 $(FSHOTS)
 	@if diff -u tests/pictures/$(call REV10,files,$(subst edit,files,$(EMD5))) $(B)/files.md5; then echo "PASS  Files pictures"; \
 	else echo "FAIL  Files pictures (look at $(B)/files*.ppm, then make pictures)"; exit 1; fi
@@ -899,7 +904,7 @@ test-music: all $(EMU)
 # refusal: their own md5 files (NAME-nolau.md5; 0.27: NAME-rev7.md5 for REV $07). make
 # pictures-26 freezes the pictures.
 M26SHOTS := 9 15 16.5 21.5 23.5 26.5 29 32 40 42
-M26PREP := echo "Music=/BIN/MUSIC.PRG" >> SYSTEM/PROGRAMS
+M26PREP := echo "Music Player=/BIN/MUSIC.PRG" >> SYSTEM/PROGRAMS
 # (0.27) REV $0A: the meters and rows of a few shots differ by a moment: $(1)-rev10.md5 if it
 # exists; REV $07: the refusal with that board's free memory on the status line: $(1)-rev7.md5
 M26MD5  = $(if $(findstring --rev 7,$(EMUFLAGS)),$(1)-rev7.md5,$(if $(NOLAU),$(1)-nolau.md5,$(call REV10,$(1),$(1).md5)))
@@ -939,13 +944,18 @@ pictures-26:
 # tools/mkmid.py, the register stream's notes and times against the files', broken files; before
 # REV $0C a polite refusal). MIDI heard (tests/midwav.py, REV $0C only): a small file played
 # with emu816's --wav, the pitches, a rest, a chord, silence after the end. A Desktop session
-# (tests/opl27.src): Music plays a MIDI file, the OPL2 app finds the chip taken, Stop gives it
-# back, the app plays, Music finds it taken (REV $0C only). make pictures-27 freezes the
-# pictures.
+# (tests/opl27.src): Music Player plays a MIDI file, OTEST's "otest h" in the Terminal finds the
+# chip taken (EAGAIN), Stop gives it back, "otest h" takes it, Music Player finds it taken
+# (REV $0C only; 0.27: OTEST replaces the OPL2 FM Synth program, removed). make pictures-27
+# freezes the pictures. Music Player's Volume and Stereo bars (tests/vol27.src, wherever there is Lau):
+# lowered and raised with the keys, the menu, a click and a drag, each bar measured in every
+# shot by tests/volbars.py (filled to its value, white after it; before 0.27 a lowered bar
+# kept its old length).
 OTESTTXT = $(if $(PRE12),otest-noopl.txt,otest.txt)
 OTESTERR = $(if $(PRE12),/dev/null,tests/otest.err)
-O27SHOTS := 13 17 23 25.5 30
-O27PREP := echo "Music=/BIN/MUSIC.PRG" >> SYSTEM/PROGRAMS && echo "OPL2=/BIN/OPLDEMO.PRG" >> SYSTEM/PROGRAMS && python3 ../../tools/mkmid.py Music > /dev/null
+O27SHOTS := 13 18.5 24.5 28.5
+V27SHOTS := 15 17 19.5 21.5 24.5 26.5 28.5
+O27PREP := echo "Music Player=/BIN/MUSIC.PRG" >> SYSTEM/PROGRAMS && python3 ../../tools/mkmid.py Music > /dev/null
 test-27: all $(EMU)
 	@rm -rf build/run-sd; cp -r $(SD) build/run-sd; rm -rf build/run-sd/Music; touch build/run-sd/SYSTEM/NODESK
 	@$(EMU) $(EMUFLAGS) $(CARDDATE) --headless --log-opl --sd build/run-sd --max-seconds 9 \
@@ -960,12 +970,19 @@ test-27: all $(EMU)
 	@if [ -z "$(PRE12)" ]; then python3 tests/midwav.py $(EMU) $(SD) $(SD)/SYSTEM/HORIZON.SYS $(EMUFLAGS); \
 	else echo "SKIP  0.27 MIDI heard (REV \$$0C only)"; fi
 	@if [ -z "$(PRE12)" ]; then \
-	  PREP='$(O27PREP)' KEEPMUSIC=1 DESK=1 sh tests/shots.sh "$(EMU) $(EMUFLAGS) $(CARDDATE)" $(SD) opl27 32 $(O27SHOTS); \
-	  if diff -u tests/pictures/opl27.md5 $(B)/opl27.md5; then echo "PASS  0.27 the OPL2 on the Desktop: MIDI in Music, the app finding the chip taken, Stop giving it back, the app's demo, Music finding it taken"; \
+	  PREP='$(O27PREP)' KEEPMUSIC=1 DESK=1 sh tests/shots.sh "$(EMU) $(EMUFLAGS) $(CARDDATE)" $(SD) opl27 30 $(O27SHOTS); \
+	  if diff -u tests/pictures/opl27.md5 $(B)/opl27.md5; then echo "PASS  0.27 the OPL2 on the Desktop: MIDI in Music Player, another owner (otest h) refused, Stop giving the chip back, the other owner taking it, Music Player refused"; \
 	  else echo "FAIL  0.27 OPL2 pictures (look at $(B)/opl27*.ppm, then make pictures-27)"; exit 1; fi; \
 	  if grep -l 'emu816: blitter:' $(B)/opl27.err; then echo "FAIL  blitter rules (the 0.27 session)"; exit 1; \
 	  else echo "PASS  blitter rules: the 0.27 session"; fi; \
 	else echo "SKIP  0.27 OPL2 pictures (REV \$$0C only)"; fi
+	@if [ -z "$(NOLAU)" ]; then \
+	  PREP='$(M26PREP)' KEEPMUSIC=1 DESK=1 sh tests/shots.sh "$(EMU) $(EMUFLAGS) $(CARDDATE)" $(SD) vol27 29 $(V27SHOTS); \
+	  if python3 tests/volbars.py vol27; then echo "PASS  0.27 Music Player's Volume and Stereo bars follow each change, down as well as up (keys, menu, a click, a drag)"; \
+	  else echo "FAIL  0.27 Music Player's bars (look at $(B)/vol27*.ppm)"; exit 1; fi; \
+	  if grep -l 'emu816: blitter:' $(B)/vol27.err; then echo "FAIL  blitter rules (the bars' session)"; exit 1; \
+	  else echo "PASS  blitter rules: the bars' session"; fi; \
+	else echo "SKIP  0.27 Music Player's bars (Lau: REV \$$0A and later)"; fi
 
 pictures-27:
 	cp $(B)/opl27.md5 tests/pictures/opl27.md5

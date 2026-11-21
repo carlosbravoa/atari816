@@ -1,4 +1,5 @@
-; MUSIC - the music player (/BIN/MUSIC.PRG, Horizon 0.26): the window "Music".
+; MUSIC - the music player (/BIN/MUSIC.PRG, Horizon 0.26): the window "Music Player"
+; (0.27; "Music" before: the name shown, the files keep theirs).
 ;   music               the player with the playlist of the last session
 ;   music PATH          PATH (a MOD or WAV file, a folder, or a URL) added to the playlist and
 ;                       played at once (Files and the Desktop open .MOD and .WAV files so)

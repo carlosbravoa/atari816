@@ -7,7 +7,8 @@
 ;                       recolours live).
 ;                     Classic Atari: the I/O processor's /atari.ini (memory, keyboard layout,
 ;                       arrow keys as joystick, scanlines, horizontal position, boot
-;                       cartridge). These apply at the next full restart. (0.27: no stereo
+;                       cartridge, (0.27) BASIC when a disk boots, fast disk loading). These
+;                       apply at the next full restart. (0.27: no stereo
 ;                       row: REV $0C has one POKEY for the classic machine, so the core's
 ;                       stereo key does nothing; a stereo line in the file is kept as it is.)
 ;                     Save writes /SYSTEM/CONFIG (and /atari.ini when a Classic Atari value
@@ -52,6 +53,10 @@
 ;   scanlines=0             value & 3: 0 off, 1 25 %, 2 50 %, 3 75 %
 ;   boot=basic              "ash": /ASH.CAR is the default cartridge; anything else: BASIC
 ;   hpos=0                  horizontal position, clamped to 0-48
+;   basic=1                 (0.27) non-zero: BASIC present when a disk boots (as the real
+;                           machine); 0: a disk in D1: boots without BASIC (most games)
+;   fastdisk=1              (0.27) non-zero: sector reads through the fast disk (a PBI
+;                           device); 0: every disk access over the serial port
 ; Save rewrites only the lines of these keys (every line of a key: the last one counts),
 ; keeps every other line as it is, and appends the keys missing (CR LF if the file uses it).
         .include "horizon.inc"
@@ -86,12 +91,16 @@ RA_JOY  = RA + 48
 RA_SCAN = RA + 72
 RA_HPOS = RA + 96
 RA_BOOT = RA + 120
+RA_BAS  = RA + 144                      ; (0.27) BASIC when a disk boots
+RA_FAST = RA + 168                      ; (0.27) fast disk loading
 VOLX    = 264                           ; the volume's number, right-aligned in 20 pixels
 FBMAX   = 1024
 AMAX    = 4096                          ; /atari.ini at most AMAX - 1 bytes
-NAK     = 6                             ; its keys
+NAK     = 8                             ; its keys
 AV_HPOS = 10                            ; aval offsets
 AV_BOOT = 8
+AV_BAS  = 12                            ; (0.27)
+AV_FAST = 14
 NSET    = 6                             ; kernel settings 0-5 in val (words)
 SNDN    = 3200                          ; the sound Test sample: 0.2 s at 16 kHz, 8-bit
 
@@ -352,7 +361,7 @@ onclick:
         jmp     loop
 :       ldx     #.loword(adflt)         ; Classic Atari: the firmware's defaults
         ldy     #.loword(aval)
-        jsr     copy12
+        jsr     copya
         jsr     redraw_atari
         jmp     loop
 @tog:   stx     z:t0                    ; a toggle: which group, which button
@@ -440,7 +449,7 @@ do_save:
         bcs     @aerr
         ldx     #.loword(aval)          ; saved: now the file's values
         ldy     #.loword(aorig)
-        jsr     copy12
+        jsr     copya
         lda     #1
         sta     rpend
 @cfg:   jsr     build
@@ -953,8 +962,8 @@ setpal: lda     #C_DESK
 ; 18 bytes X -> Y (cur, orig, dflt)
 copy16: lda     #8
         bra     :+
-; 12 bytes X -> Y (aval, aorig, adflt)
-copy12: lda     #5
+; 16 bytes X -> Y (aval, aorig, adflt)
+copya:  lda     #7
 :       sta     z:t0
 :       lda     a:0,x
         sta     a:0,y
@@ -1230,7 +1239,7 @@ pchr:   sep     #$20
 load_ini:
         ldx     #.loword(adflt)
         ldy     #.loword(aval)
-        jsr     copy12
+        jsr     copya
         stz     alen
         stz     aerr
         ptr     p_ini
@@ -1284,7 +1293,7 @@ load_ini:
         sta     (aend)
         ldx     #.loword(aval)
         ldy     #.loword(aorig)
-        jmp     copy12
+        jmp     copya
 @bad:   lda     #1
         sta     aerr
         bra     @end
@@ -1475,7 +1484,7 @@ aset:   sta     z:k
         bcc     @st
 @h48:   lda     #48
         bra     @st
-@bool:  lda     z:nl                    ; kbdlayout, joystick: non-zero = 1
+@bool:  lda     z:nl                    ; kbdlayout, joystick, basic, fastdisk: non-zero = 1
         ora     z:nh
         beq     @st
         lda     #1
@@ -1728,9 +1737,11 @@ ak_joy: .byte   "joystick", 0
 ak_scan: .byte  "scanlines", 0
 ak_boot: .byte  "boot", 0
 ak_hpos: .byte  "hpos", 0
-akeys:  .addr   ak_ram, ak_kbd, ak_joy, ak_scan, ak_boot, ak_hpos, 0
-adflt:  .word   128, 0, 0, 0, 0, 0
-abit:   .word   1, 2, 4, 8, 16, 32
+ak_bas: .byte   "basic", 0                      ; (0.27)
+ak_fast: .byte  "fastdisk", 0
+akeys:  .addr   ak_ram, ak_kbd, ak_joy, ak_scan, ak_boot, ak_hpos, ak_bas, ak_fast, 0
+adflt:  .word   128, 0, 0, 0, 0, 0, 1, 1
+abit:   .word   1, 2, 4, 8, 16, 32, 64, 128
 s_basic: .byte  "basic", 0
 s_ash:  .byte   "ash", 0
 ; the presets (desk, desk2) and the two system colours of their swatch's checker (the
@@ -1784,6 +1795,12 @@ grp_a:  .addr   b_pg1
         .addr   b_bt1
         .word   2
         .addr   v_01, aval + AV_BOOT
+        .addr   b_bas1                  ; (0.27)
+        .word   2
+        .addr   v_10, aval + AV_BAS
+        .addr   b_fd1
+        .word   2
+        .addr   v_10, aval + AV_FAST
         .word   0
 pgrps:  .addr   grp_d, grp_a
 plists: .addr   ctl_d, ctl_a
@@ -1792,6 +1809,7 @@ v_delay: .word  0, 25, 40, 60
 v_rate: .word   10, 5, 3
 v_saver: .word  0, 60, 300, 600
 v_01:   .word   0, 1
+v_10:   .word   1, 0                    ; (0.27: on, the default, first)
 v_ram:  .word   128, 320
 v_scan: .word   0, 1, 2, 3
 t_desk: .byte   "Desktop:", 0
@@ -1811,6 +1829,8 @@ t_joy:  .byte   "Arrow keys:", 0
 t_scan: .byte   "Scanlines:", 0
 t_hpos: .byte   "H position:", 0
 t_boot: .byte   "Boot:", 0
+t_bas:  .byte   "Disk boot:", 0
+t_fast: .byte   "Disk loading:", 0
 s_pg1:  .byte   "Desktop", 0
 s_pg2:  .byte   "Classic Atari", 0
 s_1:    .byte   "1", 0
@@ -1835,6 +1855,9 @@ s_50:   .byte   "50%", 0
 s_75:   .byte   "75%", 0
 s_bbasic: .byte "BASIC", 0
 s_bash: .byte   "ASH cartridge", 0
+s_wbas: .byte   "With BASIC", 0
+s_nobas: .byte  "Without BASIC", 0
+s_sio:  .byte   "Serial port", 0
 s_test: .byte   "Test", 0
 ; one period of the sound Test's tone: round(100 sin x + 22 sin 2x), signed 8-bit
 tone:   .byte   0, 37, 69, 93, 106, 108, 100, 86, 68, 49, 31, 15
@@ -1858,9 +1881,10 @@ ctl_d:  .addr   b_pg1, b_pg2, l_desk, l_mouse, l_delay, l_rate, l_try, l_beep, l
         .addr   b_m1, b_m2, b_m3, b_m4, b_d1, b_d2, b_d3, b_d4, b_r1, b_r2, b_r3
         .addr   f_try, sb_vol, b_test, sb_snd, b_stest
         .addr   l_saver, b_sv1, b_sv2, b_sv3, b_sv4, b_svtest, b_dflt, b_cancel, b_save, 0
-ctl_a:  .addr   b_pg1, b_pg2, l_ram, l_kbd, l_joy, l_scan, l_hpos, l_boot
+ctl_a:  .addr   b_pg1, b_pg2, l_ram, l_kbd, l_joy, l_scan, l_hpos, l_boot, l_bas, l_fast
         .addr   b_ram1, b_ram2, b_kbd1, b_kbd2
         .addr   b_joy1, b_joy2, b_sc1, b_sc2, b_sc3, b_sc4, sb_hpos, b_bt1, b_bt2
+        .addr   b_bas1, b_bas2, b_fd1, b_fd2
         .addr   b_dflt, b_cancel, b_save, 0
 ; every control (their CT_WIN)
 allc:   .addr   l_desk, l_mouse, l_delay, l_rate, l_try, l_beep, l_svol
@@ -1868,9 +1892,10 @@ allc:   .addr   l_desk, l_mouse, l_delay, l_rate, l_try, l_beep, l_svol
         .addr   f_try, sb_vol, b_test, sb_snd, b_stest
         .addr   l_saver, b_sv1, b_sv2, b_sv3, b_sv4, b_svtest
         .addr   b_pg1, b_pg2, b_dflt, b_cancel, b_save
-        .addr   l_ram, l_kbd, l_joy, l_scan, l_hpos, l_boot
+        .addr   l_ram, l_kbd, l_joy, l_scan, l_hpos, l_boot, l_bas, l_fast
         .addr   b_ram1, b_ram2, b_kbd1, b_kbd2
-        .addr   b_joy1, b_joy2, b_sc1, b_sc2, b_sc3, b_sc4, sb_hpos, b_bt1, b_bt2, 0
+        .addr   b_joy1, b_joy2, b_sc1, b_sc2, b_sc3, b_sc4, sb_hpos, b_bt1, b_bt2
+        .addr   b_bas1, b_bas2, b_fd1, b_fd2, 0
 
         .segment "DATA"
 wblk:   .word   (640 - W - 2) / 2, 20, W, H
@@ -1924,6 +1949,8 @@ l_joy:  mklab   LX, RA_JOY + 6, t_joy
 l_scan: mklab   LX, RA_SCAN + 6, t_scan
 l_hpos: mklab   LX, RA_HPOS + 6, t_hpos
 l_boot: mklab   LX, RA_BOOT + 6, t_boot
+l_bas:  mklab   LX, RA_BAS + 6, t_bas           ; (0.27)
+l_fast: mklab   LX, RA_FAST + 6, t_fast
 b_ram1: mkbtn   CX, RA_RAM, 116, 0, s_k128
 b_ram2: mkbtn   CX + 120, RA_RAM, 116, 0, s_k320
 b_kbd1: mkbtn   CX, RA_KBD, 116, 0, s_katari
@@ -1939,6 +1966,10 @@ sb_hpos: .byte  UT_HSCROLL, 0
         .word   0, 48, 4, 1, 0, 0
 b_bt1:  mkbtn   CX, RA_BOOT, 116, 0, s_bbasic
 b_bt2:  mkbtn   CX + 120, RA_BOOT, 116, 0, s_bash
+b_bas1: mkbtn   CX, RA_BAS, 116, 0, s_wbas       ; (0.27) basic=1, basic=0
+b_bas2: mkbtn   CX + 120, RA_BAS, 116, 0, s_nobas
+b_fd1:  mkbtn   CX, RA_FAST, 116, 0, s_fast     ; fastdisk=1, fastdisk=0
+b_fd2:  mkbtn   CX + 120, RA_FAST, 116, 0, s_sio
 b_dflt: mkbtn   LX, R_BTN, 72, 0, s_dflt
 b_cancel: mkbtn W - LX - 64 - 8 - 64, R_BTN, 64, UF_CANCEL, s_cancel
 b_save: mkbtn   W - LX - 64, R_BTN, 64, UF_DEFAULT, s_save
@@ -1960,8 +1991,8 @@ cur:    .res    18                      ; mouse, beep, delay, rate, sound, saver
 val     = cur
 desk    = cur + NSET * 2
 orig:   .res    18
-aval:   .res    12                      ; ram, kbdlayout, joystick, scanlines, boot, hpos
-aorig:  .res    12
+aval:   .res    16                      ; ram, kbdlayout, joystick, scanlines, boot, hpos,
+aorig:  .res    16                      ; (0.27) basic, fastdisk
 c0:     .res    6                       ; (parse: three numbers)
 tbuf:   .res    64
 obuf:   .res    AMAX + 256

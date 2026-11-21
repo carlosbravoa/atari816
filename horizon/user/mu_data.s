@@ -5,7 +5,7 @@
 ;   File: 0 Open..., 1 Open folder..., 2 Open location..., 4 Remove, 5 Clear, 7 Quit
 ;   Play: 0 Play / Pause, 1 Stop, 3 Previous, 4 Next, 5 Back, 6 Forward, 8 Shuffle,
 ;         9 Repeat off, 10 Repeat all, 11 Repeat one, 13 Louder, 14 Softer
-;   View: 0 Playlist, 1 Samples          Help: 0 Keys..., 1 About Music...
+;   View: 0 Playlist, 1 Samples          Help: 0 Keys..., 1 About Music Player...
 menus:  .byte   "File", 0
         .byte   "Open...", 9, "Ctrl+O", 0
         .byte   "Open folder...", 0
@@ -34,7 +34,7 @@ menus:  .byte   "File", 0
         .byte   "View", 0
         .byte   MS_STATE, "Playlist", 9, "Ctrl+P", 0
         .byte   MS_STATE, "Samples", 9, "Ctrl+I", 0, 0
-        .byte   "Help", 0, "Keys...", 0, "About Music...", 0, 0, 0
+        .byte   "Help", 0, "Keys...", 0, "About Music Player...", 0, 0, 0
 mfile:  .addr   a_open, a_folder, a_url, m_none, a_remove, a_clear, m_none, m_quit
 mplay:  .addr   a_toggle, a_stop, m_none, a_prev, a_next, m_back, m_fwd, m_none
         .addr   m_shuffle, m_roff, m_rall, m_rone, m_none, m_louder, m_softer
@@ -77,7 +77,7 @@ s_off:  .byte   "OFF", 0
 s_all:  .byte   "ALL", 0
 s_one:  .byte   "ONE", 0
 s_on:   .byte   "ON", 0
-s_cfghead: .byte "# Music: the settings and the playlist (one path or address a line)", 10, 0
+s_cfghead: .byte "# Music Player: the settings and the playlist (one path or address a line)", 10, 0
 s_kvol: .byte   "volume=", 0
 s_ksep: .byte   "separation=", 0
 s_krep: .byte   "repeat=", 0
@@ -95,7 +95,7 @@ p_req:  .byte   "/SYSTEM/OPEN.REQ", 0
 p_self: .byte   "/BIN/MUSIC.PRG", 0     ; (upper case: compared ignoring case)
 hexd:   .byte   "0123456789ABCDEF"
 
-t_title: .byte  "Music", 0
+t_title: .byte  "Music Player", 0
 t_open: .byte   "Open a MOD or WAV file", 0
 s_ok:   .byte   "OK", 0
 s_cancel: .byte "Cancel", 0
@@ -171,31 +171,31 @@ e_pcbusy: .byte "Too many connections on the PC.", 0
 e_net:  .byte   "Network error.", 0
 e_nomem: .byte  "Not enough memory for this song.", 0
 e_nodev: .byte  "No Lau: the sample player is not there.", 0
-e_format: .byte "Not a module (MOD) or a WAV file Music can play.", 0
+e_format: .byte "Not a module (MOD) or a WAV file Music Player can play.", 0
 e_noopl: .byte  "MIDI needs the OPL2 (hardware revision $0C).", 0
 e_oplbusy: .byte "The OPL2 is in use by another program.", 0
 
 ; alerts
 al_nolau: .word AL_INFO
         .addr   t_title, m_nolau, s_ok, 0, 0
-m_nolau: .byte  "Music needs Lau, the Atari816's sample player", 10
+m_nolau: .byte  "Music Player needs Lau, the Atari816's sample player", 10
         .byte   "(hardware revision $0A or later).", 0
 al_noport: .word AL_ERROR
         .addr   t_title, m_noport, s_ok, 0, 0
-m_noport: .byte "Music cannot start: no message port is free.", 10
+m_noport: .byte "Music Player cannot start: no message port is free.", 10
         .byte   "Close a program and try again.", 0
 al_noeng: .word AL_ERROR
         .addr   t_title, m_noeng, s_ok, 0, 0
-m_noeng: .byte  "Music cannot start: its engine,", 10
+m_noeng: .byte  "Music Player cannot start: its engine,", 10
         .byte   "/SYSTEM/MUSICD.PRG, is not on the card.", 0
 al_nohello: .word AL_ERROR
         .addr   t_title, m_nohello, s_ok, 0, 0
-m_nohello: .byte "Music cannot start: its engine,", 10
+m_nohello: .byte "Music Player cannot start: its engine,", 10
         .byte   "/SYSTEM/MUSICD.PRG, did not answer.", 0
 al_dead: .word  AL_ERROR
         .addr   t_title, m_dead, s_ok, 0, 0
 m_dead: .byte   "The music engine has stopped.", 10
-        .byte   "Close Music and start it again.", 0
+        .byte   "Close Music Player and start it again.", 0
 al_full: .word  AL_WARN
         .addr   t_title, m_full, s_ok, 0, 0
 m_full: .byte   "The playlist is full (256 songs).", 0
@@ -209,8 +209,8 @@ m_clear: .byte  "Take every song out of the playlist?", 10
         .byte   "(The files stay on the card.)", 0
 al_about: .word AL_INFO
         .addr   t_about, m_abtxt, s_ok, 0, 0
-t_about: .byte  "About Music", 0
-m_abtxt: .byte  "Music for the Atari816, version 1.0", 10
+t_about: .byte  "About Music Player", 0
+m_abtxt: .byte  "Music Player for the Atari816, version 1.0", 10
         .byte   "Plays MOD modules (4 to 8 channels) and WAV files", 10
         .byte   "on Lau. The engine: /SYSTEM/MUSICD.PRG.", 0
 al_path: .word  AL_WARN
@@ -229,7 +229,7 @@ t_url:  .byte   "Open location", 0
 m_url:  .byte   "The address of a MOD or WAV file (http, https, ftp):", 0
 
 ; Help > Keys...
-t_keys: .byte   "Music: keys", 0
+t_keys: .byte   "Music Player: keys", 0
 KEYSN   = 9
 dg_keys: .addr  t_keys
         .word   420, 12 + KEYSN * 14 + 32
@@ -272,7 +272,7 @@ bt_kok: .byte   UT_BUTTON, 0
         .addr   s_ok
 al_engerr: .word AL_ERROR
         .addr   t_title, m_engerr, s_ok, 0, 0
-m_engerr: .byte "Music cannot start its engine,", 10
+m_engerr: .byte "Music Player cannot start its engine,", 10
         .byte   "/SYSTEM/MUSICD.PRG (error $"
 m_engerr_h: .byte "00).", 0
 m_errn: .byte   "Error $"

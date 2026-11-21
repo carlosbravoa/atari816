@@ -1,15 +1,15 @@
 # (0.27) the OPL2 on the Desktop (DESK=1; tests/mousegen.py makes tests/opl27.keys from this;
-# the card's Programs menu gets "Music" and "OPL2", /Music the two songs of tools/mkmid.py
-# next to the card's own).
+# the card's Programs menu gets "Music Player", /Music the two songs of tools/mkmid.py next
+# to the card's own). The chip's other owner is OTEST's "otest h" (user/otest.s), typed in
+# the Terminal (0.27: the OPL2 FM Synth program, the other owner before, was removed).
 # Shots (s):
-#   1  13.0  Music plays /Music/OPLGROOVE.MID (opened in Files): MIDI on the OPL2, its title,
-#            the time, the meters
-#   2  17.0  Programs > OPL2 while Music has the chip: "OPL2 in use by another program"
-#   3  23.0  the app closed (Esc), Stop in Music (the chip given back), Programs > OPL2 again:
-#            the app is ready
-#   4  25.5  its Chords demo playing
-#   5  30.0  BAROQUE.MID opened in Files (typed, Enter) meanwhile: Music says the OPL2 is in
-#            use
+#   1  13.0  Music Player plays /Music/OPLGROOVE.MID (opened in Files): MIDI on the OPL2, its
+#            title, the time, the meters
+#   2  18.5  Programs > Terminal, "otest h" while Music Player has the chip: EAGAIN ("error
+#            06"), "the OPL2 is not free"
+#   3  24.5  Music Player in front (its status line clicked), Stop (the chip given back); the
+#            Terminal again, "otest h": the chip is its own
+#   4  28.5  Music Player in front, Play: "The OPL2 is in use by another program."
 6000 move 105 8
 6400 click
 6800 move 97 107
@@ -20,17 +20,17 @@
 11500 key opl\n
 14000 move 105 8
 14400 click
-14800 move 97 119
+14800 move 97 65
 15200 click
-18000 key {esc}
-19000 move 245 160
-19200 click
-20000 move 105 8
-20400 click
-20800 move 97 119
-21200 click
-23500 move 203 159
-23700 click
-26000 move 60 31
-26200 click
-27500 key bar\n
+17000 key otest h\n
+19500 move 400 345
+19700 click
+20500 move 245 160
+20700 click
+22000 move 60 200
+22200 click
+23000 key otest h\n
+25500 move 400 345
+25700 click
+26500 move 177 160
+26700 click

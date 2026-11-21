@@ -365,10 +365,11 @@ it releases it when the song stops or ends. Three parts:
   started it and ends (exit, kill, crash) takes the music with it within a second. From the
   shell, `musicd [-l] FILE` plays a file once (or again and again) and returns at its end.
   It needs Lau (REV $0A): without it, it says so (shell) or answers MST_ERROR with ENODEV.
-  The Music program (`/BIN/MUSIC.PRG`) is its window. Music is a single-instance program; a
-  file opened from Files while it runs reaches it through `/SYSTEM/OPEN.REQ` (two lines: the
-  program's path and the argument), which the controls library's `ui_launch` writes when the
-  kernel answers ERUNNING to a spawn with an argument, and Music reads (then deletes).
+  The Music Player program (`/BIN/MUSIC.PRG`; "Music" before 0.27) is its window. It is a
+  single-instance program; a file opened from Files while it runs reaches it through
+  `/SYSTEM/OPEN.REQ` (two lines: the program's path and the argument), which the controls
+  library's `ui_launch` writes when the kernel answers ERUNNING to a spawn with an argument,
+  and Music Player reads (then deletes).
 - **The replayer library**, user/modplay.s (build/modplay.o; API in user/modplay.inc; the
   SDK's sound reference): the engine's player, for programs that play a module themselves (a
   game: `mp_tick` from its own timer task or frame loop).
@@ -394,7 +395,7 @@ back.
 **What it costs** (emu816, the board's timing): about 0.9 ms of CPU a tick in all at 125 BPM
 (50 ticks a second: 4.5 % of the CPU), of which the replayer's own work is about 0.3 ms and
 the wake-up through the kernel (interrupt, message, task switch, recv) about 0.6 ms; the
-level meters for a client (Music) add about 0.5 ms every second tick (0.25 ms a tick on
+level meters for a client (Music Player) add about 0.5 ms every second tick (0.25 ms a tick on
 average), plus one status message (send) a tick.
 
 ## The games round (0.18)
