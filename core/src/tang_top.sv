@@ -252,9 +252,16 @@ endfunction
 `ifndef A816_NO_SAMPLER
 localparam logic [7:0] A816_REV = 8'h0C;
 reg  [15:0] audio_l_out = 16'h0000, audio_r_out = 16'h0000;   // feed HDMI audio
+// The HDMI transmitter samples these 16-bit words in clk_pix. They change only just after it
+// has taken a sample (a few clk_core after hdmi_smp_tgl toggles), so it never catches a word
+// half changed: the OPL2 and POKEY change at any time, and a torn word is a click.
+reg  [2:0]  smp_s = 3'd0;
 always @(posedge clk_core) begin
-    audio_l_out <= mix_sat(audio_l_pcm, snd_l, opl_snd);
-    audio_r_out <= mix_sat(audio_r_pcm, snd_r, opl_snd);
+    smp_s <= {smp_s[1:0], hdmi_smp_tgl};
+    if (smp_s[2] ^ smp_s[1]) begin
+        audio_l_out <= mix_sat(audio_l_pcm, snd_l, opl_snd);
+        audio_r_out <= mix_sat(audio_r_pcm, snd_r, opl_snd);
+    end
 end
 `else
 localparam logic [7:0] A816_REV = 8'h09;

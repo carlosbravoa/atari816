@@ -985,3 +985,19 @@ sectors a second) the 243 sectors alone are 20 s. F12 pressed at ten moments of 
 boot: the firmware answered and Horizon took input every time. Not measured: `fastdisk=0`
 on this build (the serial path's code is unchanged), a write, and the picture and sound of
 what was loaded (the executable's clock runs after the load).
+
+## Step 27: crackling with the OPL2 (2026-11-21)
+
+MIDI songs crackled on the board, also a song of one or two voices (`ELISE.MID`); MODs did
+not. The cause: `audio_l_out` / `audio_r_out` (the final mix, in clk\_core) are sampled by
+the HDMI audio transmitter in clk\_pix, and they changed at any clk\_core edge. Lau changes
+its output just after the transmitter's sample (it follows `hdmi_smp_tgl`), the OPL2 and
+POKEY do not, so the transmitter sometimes took a 16-bit word half changed: a click.
+
+The fix (`tang_top.sv`): the mix registers load only a few clk\_core after `hdmi_smp_tgl`
+toggles, so they are steady for the rest of the 48 kHz period. Lau's output comes one
+sample later. No register or REV change. Logic 16,617 / 20,736, CLS 9,353 / 10,368 (91%);
+clk\_core 33.30 MHz, clk\_pix 89.11 MHz, sys\_clk 36.73 MHz, no violations.
+
+By ear on the board (the user): `ELISE.MID` has no crackle any more. Not measured: a capture
+of the samples.
