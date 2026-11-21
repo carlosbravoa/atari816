@@ -1,0 +1,10 @@
+# Time 0 = started from the Programs menu. The window's content starts near screen (201, 136).
+1500 shot
++300 move 249 186
++300 click
++600 click
++800 shot
+# Quit
++300 move 333 186
++300 click
++800 shot
