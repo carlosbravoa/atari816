@@ -3,7 +3,7 @@
 #define SYSBLOCK_H
 #include <stdint.h>
 
-#define SYS_REV_VAL 0x0B         /* default; --rev N reports an older board */
+#define SYS_REV_VAL 0x0C         /* default; --rev N reports an older board */
 #define WDOG_US     2000000
 
 enum { IRQ_VBLANK = 0x01, IRQ_LINE = 0x02, IRQ_TIMER0 = 0x04, IRQ_TIMER1 = 0x08,
@@ -24,7 +24,7 @@ typedef struct SysBlock {
     uint64_t dbg_busy_until;
     uint64_t dbg_dropped;
     uint8_t  sv_ctrl;           /* $00:DC00 SV_CTRL: only bit 2 FREEZE_REQ is kept */
-    uint8_t  rev;               /* SYS_REV: $06 no sound, $07 + sound, $08 + blitter, $09 + lists, beam events, $0A + sample player, $0B + sprites and fine scrolling */
+    uint8_t  rev;               /* SYS_REV: $06 no sound, $07 + sound, $08 + blitter, $09 + lists, beam events, $0A + sample player, $0B + sprites and fine scrolling, $0C + OPL2 */
     uint8_t  snd[0x14];         /* REV $07 sound page $00:DB00-$DB13 as written */
     uint64_t snd_writes, snd_ignored;
     int      snd_log;           /* --log-sound: every accepted write on stderr */
@@ -38,7 +38,8 @@ void    sys_write(uint32_t a, uint8_t v);
  * SV_STATUS ($DC01) bit 0 FROZEN = FREEZE_REQ (the classic machine is not modelled) */
 uint8_t sv_read(uint32_t a);
 /* REV $07 sound page: POKEY 2 ($DB00-$DB0F) and 4 DACs ($DB10-$DB13), write only, taken
- * only while FREEZE_REQ is set */
+ * only while FREEZE_REQ is set; from REV $0C POKEY 1's native register bank ($DB00-$DB0F, still
+ * only while frozen) and no DACs. Also Lau ($DB20-, REV $0A) and the OPL2 ($DB30-$DB31, REV $0C) */
 void    sound_write(uint32_t a, uint8_t v);
 void    sv_write(uint32_t a, uint8_t v);
 void    sys_raise_irq(uint8_t bits);

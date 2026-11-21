@@ -147,7 +147,7 @@ The keyboard and the screen at start:
   RTS/RTL from the entry point are not supported.
 - At exit the kernel closes the program's windows, files, ports and frees its banks;
   the keyboard goes back to the lender; the pointer shape goes back to the arrow; an
-  unfinished `ws_hold` is released. **Sound is not stopped**: silence POKEY 2 yourself
+  unfinished `ws_hold` is released. **Sound is not stopped**: silence POKEY yourself
   (see [sound.md](sound.md)).
 - The exit code goes to the parent's `SYS_WAIT`; the shell prints it for background jobs.
   Codes $FF00 + cause mean the kernel killed the task (below), $FF80 a kill or ctrl-C.

@@ -187,6 +187,11 @@ engine: sys     SYS_GETPID
         jsr     out_flush
         lda     #0
         jsr     e_play
+        lda     e_state                 ; (0.27) MIDI: the OPL2 taken by another program
+        cmp     #MST_ERROR
+        bne     loop
+        jsr     print_err
+        exit    1
 
 ; ---- the main loop: everything comes as a message ----
 loop:   lda     e_port
@@ -320,7 +325,7 @@ end_tick:
 :       lda     e_kind
         cmp     #KIND_MID
         bne     :+
-        jsr     mid_stop
+        jsr     mid_release             ; (0.27) the OPL2 given back
         bra     :++
 :       jsr     mp_stop
 :       jsr     idle_timer
@@ -471,14 +476,15 @@ c_seek: lda     e_state
         jmp     wav_seek
 :       cmp     #KIND_MID
         bne     @sk_mod
-        lda     e_arg
-        jsr     mid_play
         lda     e_state
         cmp     #MST_PAUSED
         bne     :+
-        jsr     mid_pause
+        lda     e_arg                   ; (0.27) paused: no notes until it plays on
+        jsr     mid_cue
         jmp     send_status
-:       jsr     mid_timer
+:       lda     e_arg
+        jsr     mid_play
+        jsr     mid_timer
         jmp     send_status
 @sk_mod:
         lda     e_arg
@@ -630,15 +636,20 @@ e_play: sta     e_t
         sta     e_arg
         jmp     wav_seek
 :       cmp     #KIND_MID
-        bne     :+
+        bne     @mod
         lda     #MST_PLAYING
         sta     e_state
         stz     e_msdiv
         lda     e_t
         jsr     mid_play
-        jsr     mid_timer
+        bcc     :+
+        jsr     unload                  ; (0.27) another program has the OPL2
+        lda     #EMS_OPLBUSY
+        jsr     set_err
         jmp     send_status
-:       lda     #MST_PLAYING
+:       jsr     mid_timer
+        jmp     send_status
+@mod:   lda     #MST_PLAYING
         sta     e_state
         jsr     mp_reset125             ; the timer runs from the first tick (at 125 BPM) ...
         jsr     mod_start
@@ -686,7 +697,7 @@ e_stop: lda     e_kind
         bra     :+++
 :       cmp     #KIND_MID
         bne     :+
-        jsr     mid_stop
+        jsr     mid_release             ; (0.27) the OPL2 given back
         bra     :++
 :       cmp     #KIND_MOD
         bne     :+
@@ -1495,7 +1506,7 @@ mid_load:
         ldx     #0
         sys     SYS_OPLW
         bcc     :+
-        lda     #ENODEV
+        lda     #EMS_NOOPL              ; (0.27: its own error, not "No Lau")
         jmp     lfail
 :       ; Allocate consecutive banks for the file (unknown size: 4 banks = 256 KB)
         lda     e_size
@@ -2371,6 +2382,14 @@ print_err:
 :       cmp     #ENOMEM
         bne     :+
         print   "not enough memory\n"
+        rts
+:       cmp     #EMS_NOOPL              ; (0.27) MIDI
+        bne     :+
+        print   "MIDI needs the OPL2 (hardware revision $0C)\n"
+        rts
+:       cmp     #EMS_OPLBUSY
+        bne     :+
+        print   "the OPL2 is in use by another program\n"
         rts
 :       pha
         print   "error $"

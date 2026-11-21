@@ -1,5 +1,7 @@
 ; sound.s - REV $07 sound: POKEY 2 ($00:DB00-$DB0F, write only) and four 8-bit DACs
-; ($00:DB10-$DB13; 0, 1 left, 2, 3 right). The hardware takes these writes only while the
+; ($00:DB10-$DB13; 0, 1 left, 2, 3 right). (0.27) From REV $0C the same registers reach POKEY
+; 1's native register bank, the DACs are gone (their writes do nothing), and the OPL2
+; (YM3812) is at $00:DB30-$DB31 (opl_write, below). The hardware takes these writes only while the
 ; classic machine is frozen (FREEZE_REQ), so the kernel silences them before every unfreeze.
 ;
 ; (0.15) Ownership: every register a program writes (sound_write, beep) is kept in a shadow
@@ -30,6 +32,11 @@ CH_T2       = 15                        ; of note 2
 snd_init:
         stz     snd_left
         stz     opl_owner
+        ldx     #10                     ; (0.27) the copies of $B0-$B8, $BD
+:       stz     opl_bsh,x
+        dex
+        dex
+        bpl     :-
         lda     #NONE
         sta     ch_n
         a8
@@ -50,20 +57,21 @@ snd_init:
         jsr     snd_silence
 @out:   jmp     au_init                 ; (0.17) Lau
 
-; AUDC1-4 = 0, DACs = 0, OPL2 key-off (keeps A, X, Y); a chime stops
+; AUDC1-4 = 0, DACs = 0, OPL2 key-off (keeps A, X, Y); a chime stops. (0.27) The OPL2 only
+; has its notes keyed off: pitch, block, the depths and rhythm mode stay, and so does its
+; owner, so that a song playing on it goes on after the classic machine was shown.
 snd_silence:
         jsr     au_silence              ; (0.17) Lau's voices too
         pha
         phx
         phy
-        jsr     opl_silence
+        jsr     opl_keyoff
         ply
         plx
         lda     k_rev
         cmp     #$07
         bcc     @out
         stz     snd_left
-        stz     opl_owner
         lda     #NONE
         sta     ch_n
         a8
@@ -341,6 +349,11 @@ snd_task_exit:
 :       rts
 
 ; ---- OPL2 (YM3812, REV $0C, $00:DB30-$DB31) ----
+; (0.27) One owner, as the music timer: the first task that writes a register (or resets the
+; chip) owns it until it exits or releases it ($FFFD); meanwhile the others get EAGAIN (the
+; probe $FFFE always answers). The kernel keeps a copy of what was last written to $B0-$B8
+; and $BD (opl_bsh), so that showing the classic machine keys the notes off and nothing else.
+
 ; Wait A microseconds using UPTIME (low 16 bits); preserves X and Y.
 opl_wait_us:
         sta     kt1
@@ -379,6 +392,25 @@ opl_hw: a8
         lda     #26
         jmp     opl_wait_us
 
+; (0.27) the same, and $B0-$B8 / $BD into their copies in opl_bsh; preserves Y
+opl_wr: pha
+        phy
+        sec
+        sbc     #$00B0
+        cmp     #9
+        bcc     :+
+        cmp     #$000D                  ; $BD: byte 9
+        bne     @n
+        lda     #9
+:       tay
+        txa
+        a8
+        sta     opl_bsh,y
+        a16
+@n:     ply
+        pla
+        jmp     opl_hw
+
 ; Silence OPL2: key-off all 9 channels ($B0-$B8 = 0) and rhythm ($BD = 0).
 opl_silence:
         lda     k_rev
@@ -387,16 +419,40 @@ opl_silence:
         ldy     #$00B0
 @lp:    tya
         ldx     #0
-        jsr     opl_hw
+        jsr     opl_wr
         iny
         cpy     #$00B9
         bne     @lp
         lda     #$00BD
         ldx     #0
-        jsr     opl_hw
+        jsr     opl_wr
 @out:   rts
 
-; Reset OPL2: clear registers $01-$F5 and release owner.
+; (0.27) Key-off only (snd_silence): $B0-$B8 = their last values without KEY-ON (bit 5),
+; $BD = its last value without the rhythm instruments (bits 0-4)
+opl_keyoff:
+        lda     k_rev
+        cmp     #$0C
+        bcc     @out
+        ldy     #0
+@lp:    lda     opl_bsh,y
+        and     #$00DF
+        tax
+        tya
+        clc
+        adc     #$00B0
+        jsr     opl_wr
+        iny
+        cpy     #9
+        bne     @lp
+        lda     opl_bsh+9
+        and     #$00E0
+        tax
+        lda     #$00BD
+        jsr     opl_wr
+@out:   rts
+
+; Reset OPL2: clear registers $01-$F5 (the owner stays: 0.27).
 opl_reset:
         lda     k_rev
         cmp     #$0C
@@ -404,14 +460,14 @@ opl_reset:
         ldy     #$0001
 @lp:    tya
         ldx     #0
-        jsr     opl_hw
+        jsr     opl_wr
         iny
         cpy     #$00F6
         bne     @lp
-        stz     opl_owner
 @out:   rts
 
-; ---- $6D opl_write(A = reg $00-$F5 / $FFFE probe / $FFFF reset, X = val) -> A = OPL_STAT ----
+; ---- $6D opl_write(A = reg $00-$F5 / $FFFE probe / $FFFF reset / $FFFD release, X = val)
+; -> A = OPL_STAT; EAGAIN while another task owns the chip (0.27), ENODEV before REV $0C ----
 sys_oplw:
         lda     k_rev
         cmp     #$0C
@@ -421,23 +477,41 @@ sys_oplw:
 :       ldx     cur
         lda     t_a,x
         cmp     #$FFFE
+        beq     @stat                   ; the probe: always, never takes the chip
+        cmp     #$00F6
+        bcc     @mine
+        cmp     #$FFFD
+        bcs     @mine
+        jmp     err_inval
+@mine:  lda     opl_owner               ; free or the caller's?
+        beq     @take
+        dec     a
+        cmp     cur
+        beq     @take
+        lda     #EAGAIN
+        jmp     set_err
+@take:  lda     t_a,x
+        cmp     #$FFFD
+        bne     :+
+        lda     opl_owner               ; release: its notes off, the chip free
         beq     @stat
+        stz     opl_owner
+        jsr     opl_silence
+        bra     @stat
+:       lda     cur
+        inc     a
+        sta     opl_owner
+        lda     t_a,x
         cmp     #$FFFF
         bne     :+
         jsr     opl_reset
         bra     @stat
-:       cmp     #$00F6
-        bcc     :+
-        jmp     err_inval
 :       pha
-        lda     cur
-        inc     a
-        sta     opl_owner
         lda     t_x,x
         and     #$00FF
         tax
         pla
-        jsr     opl_hw
+        jsr     opl_wr
 @stat:  a8
         lda     f:OPL_STAT
         a16

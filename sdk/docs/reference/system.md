@@ -429,7 +429,7 @@ In: A = id, X = new value ($FFFF = only read). Out: A = the old value. Ids:
 | Id | Setting |
 | --- | --- |
 | 0 | mouse speed 1-4 |
-| 1 | the alert (beep) volume 0-15, 0 silent (POKEY 2: beeps and chimes) |
+| 1 | the alert (beep) volume 0-15, 0 silent (POKEY: beeps and chimes) |
 | 2 | key repeat delay in 10 ms ticks (0 = no repeat; default 40) |
 | 3 | key repeat interval in ticks (default 5) |
 | 4 | (Horizon 0.18) the sound volume 0-15: Lau's master volume, volume x 17 (default 8; before 0.18 Lau followed setting 1) |

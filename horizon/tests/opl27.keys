@@ -1,0 +1,53 @@
+# (0.27) the OPL2 on the Desktop (DESK=1; tests/mousegen.py makes tests/opl27.keys from this;
+# the card's Programs menu gets "Music" and "OPL2", /Music the two songs of tools/mkmid.py).
+# Shots (s):
+#   1  13.0  Music plays /Music/OPLGROOVE.MID (opened in Files): MIDI on the OPL2, its title,
+#            the time, the meters
+#   2  17.0  Programs > OPL2 while Music has the chip: "OPL2 in use by another program"
+#   3  23.0  the app closed (Esc), Stop in Music (the chip given back), Programs > OPL2 again:
+#            the app is ready
+#   4  25.5  its Chords demo playing
+#   5  30.0  BAROQUE.MID opened in Files (typed, Enter) meanwhile: Music says the OPL2 is in
+#            use
+6000 M -100:-100:0:0
+6050 M -100:-72:0:0
+6100 M -15:0:0:0
+6400 M 0:0:0:1
+6480 M 0:0:0:0
+6800 M -8:99:0:0
+7200 M 0:0:0:1
+7280 M 0:0:0:0
+9000 M -37:-76:0:0
+9200 M 0:0:0:1
+9280 M 0:0:0:0
+10000 music\n
+11500 opl\n
+14000 M 45:-23:0:0
+14400 M 0:0:0:1
+14480 M 0:0:0:0
+14800 M -8:100:0:0
+14850 M 0:11:0:0
+15200 M 0:0:0:1
+15280 M 0:0:0:0
+18000 {esc}
+19000 M 100:41:0:0
+19050 M 48:0:0:0
+19200 M 0:0:0:1
+19280 M 0:0:0:0
+20000 M -100:-100:0:0
+20050 M -40:-52:0:0
+20400 M 0:0:0:1
+20480 M 0:0:0:0
+20800 M -8:100:0:0
+20850 M 0:11:0:0
+21200 M 0:0:0:1
+21280 M 0:0:0:0
+23500 M 100:40:0:0
+23550 M 6:0:0:0
+23700 M 0:0:0:1
+23780 M 0:0:0:0
+26000 M -100:-100:0:0
+26050 M -43:-28:0:0
+26200 M 0:0:0:1
+26280 M 0:0:0:0
+27500 bar\n

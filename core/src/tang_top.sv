@@ -304,10 +304,10 @@ wire [31:0] a816_wdata;          // CPU byte writes come replicated with a one-b
 wire [3:0]  a816_wmask;
 wire        a816_long;           // with a burst read: 16 bytes (NVC, classic machine frozen)
 wire        a816_sv_freeze;      // 1 = classic machine frozen by Horizon (SV_CTRL)
-wire        a816_snd_wr;         // native sound register write ($00:DB00-$DB1F)
-// Registered copy for POKEY 2 / the DACs: the write reaches them one clk_core later. Without
-// this register the 65C816's microcode -> RDY_OUT -> io_wr -> POKEY 2 -> MMU -> 6502 chain was
-// the clk_core critical path (34.8 ns of 34.86).
+wire        a816_snd_wr;         // native sound register write ($00:DB00-$DB1F; REV $0C: only $DB00-$DB0F do anything)
+// Registered copy for POKEY's native bank (REV $0C; POKEY 2 and the DACs before): the write
+// reaches it one clk_core later. Without this register the 65C816's microcode -> RDY_OUT ->
+// io_wr -> POKEY -> MMU -> 6502 chain was the clk_core critical path (34.8 ns of 34.86).
 reg         a816_snd_wr_r = 1'b0;
 reg  [4:0]  a816_snd_addr_r = 5'd0;
 reg  [7:0]  a816_snd_data_r = 8'd0;
@@ -848,12 +848,7 @@ wire        siocmd_ack;
 wire [1:0]  scanline_level;
 wire [7:0]  h_offset;
 
-// Dual-POKEY stereo enable (OSD-toggled): quasi-static config from iosys (sys_clk).
-// 2-FF synchronise into clk_core where the Atari core's STEREO input lives.
-wire        stereo_opt;
 wire        kbd_pc_layout;   // OSD "Keyboard: PC" (sys_clk, same domain as the keyboard module)
-reg         stereo_s1 = 1'b0, stereo_core = 1'b0;
-always @(posedge clk_core) begin stereo_s1 <= stereo_opt; stereo_core <= stereo_s1; end
 
 // Atari RAM size (OSD-selected): quasi-static config from iosys (sys_clk). The
 // firmware only changes it across a cold boot, so a plain 2-FF sync into clk_core
@@ -961,7 +956,6 @@ iosys_picorv32 #(
     // Video options
     .scanline_level_out(scanline_level),
     .h_offset_out(h_offset),
-    .stereo_out(stereo_opt),
     .kbd_pc_layout_out(kbd_pc_layout),
     .ram_select_out(ram_select_opt)
 );
@@ -1138,7 +1132,7 @@ atari800core_simple_sdram #(
     // desynchronized games (missed VBIs/DLIs → corrupted background, garbled sprites
     // on resume). The menu is now a pure overlay: the Atari runs live behind it, and
     // keyboard/joystick inputs are masked from the core while the overlay is up.
-    .A816_SND                   (a816_sv_freeze),   // frozen: POKEY 2 and the DACs belong to the 65C816
+    .A816_SND                   (a816_sv_freeze),   // frozen: POKEY 1 plays its native register bank ($00:DB00-$DB0F)
     .A816_SND_WR                (a816_snd_wr_r),
     .A816_SND_ADDR              (a816_snd_addr_r),
     .A816_SND_DATA              (a816_snd_data_r),

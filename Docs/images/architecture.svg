@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 650" width="1000" height="650" font-family="Helvetica, Arial, sans-serif" role="img" aria-labelledby="t d">
   <title id="t">Atari816 architecture</title>
-  <desc id="d">Inside the FPGA: a 65C816 with the FREDDIE II memory manager and 8 MB of RAM, the custom chips Marga, Ali, Lau and POKEY 2, a complete classic Atari 8-bit, and an I/O processor. Outside: keyboard and mouse, SD card, a PC running the link gateway, and an HDMI monitor.</desc>
+  <desc id="d">Inside the FPGA: a 65C816 with the FREDDIE II memory manager and 8 MB of RAM, the custom chips Marga, Ali and Lau, an OPL2 FM synthesizer, a complete classic Atari 8-bit, and an I/O processor. Outside: keyboard and mouse, SD card, a PC running the link gateway, and an HDMI monitor.</desc>
   <defs>
     <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
       <path d="M0 0L10 5L0 10z" fill="#44506a"/>
@@ -61,10 +61,10 @@
   <text class="s" x="400" y="240">copies, lists</text>
 
   <rect class="chip" x="475" y="176" width="130" height="84" rx="6"/>
-  <text class="h" x="540" y="200">Lau + POKEY 2</text>
+  <text class="h" x="540" y="200">Lau + OPL2</text>
   <text class="s" x="540" y="220">8 sample voices,</text>
-  <text class="s" x="540" y="236">48 kHz, and a</text>
-  <text class="s" x="540" y="252">second POKEY</text>
+  <text class="s" x="540" y="236">48 kHz, and FM</text>
+  <text class="s" x="540" y="252">(YM3812)</text>
 
   <rect class="chip" x="620" y="176" width="160" height="84" rx="6"/>
   <text class="h" x="700" y="200">Marga</text>

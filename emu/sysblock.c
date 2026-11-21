@@ -40,7 +40,7 @@ void sys_raise_nmi(uint8_t bits)
 
 void sys_raise_irq(uint8_t bits) { M.sys.irq_status |= bits; machine_update_irq(); }
 
-uint8_t sys_irq_now(void) { return M.sys.irq_status | (mailbox_pending() ? IRQ_IOP : 0) | (audio_irq() ? IRQ_AUDIO : 0); }
+uint8_t sys_irq_now(void) { return M.sys.irq_status | (mailbox_pending() ? IRQ_IOP : 0) | (audio_irq() || opl_irq() ? IRQ_AUDIO : 0); }
 
 static void tick(SysBlock *s)
 {
@@ -169,13 +169,17 @@ void sv_write(uint32_t a, uint8_t v)
     if ((a & 0xFF) == 0x00) M.sys.sv_ctrl = v & 0x04;
 }
 
-/* ── REV $07 sound: no audio is produced; writes are kept and counted (and logged) ── */
+/* ── REV $07 sound: no audio is produced; writes are kept and counted (and logged).
+ * REV $0C: $DB00-$DB0F go to POKEY 1's native register bank (as POKEY 2's did: only while
+ * frozen) and the DACs $DB10-$DB13 are gone: writes there do nothing ── */
 void sound_write(uint32_t a, uint8_t v)
 {
     SysBlock *s = &M.sys;
     int i = a & 0xFF;
+    if (s->rev >= 12 && (i == 0x30 || i == 0x31)) { opl_write(a, v); return; }   /* REV $0C OPL2 */
     if (i >= 0x20) { audio_write(a, v); return; }          /* REV $0A sample player */
     if (s->rev < 7 || i >= 0x14) return;
+    if (s->rev >= 12 && i >= 0x10) return;                 /* REV $0C: no DACs */
     if (!(s->sv_ctrl & 0x04)) { s->snd_ignored++; return; }   /* only while FREEZE_REQ */
     s->snd[i] = v;
     s->snd_writes++;

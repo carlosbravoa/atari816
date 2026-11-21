@@ -20,13 +20,13 @@ All native I/O lives in $00:D800 to $00:DFFF, in 256-byte blocks; user-mode code
 | $00:D800 to $00:D8FF | FREDDIE II | FREDDIE II |
 | $00:D900 to $00:D9FF | Marga (video) | Marga |
 | $00:DA00 to $00:DAFF | Ali (blitter) | Ali |
-| $00:DB00 to $00:DBFF | Native audio: POKEY 2, Lau (sample player) | Native audio |
+| $00:DB00 to $00:DBFF | Native audio: POKEY, Lau (sample player), OPL2 (FM) | Native audio |
 | $00:DC00 to $00:DCFF | Classic supervisor | Classic supervisor |
 | $00:DD00 to $00:DDFF | I/O processor mailbox | Mailbox |
 | $00:DE00 to $00:DEFF | System: ID, interrupts, timers, input routing | System block |
 | $00:DF00 to $00:DFFF | Reserved for expansion |  |
 
-**The custom chips and their register prefixes:** FREDDIE II, the memory manager (FR\_\*); Marga, the video chip (NV\_\*, from its old name, the native video controller or NVC); Ali, the blitter (BL\_\*); Lau, the 8-voice sample player (AU\_\*); POKEY 2, the classic machine's second POKEY lent to the native side (its own register names, at $DB00). The prefixes keep the old names, so code does not change.
+**The custom chips and their register prefixes:** FREDDIE II, the memory manager (FR\_\*); Marga, the video chip (NV\_\*, from its old name, the native video controller or NVC); Ali, the blitter (BL\_\*); Lau, the 8-voice sample player (AU\_\*); POKEY, the classic machine's sound chip lent to the native side while that machine is frozen (its own register names, at $DB00; a second POKEY, "POKEY 2", before REV $0C); the OPL2, a YM3812 FM synthesizer (OPL\_\*, REV $0C). The prefixes keep the old names, so code does not change.
 
 ### 65C816 vectors (native mode)
 
@@ -139,7 +139,7 @@ Every classic chip register, including the write-only ones and the internal coun
 
 | Address | Name | Access | Meaning |
 | --- | --- | --- | --- |
-| $00:DC20 | SV\_CHIP\_SEL | RW | 0 ANTIC, 1 GTIA, 2 POKEY 1, 3 POKEY 2, 4 PIA, 5 ANTIC internal, 6 POKEY internal (counters, polynomials) |
+| $00:DC20 | SV\_CHIP\_SEL | RW | 0 ANTIC, 1 GTIA, 2 POKEY, 3 reserved (the second POKEY of REV $07 to $0B), 4 PIA, 5 ANTIC internal, 6 POKEY internal (counters, polynomials) |
 | $00:DC21 | SV\_CHIP\_IDX | RW | Register index within the chip |
 | $00:DC22 | SV\_CHIP\_DATA | RW | Value; each access increments SV\_CHIP\_IDX |
 
@@ -339,20 +339,43 @@ A command list lets the blitter run many blits without the CPU: the CPU writes t
 - Records are read through the blitter's own memory port (video fetch, then CPU, then blitter); the CPU's writes reach RAM at once (write-through cache), so no flush is needed before LIST.
 - WAIT\_VBL is the cheap way to a tear-free update: put it on the first record of a frame's work; the blits then start in vertical blank (about 870 µs before line 0 is fetched).
 
-## Native audio — $DB00: POKEY 2 and Lau
+## Native audio — $DB00: POKEY, Lau and the OPL2
 
-Two parts share $00:DB00 to $00:DBFF: the classic machine's second POKEY and four DACs, lent to the 65C816 while the classic machine is frozen (REV $07), and Lau, the 8-voice sample player, which plays from main RAM (REV $0A). Both are mixed with the classic machine's sound into the HDMI audio.
+Three parts share $00:DB00 to $00:DBFF: the classic machine's POKEY, lent to the 65C816 while the classic machine is frozen (REV $07; from REV $0C it is the machine's one POKEY, playing a register bank of its own); Lau, the 8-voice sample player, which plays from main RAM (REV $0A); and the OPL2, a YM3812 FM synthesizer (REV $0C). All are mixed with the classic machine's sound into the HDMI audio.
 
-**Status (2026-11-17):** Lau is in the default build from REV $0A (bring-up log, step 17). A build with `A816_NO_SAMPLER` defined in `core/src/tang_top.sv` leaves it out and reports REV $09; there $DB20 to $DBFF read 0 and ignore writes.
+**Status (2026-11-21):** REV $0C is the default build (bring-up log, step 25). A build with `A816_NO_SAMPLER` defined in `core/src/tang_top.sv` leaves Lau out and reports REV $09; there $DB20 to $DB2F and $DB80 to $DBFF read 0 and ignore writes.
 
-### POKEY 2 and DACs (REV $07)
+### POKEY (REV $07; native register bank from REV $0C)
 
 | Address | Name | Access | Meaning |
 | --- | --- | --- | --- |
-| $00:DB00 to $00:DB0F | POKEY 2 | W | The classic machine's second POKEY (AUDF1 to SKCTL), only while SV\_CTRL.FREEZE\_REQ is set |
-| $00:DB10 to $00:DB13 | DAC0 to DAC3 | W | 8-bit DACs: 0 and 1 left, 2 and 3 right, same condition |
+| $00:DB00 to $00:DB0F | POKEY | W | POKEY's sound registers (below), only while SV\_CTRL.FREEZE\_REQ is set |
+| $00:DB10 to $00:DB13 | DAC0 to DAC3 | W | REV $07 to $0B only: 8-bit DACs, 0 and 1 left, 2 and 3 right, same condition. Gone in REV $0C (writes do nothing): use Lau |
 
-They run from a 1.79 MHz tick that does not stop with the freeze; the frozen first POKEY is left out of the mix. Horizon must silence them before resuming the classic machine.
+**REV $0C.** The classic machine has one POKEY and its sound is mono (the second POKEY and the DACs made room for the OPL2). While the machine is frozen, that POKEY's sound generators play from a second register bank that only these writes reach: AUDF1 to AUDF4 and AUDC1 to AUDC4 ($DB00 to $DB07), AUDCTL ($DB08), STIMER ($DB09) and bits 0 and 1 of SKCTL ($DB0F: both 0 holds the clock dividers and the noise generators in reset, which is the state after a reset, so write 3 once). Writes to the other addresses do nothing. The classic machine's own registers (its AUDF, AUDC, AUDCTL and SKCTL, the interrupts, the serial port, the keyboard scan and the paddles) are neither changed nor run meanwhile, and take over again when the machine resumes: a frozen game finds its sound as it left it. The GTIA click is left out of the mix while the machine is frozen.
+
+**REV $07 to $0B.** These writes went to the classic machine's second POKEY (all its registers, AUDF1 to SKCTL), and the frozen first POKEY was left out of the mix.
+
+In every revision the generators run from a 1.79 MHz tick that does not stop with the freeze, and Horizon must silence them before resuming the classic machine.
+
+### OPL2 (FM synthesizer) — $DB30 (REV $0C)
+
+A YM3812 (the chip of the AdLib card; the JTOPL core): nine two-operator FM channels, or six and five rhythm instruments, four waveforms, two timers. Programs written for the AdLib's two ports work with the addresses changed.
+
+| Address | Name | Access | Meaning |
+| --- | --- | --- | --- |
+| $00:DB30 | OPL\_ADDR | W | Selects the OPL2 register ($01 to $F5) that the next OPL\_DATA write goes to |
+| $00:DB30 | OPL\_STAT | R | Bit 7 IRQ (a timer flag is set), bit 6 timer 1 overflowed, bit 5 timer 2 overflowed, bits 4 to 0 read 00110: $06 when idle, as a YM3812 |
+| $00:DB31 | OPL\_DATA | W | Value for the selected register |
+| $00:DB32 to $00:DB33 | OPL\_OUT | R | The OPL2's output now (signed 16-bit; not latched, changes at 49.8 kHz) |
+
+- **Registers** are the YM3812's ($01 test and waveform enable, $02 to $04 timers, $08, $20 to $35, $40 to $55, $60 to $75, $80 to $95 operators, $A0 to $A8, $B0 to $B8, $C0 to $C8 channels, $BD rhythm, $E0 to $F5 waveforms); see its data sheet.
+- **Clock.** 3.5859 MHz (clk\_core / 8), 0.18% above the AdLib's 3.5795 MHz: notes are 3 cents sharp. One output sample every 72 clocks (49.80 kHz); the HDMI audio takes the latest one at 48 kHz.
+- **Write timing.** A register that belongs to a channel or an operator ($20 and up) takes its new value within one output sample (20.1 µs) of the OPL\_DATA write; a second OPL\_DATA write before that may replace the first, so leave 21 µs between data writes. OPL\_ADDR needs no wait. (Horizon's opl\_write waits 5 µs after the address and 26 µs after the data, enough for a real chip too.) Both writes are registered once before they reach the chip.
+- **Timers.** Timer 1 counts in steps of 288 clocks (80.3 µs), timer 2 in steps of 1,152 (321.3 µs), from the value in $02 / $03 up to 256; register $04 as in the YM3812 (bit 0 and 1 start them, bit 6 and 5 mask their flags, bit 7 clears the flags). The AdLib detection sequence works unchanged.
+- **Interrupt.** While OPL\_STAT bit 7 is set the AUDIO interrupt (IRQ\_STATUS bit 5) is set, together with Lau's; clear it by writing $80 to register $04.
+- **Mix.** The output is added to both HDMI channels at full scale, next to the classic mix and Lau, and the sum is saturated.
+- The OPL2 runs whether the classic machine is frozen or not. While the 65C816 is held in reset (restart) it is reset: all registers 0, silent.
 
 ### Lau (sample player) — $DB20 (REV $0A)
 
@@ -394,7 +417,7 @@ Samples are signed (8-bit: -128 to 127; 16-bit: -32768 to 32767).
 - **Position.** The position is POS + FRAC / 16384. Each output sample adds V\_PITCH to it. When POS reaches LEN: with LOOP, POS = POS - LEN + V\_LOOP (the overshoot is kept; LEN - LOOP must be at least 4, else at least the step); without LOOP the voice stops and outputs nothing more. Either way the voice's AU\_END bit is set.
 - **No interpolation.** A voice outputs the sample at its position (the last one it read) until the position moves on. Linear interpolation was planned but left out: it cost about 90 logic cells, a multiplier and a second stored sample per voice, more than the budget allowed. Samples recorded near 48 kHz, or played near pitch $4000, sound clean; low-rate samples played slowly get the usual stair-step aliasing.
 - **Start.** KEYON takes effect within four output samples (83 µs, the output FIFO below); the first output of the voice is sample 0.
-- **Mix.** Per voice, a 16-bit value (8-bit samples are multiplied by 256) times its volume, divided by 512 (arithmetic shift, rounding down); the sum over the voices (18 bits) times AU\_MASTER / 256, saturated to 16 bits: L = sat(Σ (sample × V\_VOL\_L >> 9) × AU\_MASTER >> 8), likewise R. One voice at full volume and AU\_MASTER $FF reaches half of full scale; louder sums are clipped. The HDMI output is the classic machine's mix (POKEYs, DACs, as before but shifted by +16384, so that its silence sits at -16384 instead of -32768) plus L and R, saturated.
+- **Mix.** Per voice, a 16-bit value (8-bit samples are multiplied by 256) times its volume, divided by 512 (arithmetic shift, rounding down); the sum over the voices (18 bits) times AU\_MASTER / 256, saturated to 16 bits: L = sat(Σ (sample × V\_VOL\_L >> 9) × AU\_MASTER >> 8), likewise R. One voice at full volume and AU\_MASTER $FF reaches half of full scale; louder sums are clipped. The HDMI output is the classic machine's mix (POKEY and GTIA, as before but shifted by +16384, so that its silence sits at -16384 instead of -32768) plus L and R, plus the OPL2 on both channels (REV $0C), saturated.
 - **Memory.** A voice reads its samples as 8-byte blocks and keeps the last one, so at pitch $4000 it reads RAM once every 8 (8-bit) or 4 (16-bit) output samples. Reads go through Ali's memory port with priority after Marga's line fetch and before the sprite fetch, the CPU and the blitter (REV $0B; in REV $0A after the CPU). The player computes up to four output samples ahead into a FIFO; a sample that is not ready when the HDMI takes it repeats the last one and counts in AU\_LATE.
 - Lau runs whether the classic machine is frozen or not. While the 65C816 is held in reset (restart) all its registers return to their reset values and it is silent.
 - Like Ali, it reads RAM behind the 65C816's cache: samples the CPU has just written are in RAM already (write-through), nothing to flush.

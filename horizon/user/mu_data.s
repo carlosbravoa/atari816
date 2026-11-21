@@ -148,7 +148,8 @@ errtab: .word   $44, e_nofile, $45, e_nopath, $46, e_name, $47, e_denied, $41, e
         .word   E_NOLINK, e_nolink, E_LOST, e_lost, E_NOSVC, e_nosvc, E_BADADDR, e_badaddr
         .word   E_NONAME, e_noname, E_REFUSED, e_refused, E_TIMEOUT, e_timeout
         .word   E_HTTP, e_http, E_CLOSED, e_closed, E_TLS, e_tls, E_PCBUSY, e_pcbusy
-        .word   E_NET, e_net, ENOMEM, e_nomem, ENODEV, e_nodev, EMS_FORMAT, e_format, 0
+        .word   E_NET, e_net, ENOMEM, e_nomem, ENODEV, e_nodev, EMS_FORMAT, e_format
+        .word   EMS_NOOPL, e_noopl, EMS_OPLBUSY, e_oplbusy, 0      ; (0.27) MIDI
 e_nofile: .byte "File not found.", 0
 e_nopath: .byte "Folder not found.", 0
 e_name: .byte   "Not a valid file name.", 0
@@ -171,6 +172,8 @@ e_net:  .byte   "Network error.", 0
 e_nomem: .byte  "Not enough memory for this song.", 0
 e_nodev: .byte  "No Lau: the sample player is not there.", 0
 e_format: .byte "Not a module (MOD) or a WAV file Music can play.", 0
+e_noopl: .byte  "MIDI needs the OPL2 (hardware revision $0C).", 0
+e_oplbusy: .byte "The OPL2 is in use by another program.", 0
 
 ; alerts
 al_nolau: .word AL_INFO

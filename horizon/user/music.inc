@@ -45,8 +45,12 @@ MST_PLAYING = 3
 MST_PAUSED  = 4
 MST_ENDED   = 5 ; played to its end (MC_LOOP 0)
 MST_ERROR   = 6 ; the load failed: [5] = the error (a file error $40+, ENOMEM, ENODEV no Lau,
-                ;   EMS_FORMAT not a module or WAV file it can play)
+                ;   EMS_FORMAT not a module or WAV file it can play, (0.27) EMS_NOOPL a MIDI
+                ;   file without the OPL2, EMS_OPLBUSY a MIDI file whose play found the OPL2
+                ;   taken by another program)
 EMS_FORMAT  = $FE
+EMS_NOOPL   = $FD ; (0.27) MIDI needs the OPL2 (hardware REV $0C)
+EMS_OPLBUSY = $FC ; (0.27) another program owns the OPL2
 
 ; ---- the info block (MC_READ area 1) ----
 MI_KIND   = 0   ; u8 0 nothing, 1 MOD, 2 WAV, 3 MIDI (OPL2, REV $0C+)

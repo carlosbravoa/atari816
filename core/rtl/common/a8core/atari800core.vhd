@@ -185,8 +185,9 @@ ENTITY atari800core IS
 		ROM_IN_RAM : in std_logic;
 		THROTTLE_COUNT_6502 : in STD_LOGIC_VECTOR(5 DOWNTO 0);
 		HALT : in std_logic;
-		-- Atari816 native sound: while A816_SND = 1 (classic machine frozen) the second
-		-- POKEY and the four COVOX DACs belong to the 65C816 and keep running
+		-- Atari816 native sound: while A816_SND = 1 (classic machine frozen) POKEY plays
+		-- its native register bank, written by the 65C816 at $00:DB00-$DB0F (REV $0C;
+		-- before that a second POKEY and the four COVOX DACs)
 		A816_SND : in std_logic := '0';
 		A816_SND_WR : in std_logic := '0';
 		A816_SND_ADDR : in std_logic_vector(4 downto 0) := (others=>'0');
@@ -318,8 +319,8 @@ signal AUDIO_R_pre : std_logic_vector(15 downto 0);
 signal covox_write_enable : std_logic;
 -- Atari816 native sound
 signal snd_free_179 : std_logic;
-signal snd_p2_en, snd_p2_wr, snd_mix_en, snd_cvx_wr, snd_stereo : std_logic;
-signal snd_p2_addr : std_logic_vector(3 downto 0);
+signal snd_pk_wr, snd_mix_en, snd_cvx_wr, snd_gtia : std_logic;
+signal snd_pk_addr : std_logic_vector(3 downto 0);
 signal snd_cvx_addr : std_logic_vector(1 downto 0);
 signal snd_data : std_logic_vector(7 downto 0);
 signal snd_l0, snd_l1, snd_l2, snd_l3 : std_logic_vector(3 downto 0);
@@ -447,16 +448,18 @@ PORT MAP(CLK => CLK,
 		 DATA_OUT => ANTIC_DO,
 		 dma_address_out => ANTIC_ADDR);
 
--- Atari816 (opl2 branch): POKEY 2 removed (mono classic POKEY 1; OPL2 added for native FM).
--- While the classic machine is frozen (A816_SND=1), route native $00:DB00-$DB0F writes to
--- POKEY 1's isolated native audio register bank so Horizon chimes/alerts/beeps work without
--- disturbing classic Atari's AUDF/AUDC/AUDCTL/SKCTL/IRQ/SIO/keyboard/POT state.
+-- Atari816 REV $0C: one POKEY, mono (the second POKEY and the COVOX DACs made room for the
+-- OPL2). While the classic machine is frozen (A816_SND = 1) the native writes to
+-- $00:DB00-$DB0F go to POKEY's native register bank (pokey.vhdl, NATIVE_MODE) and POKEY runs
+-- from a 1.79 MHz tick that does not stop with the freeze: Horizon's chime and beeps play
+-- without touching the classic machine's AUDF/AUDC/AUDCTL/SKCTL, interrupts, serial port,
+-- keyboard scan or paddles. The GTIA click is left out of the mix meanwhile.
 snd_free_div : entity work.enable_divider
 	generic map (COUNT=>cycle_length)
 	port map(clk=>CLK,reset_n=>RESET_N,enable_in=>'1',enable_out=>snd_free_179);
 snd_mix_en   <= snd_free_179 when A816_SND = '1' else ANTIC_ENABLE_179;
-snd_p2_wr    <= (A816_SND_WR and not A816_SND_ADDR(4)) when A816_SND = '1' else POKEY_WRITE_ENABLE;
-snd_p2_addr  <= A816_SND_ADDR(3 downto 0) when A816_SND = '1' else PBI_ADDR_INT(3 downto 0);
+snd_pk_wr    <= (A816_SND_WR and not A816_SND_ADDR(4)) when A816_SND = '1' else POKEY_WRITE_ENABLE;
+snd_pk_addr  <= A816_SND_ADDR(3 downto 0) when A816_SND = '1' else PBI_ADDR_INT(3 downto 0);
 snd_cvx_wr   <= (A816_SND_WR and A816_SND_ADDR(4)) when A816_SND = '1' else covox_write_enable;
 snd_cvx_addr <= A816_SND_ADDR(1 downto 0) when A816_SND = '1' else pbi_addr_int(1 downto 0);
 snd_data     <= A816_SND_DATA when A816_SND = '1' else WRITE_DATA(7 DOWNTO 0);
@@ -464,7 +467,7 @@ snd_l0 <= POKEY1_CHANNEL0;
 snd_l1 <= POKEY1_CHANNEL1;
 snd_l2 <= POKEY1_CHANNEL2;
 snd_l3 <= POKEY1_CHANNEL3;
-snd_stereo <= GTIA_SOUND and not A816_SND;
+snd_gtia <= GTIA_SOUND and not A816_SND;
 POKEY2_CHANNEL0 <= (others => '0');
 POKEY2_CHANNEL1 <= (others => '0');
 POKEY2_CHANNEL2 <= (others => '0');
@@ -474,7 +477,7 @@ POKEY2_DO <= POKEY_DO;
 pokey_mixer_both : entity work.pokey_mixer_mux
 PORT MAP(CLK => CLK,
 		 ENABLE_179 => snd_mix_en,
-		 GTIA_SOUND => snd_stereo,
+		 GTIA_SOUND => snd_gtia,
 		 SIO_AUDIO => SIO_AUDIO,
 		 CHANNEL_L_0 => snd_l0,
 		 CHANNEL_L_1 => snd_l1,
@@ -673,13 +676,13 @@ PORT MAP(CLK => CLK,
 pokey1 : entity work.pokey
 PORT MAP(CLK => CLK,
 		 ENABLE_179 => snd_mix_en,
-		 WR_EN => snd_p2_wr,
+		 WR_EN => snd_pk_wr,
 		 RESET_N => RESET_N,
 		 SIO_IN1 => SIO_RXD,
 		 SIO_CLOCKIN_IN => SIO_CLOCKIN_IN,
 		 SIO_CLOCKIN_OUT => SIO_CLOCKIN_OUT,
 		 SIO_CLOCKIN_OE => SIO_CLOCKIN_OE,
-		 ADDR => snd_p2_addr,
+		 ADDR => snd_pk_addr,
 		 DATA_IN => snd_data,
 		 keyboard_response => KEYBOARD_RESPONSE,
 		 POT_IN => POT_IN,

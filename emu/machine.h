@@ -10,6 +10,7 @@
 #include "nvc.h"
 #include "blitter.h"
 #include "audio.h"
+#include "opl.h"
 
 #define RAM_SIZE   0x800000u            /* 8 MB: AW = 23 */
 #define CPU_HZ     14343750.0           /* 28.6875 MHz / 2 */
@@ -23,6 +24,7 @@ typedef struct Machine {
     Nvc      nvc;
     Blitter  bl;
     Audio    au;
+    Opl      opl;
     uint64_t next_event;                /* earliest cycle at which some device needs to run */
     int      trace;
 } Machine;

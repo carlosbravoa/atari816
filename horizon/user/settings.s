@@ -5,9 +5,11 @@
 ;                       volume, (0.24) the screen saver (Off, 1, 5, 10 minutes; Test starts
 ;                       /SYSTEM/SAVER.PRG at once). Every change applies at once (the desktop
 ;                       recolours live).
-;                     Classic Atari: the I/O processor's /atari.ini (memory, stereo, keyboard
-;                       layout, arrow keys as joystick, scanlines, horizontal position, boot
-;                       cartridge). These apply at the next full restart.
+;                     Classic Atari: the I/O processor's /atari.ini (memory, keyboard layout,
+;                       arrow keys as joystick, scanlines, horizontal position, boot
+;                       cartridge). These apply at the next full restart. (0.27: no stereo
+;                       row: REV $0C has one POKEY for the classic machine, so the core's
+;                       stereo key does nothing; a stereo line in the file is kept as it is.)
 ;                     Save writes /SYSTEM/CONFIG (and /atari.ini when a Classic Atari value
 ;                     changed: then it offers to restart now) and closes; Cancel (Esc, the
 ;                     close box) puts back the values the panel started with and writes
@@ -45,7 +47,6 @@
 ; it keep their defaults); values read with C atoi. The keys, with the defaults:
 ;   ram=128                 128 or 320 (KB; no key: 128, anything else: 320; 0.16: the
 ;                           core has only these two since REV $0A)
-;   stereo=0                non-zero: dual POKEY stereo
 ;   kbdlayout=0             0 Atari key positions, non-zero US PC symbols
 ;   joystick=0              non-zero: the arrow keys drive joystick 1 (Left Alt = fire)
 ;   scanlines=0             value & 3: 0 off, 1 25 %, 2 50 %, 3 75 %
@@ -80,18 +81,17 @@ SEPY    = T + 244
 R_BTN   = T + 256
 RA      = T + 8                         ; the Classic Atari rows: every 24 pixels
 RA_RAM  = RA
-RA_SND  = RA + 24
-RA_KBD  = RA + 48
-RA_JOY  = RA + 72
-RA_SCAN = RA + 96
-RA_HPOS = RA + 120
-RA_BOOT = RA + 144
+RA_KBD  = RA + 24                       ; (0.27: the stereo row is gone)
+RA_JOY  = RA + 48
+RA_SCAN = RA + 72
+RA_HPOS = RA + 96
+RA_BOOT = RA + 120
 VOLX    = 264                           ; the volume's number, right-aligned in 20 pixels
 FBMAX   = 1024
 AMAX    = 4096                          ; /atari.ini at most AMAX - 1 bytes
-NAK     = 7                             ; its keys
-AV_HPOS = 12                            ; aval offsets
-AV_BOOT = 10
+NAK     = 6                             ; its keys
+AV_HPOS = 10                            ; aval offsets
+AV_BOOT = 8
 NSET    = 6                             ; kernel settings 0-5 in val (words)
 SNDN    = 3200                          ; the sound Test sample: 0.2 s at 16 kHz, 8-bit
 
@@ -352,7 +352,7 @@ onclick:
         jmp     loop
 :       ldx     #.loword(adflt)         ; Classic Atari: the firmware's defaults
         ldy     #.loword(aval)
-        jsr     copy14
+        jsr     copy12
         jsr     redraw_atari
         jmp     loop
 @tog:   stx     z:t0                    ; a toggle: which group, which button
@@ -440,7 +440,7 @@ do_save:
         bcs     @aerr
         ldx     #.loword(aval)          ; saved: now the file's values
         ldy     #.loword(aorig)
-        jsr     copy14
+        jsr     copy12
         lda     #1
         sta     rpend
 @cfg:   jsr     build
@@ -953,8 +953,8 @@ setpal: lda     #C_DESK
 ; 18 bytes X -> Y (cur, orig, dflt)
 copy16: lda     #8
         bra     :+
-; 14 bytes X -> Y (aval, aorig, adflt)
-copy14: lda     #6
+; 12 bytes X -> Y (aval, aorig, adflt)
+copy12: lda     #5
 :       sta     z:t0
 :       lda     a:0,x
         sta     a:0,y
@@ -1230,7 +1230,7 @@ pchr:   sep     #$20
 load_ini:
         ldx     #.loword(adflt)
         ldy     #.loword(aval)
-        jsr     copy14
+        jsr     copy12
         stz     alen
         stz     aerr
         ptr     p_ini
@@ -1284,7 +1284,7 @@ load_ini:
         sta     (aend)
         ldx     #.loword(aval)
         ldy     #.loword(aorig)
-        jmp     copy14
+        jmp     copy12
 @bad:   lda     #1
         sta     aerr
         bra     @end
@@ -1460,7 +1460,7 @@ aset:   sta     z:k
         bcc     :-
 @r320:  lda     #320
         bra     @st
-@nram:  cpx     #8
+@nram:  cpx     #6
         bne     @nscan
         lda     z:nl                    ; scanlines: & 3
         and     #3
@@ -1475,7 +1475,7 @@ aset:   sta     z:k
         bcc     @st
 @h48:   lda     #48
         bra     @st
-@bool:  lda     z:nl                    ; stereo, kbdlayout, joystick: non-zero = 1
+@bool:  lda     z:nl                    ; kbdlayout, joystick: non-zero = 1
         ora     z:nh
         beq     @st
         lda     #1
@@ -1723,15 +1723,14 @@ dflt:   .word   1, 8, 40, 5, 8, 300
         .byte   36, 92, 112, 46, 104, 124
 ; /atari.ini: the keys (aval's order), the firmware's defaults, a bit for each key
 ak_ram: .byte   "ram", 0
-ak_ster: .byte  "stereo", 0
 ak_kbd: .byte   "kbdlayout", 0
 ak_joy: .byte   "joystick", 0
 ak_scan: .byte  "scanlines", 0
 ak_boot: .byte  "boot", 0
 ak_hpos: .byte  "hpos", 0
-akeys:  .addr   ak_ram, ak_ster, ak_kbd, ak_joy, ak_scan, ak_boot, ak_hpos, 0
-adflt:  .word   128, 0, 0, 0, 0, 0, 0
-abit:   .word   1, 2, 4, 8, 16, 32, 64
+akeys:  .addr   ak_ram, ak_kbd, ak_joy, ak_scan, ak_boot, ak_hpos, 0
+adflt:  .word   128, 0, 0, 0, 0, 0
+abit:   .word   1, 2, 4, 8, 16, 32
 s_basic: .byte  "basic", 0
 s_ash:  .byte   "ash", 0
 ; the presets (desk, desk2) and the two system colours of their swatch's checker (the
@@ -1773,18 +1772,15 @@ grp_a:  .addr   b_pg1
         .addr   b_ram1
         .word   2
         .addr   v_ram, aval
-        .addr   b_snd1
-        .word   2
-        .addr   v_01, aval + 2
         .addr   b_kbd1
         .word   2
-        .addr   v_01, aval + 4
+        .addr   v_01, aval + 2
         .addr   b_joy1
         .word   2
-        .addr   v_01, aval + 6
+        .addr   v_01, aval + 4
         .addr   b_sc1
         .word   4
-        .addr   v_scan, aval + 8
+        .addr   v_scan, aval + 6
         .addr   b_bt1
         .word   2
         .addr   v_01, aval + AV_BOOT
@@ -1810,7 +1806,6 @@ s_1m:   .byte   "1 min", 0
 s_5m:   .byte   "5 min", 0
 s_10m:  .byte   "10 min", 0
 t_ram:  .byte   "Memory:", 0
-t_snd:  .byte   "Sound:", 0
 t_kbd:  .byte   "Keyboard:", 0
 t_joy:  .byte   "Arrow keys:", 0
 t_scan: .byte   "Scanlines:", 0
@@ -1831,8 +1826,6 @@ s_med:  .byte   "Medium", 0
 s_fast: .byte   "Fast", 0
 s_k128: .byte   "128 KB", 0
 s_k320: .byte   "320 KB", 0
-s_mono: .byte   "Mono", 0
-s_stereo: .byte "Stereo", 0
 s_katari: .byte "Atari layout", 0
 s_kpc:  .byte   "PC layout (US)", 0
 s_cursor: .byte "Cursor keys", 0
@@ -1865,8 +1858,8 @@ ctl_d:  .addr   b_pg1, b_pg2, l_desk, l_mouse, l_delay, l_rate, l_try, l_beep, l
         .addr   b_m1, b_m2, b_m3, b_m4, b_d1, b_d2, b_d3, b_d4, b_r1, b_r2, b_r3
         .addr   f_try, sb_vol, b_test, sb_snd, b_stest
         .addr   l_saver, b_sv1, b_sv2, b_sv3, b_sv4, b_svtest, b_dflt, b_cancel, b_save, 0
-ctl_a:  .addr   b_pg1, b_pg2, l_ram, l_snd, l_kbd, l_joy, l_scan, l_hpos, l_boot
-        .addr   b_ram1, b_ram2, b_snd1, b_snd2, b_kbd1, b_kbd2
+ctl_a:  .addr   b_pg1, b_pg2, l_ram, l_kbd, l_joy, l_scan, l_hpos, l_boot
+        .addr   b_ram1, b_ram2, b_kbd1, b_kbd2
         .addr   b_joy1, b_joy2, b_sc1, b_sc2, b_sc3, b_sc4, sb_hpos, b_bt1, b_bt2
         .addr   b_dflt, b_cancel, b_save, 0
 ; every control (their CT_WIN)
@@ -1875,8 +1868,8 @@ allc:   .addr   l_desk, l_mouse, l_delay, l_rate, l_try, l_beep, l_svol
         .addr   f_try, sb_vol, b_test, sb_snd, b_stest
         .addr   l_saver, b_sv1, b_sv2, b_sv3, b_sv4, b_svtest
         .addr   b_pg1, b_pg2, b_dflt, b_cancel, b_save
-        .addr   l_ram, l_snd, l_kbd, l_joy, l_scan, l_hpos, l_boot
-        .addr   b_ram1, b_ram2, b_snd1, b_snd2, b_kbd1, b_kbd2
+        .addr   l_ram, l_kbd, l_joy, l_scan, l_hpos, l_boot
+        .addr   b_ram1, b_ram2, b_kbd1, b_kbd2
         .addr   b_joy1, b_joy2, b_sc1, b_sc2, b_sc3, b_sc4, sb_hpos, b_bt1, b_bt2, 0
 
         .segment "DATA"
@@ -1926,7 +1919,6 @@ spb:    .faraddr snd
         .word   $1555
         .byte   255, 255, 0, SP_ANY, 0
 l_ram:  mklab   LX, RA_RAM + 6, t_ram
-l_snd:  mklab   LX, RA_SND + 6, t_snd
 l_kbd:  mklab   LX, RA_KBD + 6, t_kbd
 l_joy:  mklab   LX, RA_JOY + 6, t_joy
 l_scan: mklab   LX, RA_SCAN + 6, t_scan
@@ -1934,8 +1926,6 @@ l_hpos: mklab   LX, RA_HPOS + 6, t_hpos
 l_boot: mklab   LX, RA_BOOT + 6, t_boot
 b_ram1: mkbtn   CX, RA_RAM, 116, 0, s_k128
 b_ram2: mkbtn   CX + 120, RA_RAM, 116, 0, s_k320
-b_snd1: mkbtn   CX, RA_SND, 116, 0, s_mono
-b_snd2: mkbtn   CX + 120, RA_SND, 116, 0, s_stereo
 b_kbd1: mkbtn   CX, RA_KBD, 116, 0, s_katari
 b_kbd2: mkbtn   CX + 120, RA_KBD, 116, 0, s_kpc
 b_joy1: mkbtn   CX, RA_JOY, 116, 0, s_cursor
@@ -1970,8 +1960,8 @@ cur:    .res    18                      ; mouse, beep, delay, rate, sound, saver
 val     = cur
 desk    = cur + NSET * 2
 orig:   .res    18
-aval:   .res    14                      ; ram, stereo, kbdlayout, joystick, scanlines, boot, hpos
-aorig:  .res    14
+aval:   .res    12                      ; ram, kbdlayout, joystick, scanlines, boot, hpos
+aorig:  .res    12
 c0:     .res    6                       ; (parse: three numbers)
 tbuf:   .res    64
 obuf:   .res    AMAX + 256

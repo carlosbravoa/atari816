@@ -97,6 +97,7 @@ uint64_t audio_next_event(void) { return A.next; }
 uint8_t audio_read(uint32_t a)
 {
     if (M.sys.rev < 10) return 0;
+    if (M.sys.rev >= 12 && (a & 0xFC) == 0x30) return opl_read(a);   /* REV $0C OPL2 */
     switch (a & 0xFF) {
     case 0x22: return A.playing;
     case 0x23: return A.end;

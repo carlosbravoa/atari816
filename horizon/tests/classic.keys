@@ -25,13 +25,13 @@
 +50 M 18:0:0:0
 +300 M 0:0:0:1
 +100 M 0:0:0:0
-# Scanlines 50% (400, 186)
-8800 M -30:96:0:0
+# Scanlines 50% (400, 162; 0.27: the stereo row above it is gone)
+8800 M -30:72:0:0
 +300 M 0:0:0:1
 +100 M 0:0:0:0
 # Save (456, 334; 0.18: the panel is a row taller; 0.24: one more, the Screen saver)
-10500 M 56:96:0:0
-+50 M 0:52:0:0
+10500 M 56:100:0:0
++50 M 0:72:0:0
 +300 M 0:0:0:1
 +100 M 0:0:0:0
 # the alert: Later (298, 209)

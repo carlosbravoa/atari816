@@ -139,6 +139,14 @@ taken from this tree and used commercially under its own terms, on its own.
     AddrGen.v. The changes are recorded in the git history and are under the
     same GPL-3.0 terms.
 
+  OPL2 (YM3812) FM synthesizer, JTOPL — Jose Tejada Gomez (jotego)
+    src/a816/jtopl/* (the OPL2 subset of JTOPL's hdl/ directory)
+    GNU General Public License v3.0 or later, in the file headers.
+    LICENSES/GPL-3.0.txt
+    Upstream: https://github.com/jotego/jtopl
+    The wrapper src/a816/a816_opl.sv is part of the Atari816 hardware
+    (LICENSE-PORT).
+
   Low-latency SDRAM controller — nand2mario
     src/sdram_nestang.v (32-bit masked writes and half-rate BL2 burst reads
     added here)

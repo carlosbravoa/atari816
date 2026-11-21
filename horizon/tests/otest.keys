@@ -1,0 +1,7 @@
+# (0.27) OTEST on the text shell (NODESK): the OPL2 call (user/otest.s). Its console must
+# match tests/otest.txt (tests/otest-noopl.txt before REV $0C), its OPL2 writes (emu816
+# --log-opl) tests/otest.err.
+1500 {esc}
++1500 otest\n
+# otest 7 (at about 3.4 s) shows the classic machine with a note on: F12 back to the shell
+4400 {F12}

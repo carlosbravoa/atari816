@@ -27,7 +27,6 @@ DWORD fat_from2000(uint32_t t);  // seconds since 2000 -> FAT time (defined belo
 int option_arrow_joystick = 0;              // 1 = arrow keys drive Joystick 1 (Left-Alt = fire)
 int option_scanline_level = 0;              // 0=off,1=25%,2=50%,3=75% scanline brightness
 int option_h_offset = 0;                    // horizontal pan: capture-skip pixels (0..48)
-int option_stereo = 0;                      // 1 = dual-POKEY stereo (POKEY2 @ $D210 -> right); default mono
 int option_kbd_layout = 0;                  // 0 = Atari-positional keys (default), 1 = US-PC symbolic
 int option_folderdrive = 0;                  // (step 3) "folderdrive=N": the folder disk on DN: (0 none)
 static char option_folder[128] __attribute__((section(".sdbuf")));   // "folder=PATH"
@@ -62,7 +61,6 @@ static inline void apply_input_options(void) {
 // Push video options into the hardware config registers.
 static inline void apply_video_options(void) {
     reg_video_opts = (option_scanline_level & 0x3)  // 0x B4 [1:0] scanline level
-                   | ((option_stereo & 1) << 2)     //      [2]   dual-POKEY stereo enable
                    | ((option_kbd_layout & 1) << 3); //      [3]   keyboard: PC symbolic layout
     reg_h_offset   = option_h_offset & 0xFF;        // 0x B8 [7:0] horizontal position
 }
@@ -209,9 +207,6 @@ int load_option()  {
             if (v < 0) v = 0;
             if (v > 48) v = 48;
             option_h_offset = v;
-        }
-        if (strcmp(key, "stereo") == 0) {
-            option_stereo = (atoi(value) != 0);
         }
         if (strcmp(key, "kbdlayout") == 0) {
             option_kbd_layout = (atoi(value) != 0);
@@ -1648,7 +1643,7 @@ static void sys_do_restart(int full) {
         uart_printf("sys: full restart\n");
         // power-on defaults, then /atari.ini (keys left out of the file go back to default)
         option_arrow_joystick = 0; option_scanline_level = 0; option_h_offset = 0;
-        option_stereo = 0; option_kbd_layout = 0; option_ram_idx = 0; option_boot_ash = 0;
+        option_kbd_layout = 0; option_ram_idx = 0; option_boot_ash = 0;
         int r = load_option();
         for (int a = 0; r < 0 && a < 5; a++) {
             delay(50); f_mount(0, "", 0); delay(20);

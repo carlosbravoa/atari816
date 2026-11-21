@@ -23,7 +23,7 @@ finished arcade game in a window).
   - colours: the system palette, palette entries of your own (`pal_alloc`, `pal_set`; shown
     while you have the focus), all 256 in full-screen mode;
   - win_draw for a window's few operations; key down / up events, the mouse, the joysticks
-    (`joystick`), a 10 ms window timer, focus events; POKEY 2 and **Lau** (8 sample voices);
+    (`joystick`), a 10 ms window timer, focus events; POKEY, **Lau** (8 sample voices) and the OPL2 (REV $0C);
     64 KB banks of memory; files.
 - **You do not have**: other video modes than these three, raster code of your own (no
   interrupts in programs: the raster table is the kernel's), sprite collision detection,
@@ -283,7 +283,7 @@ fixed font) and only wait for a key or a click.
 
 `run816.py` runs the game with an input script (`key right 500` holds a key, `click`,
 `shot` takes a picture, `{alt-esc}` / `{alt-tab}` leave and re-enter a full-screen game).
-`--log-sound` lists every POKEY 2 write in `emu.err`, `--log-lau` every write to Lau. Check:
+`--log-sound` lists every POKEY write in `emu.err`, `--log-lau` every write to Lau. Check:
 the title, a few seconds of play, a state change, the game over screen; look at every
 picture (the emulator's screenshots show the full screen, the sprites, the scroll registers
 and the raster table as the monitor would). Test with an older `--rev` too if those boards

@@ -98,6 +98,8 @@ void machine_reschedule(void)
     if (se < n) n = se;
     se = audio_next_event();
     if (se < n) n = se;
+    se = opl_next_event();
+    if (se < n) n = se;
     if (nextkey < nkeys && keys[nextkey].cycle < n) n = keys[nextkey].cycle;
     M.next_event = n;
 }
@@ -108,6 +110,7 @@ void machine_sync_slow(void)
     sys_update(now);
     blitter_update(now);
     audio_update(now);
+    opl_update(now);
     nvc_update(now);
     keys_due(now);
     mailbox_poll(now);
@@ -226,6 +229,7 @@ static void machine_restart(void)
     nvc_reset();
     blitter_reset();
     audio_reset();
+    opl_reset();
     mailbox_reset();
     cpu_reset(&M.cpu);
     machine_reschedule();
@@ -300,11 +304,15 @@ static void usage(void)
         "  --mouse LIST         inject mouse: \"t_ms:dx:dy:wheel:buttons,...\" (e.g. 100:5:-3:0:1)\n"
         "  --rev N              SYS_REV to report: 6 (no sound, no blitter), 7 (sound), 8 (+ blitter),\n"
         "                       9 (+ blitter lists, raster events at the beam, NV_FRAME),\n"
-        "                       10 (+ sample player), 11 (default: + sprites, fine scrolling)\n"
-        "  --wav FILE.wav       write the sample player's output (48 kHz stereo, without the POKEY sound)\n"
-        "  --log-sound          print every accepted sound write ($DB00-$DB13) on stderr\n"
+        "                       10 (+ sample player), 11 (+ sprites, fine scrolling),\n"
+        "                       12 (default: + OPL2 at $DB30, POKEY's native bank, no DACs)\n"
+        "  --wav FILE.wav       write the sample player's output (48 kHz stereo, without POKEY and OPL2)\n"
+        "  --log-sound          print every accepted sound write ($DB00-$DB13; REV 12 $DB00-$DB0F) on stderr\n"
         "  --log-lau            print every write to Lau, the sample player ($DB20-$DBFF, REV 10), on stderr\n"
         "  --log-lau-us         the same, each line with the emulated time in microseconds: lau US $DBxx = $yy\n"
+        "  --log-opl            print every OPL2 data write ($DB31, REV 12) on stderr: opl $RR = $yy\n"
+        "                       (RR the register selected at $DB30)\n"
+        "  --log-opl-us         the same, with the emulated time in microseconds: opl US $RR = $yy\n"
         "  --headless           no window (SDL builds open a 1280x720 window by default)\n"
 #ifdef HAVE_SDL
         "  --fast               window open, but do not throttle to real time\n"
@@ -364,6 +372,8 @@ int main(int argc, char **argv)
         else if (!strcmp(a, "--log-sound")) M.sys.snd_log |= 1;
         else if (!strcmp(a, "--log-lau")) M.sys.snd_log |= 2;
         else if (!strcmp(a, "--log-lau-us")) M.sys.snd_log |= 4;
+        else if (!strcmp(a, "--log-opl")) M.sys.snd_log |= 8;
+        else if (!strcmp(a, "--log-opl-us")) M.sys.snd_log |= 16;
         else if (!strcmp(a, "--wav") && i + 1 < argc) wav_path = argv[++i];
 #ifdef HAVE_SDL
         else if (!strcmp(a, "--headless")) sdl_on = 0;
@@ -425,6 +435,7 @@ int main(int argc, char **argv)
     nvc_reset();
     blitter_reset();
     audio_reset();
+    opl_reset();
     mailbox_reset();
     cpu_reset(&M.cpu);
     machine_reschedule();
@@ -496,9 +507,11 @@ int main(int argc, char **argv)
                 (unsigned long long)M.bl.n_busy_starts, (unsigned long long)M.bl.n_busy_writes,
                 (unsigned long long)M.bl.n_stale_reads, (unsigned long long)M.sys.snd_writes,
                 (unsigned long long)M.sys.snd_ignored);
-        fprintf(stderr, "emu816: %llu blitter lists (%llu records), %llu audio samples, %llu KEYON writes\n",
+        fprintf(stderr, "emu816: %llu blitter lists (%llu records), %llu audio samples, %llu KEYON writes, "
+                "%llu OPL2 data writes\n",
                 (unsigned long long)M.bl.n_lists, (unsigned long long)M.bl.n_records,
-                (unsigned long long)M.au.n_samples, (unsigned long long)M.au.n_keyon);
+                (unsigned long long)M.au.n_samples, (unsigned long long)M.au.n_keyon,
+                (unsigned long long)M.opl.n_writes);
         fprintf(stderr, "emu816: memory timing%s: %llu cache fills, %llu RAM writes, %llu cache sweeps, "
                 "%llu stall cycles (%.1f%%)\n", M.fr.ideal ? " off (--ideal-timing)" : "",
                 (unsigned long long)M.fr.n_fills, (unsigned long long)M.fr.n_wrs,

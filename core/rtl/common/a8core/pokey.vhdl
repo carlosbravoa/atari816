@@ -247,7 +247,7 @@ ARCHITECTURE vhdl OF pokey IS
 	signal audc3_next : std_logic_vector(7 downto 0);
 	signal audctl_next : std_logic_vector(7 downto 0);
 
-	-- Atari816 (opl2 branch): separate native audio register bank so Horizon system sounds
+	-- Atari816 REV $0C: separate native audio register bank so Horizon system sounds
 	-- share POKEY 1 while the classic machine is frozen (NATIVE_MODE=1) without clobbering
 	-- classic Atari's AUDF/AUDC/AUDCTL/SKCTL/IRQ/SIO/keyboard/POT state.
 	signal n_audf0_reg, n_audc0_reg, n_audf1_reg, n_audc1_reg : std_logic_vector(7 downto 0);

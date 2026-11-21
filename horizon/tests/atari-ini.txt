@@ -2,8 +2,6 @@
 # at a full restart. Settings > Classic Atari edits it (only the lines of these keys).
 # ram: 128 or 320 (KB; 320 = RAMBO)
 ram=320
-# stereo: 1 = dual POKEY (the second POKEY at $D210 on the right)
-stereo=0
 # kbdlayout: 0 = Atari key positions, 1 = US PC symbols
 kbdlayout=0
 # joystick: 1 = the arrow keys are joystick 1 (Left Alt = fire)

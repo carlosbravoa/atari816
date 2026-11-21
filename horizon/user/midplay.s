@@ -16,6 +16,7 @@
         .include "horizon.inc"
 
         .export mid_open, mid_play, mid_tick, mid_pause, mid_resume, mid_stop, mid_setvol
+        .export mid_release, mid_cue
         .export mid_bank_init, mid_load_wopl
         .export mid_buf, mid_len, mid_loop
         .export mid_ntrks, mid_bpm, mid_tot_tenths, mid_tenths, mid_frac, mid_lev, mid_state
@@ -33,6 +34,7 @@ NCHAN     = 16
 EMS_FMT   = $FE
 MIDS_SIL_SCAN = 1
 MIDS_SIL_SEEK = 2
+MAX_CHUNKS = 16384      ; (0.27) md_add_dt_us chunks of 1024 ticks in one silent run
 
         .segment "ZEROPAGE"
 md_p:     .res    4             ; 24-bit current read pointer (lo16, bank16)
@@ -186,6 +188,7 @@ mid_open:
         lda     z:md_p+2
         adc     md_u32_hi
         sta     md_cend_bk
+        bcs     @cclamp                 ; (0.27) past 16 bits of banks: the file's end
         ; Clamp chunk end to file end
         cmp     md_fend_bk
         bcc     @cok
@@ -224,7 +227,7 @@ mid_open:
         sta     z:md_p
         lda     md_cend_bk
         sta     z:md_p+2
-        bra     @cloop
+        jmp     @cloop
 
 @cdone: lda     mid_ntrks
         beq     @bad
@@ -252,12 +255,17 @@ mid_open:
 
 ; ----------------------------------------------------------------------------
 ; mid_play: A = starting position in 256ths (0..255).
-; Resets OPL2, resets tracks, fast-forwards to target if A > 0, starts playing.
+; Takes the OPL2 (reset once, 0.27) or keys its notes off, resets tracks, fast-forwards to
+; target if A > 0, starts playing. C set, A = EAGAIN: another program owns the OPL2.
 mid_play:
+        stz     md_cue
+md_play2:
         and     #$00FF
         sta     md_seek_pos
         jsr     opl_hw_init
-        jsr     md_reset_state
+        bcc     :+
+        rts
+:       jsr     md_reset_state
         lda     md_seek_pos
         beq     @go
         ; target_tenths = (pos * mid_tot_tenths) / 256
@@ -280,11 +288,37 @@ mid_play:
         sta     md_target_t
         jsr     md_fastfwd
 @go:    stz     md_silent
-        lda     #MIDS_PLAY
+        lda     md_cue                  ; (0.27) mid_cue: paused here
+        beq     :+
+        lda     #MIDS_PAUSE
+        sta     mid_state
+        clc
+        rts
+:       lda     #MIDS_PLAY
         sta     mid_state
         ; Dispatch tick-0 events right away
         jsr     md_dispatch_due
+        clc
         rts
+
+; mid_cue: (0.27) A = position in 256ths: as mid_play, but paused there (no notes sound
+; before mid_resume; the events due at that tick come with the first mid_tick)
+mid_cue:
+        ldx     #1
+        stx     md_cue
+        bra     md_play2
+
+; ----------------------------------------------------------------------------
+; mid_release: (0.27) stop and give the OPL2 back (SYS_OPLW $FFFD), if it is ours
+mid_release:
+        jsr     mid_stop
+        lda     md_own
+        beq     @x
+        stz     md_own
+        lda     #$FFFD
+        ldx     #0
+        sys     SYS_OPLW
+@x:     rts
 
 ; ----------------------------------------------------------------------------
 ; mid_pause: silence active voices cleanly (preserve song position)
@@ -578,8 +612,15 @@ md_fastfwd:
 md_run_silent:
         stz     md_evcap
         stz     md_evcap+2
+        stz     md_chunks
 @lp:    lda     md_active
         beq     @done
+        lda     mid_tenths              ; (0.27) an hour or the time budget: the end
+        cmp     #35999
+        bcs     @done
+        lda     md_chunks
+        cmp     #MAX_CHUNKS
+        bcs     @done
         ; In seek mode, stop once mid_tenths >= md_target_t
         lda     md_silent
         cmp     #MIDS_SIL_SEEK
@@ -629,8 +670,17 @@ md_run_silent:
 
 ; Accumulate md_dt_lo:md_dt_hi ticks at current md_tempo / md_div into md_us & mid_tenths.
 ; Processes in chunks of <= 1024 ticks so (chunk * md_tempo) never overflows 32 bits.
+; (0.27) It stops at an hour (mid_tenths 35999) and after MAX_CHUNKS chunks in a run (a
+; garbled delta of up to 2^28 ticks would take minutes); the rest of the delta is dropped.
 md_add_dt_us:
-@ck:    lda     md_dt_hi
+@ck:    lda     mid_tenths
+        cmp     #35999
+        jcs     @done
+        lda     md_chunks
+        cmp     #MAX_CHUNKS
+        jcs     @done
+        inc     md_chunks
+        lda     md_dt_hi
         bne     @big
         lda     md_dt_lo
         jeq     @done
@@ -672,7 +722,7 @@ md_add_dt_us:
         bne     @sub10
         lda     md_us_lo
         cmp     #.loword(100000)
-        bcc     @ck
+        jcc     @ck
 @sub10: lda     md_us_lo
         sec
         sbc     #.loword(100000)
@@ -852,9 +902,8 @@ md_proc_event:
         jmp     @next_dt
 
 @sys_or_meta:
-        ; SMF: SysEx and Meta cancel running status
-        ldx     md_trk
-        stz     tr_rstat,x
+        ; SMF: SysEx and Meta cancel running status; (0.27) kept anyway (tolerant: some
+        ; files continue a running status after a meta event)
         lda     md_stat
         cmp     #$00FF
         beq     @meta
@@ -885,15 +934,17 @@ md_proc_event:
         jsr     md_skip_vlq
         jmp     @next_dt
 
-@tempo: lda     md_vlq_hi
+@tempo: lda     md_smpte                ; (0.27) SMPTE division: the tempo stays fixed
+        jne     @tskip
+        lda     md_vlq_hi
         jne     @tskip
         lda     md_vlq_lo
         cmp     #3
         jne     @tskip
-        ; Read 24-bit big-endian microseconds per quarter note
+        ; Read 24-bit big-endian microseconds per quarter note (committed once all three are read)
         jsr     md_getb_chk
         jcs     @end_trk
-        sta     md_tempo_hi             ; top byte (bits 23..16)
+        sta     z:md_t1                 ; top byte (bits 23..16)
         jsr     md_getb_chk
         jcs     @end_trk
         xba
@@ -902,6 +953,8 @@ md_proc_event:
         jcs     @end_trk
         ora     z:md_t0
         sta     md_tempo_lo
+        lda     z:md_t1
+        sta     md_tempo_hi
         ; Clamp tempo to [60000, 3000000] so corrupt files cannot stall
         lda     md_tempo_hi
         bne     @chk_hi
@@ -1087,6 +1140,7 @@ md_cc:  ldx     md_ch
         and     #$007F
         cmp     #64
         bcs     @sust_on
+@sust_off:
         stz     ch_sust,x
         lda     md_silent
         bne     @cc_x
@@ -1138,9 +1192,31 @@ md_cc:  ldx     md_ch
 @cc_rst:
         lda     #127
         sta     ch_expr,x
-        stz     ch_sust,x
         stz     ch_bend,x
-        rts
+        lda     md_silent
+        bne     @rs_x
+        ; (0.27) the sounding voices of md_ch: expression and (melodic) bend applied
+        ldx     #0
+@rsl:   lda     v_state,x
+        cmp     #1
+        bne     @rsn
+        lda     v_ch,x
+        cmp     md_ch
+        bne     @rsn
+        phx
+        stx     md_v
+        jsr     opl_update_vol
+        lda     md_ch
+        cmp     #9 * 2
+        beq     :+
+        jsr     opl_update_pitch
+:       plx
+@rsn:   inx
+        inx
+        cpx     #NVOICE * 2
+        bcc     @rsl
+@rs_x:  ldx     md_ch                   ; the pedal up: the voices it held released
+        jmp     @sust_off
 
         ; Pitch Bend: md_d1 = LSB (7-bit), md_d2 = MSB (7-bit) -> signed -8192..+8191
 md_bend:
@@ -1268,14 +1344,17 @@ md_note_on:
         jsr     md_alloc_voice
         ldx     md_v
 
-        ; Key-off existing voice cleanly before retrigger / patch load
-        lda     v_state,x
+        ; Key-off the voice before retrigger / patch load, whatever its state (0.27: a
+        ; drum freed by its release count may still be keyed on), keeping its pitch
+        lda     v_b0,x
         beq     :+
+        and     #$00DF
+        tay
         lda     md_v
         lsr     a
         clc
         adc     #$00B0
-        ldx     #0
+        tyx
         sys     SYS_OPLW
         ldx     md_v
 
@@ -1307,6 +1386,17 @@ md_note_on:
         jsr     opl_update_vol
         ; Compute pitch (with bend for melodic) and Key-On!
         jsr     opl_update_pitch
+        ; (0.27) A drum gets no Note Off: it is releasing at once (free after ~300 ms), so
+        ; the allocator takes drums before it steals a melodic note
+        lda     md_ch
+        cmp     #9 * 2
+        bne     :+
+        ldx     md_v
+        lda     #2
+        sta     v_state,x
+        lda     #60
+        sta     v_rel,x
+:
 
         ; Update level meter (map voice 0..7 -> meter 0..7, voice 8 -> meter 7)
         lda     md_v
@@ -1436,17 +1526,28 @@ md_alloc_voice:
 ; OPL2 Register Helpers (operate on voice md_v = v*2)
 ; ============================================================================
 
-; Reset OPL2, enable waveform select ($01 = $20), and set bank $BD AM/VIB depth
+; Take the OPL2 and reset it (0.27: only when it is not ours yet; when it is, its voices are
+; keyed off), enable waveform select ($01 = $20), and set bank $BD AM/VIB depth.
+; C set, A = EAGAIN: another program owns it.
 opl_hw_init:
-        lda     #$FFFF
+        lda     md_own
+        beq     :+
+        jsr     opl_all_keyoff
+        bra     @regs
+:       lda     #$FFFF
         ldx     #0
         sys     SYS_OPLW
-        lda     #$0001
+        bcc     :+
+        rts
+:       lda     #1
+        sta     md_own
+@regs:  lda     #$0001
         ldx     #$0020
         sys     SYS_OPLW
         lda     #$00BD
         ldx     md_bd_flags
         sys     SYS_OPLW
+        clc
         rts
 
 ; Key-off all 9 OPL2 voices cleanly (keeping pitch in $B0+v)
@@ -1599,20 +1700,21 @@ mid_load_wopl:
         sta     md_wnprc
 
         ; Global flags at offset 17: bit 0 = deep AM ($80), bit 1 = deep VIB ($40)
+        ; (0.27: into md_wbdf, taken only once the bank is known to fit)
         ldy     #17
         lda     [md_p],y
         and     #$00FF
-        stz     md_bd_flags
+        stz     md_wbdf
         bit     #$0001
         beq     :+
         lda     #$0080
-        tsb     md_bd_flags
+        tsb     md_wbdf
         lda     [md_p],y
         and     #$00FF
 :       bit     #$0002
         beq     :+
         lda     #$0040
-        tsb     md_bd_flags
+        tsb     md_wbdf
 
 :       ; Melodic bank 0 offset = 19 + (ver >= 2 ? 34 * (nb_mel + nb_perc) : 0)
         lda     #19
@@ -1650,7 +1752,9 @@ mid_load_wopl:
         cmp     md_wlen
         beq     :+
         jcs     @bad
-:       ; Convert 128 melodic instruments (bank 0) -> ram_mel
+:       lda     md_wbdf                 ; the bank fits: its depths
+        sta     md_bd_flags
+        ; Convert 128 melodic instruments (bank 0) -> ram_mel
         lda     md_wmoff
         sta     z:md_p
         lda     md_wbk
@@ -1741,6 +1845,10 @@ mid_load_wopl:
 
 ; Convert one WOPL melodic instrument at [md_p] -> 12-byte patch at [md_q]
 wopl_conv_mel:
+        ldy     #39                     ; (0.27) blank: the built-in patch stays
+        lda     [md_p],y
+        and     #$0004
+        bne     @skip
         jsr     wopl_conv_ops
         ; Melodic note offset: signed byte at [md_p]+33
         sep     #$20
@@ -1751,7 +1859,7 @@ wopl_conv_mel:
         sta     [md_q],y
         rep     #$20
         .a16
-        rts
+@skip:  rts
 
 ; Convert one WOPL drum instrument at [md_p] -> 12-byte patch at [md_q]
 wopl_conv_drm:
@@ -2199,7 +2307,11 @@ md_tr_eof:
 
 ; Read 1 byte at [md_p] and advance 24-bit md_p -> A (0..255)
 md_getb:
+        sep     #$20                    ; (0.27: one byte; the next may be in a bank not ours)
+        .a8
         lda     [md_p]
+        rep     #$20
+        .a16
         and     #$00FF
         inc     z:md_p
         bne     :+
@@ -2437,6 +2549,9 @@ md_got_title:   .res    2
 md_seek_pos:    .res    2
 md_target_t:    .res    2
 md_evcap:       .res    4
+md_chunks:      .res    2       ; (0.27) md_add_dt_us chunks in this silent run
+md_own:         .res    2       ; (0.27) 1: the OPL2 is ours (taken by mid_play)
+md_cue:         .res    2       ; (0.27) 1: mid_cue (stay paused)
 md_evlim:       .res    2
 md_active:      .res    2       ; number of tracks not yet ended
 md_trk:         .res    2       ; current track index * 2
@@ -2502,6 +2617,7 @@ v_rel:          .res    NVOICE * 2
 ; Soundbank state & active RAM patch tables (default built-in, overridden by /SYSTEM/OPL2.WOPL)
 md_bd_flags:    .res    2       ; $BD AM/VIB depth flags ($00 or $C0)
 md_wbk:         .res    2
+md_wbdf:        .res    2       ; (0.27) the file's depth flags until the bank is known to fit
 md_wlen:        .res    2
 md_wver:        .res    2
 md_wisize:      .res    2

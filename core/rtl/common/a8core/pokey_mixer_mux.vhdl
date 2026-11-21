@@ -45,7 +45,7 @@ ARCHITECTURE vhdl OF pokey_mixer_mux IS
 	signal VOLUME_POSTLOWPASS_L_REG : STD_LOGIC_VECTOR(15 downto 0);
 BEGIN
 
--- Atari816 (opl2 branch): mono classic mixer (POKEY 1 only; drops filter_right and L/R mux).
+-- Atari816 REV $0C: mono mixer (one POKEY: no right filter, no left/right multiplexing).
 process(clk)
 begin
 	if (clk'event and clk='1') then

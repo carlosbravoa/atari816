@@ -850,3 +850,86 @@ restarting the gateway) brings it back.
 0x500000, then the bitstream); the board came up from flash to the Horizon 0.23 desktop, the folder
 disk mounted again from /atari.ini, self test 11 OK + DONE. `core/impl/net1/` stays the fallback
 (with its own `cold.bin`; it has neither the keyboard fix nor step 3).
+
+## Step 25: the OPL2, one POKEY, Horizon 0.27 (2026-11-20 and 21, REV $0C)
+
+**What changed in the hardware** (register spec, "Native audio"):
+
+- **An OPL2** (YM3812, the JTOPL core, GPL-3.0) at $00:DB30 to $00:DB33, clocked at
+  clk\_core / 8 = 3.5859 MHz, mixed into both HDMI channels; its timer interrupt is ORed into
+  AUDIO (IRQ\_STATUS bit 5). Writes and reads are registered once (`a816_opl.sv`), so the chip is
+  not on the 65C816's critical path.
+- **Room for it:** Lau's voice state, sample blocks and output FIFO share one 64 x 32 block RAM
+  (7 block RAMs became 2; three more engine states); the key translation table of
+  `usb_to_atari800.sv` is used in turn by the four key slots; the hardware CH9350 decoder
+  (`uart_kbd_ch9350.sv`) is gone (the firmware's parser, which already fed Horizon, now feeds
+  the classic keyboard too, through the UART's 64-byte FIFO); the flash is read by the firmware
+  bit by bit (it is only read at boot, for the cold part); the diagnostic counters and LEDs of
+  the bring-up are gone.
+- **One POKEY, mono.** The second POKEY, the right-channel filter and the COVOX DACs are gone
+  (`covox = 0`; the `stereo` key of /atari.ini and Settings' Stereo row with them). Native sound
+  ($00:DB00 to $DB0F) now plays on the classic machine's POKEY while that machine is frozen,
+  from a second register bank (`pokey.vhdl`, NATIVE\_MODE): AUDF, AUDC, AUDCTL, STIMER and the
+  two initialization bits of SKCTL. The classic registers, interrupts, serial port, keyboard
+  scan and paddles neither change nor run meanwhile; with NATIVE\_MODE = 0 the chip's logic is
+  what it was. $00:DB10 to $DB13 (the DACs) do nothing.
+
+**A black screen when opening files** was seen on one of the builds of 2026-11-20, after the
+native sound was first moved to the classic POKEY. Not reproduced on the last build of that day
+nor on this step's. The likely cause (not proven: the intermediate builds were not kept) is that
+build writing Horizon's SKCTL and AUDCTL into the classic machine's own POKEY registers, so
+that a program opened with "Run in Atari" could not be read over SIO and the classic screen
+stayed black; the separate register bank was added right after it. Checked on the final build:
+timing closed, the HDMI canary at 2.2 ns, an .XEX opened from Files boots through SIO and F12
+returns, 7 times of 7.
+
+| | Step 24 (`dev`) | Step 25 |
+| --- | --- | --- |
+| Logic | 16,596 / 20,736 (81%) | 16,752 (81%) |
+| Registers | 8,325 | 8,322 |
+| CLS | 9,395 / 10,368 (91%) | 9,373 (91%) |
+| Block RAM | 44 / 46 | 43 / 46 |
+| DSP | 4 / 24 | 5 / 24 |
+| clk\_core (needs 28.69 MHz) | 31.85 MHz | 30.74 MHz |
+| clk\_pix (needs 71.72 MHz) | 89.83 MHz | 85.21 MHz |
+| HDMI canary | | 2.207 ns |
+| Setup / hold violations | 0 / 0 | 0 / 0 (worst hold 0.074 ns) |
+
+(The step 24 column is the figure recorded when the OPL2 work started.)
+
+**Audit of 2026-11-21** (the OPL2 work had been done without the emulator, the tests or the
+documents):
+
+- RTL simulation (`core/sim_a816/run.sh`): `opltest_sim.bin` (status, AdLib timer detection,
+  a tone with both signs), `sampler_sim.bin` (Lau on the shared block RAM: AU\_LATE 0) and
+  `a816_sim.bin` pass. The committed firmware images match their sources (only the build date
+  differs).
+- Removed what was left of the stereo option (firmware, `iosys_picorv32.v`, `tang_top.sv`) and
+  the two source files no longer built (`uart_kbd_ch9350.sv`, `spiflash.v`). The netlist did
+  not change (same cells, same timing); the bitstream was rebuilt for the firmware.
+- **emu816 is REV $0C**: the OPL2's registers, status, timers and interrupt (no sound: `--wav`
+  is still Lau only), `--log-opl`, no DACs; `--rev 11` and lower as before.
+- **Horizon 0.27** (horizon/README.md): `opl_write` ($6D) with one owner at a time, key-offs
+  only while the classic machine is shown; MIDI files in Music; the OPL2 program. A review of
+  the new MIDI player found, and this step fixed: a chunk length that wraps hung the engine (a
+  22-byte file is enough); a file whose size is a multiple of 64 KB killed it (a 16-bit read
+  of the last byte); drum voices were never freed, so held notes were cut; a huge delta time
+  stalled loading for minutes; Set Tempo was applied in SMPTE files; controller 121 left
+  pedal-held notes sounding; a board without the OPL2 said "No Lau". Each has a test
+  (`horizon/tests/midrun.py`) that fails on the old code.
+- Tests: `make -C horizon test` 154 PASS at REV $0C, and passes with `--rev 11`, `10`, `9`
+  and `7`; `make -C emu test` 33 of 33; `make -C sdk test` passes.
+
+**Known limits.** The classic keyboard now depends on the firmware reading the UART in time
+(64 bytes of FIFO, about 5 reports); it polls during long requests since step 22. The freeze is
+not synchronized with the classic machine's bus cycle: a POKEY write of the 6502 in the very
+clock where the freeze begins would be lost (one clock in a write cycle; not seen). The OPL2 is
+3 cents sharp (3.5859 MHz instead of 3.5795). A build with `A816_NO_SAMPLER` still contains the
+OPL2 but reports REV $09.
+
+**Board** (build `core/impl/opl2_b/`, flashed with its `cold.bin`; `core/impl/opl2_a/` is the
+build of 2026-11-20, the same netlist with the firmware before the cleanup): Horizon 0.27
+installed over the PC link and restarted; `canyon.mid` opened from Files plays in Music (the
+time and the meters run); JOYTEST.xex opened from Files runs on the classic machine and F12
+returns. Not checked here, because it needs eyes and ears at the board: the HDMI picture itself
+during these tests, and the sound.

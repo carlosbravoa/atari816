@@ -22,6 +22,7 @@ BLITTEST=$T/BLITTEST.BIN; [ -f $SW/BLITTEST.BIN ] && BLITTEST=$SW/BLITTEST.BIN
 BLITLIST=$T/BLITLIST.BIN; [ -f $SW/BLITLIST.BIN ] && BLITLIST=$SW/BLITLIST.BIN
 SAMPLER=$T/SAMPLER.BIN; [ -f $SW/SAMPLER.BIN ] && SAMPLER=$SW/SAMPLER.BIN
 SPRTEST=$T/SPRTEST.BIN; [ -f $SW/SPRTEST.BIN ] && SPRTEST=$SW/SPRTEST.BIN
+OPLTEST=$T/OPLTEST.BIN; [ -f $SW/OPLTEST.BIN ] && OPLTEST=$SW/OPLTEST.BIN
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
 
@@ -125,6 +126,24 @@ if [ $REVN -ge 11 ]; then
     done
     [ -z "$bad_sc" ] && ok "sprscene 1-10 (sprites, scrolling, split: identical to the RTL's frames)" || bad "sprscene pictures differ:$bad_sc"
 else skip "SPRTEST.BIN and the sprite scenes (REV 0B)"; fi
+
+# ── OPL2 REV $0C. OPLTEST is the hardware self test: STAT and TIMER must pass; its TONE part
+# needs the FM synthesis the emulator does not have ($DB32/$DB33 read 0), so it must fail
+# there, and only there. tests/asm/opltimer: the timers' periods (A 1,285 us and B 5,140 us at
+# $F0), a masked flag, IRQ_STATUS bit 5 waking WAI, a new value at the next overflow, a
+# stopped timer; with --log-sound only $DB00 of its two frozen writes is taken (no DACs) ──
+if [ $REVN -ge 12 ]; then
+    out=$($EMU --max-seconds 5 $OPLTEST 2>/dev/null)
+    [ "$out" = "$(printf 'OPL2 TEST REV %s\nSTAT OK\nTIMER OK\nTONE FAIL\nOPL2 FAIL\nDONE' "$REV")" ] \
+        && ok "OPLTEST.BIN (status \$06, AdLib timer detection, AUDIO IRQ; TONE fails: no synthesis)" || bad "OPLTEST.BIN" "$out"
+    out=$($EMU --max-seconds 5 --log-sound $T/asm/opltimer.bin 2>"$TMP/opl.err")
+    if [ "$out" = "$(sed "s/REV 0C/REV $REV/" $T/expected/opltimer.txt)" ] && [ "$(cat "$TMP/opl.err")" = 'sound $DB00 = $12' ]; then
+        ok "opltimer (timer periods, masks, AUDIO IRQ and WAI, reload, stop; no DACs)"; else bad "opltimer" "$out
+$(cat "$TMP/opl.err")"; fi
+else
+    out=$($EMU --max-seconds 5 $OPLTEST 2>/dev/null)
+    printf '%s\n' "$out" | grep -qx "STAT FAIL 00" && ok "OPLTEST.BIN before REV 0C: no OPL2 (status reads 00)" || bad "OPLTEST.BIN (no OPL2)" "$out"
+fi
 
 # ── fixed RTL issues (see README): the aborted COP stays in user mode, E-mode IRQ pushes B=0 ──
 out=$($EMU --max-seconds 5 $T/asm/copabort.bin)

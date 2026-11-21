@@ -86,12 +86,14 @@ start:  sys     SYS_SINGLE              ; one instance only
         sys     SYS_OPLW
         bcs     @no_opl
         sta     opl_st
-        lda     #1
-        sta     has_opl
-        ; Reset OPL2 and enable OPL2 waveform select ($01 = $20)
+        ; Reset OPL2 (0.27: this takes the chip, once; EAGAIN: Music or another program
+        ; has it) and enable OPL2 waveform select ($01 = $20)
         lda     #$FFFF
         ldx     #0
         sys     SYS_OPLW
+        bcs     @busy
+        lda     #1
+        sta     has_opl
         lda     #$0001
         ldx     #$0020
         sys     SYS_OPLW
@@ -102,6 +104,11 @@ start:  sys     SYS_SINGLE              ; one instance only
         sta     l_stat + LB_TEXT
         bra     @draw
 
+@busy:  lda     #.loword(s_hw_busy)
+        sta     l_hw + LB_TEXT
+        lda     #.loword(s_busy)
+        sta     l_stat + LB_TEXT
+        bra     @draw
 @no_opl:
         lda     #.loword(s_hw_no)
         sta     l_hw + LB_TEXT
@@ -358,9 +365,7 @@ stop_all:
         sta     lau_v
 :       lda     has_opl
         beq     :+
-        lda     #$FFFF                  ; reset OPL2
-        ldx     #0
-        sys     SYS_OPLW
+        jsr     opl_keyoff_all          ; (0.27: no reset, the chip is ours since the start)
         lda     #$0001
         ldx     #$0020                  ; re-enable OPL2 waveforms
         sys     SYS_OPLW
@@ -720,6 +725,21 @@ opl_note_on:
         sys     SYS_OPLW
         rts
 
+; (0.27) every channel keyed off ($B0-$B8 = 0) and the rhythm off ($BD = 0)
+opl_keyoff_all:
+        lda     #$00B0
+:       pha
+        ldx     #0
+        sys     SYS_OPLW
+        pla
+        inc     a
+        cmp     #$00B9
+        bcc     :-
+        lda     #$00BD
+        ldx     #0
+        sys     SYS_OPLW
+        rts
+
 ; A = channel (0..8)
 opl_note_off:
         clc
@@ -931,6 +951,8 @@ wdraw:  lda     win
 t_title:   .byte "OPL2 FM Synth", 0
 s_hw_ok:   .byte "YM3812 OPL2 ready (REV $0C)", 0
 s_hw_no:   .byte "No OPL2 hardware (needs REV $0C+)", 0
+s_hw_busy: .byte "OPL2 in use by another program", 0
+s_busy:    .byte "Stop the song in Music, then start again.", 0
 s_ready:   .byte "Ready - click a demo or press A-K", 0
 s_need:    .byte "Flash the REV $0C bitstream to use OPL2.", 0
 s_stopped: .byte "Stopped - ready", 0
