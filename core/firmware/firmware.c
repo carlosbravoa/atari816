@@ -830,9 +830,18 @@ static void bootwd_poll(void) {
     }
 }
 
+// The transmitter is clocked by the classic machine's POKEY tick, which stops when Horizon
+// freezes that machine (F12 during a disk load): a full FIFO then never drains. Waiting for it
+// without a bound hung the firmware, and with it Horizon's keyboard and mouse. A byte leaves
+// the FIFO every 0.5 ms at 19,200 baud: after 5 ms the rest of this answer is dropped (the
+// Atari's OS repeats the command when it runs again).
+static int sio_tx_dead;
 void sio_tx_byte(uint8_t b) {
+    if (sio_tx_dead) return;
+    uint32_t start = reg_cycle;
     while (reg_sio_tx_stat & 0x200) {
         // Wait until TX FIFO is not full
+        if ((uint32_t)(reg_cycle - start) > 27u * 5000u) { sio_tx_dead = 1; return; }
     }
     reg_sio_tx = b;
 }
@@ -921,6 +930,7 @@ static void name_from_path(char *dst, const char *path) {
 }
 
 void sio_process_command(void) {
+    sio_tx_dead = 0;
     // NOTE: auto-baud tuning removed (T2) — it read reg_sio_divisor, which is a
     // *different* (measured-receive) register than the TX divisor it writes, and
     // could silently corrupt the TX baud. TX divisor stays fixed (set in sio_init).
