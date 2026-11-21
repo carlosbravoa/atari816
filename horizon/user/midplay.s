@@ -16,6 +16,7 @@
         .include "horizon.inc"
 
         .export mid_open, mid_play, mid_tick, mid_pause, mid_resume, mid_stop, mid_setvol
+        .export mid_bank_init, mid_load_wopl
         .export mid_buf, mid_len, mid_loop
         .export mid_ntrks, mid_bpm, mid_tot_tenths, mid_tenths, mid_frac, mid_lev, mid_state
         .export mid_title
@@ -1220,11 +1221,11 @@ md_note_on:
 :       sta     md_enote
         bra     @alloc
 
-@drum:  ; Percussion: MIDI notes 35..81
+@drum:  ; Percussion: MIDI notes 35..87 (53 entries)
         lda     md_note
         cmp     #35
         bcc     @dr_ign
-        cmp     #82
+        cmp     #88
         bcs     @dr_ign
         ; Hi-hat choke: Closed (42) or Pedal (44) chokes Open Hi-Hat (46)
         cmp     #42
@@ -1435,13 +1436,16 @@ md_alloc_voice:
 ; OPL2 Register Helpers (operate on voice md_v = v*2)
 ; ============================================================================
 
-; Reset OPL2 and enable waveform select ($01 = $20)
+; Reset OPL2, enable waveform select ($01 = $20), and set bank $BD AM/VIB depth
 opl_hw_init:
         lda     #$FFFF
         ldx     #0
         sys     SYS_OPLW
         lda     #$0001
         ldx     #$0020
+        sys     SYS_OPLW
+        lda     #$00BD
+        ldx     md_bd_flags
         sys     SYS_OPLW
         rts
 
@@ -1479,7 +1483,7 @@ opl_release_v:
         sta     v_rel,x
         rts
 
-; Set z:md_q to the 12-byte patch for A = patch_id (0..127 melodic, 128..174 drum)
+; Set z:md_q to the 12-byte patch in RAM bank for A = patch_id (0..127 melodic, 128..180 drum)
 md_patch_ptr:
         cmp     #128
         bcs     @drm
@@ -1491,9 +1495,9 @@ md_patch_ptr:
         clc
         adc     z:md_t0
         clc
-        adc     #.loword(gm_mel)
+        adc     #.loword(ram_mel)
         sta     z:md_q
-        lda     #^gm_mel
+        lda     #^ram_mel
         sta     z:md_q+2
         rts
 @drm:   sec
@@ -1505,11 +1509,330 @@ md_patch_ptr:
         clc
         adc     z:md_t0
         clc
-        adc     #.loword(gm_drm)
+        adc     #.loword(ram_drm)
         sta     z:md_q
-        lda     #^gm_drm
+        lda     #^ram_drm
         sta     z:md_q+2
         rts
+
+; ============================================================================
+; Soundbank Management (built-in default + WOPL v1/v2/v3 runtime loader)
+; ============================================================================
+
+; Initialize RAM patch bank from built-in opl_gm.inc defaults.
+mid_bank_init:
+        stz     md_bd_flags
+        ; Copy 128 melodic patches (1536 bytes)
+        ldx     #0
+@cm:    lda     gm_mel,x
+        sta     ram_mel,x
+        inx
+        inx
+        cpx     #128 * 12
+        bcc     @cm
+        ; Copy 47 built-in drum patches (notes 35..81 = 564 bytes)
+        ldx     #0
+@cd:    lda     gm_drm,x
+        sta     ram_drm,x
+        inx
+        inx
+        cpx     #47 * 12
+        bcc     @cd
+        ; Fill extra drum slots 82..87 (6 slots) by repeating slot 81 (Triangle)
+        ldx     #47 * 12
+@cx:    lda     ram_drm - 12,x
+        sta     ram_drm,x
+        inx
+        inx
+        cpx     #53 * 12
+        bcc     @cx
+        rts
+
+; Parse a WOPL3-BANK file in bank A (offset 0, length X <= 65535) into ram_mel/ram_drm.
+; Returns C clear on success, C set if invalid header or truncated.
+mid_load_wopl:
+        sta     md_wbk
+        stx     md_wlen
+        stz     z:md_p
+        sta     z:md_p+2
+        ; Need at least 19 bytes header
+        cpx     #19
+        jcc     @bad
+        ; Check magic "WOPL3-BANK\0" (11 bytes)
+        ldy     #0
+@mag:   sep     #$20
+        .a8
+        lda     [md_p],y
+        cmp     wopl_magic,y
+        rep     #$20
+        .a16
+        jne     @bad
+        iny
+        cpy     #11
+        bcc     @mag
+
+        ; Version (little-endian u16 at offset 11): 1, 2, or 3
+        ldy     #11
+        lda     [md_p],y
+        jeq     @bad
+        cmp     #4
+        jcs     @bad
+        sta     md_wver
+
+        ; Instrument size: 66 if ver >= 3, else 62
+        cmp     #3
+        bcc     :+
+        lda     #66
+        bra     :++
+:       lda     #62
+:       sta     md_wisize
+
+        ; nb_mel (big-endian u16 at offset 13), nb_perc (big-endian u16 at offset 15)
+        ldy     #13
+        lda     [md_p],y
+        xba
+        jeq     @bad
+        sta     md_wnmel
+        ldy     #15
+        lda     [md_p],y
+        xba
+        sta     md_wnprc
+
+        ; Global flags at offset 17: bit 0 = deep AM ($80), bit 1 = deep VIB ($40)
+        ldy     #17
+        lda     [md_p],y
+        and     #$00FF
+        stz     md_bd_flags
+        bit     #$0001
+        beq     :+
+        lda     #$0080
+        tsb     md_bd_flags
+        lda     [md_p],y
+        and     #$00FF
+:       bit     #$0002
+        beq     :+
+        lda     #$0040
+        tsb     md_bd_flags
+
+:       ; Melodic bank 0 offset = 19 + (ver >= 2 ? 34 * (nb_mel + nb_perc) : 0)
+        lda     #19
+        sta     md_wmoff
+        lda     md_wver
+        cmp     #2
+        bcc     @parse_mel
+        lda     md_wnmel
+        clc
+        adc     md_wnprc
+        sta     md_m0
+        stz     md_m1
+        lda     #34
+        jsr     md_mul32_16
+        lda     md_m1
+        jne     @bad
+        lda     md_m0
+        clc
+        adc     #19
+        jcs     @bad
+        sta     md_wmoff
+
+@parse_mel:
+        ; Verify melodic bank 0 fits in md_wlen: md_wmoff + 128 * md_wisize <= md_wlen
+        lda     md_wisize
+        sta     md_m0
+        stz     md_m1
+        lda     #128
+        jsr     md_mul32_16
+        lda     md_m0
+        sta     md_wbsz                 ; bytes per 128-instrument bank (7936 or 8448)
+        clc
+        adc     md_wmoff
+        jcs     @bad
+        cmp     md_wlen
+        beq     :+
+        jcs     @bad
+:       ; Convert 128 melodic instruments (bank 0) -> ram_mel
+        lda     md_wmoff
+        sta     z:md_p
+        lda     md_wbk
+        sta     z:md_p+2
+        lda     #.loword(ram_mel)
+        sta     z:md_q
+        lda     #^ram_mel
+        sta     z:md_q+2
+        stz     md_widx                 ; 0..127
+@ml:    jsr     wopl_conv_mel
+        lda     z:md_p
+        clc
+        adc     md_wisize
+        sta     z:md_p
+        lda     z:md_q
+        clc
+        adc     #12
+        sta     z:md_q
+        inc     md_widx
+        lda     md_widx
+        cmp     #128
+        bcc     @ml
+
+        ; Parse percussion bank 0 (notes 35..87) if nb_perc >= 1 and within md_wlen
+        lda     md_wnprc
+        jeq     @ok
+        ; perc0_off = md_wmoff + md_wnmel * md_wbsz
+        lda     md_wbsz
+        sta     md_m0
+        stz     md_m1
+        lda     md_wnmel
+        jsr     md_mul32_16
+        lda     md_m1
+        jne     @ok
+        lda     md_m0
+        clc
+        adc     md_wmoff
+        jcs     @ok
+        sta     md_wpoff
+        ; Need perc0_off + 88 * md_wisize <= md_wlen
+        lda     md_wisize
+        sta     md_m0
+        stz     md_m1
+        lda     #88
+        jsr     md_mul32_16
+        lda     md_m0
+        clc
+        adc     md_wpoff
+        bcs     @ok
+        cmp     md_wlen
+        beq     :+
+        bcs     @ok
+:       ; Start at note 35: md_p = md_wpoff + 35 * md_wisize
+        lda     md_wisize
+        sta     md_m0
+        stz     md_m1
+        lda     #35
+        jsr     md_mul32_16
+        lda     md_m0
+        clc
+        adc     md_wpoff
+        sta     z:md_p
+        lda     md_wbk
+        sta     z:md_p+2
+        lda     #.loword(ram_drm)
+        sta     z:md_q
+        lda     #^ram_drm
+        sta     z:md_q+2
+        lda     #35
+        sta     md_widx                 ; note 35..87
+@dl:    jsr     wopl_conv_drm
+        lda     z:md_p
+        clc
+        adc     md_wisize
+        sta     z:md_p
+        lda     z:md_q
+        clc
+        adc     #12
+        sta     z:md_q
+        inc     md_widx
+        lda     md_widx
+        cmp     #88
+        bcc     @dl
+@ok:    clc
+        rts
+@bad:   sec
+        rts
+
+; Convert one WOPL melodic instrument at [md_p] -> 12-byte patch at [md_q]
+wopl_conv_mel:
+        jsr     wopl_conv_ops
+        ; Melodic note offset: signed byte at [md_p]+33
+        sep     #$20
+        .a8
+        ldy     #33
+        lda     [md_p],y
+        ldy     #11
+        sta     [md_q],y
+        rep     #$20
+        .a16
+        rts
+
+; Convert one WOPL drum instrument at [md_p] -> 12-byte patch at [md_q]
+wopl_conv_drm:
+        ; If blank flag (bit 2 of [md_p]+39) is set, leave built-in fallback intact
+        ldy     #39
+        lda     [md_p],y
+        and     #$0004
+        bne     @skip
+        jsr     wopl_conv_ops
+        ; Percussion fixed note at [md_p]+38 (if 0, use md_widx)
+        sep     #$20
+        .a8
+        ldy     #38
+        lda     [md_p],y
+        bne     :+
+        lda     md_widx
+:       ldy     #11
+        sta     [md_q],y
+        rep     #$20
+        .a16
+@skip:  rts
+
+; Copy WOPL carrier (42..46), modulator (47..51), and fb/conn (40) into [md_q] (0..10)
+wopl_conv_ops:
+        sep     #$20
+        .a8
+        ldy     #47                     ; mod $20
+        lda     [md_p],y
+        ldy     #0
+        sta     [md_q],y
+        ldy     #42                     ; car $20
+        lda     [md_p],y
+        ldy     #1
+        sta     [md_q],y
+        ldy     #48                     ; mod $40
+        lda     [md_p],y
+        ldy     #2
+        sta     [md_q],y
+        ldy     #43                     ; car $40
+        lda     [md_p],y
+        ldy     #3
+        sta     [md_q],y
+        ldy     #49                     ; mod $60
+        lda     [md_p],y
+        ldy     #4
+        sta     [md_q],y
+        ldy     #44                     ; car $60
+        lda     [md_p],y
+        ldy     #5
+        sta     [md_q],y
+        ldy     #50                     ; mod $80
+        lda     [md_p],y
+        ldy     #6
+        sta     [md_q],y
+        ldy     #45                     ; car $80
+        lda     [md_p],y
+        ldy     #7
+        sta     [md_q],y
+        ldy     #51                     ; mod $E0 (clamp to OPL2 0..3)
+        lda     [md_p],y
+        and     #$03
+        ldy     #8
+        sta     [md_q],y
+        ldy     #46                     ; car $E0 (clamp to OPL2 0..3)
+        lda     [md_p],y
+        and     #$03
+        ldy     #9
+        sta     [md_q],y
+        ldy     #40                     ; $C0 FB | CNT
+        lda     [md_p],y
+        and     #$0F
+        ldy     #10
+        sta     [md_q],y
+        rep     #$20
+        .a16
+        rts
+
+        .segment "RODATA"
+wopl_magic:
+        .byte   "WOPL3-BANK", 0
+        .segment "CODE"
 
 ; Program static OPL2 registers ($20, $60, $80, $E0 mod & car, $C0) for voice md_v
 ; Assumes z:md_q points to 12-byte patch!
@@ -2175,3 +2498,18 @@ v_b0:           .res    NVOICE * 2
 v_sust:         .res    NVOICE * 2
 v_age:          .res    NVOICE * 2
 v_rel:          .res    NVOICE * 2
+
+; Soundbank state & active RAM patch tables (default built-in, overridden by /SYSTEM/OPL2.WOPL)
+md_bd_flags:    .res    2       ; $BD AM/VIB depth flags ($00 or $C0)
+md_wbk:         .res    2
+md_wlen:        .res    2
+md_wver:        .res    2
+md_wisize:      .res    2
+md_wnmel:       .res    2
+md_wnprc:       .res    2
+md_wmoff:       .res    2
+md_wpoff:       .res    2
+md_wbsz:        .res    2
+md_widx:        .res    2
+ram_mel:        .res    128 * 12
+ram_drm:        .res    53 * 12

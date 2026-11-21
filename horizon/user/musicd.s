@@ -162,6 +162,7 @@ engine: sys     SYS_GETPID
         lda     e_loop
         sta     mp_loop
         sta     mid_loop
+        jsr     mid_init_bank
         jsr     idle_timer
         sys     SYS_UPTIME
         sta     e_ms
@@ -1435,6 +1436,59 @@ mod_load:
         rts
 
 ; ---------------------------------------------------------------- MIDI (SMF on OPL2)
+; Initialize built-in OPL2 GM bank, then override from /SYSTEM/OPL2.WOPL if present.
+mid_init_bank:
+        jsr     mid_bank_init
+        ldx     #.loword(p_wopl)
+        ldy     #^p_wopl
+        lda     #O_READ
+        sys     SYS_OPEN
+        bcs     @done
+        sta     e_fh
+        sys     SYS_BALLOC
+        bcs     @close
+        sta     e_cb
+        ; Read up to 65000 bytes in CHUNK pieces into bank e_cb
+        stz     e_got
+        stz     e_q
+        lda     e_cb
+        sta     e_q+2
+@rlp:   lda     #65000
+        sec
+        sbc     e_got
+        beq     @rdone
+        cmp     #CHUNK
+        bcc     :+
+        lda     #CHUNK
+:       sta     e_n
+        lda     e_q
+        sta     e_rb+1
+        lda     e_q+2
+        sta     e_rb+3
+        lda     e_n
+        jsr     rd_file
+        bcs     @free
+        sta     e_t
+        clc
+        adc     e_got
+        sta     e_got
+        lda     e_t
+        clc
+        adc     e_q
+        sta     e_q
+        lda     e_t
+        cmp     e_n
+        beq     @rlp
+@rdone: lda     e_cb
+        ldx     e_got
+        jsr     mid_load_wopl
+@free:  lda     e_cb
+        sys     SYS_BFREE
+        stz     e_cb
+@close: lda     e_fh
+        sys     SYS_CLOSE
+@done:  rts
+
 mid_load:
         ; Check OPL2 hardware before allocating/reading
         lda     #$FFFE
@@ -2327,6 +2381,7 @@ print_err:
 
         .segment "RODATA"
 p_self: .byte   "/SYSTEM/MUSICD.PRG", 0
+p_wopl: .byte   "/SYSTEM/OPL2.WOPL", 0
 tags:   .byte   "M.K.M!K!M&K!N.T.FLT4FLT84CHN6CHN8CHNCD81OKTAOCTA"
         .word   0
 

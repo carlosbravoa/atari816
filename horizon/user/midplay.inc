@@ -10,6 +10,7 @@
 ;   4. mid_pause / mid_resume / mid_stop / mid_setvol (A = 0..64)
 
         .import mid_open, mid_play, mid_tick, mid_pause, mid_resume, mid_stop, mid_setvol
+        .import mid_bank_init, mid_load_wopl
         .import mid_buf, mid_len, mid_loop
         .import mid_ntrks, mid_bpm, mid_tot_tenths, mid_tenths, mid_frac, mid_lev, mid_state
         .import mid_title
