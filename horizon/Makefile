@@ -285,9 +285,11 @@ user/saver_art.inc: sdfiles/icons.txt kernel/font8x12.txt tools/mksaver.py tools
 # SDK's too) and ulib
 $(B)/modplay.o: user/modplay.s user/modplay.inc user/horizon.inc user/version.inc | $(B)
 	$(CA65) -I user -o $@ $<
-$(SD)/SYSTEM/MUSICD.PRG: user/musicd.s user/music.inc user/modplay.inc user/horizon.inc user/version.inc user/prog.cfg $(B)/modplay.o $(B)/ulib.o | $(SD)/SYSTEM
+$(B)/midplay.o: user/midplay.s user/midplay.inc user/opl_gm.inc user/horizon.inc | $(B)
+	$(CA65) -I user -o $@ $<
+$(SD)/SYSTEM/MUSICD.PRG: user/musicd.s user/music.inc user/modplay.inc user/midplay.inc user/horizon.inc user/version.inc user/prog.cfg $(B)/modplay.o $(B)/midplay.o $(B)/ulib.o | $(SD)/SYSTEM
 	$(CA65) -I user -o $(B)/musicd.o $<
-	$(LD65) -C user/prog.cfg -o $@ $(B)/musicd.o $(B)/modplay.o $(B)/ulib.o
+	$(LD65) -C user/prog.cfg -o $@ $(B)/musicd.o $(B)/modplay.o $(B)/midplay.o $(B)/ulib.o
 $(SD)/BIN/MUSIC.PRG: $(wildcard user/mu_*.s) user/music.inc
 # (0.26) the demo music, original and generated here (tools/mkmod.py): /Music/HORIZON.MOD, /Music/LAU.MOD.
 # The test sessions run on a copy of the card without /Music (as before 0.26: the root's

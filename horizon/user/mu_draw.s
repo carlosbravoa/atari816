@@ -230,6 +230,8 @@ mkfmt:  stz     sl
         and     #$00FF
         cmp     #1
         beq     @mod
+        cmp     #3
+        jeq     @mid
         cmp     #2
         jne     @done
         ldx     #.loword(s_wav)         ; "WAV, 44100 Hz, 16-bit stereo, 3:12"
@@ -251,6 +253,21 @@ mkfmt:  stz     sl
         ldx     #.loword(s_stereo2)
 :       jsr     sapp
         ldx     #.loword(s_comma)
+        jsr     sapp
+        lda     info+MI_TENTHS
+        jsr     sappt10
+        bra     @done
+@mid:   ldx     #.loword(s_mid)         ; "MIDI (OPL2), 12 tracks, 120 BPM, 3:12"
+        jsr     sapp
+        lda     info+MI_NPAT
+        and     #$00FF
+        jsr     sappn
+        ldx     #.loword(s_trks)
+        jsr     sapp
+        lda     info+MI_BPM
+        and     #$00FF
+        jsr     sappn
+        ldx     #.loword(s_bpm)
         jsr     sapp
         lda     info+MI_TENTHS
         jsr     sappt10
@@ -290,10 +307,11 @@ mkfmt:  stz     sl
 
 ; the position line and the time from the status (PH_READY)
 mkpos:  stz     sl
+        stz     sbuf
         lda     info+MI_KIND
         and     #$00FF
         cmp     #2
-        jeq     @wav
+        jcs     @wav
         cmp     #1
         bne     @time
         ldx     #.loword(s_order)       ; "Order 4 of 12, pattern 5, row 32"
@@ -326,8 +344,8 @@ mkpos:  stz     sl
         lda     info+MI_KIND
         and     #$00FF
         cmp     #2
-        bne     :+
-        ldx     #.loword(s_slash)       ; a WAV: " / its length"
+        bcc     :+
+        ldx     #.loword(s_slash)       ; a WAV or MIDI: " / its length"
         jsr     sapp
         lda     info+MI_TENTHS
         jsr     sappt10
@@ -366,7 +384,7 @@ barpx:  lda     #C_SELECT
 :       lda     info+MI_KIND
         and     #$00FF
         cmp     #2
-        beq     @wav
+        bcs     @wav
         cmp     #1
         bne     @zero
         lda     info+MI_SLEN            ; (order * 64 + row) * width / (length * 64)

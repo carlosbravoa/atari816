@@ -49,8 +49,8 @@ MST_ERROR   = 6 ; the load failed: [5] = the error (a file error $40+, ENOMEM, E
 EMS_FORMAT  = $FE
 
 ; ---- the info block (MC_READ area 1) ----
-MI_KIND   = 0   ; u8 0 nothing, 1 MOD, 2 WAV
-MI_NCHAN  = 1   ; u8 MOD: channels 1-8; WAV: 1 or 2
+MI_KIND   = 0   ; u8 0 nothing, 1 MOD, 2 WAV, 3 MIDI (OPL2, REV $0C+)
+MI_NCHAN  = 1   ; u8 MOD: channels 1-8; WAV: 1 or 2; MIDI: 8 (meters)
 MI_SLEN   = 2   ; u8 MOD: song length (orders)
 MI_NSMP   = 3   ; u8 MOD: 15 or 31 samples
 MI_RATE   = 4   ; u16 WAV: samples a second
@@ -58,8 +58,8 @@ MI_BITS   = 6   ; u8 WAV: 8 or 16
 MI_SPEED  = 7   ; u8 MOD: the speed now
 MI_FRAMES = 8   ; u32 WAV: sample frames
 MI_SIZE   = 12  ; u32 the file's size
-MI_TENTHS = 16  ; u16 WAV: its length in tenths of a second
-MI_BPM    = 18  ; u8 MOD: the tempo now
-MI_NPAT   = 19  ; u8 MOD: patterns
-MI_TAG    = 20  ; 4 characters: "M.K.", "8CHN", ... ("" for 15 samples), "WAV "
+MI_TENTHS = 16  ; u16 WAV/MIDI: its length in tenths of a second
+MI_BPM    = 18  ; u8 MOD/MIDI: the tempo now
+MI_NPAT   = 19  ; u8 MOD: patterns; MIDI: tracks
+MI_TAG    = 20  ; 4 characters: "M.K.", "8CHN", ... ("" for 15 samples), "WAV ", "MIDI"
 MI_SIZEOF = 24

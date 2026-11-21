@@ -889,7 +889,7 @@ a_seekby:
         lda     info+MI_KIND
         and     #$00FF
         cmp     #2
-        beq     @wav
+        bcs     @wav
         lda     st+2                    ; the order now
         and     #$00FF
         clc
@@ -951,7 +951,7 @@ a_seekx:
         lda     info+MI_KIND
         and     #$00FF
         cmp     #2
-        beq     @wav
+        bcs     @wav
         lda     info+MI_SLEN            ; order = x * length / width
         and     #$00FF
         beq     @out

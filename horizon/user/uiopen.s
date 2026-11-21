@@ -912,6 +912,7 @@ ft_tab: .byte   "LNK", 0, FT_LINK, "PRG", 0, FT_PRG, "BAS", 0, FT_BASIC, "PIC", 
         .byte   "INC", 0, FT_TEXT, "ASM", 0, FT_TEXT
         .byte   "LST", 0, FT_TEXT       ; (0.23) a BASIC listing (LIST "D:..." on the Atari: $9B line ends)
         .byte   "MOD", 0, FT_MUSIC, "WAV", 0, FT_MUSIC  ; (0.26) Music
+        .byte   "MID", 0, FT_MUSIC                      ; (REV $0C) OPL2 MIDI
         .byte   0
 ; the program of each type (FT_* order) and its name for messages
 ft_prog: .addr  0, p_files, 0, 0, p_edit, p_basic, p_paint, p_sheet, p_write, 0, p_music

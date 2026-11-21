@@ -417,7 +417,7 @@ songname:
         lda     a:0,x
         and     #$00FF
         cmp     #'.'
-        bne     @no
+        jne     @no
         lda     a:1,x
         jsr     upper
         sta     z:t0
@@ -431,6 +431,12 @@ songname:
         sta     z:t1
         lda     z:t0
         cmp     #'M' | ('O' << 8)
+        bne     :+
+        lda     z:t1
+        cmp     #'D'
+        beq     @yes
+:       lda     z:t0
+        cmp     #'M' | ('I' << 8)
         bne     :+
         lda     z:t1
         cmp     #'D'

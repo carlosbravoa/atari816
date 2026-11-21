@@ -119,6 +119,9 @@ s_rpoff: .byte  "repeat off", 0
 s_rpall: .byte  "repeat all", 0
 s_rpone: .byte  "repeat one", 0
 s_wav:  .byte   "WAV, ", 0
+s_mid:  .byte   "MIDI (OPL2), ", 0
+s_trks: .byte   " tracks, ", 0
+s_bpm:  .byte   " BPM, ", 0
 s_hz:   .byte   " Hz, ", 0
 s_bit:  .byte   "-bit ", 0
 s_mono: .byte   "mono", 0
