@@ -4,7 +4,10 @@ in batches (one emulator run per batch: runner.c spawns each test and reports it
 code).
 
     conform.py [--batch N] [--out DIR] [--jobs J] [--seconds-per-test S] [-O0|-O1|-O2]
-               FILE.c ...
+               [--slow NAME.c=SECONDS ...] FILE.c ...
+
+A batch of N programs gets 6 + S * N emulated seconds (30 at least). --slow: a program
+known to need long (its name and its seconds) runs in a batch of its own with that time.
 
 A test passes when it exits with 0 and, if FILE.c.expected exists, its console output
 equals that file. Results: OUT/results.json and a summary on stdout.
@@ -78,6 +81,7 @@ def main():
     out = os.path.join(prog.BUILD, 'conform')
     files = []
     level = 2
+    slow = {}
     i = 0
     while i < len(argv):
         a = argv[i]
@@ -91,6 +95,9 @@ def main():
             jobs = int(argv[i + 1]); i += 1
         elif a == '--seconds-per-test':
             spt = float(argv[i + 1]); i += 1
+        elif a == '--slow':
+            name, _, sec = argv[i + 1].partition('=')
+            slow[name] = int(sec); i += 1
         else:
             files.append(a)
         i += 1
@@ -105,6 +112,8 @@ def main():
         for k, st, msg in ex.map(compile_one, [(k, f, out, level) for k, f in enumerate(files)]):
             results[k] = {'test': files[k], 'status': st, 'msg': msg}
     todo = [k for k in results if results[k]['status'] == 'built']
+    alone = [k for k in todo if os.path.basename(files[k]) in slow]
+    todo = [k for k in todo if k not in alone]
     # the emulator runs: groups of up to `batch` programs, `jobs` groups at a time (each
     # group has its own run-N folder; a group that stops half-way goes on after the stop)
     size = max(1, min(batch, -(-len(todo) // jobs)))
@@ -112,7 +121,8 @@ def main():
     def run_group(todo):
         while todo:
             ks = todo[:batch]
-            r = run_batch(out, ks, runner, int(6 + spt * len(ks)))
+            sec = slow.get(os.path.basename(files[ks[0]])) if len(ks) == 1 else None
+            r = run_batch(out, ks, runner, sec or max(30, int(6 + spt * len(ks))))
             done = 0
             for k in ks:
                 if k not in r:
@@ -143,7 +153,8 @@ def main():
             todo = todo[done:]
 
     with cf.ThreadPoolExecutor(jobs) as ex:
-        list(ex.map(run_group, [todo[i:i + size] for i in range(0, len(todo), size)]))
+        list(ex.map(run_group, [[k] for k in alone] +
+                    [todo[i:i + size] for i in range(0, len(todo), size)]))
     summ = {}
     for r in results.values():
         summ[r['status']] = summ.get(r['status'], 0) + 1

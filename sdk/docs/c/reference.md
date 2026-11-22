@@ -1,9 +1,9 @@
 # C reference
 
 The C SDK for Horizon: its two compilers, how a C program is laid out in memory, its
-types, far memory, the calling convention (for assembly), the C library on Horizon,
-floating point, syscalls from C, the stacks, the compilers' faults and what the SDK does
-about them, and speed. Getting started: [getting-started.md](getting-started.md); window applications (the
+types, far memory, the calling convention (for assembly), inline assembly, the C library
+on Horizon, floating point, `long long`, `setjmp`, syscalls from C, the stacks, the
+compilers' faults and what the SDK does about them, and speed. Getting started: [getting-started.md](getting-started.md); window applications (the
 controls library, `hui.h`): [apps.md](apps.md); games: [games.md](games.md); porting:
 [porting.md](porting.md).
 
@@ -11,7 +11,7 @@ controls library, `hui.h`): [apps.md](apps.md); games: [games.md](games.md); por
 | --- | --- |
 | Compilers | **cc816**, the SDK's own (`sdk/c/cc816`, Python 3, writes ca65 assembly): the default. **vbcc 65816** Release 2 (Volker Barthelmann): `hcc --cc vbcc`, installed by `sdk/c/tools/get-toolchain.sh` |
 | Driver | `sdk/c/bin/hcc` (`hcc -h` lists the options); `--cc cc816` or `--cc vbcc`, or `HZ_CC` in the environment (`make HZ_CC=vbcc` for a program built with c.mk) |
-| Headers | `horizon.h` (syscalls, blocks, helpers), `hui.h` (the controls library: [apps.md](apps.md)), `hgame.h`, `conio.h`, `joystick.h` ([games.md](games.md)), `dirent.h`; the C library's: cc816's own (`sdk/c/cc816/include`: `stdio.h`, `stdlib.h`, `string.h`, `math.h`, `float.h`, `ctype.h`, `time.h`, `errno.h`, `stdint.h`, `stdarg.h`, `limits.h`, ...), vbcc's (with `setjmp.h`) |
+| Headers | `horizon.h` (syscalls, blocks, helpers), `hui.h` (the controls library: [apps.md](apps.md)), `hgame.h`, `conio.h`, `joystick.h` ([games.md](games.md)), `dirent.h`; the C library's: cc816's own (`sdk/c/cc816/include`: `stdio.h`, `stdlib.h`, `string.h`, `math.h`, `float.h`, `ctype.h`, `time.h`, `errno.h`, `stdint.h`, `inttypes.h`, `stdarg.h`, `setjmp.h`, `limits.h`, ...), vbcc's |
 | Library | `sdk/c/lib` (both compilers), `sdk/c/lib/cc816` and `sdk/c/rt/cc816` (cc816: the whole C library and its runtime), `sdk/c/lib/vbcc`, `sdk/c/rt`, `sdk/c/fastrt` (vbcc: over vbcc's own binary library); hcc builds them into `sdk/c/build/lib/<cc816, large, tiny>/` |
 | Make | `sdk/c/c.mk` (a program's Makefile is three lines) |
 
@@ -26,8 +26,9 @@ with the same compiler").
 | Memory | one model ("Memory", below) | the large and the tiny model (`--model`) |
 | Data pointer | 16 bits: an offset in the code bank; `__far` 32 bits | large: 32 bits; tiny: 16 bits (the window) |
 | Floating point | IEEE 754 single precision: `float`, `double` and `long double` are all 32 bits; math.h; linked only into programs that use it ("Floating point", below) | `float`, `double` (32 bits, MS BASIC's format), math.h: `--float` |
-| `long long` | no | no (vbcc 65816 fails on it) |
-| `setjmp` / `longjmp` | no (`setjmp.h` is an `#error`) | in its library, not tested |
+| `long long` | yes, 64 bits ("long long (cc816)", below) | no (vbcc 65816 fails on it) |
+| `setjmp` / `longjmp` | yes ("setjmp and longjmp (cc816)") | in its library, not tested |
+| Inline assembly | `asm("...")`, ca65 text ("Inline assembly (cc816)") | no |
 | Assembly files (`.s`) | ca65 syntax ("Calling convention", below) | vasm oldstyle syntax |
 | Linking | ld65, Horizon's own linker: an o65 file straight away | vlink three times, then mko65 ("Program files") |
 | Controls library (`hui.h`) | linked straight in by ld65 | a block made by ld65 at $0100 |
@@ -35,9 +36,9 @@ with the same compiler").
 | Needs | Python 3, cc65's ca65, ld65 and ar65 | its toolchain (x86-64 Linux binaries, downloaded), and cc65 for `hui.h` |
 | Licence | the SDK's (pycparser and pcpp inside are BSD) | free for non-commercial use, may be redistributed only unmodified |
 
-**What needs `--cc vbcc`:** `setjmp`/`longjmp` and the tiny model. Floating point no longer
-does: cc816 has it (below). Neither compiler has `long long`, a 64-bit `double`,
-variable-length arrays, inline assembly, or a program larger than its one code bank.
+**What needs `--cc vbcc`:** only the tiny model. Floating point, `long long`,
+`setjmp`/`longjmp` and inline assembly are all in cc816 (below). Neither compiler has a
+64-bit `double`, variable-length arrays, or a program larger than its one code bank.
 
 ## Memory (cc816)
 
@@ -132,7 +133,7 @@ programs are smaller (16-bit pointers), but all data must fit in 28 KB.
 | `char` | 8 bits | **unsigned** (0-255; both compilers, the library is built so); `signed char` for -128-127; cc816's `-fsigned-char` makes plain `char` signed |
 | `short`, `int` | 16 bits | -32,768-32,767 (`unsigned`: 0-65,535) |
 | `long` | 32 bits | |
-| `long long` | - | not supported (neither compiler) |
+| `long long` | 64 bits | cc816 (`int64_t`, `uint64_t`, `intmax_t`; `LLONG_MAX` ...); vbcc has none |
 | `float`, `double`, `long double` | 32 bits (all three, both compilers) | cc816: IEEE 754 single precision (24-bit significand: about 7 decimal digits, 1.2e-38 to 3.4e38, denormals down to 1.4e-45); vbcc: MS BASIC's format, about 7 digits (`hcc --cc vbcc --float`) |
 | data pointer | cc816: 16 bits; vbcc: 32 bits large, 16 bits tiny | `__far` (32 bits: offset, bank, 0) with both |
 | function pointer | cc816: 16 bits (JSR); vbcc: 32 bits (JSL) | |
@@ -200,13 +201,18 @@ the window) by itself.
   PBR = the code bank: keep D and DBR.
 - **Every argument is on the hardware stack**, pushed last first: at entry the first is at
   `3,s` (above the 2-byte return address), the next ones after it. Each takes 2 bytes
-  (`char`, `short`, `int`, pointers, function pointers) or 4 (`long`, `float`, `double`,
-  `__far` pointers: offset, bank, 0). The caller removes them. A structure argument is passed as the address
-  of a copy the caller made (2 bytes); a structure result is written through a hidden
-  first argument (the address of the caller's space), which is also returned in A.
-  Variable arguments are the same (`va_list` is a far pointer into the stack).
+  (`char`, `short`, `int`, pointers, function pointers), 4 (`long`, `float`, `double`,
+  `__far` pointers: offset, bank, 0) or 8 (`long long`: like two `long`s, the low word
+  first, at the lowest address). The caller removes them. A structure argument is passed
+  as the address of a copy the caller made (2 bytes); a structure result is written
+  through a hidden first argument (the address of the caller's space), which is also
+  returned in A. Variable arguments are the same (`va_list` is a far pointer into the
+  stack), except a structure: among the variable arguments it is its bytes themselves,
+  padded to an even size (so `va_arg(ap, struct s)` reads it).
 - The **result** is in A (16-bit and smaller) or A/X (32-bit: A the low word; a `float`
-  or `double` too: its IEEE bits, the sign in bit 15 of X).
+  or `double` too: its IEEE bits, the sign in bit 15 of X). A `long long` result is in
+  the direct page, 8 bytes at `__h0`: `__h0` the low word, `__h0+2`, `__h1`, `__h1+2` the
+  high word (A and X are then undefined).
 - **Registers** (direct page, `.importzp` them): `__rg` is 96 bytes: `__rg+0` to
   `__rg+47` may be changed by any function, `__rg+48` to `__rg+95` must be kept (save and
   restore what you use). `__h0`, `__h1`, `__h2`, `__h3` (4 bytes each) and `__rv` (4)
@@ -271,14 +277,124 @@ _sum:   lda     3,s             ; p
         rts
 ```
 
-Build them with the C files: `hcc -o PROG.PRG main.c add3.s sum.s`. In C: `unsigned
-add3(unsigned a, unsigned b, unsigned c); unsigned long sum(const unsigned *p, unsigned
-n);` (checked: `add3(1, 20, 300)` is 321, `sum` of {60000, 60000, 1, 2} is 120003). Bank
-bytes (`#^label`, `.faraddr`) are relocated by Horizon's loader. The compiler's own
-output for any C file is `hcc -S` (FILE.s next to it), or `python3 sdk/c/cc816/cc816.py
--S file.c`. Horizon's assembly libraries (ulib, the controls library) are linked straight
-into a cc816 program: they share the direct page (ld65 places their zero page after
-cc816's registers).
+Build them with the C files: `hcc -o PROG.PRG main.c add3.s sum.s` (hcc takes `.s`
+files beside the `.c` ones and assembles them with ca65). In C: `unsigned add3(unsigned
+a, unsigned b, unsigned c); unsigned long sum(const unsigned *p, unsigned n);` (checked:
+`add3(1, 20, 300)` is 321, `sum` of {60000, 60000, 1, 2} is 120003). Bank bytes
+(`#^label`, `.faraddr`) are relocated by Horizon's loader. The compiler's own output for
+any C file is `hcc -S` (FILE.s next to it), or `python3 sdk/c/cc816/cc816.py -S file.c`.
+Horizon's assembly libraries (ulib, the controls library) are linked straight into a
+cc816 program: they share the direct page (ld65 places their zero page after cc816's
+registers).
+
+### Inline assembly (cc816)
+
+An `asm` statement puts ca65 text into the compiler's output as it is. `asm`, `__asm__`
+and `__asm` are the same; `volatile`, `inline` and `goto` after them are read and
+ignored. The text is a string; several lines are joined with `\n` (adjacent strings are
+one string, as always in C):
+
+```c
+asm("\tsei");                                /* one instruction */
+asm volatile("\tlda #1\n"
+             "\tsta _flag");                 /* two lines */
+```
+
+**Where it can be.** In a function, as a statement. At file scope, between functions: it
+goes out in that place, between the functions around it, so a `.macro` defined there can
+be used by the asm statements of the functions after it; the code segment and 16-bit
+registers are put back after it. A function whose body is only asm statements can be
+`__attribute__((naked))`: it gets no prologue and no epilogue, its label is the
+function's name, it reads its arguments at `3,s` and after (as a `.s` function does) and
+ends with its own `rts`. A `.s` file is the other way to write a whole function.
+
+**Registers at the start of an asm statement in a function, and at its end.**
+
+- A, X and Y are 16-bit (M = X = 0) and must be 16-bit again at the end. Their contents
+  at the start are unknown, and the compiler assumes nothing about them afterwards; the
+  flags are free too. The file is assembled with `.smart +`, so ca65 follows `rep` and
+  `sep` itself; the compiler puts `.a16` and `.i16` after the text.
+- `__rg+0` to `__rg+47`, `__h0` to `__h3` and `__rv` are scratch: use them freely.
+- `__rg+48` to `__rg+95` must be kept, except the registers of the variables the text
+  names (below), which it may read and change.
+- Never change `__sp`, `__cbank`, D (0) or DBR (the code bank). S must be the same at the
+  end (push and pull in pairs).
+- The statement may call C functions (`jsr _name`, the arguments pushed as above and
+  removed after). The compiler keeps no value in a scratch register across an asm
+  statement, as across a call.
+
+**Names.** A global variable or function is reached by its assembler name: the C name
+with an underscore (`counter` is `_counter`); C's globals are in the code bank, so
+absolute addressing (DBR) reaches them. `%[name]` in the text is replaced by:
+
+| name is | `%[name]` becomes |
+| --- | --- |
+| a local variable or a parameter (not an array, a structure, `volatile`, or one whose address is taken) | its direct-page register, `__rg+N`. A variable named so lives in a callee-saved register for the whole function (so the scratch ones stay free). A `long`, `long long` or `__far` pointer is several words: `%[x]` is the low one, `%[x]+2` the next |
+| a global, a `static` variable (also a local one), a function | its assembler name (`_counter`, `_main__total_3`) |
+| an enumerator | its value, in decimal: `#%[MAX]` |
+
+The text reads the variable's value at its start and may change it: the C code after it
+sees the new value (a `char` variable is cut back to 8 bits). An array, a structure, a
+`volatile` local or a local whose address is taken lives on the software stack, which
+one operand cannot reach: `%[buf]` is an error that says so; take its address in a
+pointer variable first (`p = buf;`) and use `(%[p]),y`. GNU's operand lists (`asm("..." :
+"=r"(x) : "r"(y))`) are not supported (an error).
+
+**Labels.** Each asm statement in a function gets a label of its own before it, so ca65's
+cheap local labels (`@loop`) are local to the statement; `:` and `:+`/`:-` work too.
+
+A fill loop with 8-bit stores, the length and the pointer from C:
+
+```c
+#include <string.h>
+
+/* fill n bytes at p with v: 8-bit stores, Y the index */
+static void fill(unsigned char *p, unsigned n, unsigned char v)
+{
+    asm volatile("\tldy #0\n"
+                 "\tsep #$20\n"
+                 "\tlda %[v]\n"
+                 "@l:\tcpy %[n]\n"
+                 "\tbcs @d\n"
+                 "\tsta (%[p]),y\n"
+                 "\tiny\n"
+                 "\tbra @l\n"
+                 "@d:\trep #$20");
+}
+```
+
+cc816 writes for it (`hcc -S`):
+
+```asm
+_fill:	pei	(__rg+48)		; the three callee-saved registers it uses
+	pei	(__rg+50)
+	pei	(__rg+52)
+	lda	9,s			; p, n and v into them
+	sta	__rg+50
+	lda	11,s
+	sta	__rg+52
+	lda	13,s
+	and	#$00FF
+	sta	__rg+48
+Lfill_asm1:
+	ldy #0
+	sep #$20
+	lda __rg+48
+@l:	cpy __rg+52
+	bcs @d
+	sta (__rg+50),y
+	iny
+	bra @l
+@d:	rep #$20
+	.a16
+	.i16
+	...				; the registers put back, rts
+```
+
+`tests/lang/asm.c` (in `make -C sdk/c/cc816 check`) has this loop, a sum through a
+`__far` pointer (`[%[fp]],y`), a `long` changed word by word, a C function called from
+assembly (`pei (%[x])`, `jsr _twice`, `ply`), a `.macro` from a file-scope asm statement
+and a naked function.
 
 ### vbcc
 
@@ -351,14 +467,15 @@ Where it differs from the table below:
 
 | | cc816 |
 | --- | --- |
-| `printf` family | `%d %i %u %x %X %o %c %s %p %n %%`, the sizes `hh h l` (and `j z t`), widths, precision, `-+ 0#`, `*`; `%f %F %e %E %g %G %a %A` (also with `l`, `L`) in programs that use floating point ("Floating point", below) |
-| `scanf` family | `%d %i %u %o %x %c %s %[...] %p %n`, `*`, widths, the sizes `hh h l`; `%f %e %g %a` (`float *`; with `l` or `L` `double *`, `long double *`: the same 32 bits) in programs that use floating point |
+| `printf` family | `%d %i %u %x %X %o %c %s %p %n %%`, the sizes `hh h l` (and `z t`), widths, precision, `-+ 0#`, `*`; `%f %F %e %E %g %G %a %A` (also with `l`, `L`) in programs that use floating point ("Floating point", below); `%lld %lli %llu %llo %llx %llX` (and `j`: `intmax_t` is `long long`; `inttypes.h`'s `PRId64` ...) in programs that use `long long` ("long long (cc816)") |
+| `scanf` family | `%d %i %u %o %x %c %s %[...] %p %n`, `*`, widths, the sizes `hh h l`; `%f %e %g %a` (`float *`; with `l` or `L` `double *`, `long double *`: the same 32 bits) in programs that use floating point; `%lld %lli %llu %llo %llx` (and `j`, `SCNd64` ...) in programs that use `long long` |
 | `fgetpos`, `fsetpos` | 32-bit positions |
 | `malloc` | first fit over the heap; NULL when it is full (the libc test: 25 blocks of 1 KB) |
 | `clock()` | CLOCKS_PER_SEC 50, as vbcc's |
 | `strtod`, `strtof`, `strtold`, `atof` | exact (rounded to nearest, ties to even, from any number of digits), hexadecimal (`0x1.8p3`), `inf`, `infinity`, `nan`, `nan(...)`; ERANGE on overflow and when a nonzero number becomes 0 |
 | `math.h` | the list under "Floating point", below |
-| `setjmp` | not there (`--cc vbcc`) |
+| `strtoll`, `strtoull`, `atoll`, `llabs`, `lldiv` | yes (`inttypes.h`: `strtoimax`, `strtoumax`, `imaxabs`, `imaxdiv` are the same) |
+| `setjmp`, `longjmp` | yes ("setjmp and longjmp (cc816)", below) |
 | `assert` | prints the expression, the file and the line on stderr, then exit code 3 |
 
 **vbcc**: its C library (binary only, its 65816 "simulator" target) does the formatting,
@@ -504,6 +621,71 @@ math.h results against the same C built for the host. `tests/float/float.c` (bot
 readable). The compiler's random programs (`make -C sdk/c/cc816 check`) include float
 programs checked bit for bit against gcc.
 
+## long long (cc816)
+
+`long long` and `unsigned long long` are 64 bits (`int64_t`, `uint64_t`, `intmax_t`,
+`uintmax_t`; `LLONG_MIN`, `LLONG_MAX`, `ULLONG_MAX` in `limits.h`, `INT64_MAX`,
+`INT64_C(...)` in `stdint.h`, `PRId64` and `SCNd64` in `inttypes.h`). Every operator
+works on them, and every conversion to and from the other types, `float` and `double`
+too. Constants: `LL`, `ULL` (also `ll`, `ull`, `LLU`), and a constant too big for
+`long` is a `long long` by itself, as C says. The compiler folds constant expressions
+with them (`sizeof`, initialisers, `case`). They can be globals with initialisers,
+structure members, array elements, arguments and results, variadic arguments
+(`va_arg(ap, long long)`), and a `switch` value. A bit-field cannot be `long long`.
+
+**Where it is.** `+ - & | ^ ~`, unary `-`, the compares, `++`/`--` and shifts by a
+multiple of 16 or by 1 to 3 are inline (four 16-bit steps). Multiply, divide, remainder
+and other shifts call helpers in 65816 assembly (`sdk/c/rt/cc816/rt_mul64.s`,
+`rt_div64.s`, `rt_shift64.s`: the operands in `__h0`..`__h3`, the contract at the top of
+`rt_shift64.s`). The conversions to and from `float` are C (`sdk/c/lib/cc816/llconv.c`),
+rounded as the 32-bit ones are (to nearest, ties to even; toward zero to an integer).
+`(long long)` of a float out of range gives `LLONG_MIN` (as x86 does), `(unsigned long
+long)` gives `ULLONG_MAX` for 2^64 and above and for NaN. A `long long` argument takes 8
+bytes on the stack, a result comes back in `__h0`..`__h1` ("Calling convention").
+
+**Only for programs that use it.** The helpers are linked when the code calls them.
+printf's and scanf's `%lld` family (`lib/cc816/fmtll.c`, `scanll.c`) is linked as the
+float conversions are: by a file that uses `long long` and calls a printf (or a scanf)
+function, or gives a `long long` to a variadic function. A program without `long long`
+links none of it (`tests/run.py`'s `ll` test checks it); its printf is 106 bytes bigger
+than before `long long` came (the test for `ll` and the call of the hook), scanf 137.
+
+**Speed.** In microseconds, one operation on volatile operands, the loop taken out
+(`tests/ll/llbench.c`, emulated):
+
+| `+` | `-` | `<` | `*` | `/` | `/ 10` | `%` | `<< n` | `(float)ll` | `(long long)f` | `sprintf("%lld")` |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 16 | 15 | 21 | 376 | 1,260 | 196 | 1,265 | 85 | 210 | 51 | 2,985 |
+
+The division takes the 32-bit helper when both operands fit 32 bits and a quicker path
+when the divisor is below 65,536; the times above are a 57-bit value by a 34-bit one, the
+slow case (64 rounds). As with `long`, keep `long long` out of inner loops.
+
+**How it is tested.** `tests/lang/longlong.c` (every operator, conversion and library
+function, against values from gcc), the random programs (`--features llong`, in every
+seed: 64-bit expressions mixed with every other width, checked against gcc), and the
+c-testsuite's ten `long long` programs.
+
+## setjmp and longjmp (cc816)
+
+`setjmp.h` has `jmp_buf`, `setjmp`, `longjmp` (and `sigsetjmp`, `siglongjmp`, `_setjmp`,
+`_longjmp` as the same). `setjmp` returns 0, then the value `longjmp` gives (1 if that
+is 0). A `jmp_buf` (54 bytes) keeps the hardware stack pointer, the return address, the
+software stack pointer and the 48 bytes of callee-saved registers; `longjmp` puts them
+back (`sdk/c/rt/cc816/setjmp.s`). It may jump out of any depth of calls, also out of a
+library function's callback (a `qsort` comparison); both stacks are as they were at the
+`setjmp`. A `setjmp` and `longjmp` pair takes about 86 microseconds.
+
+As C says, after `longjmp` a local variable of the function that called `setjmp` that is
+not `volatile` and was changed after the `setjmp` has an unknown value. Declare such a
+variable `volatile`: it then lives in memory and keeps its last value. A variable not
+changed after the `setjmp` keeps its value: the compiler knows `setjmp` by its name (also
+`_setjmp` and `sigsetjmp`) and gives every value live across it a place of its own for the
+whole function. Call `setjmp` directly, not through a function pointer. `longjmp` into a
+function that has returned is undefined, as in any C. `tests/lang/setjmp.c` checks deep
+jumps, a jump out of `qsort`, 2,000 jumps in a loop (no stack lost), `long`, `long long`
+and `float` values and volatile locals.
+
 ## Syscalls from C
 
 `horizon.h` includes `hzsys.h`, generated by `tools/gensys.py` from horizon.inc, ABI.md
@@ -616,14 +798,28 @@ found and fixed.
   `<stdbool.h>`, `inline`, `restrict`, designated initialisers (`.a.b = 1`, `[3] = x`, the
   values after a designator go on from there), compound literals (also at file scope),
   flexible array members, variadic macros, `__func__`, `static` and qualifiers in array
-  parameters (`int a[static 3]`), hexadecimal floating constants, `long` (32 bits).
+  parameters (`int a[static 3]`), hexadecimal floating constants, `long` (32 bits),
+  `long long` (64 bits: "long long (cc816)"), `setjmp`/`longjmp`.
 - C11: `_Static_assert`, `_Generic`, `_Alignof` (always 1), anonymous structures and
   unions, `_Noreturn`, `u"..."`, `U"..."`, `u8"..."`.
 - Old C: K&R function definitions (`int f(a, b) int a; char *b; { ... }`), functions
   without a prototype, tentative definitions (`int x; int x = 5;`).
-- GNU C: statement expressions (`({ int t = f(); t * 2; })`), `typeof`, a cast as an
-  lvalue, `case` and labels anywhere in a switch (Duff's device), `__attribute__` (read
-  and ignored), `#pragma push_macro` / `pop_macro`.
+- GNU C: statement expressions (`({ int t = f(); t * 2; })`), `typeof` and
+  `__typeof__`, a cast as an lvalue, `case` and labels anywhere in a switch (Duff's
+  device), case ranges (`case 'a' ... 'z':`: up to 32 values become cases, a wider range
+  of a 16-bit switch is one test, a 32- or 64-bit switch takes at most 256), range
+  designators (`[0 ... 9] = x`, also nested; a local's x is computed for each element),
+  inline assembly ("Inline assembly (cc816)"), a static object or element initialised
+  with a compound literal of its own type, `#pragma push_macro` / `pop_macro`,
+  `__extension__`, `__inline__`, `__restrict`, `__const`, `__signed__`, `__volatile__`,
+  `__alignof__`.
+- GNU attributes (`__attribute__((...))`): `noreturn` (the end of the function after a
+  call of it is not reached: no "control reaches the end" warning) and `naked` are used;
+  `unused`, `used`, `packed` (structures are packed anyway), `aligned(1)`, `const`,
+  `pure`, `format`, `nonnull`, `always_inline`, `noinline`, `deprecated`, `malloc`, `cold`,
+  `hot`, `visibility` and the like are read and ignored; one cc816 cannot honour
+  (`aligned(N)` with N above 1, `constructor`, `destructor`, `section`, `weak`, `alias`,
+  `cleanup`, an unknown one) is ignored with a warning (`-Wattributes`).
 - The preprocessor: `#if` with C's arithmetic (32 bits and more, `/` and `%` round toward
   zero), `defined`, `__has_include`, `#pragma once`, `#line`, `#error`, `#warning`,
   `__FILE__`, `__LINE__`, `__DATE__`, `__TIME__`, `#` and `##` (also with empty
@@ -646,14 +842,14 @@ Each of these is an error that starts with "cc816 does not support". What to do 
 
 | Not supported | Do this instead |
 | --- | --- |
-| `long long`, `int64_t`, `uint64_t`, an `LL` constant | `long` (32 bits), or a pair of `long`s. Constant expressions with `long long` (in `sizeof`, in casts the compiler works out itself) are accepted |
 | a 64-bit `double` | none: `double` is the same 32-bit format as `float` ("Floating point") |
 | variable-length arrays (`int a[n];`) | a constant size, or `malloc` |
-| inline assembly (`asm`, `__asm__`) | a `.s` file in ca65 syntax, called as a function ("Calling convention") |
-| `setjmp` / `longjmp` (`setjmp.h` is an `#error`) | `hcc --cc vbcc`, or error codes returned up the calls |
+| `__int128` (128-bit integers) | `long long` (64 bits), or a pair of them |
+| a `long long` bit-field | a `long` or `unsigned long` one (up to 32 bits), or a whole `long long` |
+| GNU asm operand lists (`asm("..." : "=r"(x) : "r"(y))`) | `%[name]` in the text ("Inline assembly (cc816)") |
+| a case range of more than 256 values in a `long` or `long long` switch | an `if` on the range |
 | `_Complex` | a structure of two `float`s |
 | an `int` bit-field wider than 16 bits | declare it `long` or `unsigned long` (up to 32 bits) |
-| GNU ranges (`case 1 ... 5:`, `[0 ... 9] = x`) | one `case` a value; a loop to fill the array |
 | labels as values (`&&label`, `goto *p`) | a `switch` on a state number |
 | nested functions (a function defined inside another) | a function at file scope, its data passed by pointer |
 | GCC built-ins (`__builtin_popcount`, ...) | the C library, or a few lines of C |
@@ -702,6 +898,7 @@ message turns it off: `-Wno-format`.
 | `cpp` | `#warning` |
 | `extern-initializer` | `extern int x = 1;` (it defines x) |
 | `multichar` | a character constant of three or more characters |
+| `attributes` | a GNU attribute cc816 does not honour (`aligned(16)`, `constructor`, `section`, ...): ignored |
 | `unused-variable` (-Wall) | a local or static variable that is never used |
 | `unused-label` (-Wall) | a label no `goto` uses |
 | `parentheses` (-Wall) | `if (a = b)`: an assignment as a condition |
@@ -733,19 +930,22 @@ hcc passes these to cc816 (`cc816.py`, the compiler alone, takes the same):
 
 #### How it is tested
 
-Its regression set (`make -C sdk/c/cc816 check`) has five parts. `tests/diag/` (99
+Its regression set (`make -C sdk/c/cc816 check`) has five parts. `tests/diag/` (101
 files, no emulator; `make -C sdk/c/cc816 diag` runs it alone): each file says the errors
 and warnings it must give, and nothing else may be said; a Python traceback fails the
 test. Then 400 test programs, each with one random change (a token taken out, doubled
 or replaced), must all give messages or compile, never an internal compiler error. `tests/regress/`: one small program
-for each fault found, run in the emulator. `tests/lang/` (25 programs): one for each part
-of C listed above. Random programs checked against gcc's results
+for each fault found, run in the emulator. `tests/lang/` (29 programs): one for each part
+of C listed above, `long long`, `setjmp`, inline assembly and the GNU extensions among
+them. Random programs checked against gcc's results
 (`cc816/tests/fuzz/genfuzz.py`: arithmetic of every width, casts, compares, shifts,
 division, arrays, structures and their copies, structures by value, bit-fields, function
 pointers, variable arguments, far pointers, switches, loops that spill registers,
 designated initialisers and compound literals, unions read through other members,
 anonymous unions, `goto` state machines and Duff's device, enumerations, `_Bool`, the
-comma operator, statement expressions; and floating-point programs, `--features
+comma operator, statement expressions, `long long` mixed with every other width (its
+operators, conversions both ways and to float, globals, structures, arguments, results,
+function pointers, variadic arguments, switches, sprintf `%lld %llu %llx %llo`); and floating-point programs, `--features
 basic,float`: float and double arithmetic, compares, conversions both ways, `++`, compound
 assignments, float arrays, structures, globals, pointers, parameters, results, variadic
 doubles, sprintf `%f %e %g`, checked bit for bit against gcc's SSE single precision). And
@@ -806,9 +1006,26 @@ the c-testsuite when `CTS=` points at a checkout.
     internal error. Found by compiling changed (broken) test programs, the robustness
     part of `tests/diag.py` (`r020_const_pointer.c`).
 
+19. **A structure among a variadic function's arguments** was passed as its address, as
+    for a parameter, so `va_arg(ap, struct s)` read the pointer and the bytes after it
+    (and an odd size put every later argument out of step). It is now its bytes on the
+    stack, padded to an even size. Found by the c-testsuite (00204.c, which had been
+    listed as needing `long long`; `r021_va_struct.c`).
+20. **`typeof`** (and `__typeof__`), which this page said cc816 had, was a syntax error:
+    the vendored pycparser knows it only in its C23 mode; `typeof(int)` (a type, not an
+    expression) failed too (`r022_typeof.c`).
+21. **A union given two designators into its anonymous structure** (`{.b = 8, .a = 7}`)
+    kept the first and warned of excess elements (`r023_union_designators.c`).
+22. **A static object initialised with a compound literal of its own type** (`struct S g
+    = (struct S){1, 2};`, an element of a static array given so) was refused as not a
+    constant; GNU C takes the literal's list (`r024_static_compound_literal.c`). 21 and 22
+    were found by the c-testsuite (00216.c) once range designators were there.
+
 Bugs 4-6 were found by the random programs once they learnt structures, bit-fields and
 far pointers; 10-16 by the programs of `tests/lang/` and the c-testsuite; 17 by the
-random programs, 18 by the robustness check.
+random programs, 18 by the robustness check; 19-22 while `long long`, the GNU
+extensions and their tests were added. The random programs with `long long` found no
+fault (they all agreed with gcc from their first run).
 `r003_nearfar.c` and `r004_coalesce32.c` guard two changes made on the way (near pointers
 widened to far ones; 32-bit results sharing their operand's registers). While floating
 point was added, its own tests found more, fixed before they reached a program. In
@@ -827,12 +1044,15 @@ with the name of a typedef (c-testsuite 00129.c, a fix of the vendored pycparser
 `#pragma push_macro` / `pop_macro` (00206.c), `__has_include`, `-U`, `-include` and
 `-fsigned-char`.
 
-The c-testsuite (single-exec, 220 programs): 201 pass. Each of the other 19 is listed in
-`cc816/tests/cts-known.txt` with its reason: 10 need `long long` (or `int64_t`), 1 a
-variable-length array, 1 GNU range designators, 2 a 32-bit `int`, 3 a 64-bit `double`
-(one of them also a 32-bit `int`), 1 one of the `__LP64__` / `__ILP32__` macros, and an
-8-queens search too slow for the test's time (with vbcc too). The random programs of
-seeds 1, 2 and 3 (1,200 programs, and 600 floating-point ones) all agree with gcc.
+The c-testsuite (single-exec, 220 programs): 213 pass (201 before `long long`, case
+ranges and range designators). Each of the other 7 is listed in
+`cc816/tests/cts-known.txt` with its reason: 1 a variable-length array, 2 a 32-bit `int`,
+3 a 64-bit `double` (one of them also a 32-bit `int`), 1 one of the `__LP64__` /
+`__ILP32__` macros. 00040.c (8 queens by brute force) is right but slow: about 260
+emulated seconds (1.5 million calls of its check function; 384 before `a < b & c < d`
+in a condition was compiled as `&&`), so `tests/check.py` gives it 400 seconds in a
+batch of its own. The random programs of seeds 1, 2 and 3 (1,200 programs, and 600
+floating-point ones) all agree with gcc.
 
 ### vbcc
 

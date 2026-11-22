@@ -14,8 +14,8 @@ from pycparser import c_ast
 
 from .ctypes816 import (CError, Unsupported, ICE, where, T, VoidT, IntT, PtrT, ArrT, StructT, FuncT,
                         Field, VOID, BOOL, CHAR, SCHAR, UCHAR, SHORT, USHORT, INT, UINT,
-                        LONG, ULONG, FLOAT, DOUBLE, LDOUBLE, promote, arith_conv, same,
-                        cname, compatible)
+                        LONG, ULONG, LLONG, ULLONG, FLOAT, DOUBLE, LDOUBLE, promote,
+                        arith_conv, same, cname, compatible, vsz)
 from .ir import V, Imm, Sym, Frame, FrameSlot, Ins, Block, Func
 from . import fp
 from .fp import FV
@@ -93,16 +93,20 @@ class Unit:
         self.exports = set()
         self.defined = set()
         self.warnings = []
+        self.asm = []            # file-scope asm: (the number of functions before it, text)
 
 
 class Front:
-    def __init__(self, filename='?', diag=None, implicit_int=()):
+    def __init__(self, filename='?', diag=None, implicit_int=(), attrs=None):
         self.diag = diag or Diag()
+        self.attrs = attrs or {}     # GNU attributes the driver found: name -> set of
+                                     # function names (noreturn, naked)
+        self.nasm = 0
         self.loc = None              # the place of the statement / expression being done
         self.implicit_int = {(c.file, c.line, c.column) for c in implicit_int}
         self.noreturn_blocks = set()
         self.sw_seen = {}
-        self.noreturn_names = set(NORETURN)
+        self.noreturn_names = set(NORETURN) | set(self.attrs.get('noreturn', ()))
         self.unit = Unit()
         self.unit.warnings = self.diag.warnings
         self.scopes = [{}]
@@ -117,6 +121,7 @@ class Front:
         self.uses_float = False      # the unit uses floating point
         self.calls_printf = False    # ... and calls a printf (links printf's %f) ...
         self.calls_scanf = False     # ... or a scanf (scanf's %f)
+        self.uses_ll = False         # the unit uses long long (printf's and scanf's %lld)
 
     # ------------------------------------------------------------------ errors
     def place_of(self, node):
@@ -198,13 +203,11 @@ class Front:
                 if 'float' in s:
                     return FLOAT
                 return LDOUBLE if longs else DOUBLE
-            if longs >= 2:
-                # (a long long type is kept for constant expressions, sizeof and casts
-                # the compiler folds; a variable, a parameter or code with it is refused)
-                return LLONG_U if 'unsigned' in s else LLONG
+            if longs >= 2 or '__int64' in s:
+                return ULLONG if 'unsigned' in s else LLONG
             for w in s:
-                if w in ('__int128', '__int64', '__int128_t', '__uint128_t'):
-                    self.unsup(f'{w} (64- and 128-bit integers): long is 32 bits', node)
+                if w in ('__int128', '__int128_t', '__uint128_t'):
+                    self.unsup(f'128-bit integers ({w}): long long is 64 bits', node)
                 if w in ('_Complex', '_Imaginary'):
                     self.unsup('complex numbers (_Complex)', node)
             if 'void' in s:
@@ -228,6 +231,8 @@ class Front:
         if isinstance(node, c_ast.Enum):
             return self.enum_type(node)
         if isinstance(node, c_ast.TypeOf):
+            if isinstance(node.expr, c_ast.Typename):
+                return self.decl_type(node.expr)
             return self.typeof(node.expr)
         if type(node).__name__ == 'BitIntType':
             self.unsup('_BitInt', node)
@@ -324,6 +329,9 @@ class Front:
                 self.err(f"bit-field '{d.name}' has a type that is not an integer "
                          f"({cname(t)})", d)
             usz = max(t.size, 1)
+            if t.is_int and t.size == 8:
+                self.unsup(f"a long long bit-field ('{d.name}'): declare it long or unsigned "
+                           f"long (up to 32 bits)", d)
             if w < 0:
                 self.err(f"negative width in bit-field '{d.name}'", d)
             if w > 8 * usz:
@@ -619,7 +627,8 @@ class Front:
             if not t.is_int:
                 return v
             # as the runtime converts: __ftoul for unsigned long, __ftol for the rest
-            v = fp.to_int(v.bits, signed=not (t.size == 4 and not t.signed))
+            v = fp.to_int(v.bits, bits=64 if t.size == 8 else 32,
+                          signed=not (t.size >= 4 and not t.signed))
         if t.is_ptr:
             return v & ((1 << (8 * t.size)) - 1)
         if not t.is_int:
@@ -687,19 +696,27 @@ class Front:
         else:
             v = int(t)
             dec = True
-        if 'll' in suf:
-            self.unsup('long long (64-bit integers): long is 32 bits (a constant with LL)', e)
         u = 'u' in suf
-        lng = 'l' in suf
+        lng = suf.count('l')            # 0, 1 (l) or 2 (ll)
+        # the first type that holds the value (C99 6.4.4.1): a decimal constant without
+        # u stays signed, an octal or hexadecimal one may become unsigned
         if not lng and not u and v <= 0x7FFF:
             return v, INT
         if not lng and (u or not dec) and v <= 0xFFFF:
             return v, UINT
-        if not u and v <= 0x7FFFFFFF:
+        if lng < 2 and not u and v <= 0x7FFFFFFF:
             return v, LONG
-        if v <= 0xFFFFFFFF:
+        if lng < 2 and (u or not dec) and v <= 0xFFFFFFFF:
             return v, ULONG
-        self.unsup('integer constant too large for 32 bits', e)
+        if not u and v <= 0x7FFFFFFFFFFFFFFF:
+            return v, LLONG
+        if (u or not dec) and v <= 0xFFFFFFFFFFFFFFFF:
+            return v, ULLONG
+        if v <= 0xFFFFFFFFFFFFFFFF:
+            self.warn(f'the integer constant {s} is so large that it is unsigned (it does not '
+                      f'fit long long)', e, 'overflow')
+            return v, ULLONG
+        self.err(f'the integer constant {s} is too large for 64 bits', e)
 
     def sizeof(self, e):
         if isinstance(e, c_ast.Typename):
@@ -936,6 +953,10 @@ class Front:
                         self.static_assert(ext)
                     elif isinstance(ext, c_ast.Pragma):
                         self.pragma(ext)
+                    elif isinstance(ext, c_ast.FuncCall) and isinstance(ext.name, c_ast.ID) \
+                            and ext.name.name in ('__cc816_asm', '__cc816_asm_ops'):
+                        text = self.asm_text(ext, top=True)
+                        self.unit.asm.append((len(self.unit.funcs), text))
                     else:
                         self.unsup(f'{type(ext).__name__} at file scope', ext)
                 except CError as e:
@@ -951,6 +972,8 @@ class Front:
         u.uses_float = self.uses_float
         u.float_printf = self.uses_float and self.calls_printf
         u.float_scanf = self.uses_float and self.calls_scanf
+        u.ll_printf = self.uses_ll and self.calls_printf
+        u.ll_scanf = self.uses_ll and self.calls_scanf
         return u
 
     def end_of_unit(self):
@@ -986,6 +1009,8 @@ class Front:
         one (a prototype alone, as in stdlib.h, does not count)"""
         if not self.uses_float and _has_float(t):
             self.uses_float = True
+        if not self.uses_ll and _has_float(t, ll=True):
+            self.uses_ll = True
 
     def typedef(self, d):
         t = self.decl_type(d.type)
@@ -1002,12 +1027,6 @@ class Front:
         if prev is not None and prev.kind in ('enum', 'typedef'):
             self.err(f"'{d.name}' redeclared as a different kind of name (it is "
                      f"{'an enumerator' if prev.kind == 'enum' else 'a typedef'})", d)
-        if not t.is_func:
-            _check_ll(t, d, self)
-        else:
-            _check_ll(t.ret, d, self)
-            for _, pt in t.params:
-                _check_ll(pt, d, self)
         if t.is_func:
             if prev is not None and prev.kind == 'global' and not prev.t.is_func:
                 self.err(f"'{d.name}' redeclared as a different kind of name (a variable "
@@ -1132,6 +1151,12 @@ class Front:
 
     # --- static initialisers -> byte image with relocations
     def static_init(self, img, off, t, init):
+        if (t.is_arr or t.is_struct) and isinstance(init, c_ast.CompoundLiteral) and \
+                isinstance(init.init, c_ast.InitList):
+            lt = self.decl_type(init.type)
+            if (lt.is_struct and t.is_struct and same(lt, t)) or \
+                    (lt.is_arr and t.is_arr and compatible(lt.elem, t.elem)):
+                init = init.init        # (struct S g = (struct S){...}: GNU C)
         if (t.is_arr or t.is_struct) and (isinstance(init, c_ast.InitList) or
                                           (t.is_arr and self.str_init(t, init))):
             img.clear(off, t.size)      # (an initialiser that overrides an earlier one)
@@ -1319,6 +1344,22 @@ class Front:
                     if not isinstance(d, c_ast.ArrayDesignator):
                         self.err(f"a member designator (.{getattr(d, 'name', '?')}) in the "
                                  f"initialiser of an array", x)
+                    if isinstance(d.expr, c_ast.BinaryOp) and d.expr.op == '...':
+                        # [lo ... hi] = x (GNU): x for each element (a local's x is
+                        # computed for each)
+                        lo, hi = self.const_int(d.expr.left), self.const_int(d.expr.right)
+                        if hi < lo:
+                            self.err(f'an empty range [{lo} ... {hi}] in the initialiser', x)
+                        if lo < 0 or (n is not None and hi >= n):
+                            self.err(f'the range [{lo} ... {hi}] in the initialiser is '
+                                     f'outside the array (0 to '
+                                     f'{n - 1 if n is not None else "..."})', x)
+                        for k in range(lo, hi + 1):
+                            j = self.init_designated(x, exprs, i, img, off + k * es, t.elem,
+                                                     static)
+                        i = j
+                        k = hi + 1
+                        continue
                     k = self.const_int(d.expr)
                     if k < 0 or (n is not None and k >= n):
                         self.err(f'the array index {k} in the initialiser is outside the '
@@ -1370,7 +1411,10 @@ class Front:
                         for kk, ff in enumerate(fields):
                             if ff.name is None and ff.type.is_struct and ff.type.field(d.name):
                                 k = kk + 1
-                    if t.union:
+                    if t.union and not (i < len(exprs) and
+                                        isinstance(exprs[i], c_ast.NamedInitializer)):
+                        # (a union takes one value; designators after it choose again:
+                        # {.b = 8, .a = 7} into an anonymous structure sets both)
                         return i
                     continue
                 if k >= len(fields):
@@ -1425,6 +1469,15 @@ class Front:
 
     def init_elem(self, exprs, i, img, off, t, static):
         x = exprs[i]
+        if (t.is_struct or t.is_arr) and isinstance(x, c_ast.CompoundLiteral) and \
+                isinstance(x.init, c_ast.InitList):
+            lt = self.decl_type(x.type)
+            if (lt.is_struct and t.is_struct and same(lt, t)) or \
+                    (lt.is_arr and t.is_arr and compatible(lt.elem, t.elem)):
+                # (an element given as a compound literal of its own type: its list, so
+                # that a static one stays a constant (GNU C))
+                self.init_one(img, off, t, x.init, static)
+                return i + 1
         if (t.is_arr or t.is_struct) and not isinstance(x, c_ast.InitList):
             if t.is_arr and isinstance(x, c_ast.Constant) and x.type == 'string':
                 self.init_one(img, off, t, x, static)
@@ -1497,6 +1550,8 @@ class Front:
             self.unit.exports.add(asm)
         f = Func(asm, static)
         f.ctype = ft
+        if name in self.attrs.get('naked', ()):
+            return self.naked_function(f, fd, name)
         f.cname = name
         f.variadic = ft.variadic
         self.fn = f
@@ -1522,12 +1577,9 @@ class Front:
             self.sret = v
         else:
             self.sret = None
-        _check_ll(ft.ret, fd, self)
         self.note_float(ft.ret)
         seen = set()
-        _check_ll(ft.ret, d, self)
         for pname, pt in ft.params:
-            _check_ll(pt, d, self)
             self.note_float(pt)
             if pname is not None:
                 if pname in seen:
@@ -1545,7 +1597,7 @@ class Front:
                     sy.param = True
                     self.bind(pname, sy)
                 continue
-            size = 4 if pt.size == 4 else 2
+            size = vsz(pt)
             v = f.newv(size, pname or 'p')
             v.param = argoff
             argoff += size
@@ -1577,7 +1629,7 @@ class Front:
             if name == 'main':
                 self.emit(Ins('ret', a=Imm(0)))
             else:
-                self.emit(Ins('ret', a=Imm(0, 4 if ft.ret.size == 4 else 2) if not ft.ret.is_void and not ft.ret.is_struct else None))
+                self.emit(Ins('ret', a=Imm(0, vsz(ft.ret)) if not ft.ret.is_void and not ft.ret.is_struct else None))
         self.pop()
         for lname, (blk, defined) in self.labels.items():
             if not defined:
@@ -1587,6 +1639,23 @@ class Front:
                 self.diag.warning(getattr(blk, 'coord', None), f"label '{lname}' defined "
                                   f"but not used", 'unused-label')
         f.blocks = [b for b in f.blocks]
+        self.unit.funcs.append(f)
+        self.fn = None
+
+    def naked_function(self, f, fd, name):
+        """__attribute__((naked)): the body is asm statements only, put out as they are
+        after the function's label (no prologue, no epilogue: the text returns itself)"""
+        texts = []
+        for item in fd.body.block_items or []:
+            if isinstance(item, c_ast.FuncCall) and isinstance(item.name, c_ast.ID) and \
+                    item.name.name in ('__cc816_asm', '__cc816_asm_ops'):
+                texts.append(self.asm_text(item, top=True))
+            elif not isinstance(item, c_ast.EmptyStatement):
+                self.err(f"the naked function '{name}' may hold asm statements only (it has "
+                         f"no prologue or epilogue: its assembly reads the arguments at "
+                         f"3,s ... and ends with rts)", item)
+        f.cname = name
+        f.naked = '\n'.join(texts)
         self.unit.funcs.append(f)
         self.fn = None
 
@@ -1742,7 +1811,6 @@ class Front:
             self.decl_type(d.type)
             return
         t = self.decl_type(d.type)
-        _check_ll(t if not t.is_func else t.ret, d, self)
         prev = self.scopes[-1].get(d.name)
         if prev is not None and prev.kind == 'error':
             prev = None             # (an earlier error's stand-in: no redefinition)
@@ -1799,7 +1867,7 @@ class Front:
             if d.init is not None:
                 self.local_init(Frame(slot), t, d.init, d)
             return
-        v = self.newv(4 if t.size == 4 else 2, d.name)
+        v = self.newv(vsz(t), d.name)
         sy = Sy('reg', t, v=v)
         sy.coord, sy.name, sy.local = d.coord, d.name, True
         self.bind(d.name, sy)
@@ -2029,7 +2097,7 @@ class Front:
         if isinstance(val, V):
             pass
         else:
-            nv = self.newv(t.size if t.size == 4 else 2)
+            nv = self.newv(vsz(t))
             self.emit(Ins('mov', nv, val))
             val = nv
         sw = Ins('sw', a=val, cases=[], default=None, signed=t.signed)
@@ -2050,6 +2118,8 @@ class Front:
         if not self.switches:
             self.err("a 'case' label not within a switch statement", s)
         sw, t = self.switches[-1]
+        if isinstance(s.expr, c_ast.BinaryOp) and s.expr.op == '...':
+            return self.case_range(s, sw, t)
         v = self.const_eval(s.expr)
         if not isinstance(v, int):
             self.err("a 'case' label needs an integer constant", s)
@@ -2063,6 +2133,39 @@ class Front:
         self.sw_seen[id(sw)][k] = s.coord
         b = self.mkblock('case')
         sw.x['cases'].append((k & ((1 << (8 * t.size)) - 1), b))
+        self.place(b)
+        for x in s.stmts or []:
+            self.stmt(x)
+
+    def case_range(self, s, sw, t):
+        """case lo ... hi: (GNU): a few values become cases (a jump table can take them);
+        a wider range of a 16-bit switch is one test (gen.py), of a 32- or 64-bit one at
+        most 256 cases"""
+        lo, hi = self.const_eval(s.expr.left), self.const_eval(s.expr.right)
+        if not isinstance(lo, int) or not isinstance(hi, int):
+            self.err("a 'case' range needs integer constants", s)
+        lo, hi = self.wrap(lo, t), self.wrap(hi, t)
+        seen = self.sw_seen[id(sw)]
+        b = self.mkblock('case')
+        if hi < lo:
+            self.warn(f'an empty case range ({lo} ... {hi})', s, 'other')
+        elif hi - lo < 32 or t.size > 2:
+            if hi - lo >= 256:
+                self.unsup(f'a case range of more than 256 values in a switch on a '
+                           f'{cname(t)}: test the range with an if', s)
+            for k in range(lo, hi + 1):
+                if k in seen:
+                    self.err(f'duplicate case value {k} (in the range {lo} ... {hi})', s)
+                seen[k] = s.coord
+                sw.x['cases'].append((k & ((1 << (8 * t.size)) - 1), b))
+        else:
+            for k in list(seen):
+                if lo <= k <= hi:
+                    self.err(f'duplicate case value {k} (in the range {lo} ... {hi})', s)
+            for rlo, rhi, _ in sw.x.setdefault('ranges', []):
+                if not (hi < rlo or rhi < lo):
+                    self.err(f'the case range {lo} ... {hi} overlaps another', s)
+            sw.x['ranges'].append((lo, hi, b))
         self.place(b)
         for x in s.stmts or []:
             self.stmt(x)
@@ -2139,7 +2242,7 @@ class Front:
         if dst is not None and r.op is not dst:
             if dst.size != r.op.size and r.t.is_float:
                 return r                # (int e = 97.0;) the conversion that follows moves it
-            if dst.size != r.op.size and r.op.size in (2, 4) and not r.t.is_struct:
+            if dst.size != r.op.size and r.op.size in (2, 4, 8) and not r.t.is_struct:
                 # a 16-bit value into a 32-bit register (long x = i; long y = -1;): widened
                 # by its own type, as convert() would; a 32-bit one into 16 bits: its low word
                 self.widen_into(r, dst)
@@ -2150,23 +2253,32 @@ class Front:
 
     def widen_into(self, r, dst):
         op, t = r.op, r.t
-        if dst.size == 2:
+        if dst.size < op.size:
             self.emit(Ins('tr', dst, op))
             return
         near = (t.is_ptr and not t.isfar) or t.is_arr or t.is_func
         if isinstance(op, Imm):
             v = op.val
-            if t.is_int and t.signed and v & 0x8000:
-                v |= 0xFFFF0000
+            if t.is_int and t.signed and v >> (8 * op.size - 1):
+                v -= 1 << (8 * op.size)
             if near and v:
-                self.emit(Ins('mkfar', dst, op))
+                self.mkfar_into(dst, op)
                 return
-            self.emit(Ins('mov', dst, Imm(v, 4)))
+            self.emit(Ins('mov', dst, Imm(v, dst.size)))
             return
         if near or isinstance(op, (Sym, Frame)):
-            self.emit(Ins('mkfar', dst, op))
+            self.mkfar_into(dst, op)
             return
         self.emit(Ins('sx' if t.is_int and t.signed else 'zx', dst, op))
+
+    def mkfar_into(self, dst, op):
+        """a near address -> dst (4 bytes: far; 8: the far address zero-extended)"""
+        if dst.size == 4:
+            self.emit(Ins('mkfar', dst, op))
+            return
+        f = self.newv(4)
+        self.emit(Ins('mkfar', f, op))
+        self.emit(Ins('zx', dst, f))
 
     def ex_Constant(self, e, dst):
         if e.type == 'string':
@@ -2182,7 +2294,9 @@ class Front:
             return Imm(self.wrap(c, t).bits, 4)
         if isinstance(c, FV):
             c = self.wrap(c, t)
-        return Imm(c, t.size if t.size in (1, 2, 4) else 2)
+        if t.size == 8:
+            self.uses_ll = True
+        return Imm(c, t.size if t.size in (1, 2, 4, 8) else 2)
 
     def ex_ID(self, e, dst):
         s = self.lookup(e.name)
@@ -2395,7 +2509,7 @@ class Front:
         if lv.fld is not None:
             return self.load_bits(lv, dst)
         size = t.size
-        d = dst if dst is not None and dst.size == (4 if size == 4 else 2) else self.newv(4 if size == 4 else 2)
+        d = dst if dst is not None and dst.size == vsz(t) else self.newv(vsz(t))
         self.emit(Ins('ld', d, base=lv.base, idx=lv.idx, off=lv.off, sz=size,
                       sgn=t.is_int and t.signed, vol=lv.vol))
         return self.to_dst(RV(d, t), dst)
@@ -2483,7 +2597,7 @@ class Front:
         """operand of r resized to size bytes (2/4) by its type"""
         if r.op.size == size:
             return r.op
-        return self.convert(r, ULONG if size == 4 else UINT).op
+        return self.convert(r, ULLONG if size == 8 else ULONG if size == 4 else UINT).op
 
     def addr_of(self, lv):
         if lv.kind == 'reg':
@@ -2650,7 +2764,7 @@ class Front:
             if not (cur.t.is_arith and rhs.t.is_arith):
                 self.err(f'invalid operands to {e.op} ({cname(cur.t)} and {cname(rhs.t)})', e)
             at = arith_conv(cur.t, rhs.t) if op not in ('<<', '>>') else promote(cur.t)
-            same_size = target is not None and (4 if at.size == 4 else 2) == target.size
+            same_size = target is not None and vsz(at) == target.size
             res = self.arith(op, cur, rhs, e, dst=target if same_size else None)
             res = self.convert(res, lv.t.unqual(), dst=target)
         if lv.kind == 'reg':
@@ -2681,7 +2795,7 @@ class Front:
             step = 1
         post = e.op.startswith('p')
         op = 'add' if '+' in e.op else 'sub'
-        size = 4 if t.size == 4 else 2
+        size = vsz(t)
         if lv.kind == 'reg':
             old = None
             if want and post:
@@ -2797,7 +2911,6 @@ class Front:
 
     def ex_Cast(self, e, dst):
         t = self.decl_type(e.to_type)
-        _check_ll(t, e, self)
         if t.is_void:
             self.expr_stmt(e.expr)
             return RV(Imm(0), VOID)
@@ -2842,49 +2955,53 @@ class Front:
         # a long) gets the code bank as its high word: (unsigned long)p is p's full
         # address, so HZ_BANK(p) is the code bank. A null pointer stays 0.
         near_src = (st.is_ptr and not st.isfar) or st.is_arr or st.is_func
+        vt = vsz(t)                     # the register size of the result: 2, 4 or 8
+
+        def dv(size):
+            return dst if dst is not None and dst.size == size else self.newv(size)
         if isinstance(op, Imm):
             v = op.val
-            if st.is_int and st.signed and op.size < 4:
+            if st.is_int and st.signed and op.size < 8:
                 v = self.wrap(v, IntT(op.size, True))
-            if tsize == 4 and near_src and op.size == 2 and (t.is_ptr or t.is_int):
+            if tsize >= 4 and near_src and op.size == 2 and (t.is_ptr or t.is_int):
                 if v == 0:
-                    return self.to_dst(RV(Imm(0, 4), t), dst)
-                d = dst if dst is not None and dst.size == 4 else self.newv(4)
-                self.emit(Ins('mkfar', d, op))
+                    return self.to_dst(RV(Imm(0, vt), t), dst)
+                d = dv(vt)
+                self.mkfar_into(d, op)
                 return self.to_dst(RV(d, t), dst)
-            return self.to_dst(RV(Imm(self.wrap(v, t) if t.is_int else v, 4 if tsize == 4 else 2), t), dst)
+            return self.to_dst(RV(Imm(self.wrap(v, t) if t.is_int else v, vt), t), dst)
         if isinstance(op, (Sym, Frame)):
-            if tsize == 4:
-                d = dst if dst is not None and dst.size == 4 else self.newv(4)
-                self.emit(Ins('mkfar', d, op))
+            if tsize >= 4:
+                d = dv(vt)
+                self.mkfar_into(d, op)
                 return self.to_dst(RV(d, t), dst)
             if tsize == 1:
-                d = dst if dst is not None and dst.size == 2 else self.newv(2)
+                d = dv(2)
                 self.emit(Ins('x8u', d, op))
                 return self.to_dst(RV(d, t), dst)
             return self.to_dst(RV(op, t), dst)
         ssize = op.size
-        if tsize == 4 and near_src and ssize == 2:
-            d = dst if dst is not None and dst.size == 4 else self.newv(4)
-            self.emit(Ins('mkfar', d, op))
+        if tsize >= 4 and near_src and ssize == 2:
+            d = dv(vt)
+            self.mkfar_into(d, op)
             return self.to_dst(RV(d, t), dst)
-        if tsize == 4:
-            if ssize == 4:
+        if vt > 2 and vt >= ssize:
+            if ssize == vt:
                 return self.to_dst(RV(op, t), dst)
-            d = dst if dst is not None and dst.size == 4 else self.newv(4)
+            d = dv(vt)
             signed = st.is_int and st.signed
             self.emit(Ins('sx' if signed else 'zx', d, op))
             return self.to_dst(RV(d, t), dst)
-        if ssize == 4:
-            d = dst if dst is not None and dst.size == 2 else self.newv(2)
+        if ssize > vt:
+            d = dv(vt)
             self.emit(Ins('tr', d, op))
             op = d
-            if tsize == 2:
+            if tsize >= 2:
                 return self.to_dst(RV(d, t), dst)
         if tsize == 1:
             if st.is_int and st.size == 1 and st.signed == t.signed:
                 return self.to_dst(RV(op, t), dst)
-            d = dst if dst is not None and dst.size == 2 else self.newv(2)
+            d = dv(2)
             self.emit(Ins('x8s' if t.signed else 'x8u', d, op))
             return self.to_dst(RV(d, t), dst)
         return self.to_dst(RV(op, t), dst)
@@ -2906,7 +3023,12 @@ class Front:
                     v = self.wrap(v, IntT(op.size, True))
                 return self.to_dst(RV(Imm(fp.from_int(v), 4), t), dst)
             v = self.wrap(FV(op.val), t)
-            return self.to_dst(RV(Imm(v, 4 if t.size == 4 else 2), t), dst)
+            return self.to_dst(RV(Imm(v, vsz(t)), t), dst)
+        if t.is_float and op.size == 8:
+            # a long long -> float: lib/cc816/llconv.c
+            return self.ll_helper('__ulltof' if not st.signed else '__lltof', op, 4, t, dst)
+        if t.is_int and t.size == 8:
+            return self.ll_helper('__ftoll' if t.signed else '__ftoull', op, 8, t, dst)
         if t.is_float:
             # an integer -> float: through a 32-bit value
             if op.size == 4:
@@ -2931,6 +3053,15 @@ class Front:
         l = self.newv(4)
         self.emit(Ins('ftol', l, op))
         return self.convert(RV(l, LONG), t, dst)
+
+    def ll_helper(self, name, op, size, t, dst):
+        """a conversion between long long and float: a call of the library's C function
+        (lib/cc816/llconv.c)"""
+        asm = mangle(name)
+        self.unit.externs.add(asm)
+        d = dst if dst is not None and dst.size == size else self.newv(size)
+        self.emit(Ins('call', d, tgt=Sym(asm), args=[op]))
+        return self.to_dst(RV(d, t), dst)
 
     def ex_BinaryOp(self, e, dst):
         op = e.op
@@ -2995,7 +3126,7 @@ class Front:
         return self.binop(irop, a.op, b.op, t, dst)
 
     def binop(self, irop, a, b, t, dst=None):
-        size = 4 if t.size == 4 else 2
+        size = vsz(t)
         if isinstance(a, Imm) and isinstance(b, Imm):
             v = fold(irop, a.val, b.val, size)
             if v is not None:
@@ -3083,7 +3214,7 @@ class Front:
         if t.is_struct:
             d = self.newv(2)
         else:
-            size = 4 if t.size == 4 else 2
+            size = vsz(t)
             d = dst if dst is not None and dst.size == size else self.newv(size)
         lt, lf, le = self.mkblock('ct'), self.mkblock('cf'), self.mkblock('ce')
         self.cond(e.cond, lt, lf)
@@ -3154,18 +3285,14 @@ class Front:
     def ex_FuncCall(self, e, dst):
         name = e.name.name if isinstance(e.name, c_ast.ID) else None
         args = e.args.exprs if e.args else []
+        if name in ('__cc816_asm', '__cc816_asm_ops'):
+            self.asm_stmt(e)
+            return RV(Imm(0), VOID)
         if name in BUILTINS:
             return self.builtin(name, args, e, dst)
         if name is not None and self.lookup(name) is None:
-            if name in ('asm', '__asm__', '__asm'):
-                self.unsup("inline assembly (asm): put the code in a .s file (ca65 syntax) "
-                           "and call it as a function (docs/c/reference.md, \"Calling "
-                           "convention\")", e)
             if name.startswith('__builtin_'):
                 self.unsup(f'the GCC built-in function {name}', e)
-            if name in ('setjmp', '_setjmp', 'longjmp', 'sigsetjmp', 'siglongjmp'):
-                self.unsup(f'{name} (setjmp and longjmp): build with hcc --cc vbcc, or '
-                           f'return an error code instead', e)
             self.warn(f"implicit declaration of the function '{name}' (include its header, "
                       f"or declare it; its result is taken as an int)", e,
                       'implicit-function-declaration')
@@ -3214,14 +3341,26 @@ class Front:
             if ft.variadic and i >= len(params):
                 # a float among a variadic function's arguments: most likely for a printf
                 # (a wrapper), a float pointer for a scanf
-                if r.t.is_float:
+                if r.t.is_float or r.t.is_int and r.t.size == 8:
                     self.calls_printf = True
-                elif r.t.is_ptr and r.t.to.is_float:
+                elif r.t.is_ptr and (r.t.to.is_float or r.t.to.is_int and r.t.to.size == 8):
                     self.calls_scanf = True
             if i < len(params) and ft.proto:
                 pt = params[i][1]
             else:
                 pt = promote(r.t) if r.t.is_int else r.t
+            if pt.is_struct and ft.variadic and i >= len(params):
+                # a variadic argument: the structure's bytes themselves on the stack
+                # (va_arg(ap, struct s) reads them there), in words, the last one padded
+                if not r.t.is_struct or not same(r.t.unqual(), pt.unqual()):
+                    self.err(f'argument {i + 1} of {_q(name)} is not a structure', a)
+                base = self.mem_at(r.op, pt, r.op.size == 4)
+                for k in range(0, pt.size, 2):
+                    w = self.newv(2)
+                    self.emit(Ins('ld', w, base=base.base, idx=base.idx, off=base.off + k,
+                                  sz=2 if k + 1 < pt.size else 1, sgn=False, vol=False))
+                    ops.append(w)
+                continue
             if pt.is_struct:
                 # by value: a private copy in the caller's frame, passed by address
                 slot = self.new_slot('arg', pt.size)
@@ -3236,10 +3375,13 @@ class Front:
         rt = ft.ret
         d = None
         if not rt.is_void and not rt.is_struct:
-            size = 4 if rt.size == 4 else 2
+            size = vsz(rt)
             d = dst if dst is not None and dst.size == size and not (rt.is_int and rt.size == 1) else self.newv(size)
         tgt = f.op
-        self.emit(Ins('call', d, tgt=tgt, args=ops))
+        ci = self.emit(Ins('call', d, tgt=tgt, args=ops))
+        if name in SETJMP_NAMES and isinstance(tgt, Sym):
+            ci.x['twice'] = True        # setjmp returns twice (regalloc.py)
+            self.fn.returns_twice = True
         if name in self.noreturn_names:
             self.noreturn_blocks.add(id(self.cur))
         if rt.is_struct:
@@ -3253,6 +3395,77 @@ class Front:
             self.emit(Ins('x8s' if rt.signed else 'x8u', nd, d))
             r = RV(nd, rt)
         return self.to_dst(r, dst)
+
+    # ------------------------------------------------------------------ inline assembly
+    def asm_text(self, e, top=False, fn_vars=None):
+        """the text of an asm statement with %[name] put in: a global's (or a static's or a
+        function's) assembler name, an enumerator's value; a local or a parameter in a
+        register becomes the placeholder \x00k\x00 (fn_vars[k] is its V; gen.py puts
+        its register there). top: at file scope (globals only)"""
+        if e.name.name == '__cc816_asm_ops':
+            self.unsup("GNU asm operands (the ': output : input : clobbers' lists): name C "
+                       "variables in the text with %[name] instead (docs/c/reference.md, "
+                       "\"Inline assembly\")", e)
+        lit = e.args.exprs[0]
+        if self.str_elem(lit).size != 1:
+            self.err('the text of an asm statement is a plain string ("...")', lit)
+        text = bytes(self.strbytes(lit)).decode('latin-1')
+
+        def put(m):
+            n = m.group(1)
+            sy = self.lookup(n)
+            if sy is None:
+                self.err(f"'{n}' undeclared (named in an asm statement as %[{n}])", e)
+            if sy.kind == 'enum':
+                return str(sy.v)
+            if sy.kind == 'global':
+                if sy.cval is None or not sy.t.const:
+                    self.unit.externs.add(sy.asm)
+                else:
+                    self.unit.externs.add(sy.asm)
+                return sy.asm
+            if top or fn_vars is None:
+                self.err(f"%[{n}]: only globals, statics, functions and enumerators can be "
+                         f"named here", e)
+            if sy.kind == 'reg':
+                v = sy.v
+                v.pinned = 'asm'
+                if v not in fn_vars:
+                    fn_vars.append(v)
+                return f'\x00{fn_vars.index(v)}\x00'
+            if sy.kind == 'mem':
+                what = 'an array' if sy.t.is_arr else 'a structure' if sy.t.is_struct else \
+                    'a volatile variable' if sy.t.volatile else \
+                    'a variable whose address is taken'
+                self.err(f"%[{n}]: '{n}' is {what}, kept on the software stack, which one "
+                         f"operand cannot reach: take its address in a pointer variable "
+                         f"('p = {'' if sy.t.is_arr else '&'}{n};') and use (%[p]),y", e)
+            self.err(f"%[{n}]: '{n}' is not a variable", e)
+        return re.sub(r'%\[\s*([A-Za-z_]\w*)\s*\]', put, text)
+
+    def asm_stmt(self, e):
+        """an asm statement in a function: its text as it is, the variables it names
+        (%[name]) in direct-page registers (regalloc.py), used and changed by it"""
+        if self.fn is None:
+            self.err('an asm statement outside a function', e)
+        vars_ = []
+        text = self.asm_text(e, fn_vars=vars_)
+        self.nasm += 1
+        self.emit(Ins('asm', text=text, vars=vars_, n=self.nasm))
+        for sy in self.scopes_vars(vars_):
+            if sy.t.is_int and sy.t.size == 1:
+                # (a char variable the assembly wrote: made a valid char value again)
+                self.emit(Ins('x8s' if sy.t.signed else 'x8u', sy.v, sy.v))
+            elif sy.t.is_int and sy.t.is_bool:
+                pass
+
+    def scopes_vars(self, vars_):
+        out = []
+        for sc in reversed(self.scopes):
+            for sy in sc.values():
+                if sy.kind == 'reg' and sy.v in vars_ and sy not in out:
+                    out.append(sy)
+        return out
 
     def check_format(self, name, args, e):
         """a printf's or a scanf's format string against its arguments (-Wformat): the
@@ -3297,10 +3510,6 @@ class Front:
             spec = m.group(0)
             if conv == '%':
                 continue
-            if ln in ('ll', 'j', 'q') or ln == 'L' and conv in 'diouxX':
-                self.warn(f"{name}: '{spec}' is a long long conversion: cc816 has no long "
-                          f"long (use %l with a long)", f, 'format')
-                return
             if not scan:
                 for star in (m.group('width'), m.group('prec')):
                     if star == '*':
@@ -3331,8 +3540,13 @@ class Front:
             if conv in 'diouxXc':
                 if conv == 'c':
                     ln = ''
-                want = 4 if ln == 'l' else 2
+                want = 8 if ln in ('ll', 'j', 'q', 'L') else 4 if ln == 'l' else 2
                 if not pt.is_int or pt.size != want:
+                    if pt.is_int and pt.size == 8:
+                        return f"takes {'an int' if want == 2 else 'a long'}, not a long " \
+                               f"long (use %ll{conv})"
+                    if want == 8:
+                        return 'takes a long long'
                     if pt.is_int and pt.size == 4:
                         return f"takes {'an int' if conv in 'di' else 'an unsigned int'} " \
                                f"(16 bits in cc816; use %l{conv} for a long)"
@@ -3365,10 +3579,10 @@ class Front:
             return 'takes a pointer (&variable)'
         to = t.to
         if conv in 'diouxXn':
-            want = {'hh': 1, 'h': 2, 'l': 4}.get(ln, 2)
+            want = {'hh': 1, 'h': 2, 'l': 4, 'll': 8, 'j': 8, 'q': 8, 'L': 8}.get(ln, 2)
             if not to.is_int or to.size != want:
                 names = {1: 'a char *', 2: 'a short * or an int *' if ln == 'h' else
-                         'an int * (16 bits)', 4: 'a long *'}
+                         'an int * (16 bits)', 4: 'a long *', 8: 'a long long *'}
                 return f'takes {names[want]}'
             return None
         if conv in 'fFeEgGaA':
@@ -3433,6 +3647,13 @@ class Front:
                 self.cond(e.left, lt, mid)
                 self.place(mid)
                 self.cond(e.right, lt, lf)
+                return
+            if op in ('&', '|') and _is_truth(e.left) and _is_truth(e.right) and \
+                    _pure(e.right, self):
+                # (a < b & c < d): both sides 0 or 1 and the right one without side
+                # effects: the same as && / ||, without making the two values
+                self.cond(c_ast.BinaryOp('&&' if op == '&' else '||', e.left, e.right,
+                                         e.coord), lt, lf)
                 return
             if op in ('<', '>', '<=', '>=', '==', '!='):
                 lt_ = decay(self.expr_type(e.left))
@@ -3595,41 +3816,33 @@ def type_eq(a, b):
 WCHAR = IntT(2, False, 'wchar_t')         # L"...": unsigned int (16 bits, the BMP)
 CHAR16 = IntT(2, False, 'char16_t')       # u"..."
 CHAR32 = IntT(4, False, 'char32_t')       # U"..."
-LLONG = IntT(8, True, 'long long')
-LLONG_U = IntT(8, False, 'unsigned long long')
-
-
-def _check_ll(t, node, f):
-    while t.is_arr or t.is_ptr:
-        if t.is_ptr:
-            return
-        t = t.elem
-    if t.is_int and t.size == 8:
-        f.unsup('long long (64-bit integers): long is 32 bits', node)
-    if t.is_struct and t.complete and not getattr(t, 'checked_ll', False):
-        t.checked_ll = True
-        for fl in t.fields:
-            _check_ll(fl.type, node, f)
 
 
 BUILTINS = {'__builtin_va_start': VOID, '__va_start': VOID, '__cop': UINT, '__cbank': UINT,
             '__builtin_fbits': ULONG, '__builtin_bitsf': FLOAT}
 
 
-def _has_float(t):
-    """a float anywhere in t (an array's elements, a structure's members)"""
+def _has_float(t, ll=False):
+    """a float anywhere in t (an array's elements, a structure's members); ll: a long
+    long instead"""
     seen = set()
     while True:
-        if t.is_float:
+        if t.is_float and not ll or ll and t.is_int and t.size == 8:
             return True
         if t.is_arr:
             t = t.elem
             continue
+        if t.is_ptr and ll:     # (scanf("%lld", &x): a pointer to one)
+            return t.to.is_int and t.to.size == 8
         if t.is_struct and t.complete and id(t) not in seen:
             seen.add(id(t))
-            return any(_has_float(f.type) for f in t.fields)
+            return any(_has_float(f.type, ll) for f in t.fields)
         return False
 
+
+LLONG_U = ULLONG
+
+SETJMP_NAMES = {'setjmp', '_setjmp', 'sigsetjmp', '__sigsetjmp'}
 
 PRINTF_NAMES = {'printf', 'fprintf', 'sprintf', 'snprintf', 'vprintf', 'vfprintf', 'vsprintf',
                 'vsnprintf'}
@@ -3892,6 +4105,33 @@ def _has_labels(node):
         if _has_labels(c):
             return True
     return False
+
+
+def _is_truth(e):
+    """an expression whose value is 0 or 1: a comparison, !, && or ||"""
+    return isinstance(e, c_ast.BinaryOp) and e.op in ('<', '>', '<=', '>=', '==', '!=', '&&',
+                                                      '||') or \
+        isinstance(e, c_ast.UnaryOp) and e.op == '!'
+
+
+def _pure(e, f):
+    """an expression without side effects (no call, assignment, ++ or --, volatile
+    read)"""
+    if isinstance(e, (c_ast.FuncCall, c_ast.Assignment, c_ast.Compound)):
+        return False
+    if isinstance(e, c_ast.UnaryOp) and e.op in ('++', '--', 'p++', 'p--'):
+        return False
+    if not isinstance(e, (c_ast.ID, c_ast.Constant, c_ast.BinaryOp, c_ast.UnaryOp,
+                          c_ast.ArrayRef, c_ast.StructRef, c_ast.Cast, c_ast.TernaryOp)):
+        return False
+    if isinstance(e, (c_ast.ID, c_ast.ArrayRef, c_ast.StructRef)) or \
+            isinstance(e, c_ast.UnaryOp) and e.op == '*':
+        try:
+            if f.expr_type(e).volatile:
+                return False
+        except CError:
+            return False
+    return all(_pure(c, f) for _, c in e.children() if not isinstance(c, c_ast.Typename))
 
 
 def _value_type(e, f):

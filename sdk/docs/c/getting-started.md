@@ -3,7 +3,7 @@
 From nothing to a C program running in the emulator and on the Atari816. The SDK's C
 compiler is **cc816**, the SDK's own (`sdk/c/cc816`, in Python); `hcc`, the SDK's driver,
 turns `.c` files into a Horizon program in one command. A second compiler, vbcc 65816, is
-there for what cc816 does not do yet (`setjmp`, a tiny memory model): section 10.
+there for the one thing cc816 does not do (a tiny memory model): section 10.
 Floating point is section 8. Every command below was
 run on Linux (x86-64) for this guide; the output is what you should see, apart from paths,
 timings and sizes.
@@ -207,10 +207,11 @@ point".
 
 ## 10. vbcc, the second compiler
 
-vbcc 65816 (Volker Barthelmann's) has what cc816 has not yet: `setjmp` and a tiny memory
-model. It has floating point too (`hcc --float`, in its own 32-bit format). It is free for
-non-commercial use and may be redistributed only unmodified, so a script downloads the
-official archive:
+vbcc 65816 (Volker Barthelmann's) has what cc816 has not: a tiny memory model (16-bit
+pointers into the window, for programs whose data fits in 32 KB). Everything else
+(floating point, `long long`, `setjmp`, inline assembly) is in cc816, so most programs
+never need vbcc. It is free for non-commercial use and may be redistributed only
+unmodified, so a script downloads the official archive:
 
 ```
 $ sdk/c/tools/get-toolchain.sh
@@ -221,12 +222,5 @@ get-toolchain: hcc (sdk/c/bin/hcc) finds it there; nothing to add to PATH
 ```
 
 It needs Linux on x86-64 (or WSL), sh, curl or wget, unzip and sha256sum. Then `hcc --cc
-vbcc ...` (or `HZ_CC=vbcc` in the environment, `make HZ_CC=vbcc` for a project) builds
-with it; every file of a program must come from the same compiler. A program that
-includes `setjmp.h` tells you so with cc816:
-
-```
-$ sdk/c/bin/hcc -o J.PRG j.c
-.../sdk/c/cc816/include/setjmp.h:3: error: #error "setjmp.h: setjmp and longjmp are not supported by cc816 yet: build with hcc --cc vbcc"
-hcc: 1 file(s) did not compile
-```
+vbcc --model tiny ...` (or `HZ_CC=vbcc` in the environment, `make HZ_CC=vbcc` for a
+project) builds with it; every file of a program must come from the same compiler.

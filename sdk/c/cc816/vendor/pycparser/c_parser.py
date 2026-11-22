@@ -817,6 +817,8 @@ class CParser:
             return []
         if tok.type == "_STATIC_ASSERT":
             return [self._parse_static_assert()]
+        if self._at_asm():
+            return [self._parse_asm()]          # (cc816) asm("...") at file scope
 
         if not self._starts_declaration(tok):
             # Special handling for old-style function definitions that have an
@@ -1752,6 +1754,8 @@ class CParser:
             if self._accept("SEMI"):
                 return c_ast.AttributeDeclaration(attributes, attributes[0].coord)
             return self._attribute_statement(self._parse_statement(), attributes)
+        if self._at_asm():
+            return self._parse_asm()            # (cc816) an asm statement
         tok_type = self._peek_type()
         match tok_type:
             case "CASE" | "DEFAULT":
@@ -1770,6 +1774,47 @@ class CParser:
                 return self._parse_pppragma_directive()
             case _:
                 return self._parse_expression_statement()
+
+    # (cc816) asm statements: asm / __asm__ / __asm, then volatile, inline or goto, then
+    # ( string-literal ... ) ;  The text becomes a call of __cc816_asm (front.py); GNU's
+    # operand lists after a ':' give __cc816_asm_ops (refused there, with a message).
+    _ASM_WORDS = frozenset({"asm", "__asm__", "__asm"})
+
+    def _at_asm(self) -> bool:
+        tok = self._peek()
+        if tok is None or tok.type not in {"ID", "TYPEID"} or tok.value not in self._ASM_WORDS:
+            return False
+        return self._peek_type(2) in {"LPAREN", "VOLATILE", "INLINE", "GOTO"}
+
+    def _parse_asm(self) -> c_ast.Node:
+        tok = self._advance()
+        coord = self._tok_coord(tok)
+        while self._peek_type() in {"VOLATILE", "INLINE", "GOTO"}:
+            self._advance()
+        self._expect("LPAREN")
+        if self._peek_type() not in _STRING_LITERAL:
+            t = self._peek()
+            self._parse_error(f"before: {t.value if t else 'end'}",
+                              self._tok_coord(t) if t else coord)
+        text = self._parse_unified_string_literal()
+        name = "__cc816_asm"
+        if self._peek_type() == "COLON":
+            name = "__cc816_asm_ops"
+            depth = 0
+            while True:
+                t = self._peek()
+                if t is None:
+                    break
+                if t.type == "LPAREN":
+                    depth += 1
+                elif t.type == "RPAREN":
+                    if depth == 0:
+                        break
+                    depth -= 1
+                self._advance()
+        self._expect("RPAREN")
+        self._expect("SEMI")
+        return c_ast.FuncCall(c_ast.ID(name, coord), c_ast.ExprList([text], coord), coord)
 
     # BNF: pragmacomp_or_statement : pppragma_directive* statement
     def _parse_pragmacomp_or_statement(self) -> c_ast.Node:
@@ -1844,6 +1889,10 @@ class CParser:
             case "CASE":
                 case_tok = self._advance()
                 expr = self._parse_constant_expression()
+                if ell := self._accept("ELLIPSIS"):
+                    # (cc816) a GNU case range: case lo ... hi:
+                    hi = self._parse_constant_expression()
+                    expr = c_ast.BinaryOp("...", expr, hi, self._tok_coord(ell))
                 self._expect("COLON")
                 if self._starts_statement():
                     stmt = self._parse_pragmacomp_or_statement()
@@ -2478,6 +2527,10 @@ class CParser:
     def _parse_designator(self) -> c_ast.Node:
         if tok := self._accept("LBRACKET"):
             expr = self._parse_constant_expression()
+            if ell := self._accept("ELLIPSIS"):
+                # (cc816) a GNU range designator: [lo ... hi] = x
+                hi = self._parse_constant_expression()
+                expr = c_ast.BinaryOp("...", expr, hi, self._tok_coord(ell))
             self._expect("RBRACKET")
             return c_ast.ArrayDesignator(expr, self._tok_coord(tok))
         if self._accept("PERIOD"):

@@ -112,18 +112,19 @@ def from_int(v):
 def to_int(b, bits=32, signed=True):
     """pattern -> integer, truncated toward zero; out of range (undefined in C) gives
     what the runtime gives: __ftol 0x80000000, __ftoul 0xFFFFFFFF for 2^32 and above
-    (and NaN), a negative value through __ftol"""
+    (and NaN), a negative value through __ftol; bits=64 the same for __ftoll (the
+    smallest long long) and __ftoull (the largest unsigned long long)"""
     x = to_py(b)
     if x != x or math.isinf(x):
         v = None
     else:
         v = math.trunc(x)
     if signed or (b & SIGN):
-        if v is None or not -(1 << 31) <= v < (1 << 31):
-            v = -(1 << 31)
+        if v is None or not -(1 << (bits - 1)) <= v < (1 << (bits - 1)):
+            v = -(1 << (bits - 1))
     else:
-        if v is None or v >= (1 << 32):
-            v = (1 << 32) - 1
+        if v is None or v >= (1 << bits):
+            v = (1 << bits) - 1
     return v
 
 

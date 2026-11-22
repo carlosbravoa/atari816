@@ -1,4 +1,5 @@
-/* limits.h - cc816 (Horizon C SDK): char 8 bits (unsigned), short and int 16, long 32. */
+/* limits.h - cc816 (Horizon C SDK): char 8 bits (unsigned), short and int 16, long 32,
+ * long long 64. */
 #ifndef _LIMITS_H
 #define _LIMITS_H
 #define CHAR_BIT 8
@@ -22,4 +23,7 @@
 #define LONG_MIN (-2147483647L - 1)
 #define LONG_MAX 2147483647L
 #define ULONG_MAX 4294967295UL
+#define LLONG_MIN (-9223372036854775807LL - 1)
+#define LLONG_MAX 9223372036854775807LL
+#define ULLONG_MAX 18446744073709551615ULL
 #endif

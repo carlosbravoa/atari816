@@ -19,9 +19,10 @@ STATEMENT_WORDS = {'return', 'if', 'for', 'while', 'do', 'switch', 'break', 'con
 TYPE_WORDS = {'char', 'short', 'int', 'long', 'float', 'double', 'void', 'signed',
               'unsigned', '_Bool', 'struct', 'union', 'enum', 'const', 'volatile', 'static',
               'extern', 'register', 'auto', 'inline', 'typedef'}
-INT64 = {'int64_t', 'uint64_t', 'int_least64_t', 'uint_least64_t', 'int_fast64_t',
-         'uint_fast64_t', '__int64', '__int128', '__uint128_t', '__int128_t'}
-ASM = {'asm', '__asm__', '__asm'}
+STDINT = {'int8_t', 'uint8_t', 'int16_t', 'uint16_t', 'int32_t', 'uint32_t', 'int64_t',
+          'uint64_t', 'int_least64_t', 'uint_least64_t', 'int_fast64_t', 'uint_fast64_t',
+          'intptr_t', 'uintptr_t', 'intmax_t', 'uintmax_t'}
+INT128 = {'__int128', '__uint128_t', '__int128_t'}
 
 _TOKEN = re.compile(r'''\s*(?:([A-Za-z_]\w*)|(\d[\w.]*)|("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*')|'''
                     r'''(\.\.\.|->|\+\+|--|<<=|>>=|<<|>>|<=|>=|==|!=|&&|\|\||[-+*/%&|^]=|'''
@@ -74,24 +75,14 @@ def explain(path, line, col, msg):
             break
     m = re.match(r'^(?:invalid expression )?before: (.*)$', msg)
     words = [t for ln, c, t in toks if ln == line]
-    if any(w in ASM for w in words):
-        return ("cc816 does not support inline assembly (asm): put the code in a .s file "
-                "(ca65 syntax) and call it as a function (docs/c/reference.md, \"Calling "
-                "convention\")", True)
     for w in words:
-        if w in INT64:
-            return (f"unknown type name '{w}': cc816 does not support 64-bit integers "
-                    f"(long long); long is 32 bits", True)
-    if 'long' in words and words.count('long') >= 2:
-        return ("cc816 does not support long long (64-bit integers): long is 32 bits", True)
+        if w in INT128:
+            return (f"cc816 does not support 128-bit integers ({w}): long long is 64 bits",
+                    True)
     if m:
         x = m.group(1)
         prev = toks[at - 1][2] if at is not None and at > 0 else None
         nxt = toks[at + 1][2] if at is not None and at + 1 < len(toks) else None
-        if x == '...':
-            return ("cc816 does not support ranges (a ... b) in case labels and "
-                    "initialisers (a GNU extension): write the cases, or the elements, one "
-                    "by one", True)
         if x == '&&' and msg.startswith('invalid expression') and _ident(nxt or ''):
             return ("cc816 does not support labels as values (&&label and goto *p, a GNU "
                     "extension): use a switch", True)
@@ -103,6 +94,8 @@ def explain(path, line, col, msg):
             before = toks[at - 2][2] if at >= 2 else None
             if before is None or before in (';', '{', '}', '(', ',') or \
                     (before in TYPE_WORDS and before not in ('struct', 'union', 'enum')):
+                if prev in STDINT:
+                    return f"unknown type name '{prev}' (#include <stdint.h>)", False
                 return f"unknown type name '{prev}' (a typedef or a header missing?)", False
         if at is not None and at > 0 and toks[at - 1][0] < line and \
                 toks[at - 1][2] not in (';', '{', '}', ',', ':', '(', '[', '=') and \
@@ -114,6 +107,8 @@ def explain(path, line, col, msg):
         return f"syntax error before '{x}'", False
     if msg == 'Invalid function definition':
         if len(words) >= 2 and _ident(words[0]) and _ident(words[1]):
+            if words[0] in STDINT:
+                return f"unknown type name '{words[0]}' (#include <stdint.h>)", False
             return f"unknown type name '{words[0]}' (a typedef or a header missing?)", False
         return ("syntax error: a statement outside a function, or a declaration without its "
                 "type", False)

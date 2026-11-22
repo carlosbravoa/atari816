@@ -54,6 +54,9 @@ class CLexer:
         self._keyword_map = _keyword_map.copy()
         if dialect == "c23":
             self._keyword_map.update(_c23_keywords)
+        else:
+            # (cc816) GNU C's typeof (and __typeof__, spelt typeof by the driver)
+            self._keyword_map["typeof"] = "TYPEOF"
 
         self.error_func = error_func
         self._init_state()

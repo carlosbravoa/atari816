@@ -8,6 +8,8 @@ Conventions (see README): JSR/RTS, 16-bit A/X/Y on entry and exit, D = 0, DBR = 
 bank. Arguments pushed right to left on the hardware stack (bank 0), popped by the
 caller; result in A (16 bits) or A = low, X = high (32 bits). Scratch registers __rg+0..
 are caller-saved, __rg+SCR.. callee-saved."""
+import re
+
 from .ir import V, Imm, Sym, Frame
 from .regalloc import SCR, CS
 
@@ -26,6 +28,45 @@ H0_READERS = {'st', 'ret', 'mov', 'call', 'and', 'or', 'xor'}
 
 def hexw(v):
     return f'${v & 0xFFFF:04X}'
+
+
+def asm_size(text):
+    """at most how many bytes an inline assembly text assembles to (for branch
+    relaxation): 4 a line (the longest instruction), the data directives counted"""
+    n = 0
+    for ln in text.split('\n'):
+        ln = ln.split(';', 1)[0].strip()
+        if ':' in ln and not ln.startswith('.'):
+            head, _, rest = ln.partition(':')
+            if re.fullmatch(r'@?[A-Za-z_][\w]*|', head.strip()):
+                ln = rest.strip()
+        if not ln:
+            continue
+        w = ln.split(None, 1)
+        d = w[0].lower()
+        arg = w[1] if len(w) > 1 else ''
+        items = arg.count(',') + 1
+        if d in ('.byte', '.byt', '.db'):
+            n += sum(len(x.strip()) - 2 if x.strip()[:1] == '"' else 1 for x in arg.split(','))
+        elif d in ('.word', '.addr', '.dw'):
+            n += 2 * items
+        elif d in ('.faraddr',):
+            n += 3 * items
+        elif d in ('.dword', '.dd'):
+            n += 4 * items
+        elif d in ('.res', '.ds'):
+            try:
+                n += int(arg.split(',')[0].strip().replace('$', '0x'), 0)
+            except ValueError:
+                n += 256
+        elif d.startswith('.'):
+            n += 0 if d in ('.a8', '.a16', '.i8', '.i16', '.export', '.import', '.importzp',
+                            '.exportzp', '.global', '.globalzp', '.local', '.segment',
+                            '.macro', '.endmacro', '.endmac', '.if', '.endif', '.else',
+                            '.p816', '.smart') else 64
+        else:
+            n += 4
+    return n
 
 
 class Gen:
@@ -103,10 +144,10 @@ class Gen:
                 self.I('clc')
                 self.I('adc', '#' + hexw(k))
             return
-        if isinstance(o, V) and o.size == 2 and part == 1:
+        if isinstance(o, V) and 2 * part >= o.size:
             self.I('lda', '#0')
             return
-        if isinstance(o, Sym) and part == 1:
+        if isinstance(o, Sym) and part >= 1:
             self.I('lda', '#0')
             return
         self.I('lda', self.src(o, part))
@@ -147,7 +188,7 @@ class Gen:
             self.I('pla')
             self.push -= 2
             return '__h3'
-        if isinstance(o, V) and o.size == 2 and part == 1:
+        if isinstance(o, V) and 2 * part >= o.size:
             return '#0'
         return self.src(o, part)
 
@@ -291,7 +332,7 @@ class Gen:
             self.sta(d)
             return
         self.I('clc')
-        for p in (0, 1):
+        for p in range(d.size // 2):
             self.lda(a, p)
             self.I('adc', self.opsrc(b, p))
             self.sta(d, p)
@@ -308,7 +349,7 @@ class Gen:
             self.sta(d)
             return
         self.I('sec')
-        for p in (0, 1):
+        for p in range(d.size // 2):
             self.lda(a, p)
             self.I('sbc', self.opsrc(b, p))
             self.sta(d, p)
@@ -353,7 +394,7 @@ class Gen:
             self.sta(d)
             return
         self.I('sec')
-        for p in (0, 1):
+        for p in range(d.size // 2):
             self.I('lda', '#0')
             self.I('sbc', self.opsrc(a, p))
             self.sta(d, p)
@@ -370,6 +411,8 @@ class Gen:
 
     def shift(self, i, kind):
         d, a, b = i.d, i.a, i.b
+        if d.size == 8:
+            return self.shift64(i, kind)
         if d.size == 4:
             return self.shift32(i, kind)
         if isinstance(b, Imm):
@@ -511,6 +554,96 @@ class Gen:
         self.I('lda', '__h0+2')
         self.sta(d, 1)
 
+    def sign_word(self):
+        """A = $FFFF when bit 15 of A is set, else 0"""
+        self.I('asl', 'a')
+        self.I('lda', '#0')
+        self.I('adc', '#$FFFF')
+        self.I('eor', '#$FFFF')
+
+    def shift64(self, i, kind):
+        """64-bit shifts: by a multiple of 16, word moves; by another constant or a
+        variable, __shl64 / __shr64 / __sar64 (__h0..__h1 shifted by X)"""
+        d, a, b = i.d, i.a, i.b
+        if isinstance(b, Imm) and (b.val & 0xFFFF) % 16 == 0:
+            k = (b.val & 0xFFFF) // 16
+            if k >= 4:
+                if kind == 'sshr':
+                    self.lda(a, 3)
+                    self.sign_word()
+                    for p in range(4):
+                        self.sta(d, p)
+                else:
+                    for p in range(4):
+                        self.stz(d, p)
+                return
+            if kind == 'shl':           # high words first (d may be a)
+                for p in range(3, -1, -1):
+                    if p - k >= 0:
+                        self.lda(a, p - k)
+                        self.sta(d, p)
+                    else:
+                        self.stz(d, p)
+                return
+            for p in range(4):          # low words first
+                if p + k <= 3:
+                    self.lda(a, p + k)
+                    self.sta(d, p)
+                elif kind == 'ushr':
+                    self.stz(d, p)
+                else:
+                    self.lda(a, 3)
+                    self.sign_word()
+                    for q in range(p, 4):
+                        self.sta(d, q)
+                    break
+            return
+        self.load_h(a, '__h0', 4)
+        if isinstance(b, Imm) and (b.val & 0xFFFF) <= 3:
+            # by 1 to 3: inline, a bit at a time through __h0..__h1
+            for _ in range(b.val & 0xFFFF):
+                if kind == 'shl':
+                    self.I('asl', '__h0')
+                    for p in (1, 2, 3):
+                        self.I('rol', f'__h0+{2 * p}')
+                    continue
+                if kind == 'ushr':
+                    self.I('lsr', '__h0+6')
+                else:
+                    self.I('lda', '__h0+6')
+                    self.I('cmp', '#$8000')
+                    self.I('ror', '__h0+6')
+                for p in (2, 1, 0):
+                    self.I('ror', f'__h0+{2 * p}' if p else '__h0')
+            self.store_h(d, '__h0')
+            return
+        self.ldx(b)
+        self.helper({'shl': '__shl64', 'ushr': '__shr64', 'sshr': '__sar64'}[kind])
+        self.store_h(d, '__h0')
+
+    def load_h(self, o, reg, words):
+        """o (extended with zeros as needed) into the direct page from reg"""
+        for p in range(words):
+            w = f'{reg}+{2 * p}' if p else reg
+            if isinstance(o, Imm) and (o.val >> (16 * p)) & 0xFFFF == 0 or \
+                    isinstance(o, (V, Sym)) and 2 * p >= o.size:
+                self.I('stz', w)
+                continue
+            self.lda(o, p)
+            self.I('sta', w)
+
+    def store_h(self, d, reg):
+        for p in range(d.size // 2):
+            self.I('lda', f'{reg}+{2 * p}' if p else reg)
+            self.sta(d, p)
+
+    def call64(self, h, i):
+        """a 64-bit helper: a in __h0..__h1, b in __h2..__h3, the result in __h0..__h1"""
+        self.load_h(i.a, '__h0', 4)
+        self.load_h(i.b, '__h2', 4)
+        self.helper(h)
+        self.store_h(i.d, '__h0')
+
     # --- multiply / divide
     def g_mul(self, i):
         d, a, b = i.d, i.a, i.b
@@ -523,6 +656,8 @@ class Gen:
             self.helper('__mul16')
             self.sta(d)
             return
+        if d.size == 8:
+            return self.call64('__mul64', i)
         self.call32('__mul32', i)
 
     def g_mulu(self, i):
@@ -566,21 +701,29 @@ class Gen:
     def g_udiv(self, i):
         if i.d.size == 2:
             return self.divmod16(i, '__udiv16')
+        if i.d.size == 8:
+            return self.call64('__udiv64', i)
         self.call32('__udiv32', i)
 
     def g_sdiv(self, i):
         if i.d.size == 2:
             return self.divmod16(i, '__sdiv16')
+        if i.d.size == 8:
+            return self.call64('__sdiv64', i)
         self.call32('__sdiv32', i)
 
     def g_umod(self, i):
         if i.d.size == 2:
             return self.divmod16(i, '__umod16')
+        if i.d.size == 8:
+            return self.call64('__umod64', i)
         self.call32('__umod32', i)
 
     def g_smod(self, i):
         if i.d.size == 2:
             return self.divmod16(i, '__smod16')
+        if i.d.size == 8:
+            return self.call64('__smod64', i)
         self.call32('__smod32', i)
 
     # --- floating point (rt/cc816/fp_*.s): the operands in __h0 (and __h1), the result
@@ -713,22 +856,26 @@ class Gen:
 
     # --- conversions
     def g_zx(self, i):
-        self.lda(i.a)
-        self.sta(i.d, 0)
-        self.stz(i.d, 1)
+        n = i.a.size // 2
+        for p in range(n):
+            self.lda(i.a, p)
+            self.sta(i.d, p)
+        for p in range(n, i.d.size // 2):
+            self.stz(i.d, p)
 
     def g_sx(self, i):
-        self.lda(i.a)
-        self.sta(i.d, 0)
-        self.I('asl', 'a')
-        self.I('lda', '#0')
-        self.I('adc', '#$FFFF')
-        self.I('eor', '#$FFFF')
-        self.sta(i.d, 1)
+        n = i.a.size // 2
+        for p in range(n):
+            self.lda(i.a, p)
+            self.sta(i.d, p)
+        self.sign_word()
+        for p in range(n, i.d.size // 2):
+            self.sta(i.d, p)
 
     def g_tr(self, i):
-        self.lda(i.a, 0)
-        self.sta(i.d)
+        for p in range(i.d.size // 2):
+            self.lda(i.a, p)
+            self.sta(i.d, p)
 
     def g_x8u(self, i):
         self.lda(i.a)
@@ -867,11 +1014,10 @@ class Gen:
         d = i.d
         sz = i.x['sz']
         acc = self.addr(i.x['base'], i.x['idx'], i.x['off'])
-        if sz == 4:
-            self.I('lda', acc(0))
-            self.sta(d, 0)
-            self.I('lda', acc(1))
-            self.sta(d, 1)
+        if sz >= 4:
+            for p in range(sz // 2):
+                self.I('lda', acc(p))
+                self.sta(d, p)
             return
         base = i.x['base']
         if sz == 1 and ((isinstance(base, V) and base.size == 4) or i.x.get('vol')):
@@ -904,7 +1050,7 @@ class Gen:
                 self.I('sta', t)
             self.I('rep', '#$20')
             return
-        for p in range(2 if sz == 4 else 1):
+        for p in range(max(sz // 2, 1)):
             t = acc(p)
             if isinstance(a, Imm) and (a.val >> (16 * p)) & 0xFFFF == 0 and \
                     not t.startswith('(') and not t.startswith('['):
@@ -1007,7 +1153,14 @@ class Gen:
         self.sta(i.d)
 
     def g_asm(self, i):
-        self.out.append(('D', i.x['text'], 0))
+        """inline assembly: the text with the registers of the variables it names put in,
+        after a label of its own (the text's @labels are local to it), then .a16 / .i16
+        again for the code after it"""
+        vs = i.x.get('vars') or []
+        text = re.sub('\x00(\\d+)\x00', lambda m: self.vaddr(vs[int(m.group(1))]), i.x['text'])
+        lines = [f'L{self.f.name[1:]}_asm{i.x.get("n", 0)}:'] + text.split('\n') + \
+            ['\t.a16', '\t.i16']
+        self.out.append(('ASM', '\n'.join(lines), asm_size(text)))
 
     # --- calls
     def g_call(self, i):
@@ -1039,7 +1192,9 @@ class Gen:
                 self.I('tya')
             self.push -= n
         if i.d is not None:
-            if i.d.size == 4:
+            if i.d.size == 8:
+                self.store_h(i.d, '__h0')      # a long long result: in __h0..__h1
+            elif i.d.size == 4:
                 self.sta(i.d, 0)
                 if i.d.loc[0] == 'dp':
                     self.I('stx', self.vaddr(i.d, 1))
@@ -1076,7 +1231,9 @@ class Gen:
     def g_ret(self, i):
         a = i.a
         if a is not None:
-            if a.size == 4:
+            if a.size == 8:
+                self.load_h(a, '__h0', 4)      # a long long result: in __h0..__h1
+            elif a.size == 4:
                 if isinstance(a, V) and a.loc[0] == 'dp':
                     self.I('ldx', self.vaddr(a, 1))
                 else:
@@ -1104,6 +1261,8 @@ class Gen:
         cc = i.x['cc']
         a, b = i.a, i.b
         t, f = i.x['t'], i.x['f']
+        if a.size == 8 or b.size == 8:
+            return self.br64(i)
         if a.size == 4 or b.size == 4:
             return self.br32(i)
         if cc in ('eq', 'ne'):
@@ -1179,19 +1338,67 @@ class Gen:
         self.L(ok)
         self.branch('bmi' if cc == 'slt' else 'bpl', t, f)
 
+    def br64(self, i):
+        """a 64-bit compare and branch, inline: eq / ne word by word, the others a
+        subtraction's carry (unsigned) or sign and overflow (signed)"""
+        cc = i.x['cc']
+        a, b = i.a, i.b
+        t, f = i.x['t'], i.x['f']
+        if cc in ('eq', 'ne'):
+            if isinstance(b, Imm) and b.val == 0:
+                self.lda(a, 0)
+                for p in (1, 2, 3):
+                    self.I('ora', self.opsrc(a, p))
+                self.branch('beq' if cc == 'eq' else 'bne', t, f)
+                return
+            for p in range(3):
+                self.lda(a, p)
+                self.I('cmp', self.opsrc(b, p))
+                self.I('bne', self.blab(f if cc == 'eq' else t))
+            self.lda(a, 3)
+            self.I('cmp', self.opsrc(b, 3))
+            self.branch('beq' if cc == 'eq' else 'bne', t, f)
+            return
+        if cc in ('ugt', 'ule', 'sgt', 'sle'):
+            a, b = b, a
+            cc = {'ugt': 'ult', 'ule': 'uge', 'sgt': 'slt', 'sle': 'sge'}[cc]
+        self.lda(a, 0)
+        self.I('cmp', self.opsrc(b, 0))
+        for p in (1, 2, 3):
+            self.lda(a, p)
+            self.I('sbc', self.opsrc(b, p))
+        if cc[0] == 'u':
+            self.branch('bcc' if cc == 'ult' else 'bcs', t, f)
+            return
+        ok = self.newlab()
+        self.I('bvc', ok)
+        self.I('eor', '#$8000')
+        self.L(ok)
+        self.branch('bmi' if cc == 'slt' else 'bpl', t, f)
+
     def g_sw(self, i):
         a = i.a
         cases = i.x['cases']
         dflt = i.x['default']
-        if a.size == 4:
+        for lo, hi, l in i.x.get('ranges', ()):
+            # a GNU case range of a 16-bit switch: a - lo < hi - lo + 1, unsigned
+            self.lda(a)
+            if hi - lo + 1 >= 0x10000:
+                self.I('jmp', self.blab(l))
+                continue
+            if lo & 0xFFFF:
+                self.I('sec')
+                self.I('sbc', '#' + hexw(lo))
+            self.I('cmp', '#' + hexw(hi - lo + 1))
+            self.I('bcc', self.blab(l))
+        if a.size >= 4:
+            n = a.size // 2
             for v, l in cases:
                 nxt = self.newlab()
-                self.lda(a, 0)
-                self.I('cmp', '#' + hexw(v))
-                self.I('bne', nxt)
-                self.lda(a, 1)
-                self.I('cmp', '#' + hexw(v >> 16))
-                self.I('beq', self.blab(l))
+                for p in range(n):
+                    self.lda(a, p)
+                    self.I('cmp', '#' + hexw(v >> (16 * p)))
+                    self.I('bne' if p < n - 1 else 'beq', nxt if p < n - 1 else self.blab(l))
                 self.L(nxt)
             self.I('jmp', self.blab(dflt))
             return

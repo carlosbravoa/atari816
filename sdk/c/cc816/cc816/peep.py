@@ -68,7 +68,7 @@ def flags_needed(lines, i, which):
     reads = READS_NZ if which == 'nz' else READS_C
     sets = SETS_NZ if which == 'nz' else SETS_C
     for l in lines[i + 1:]:
-        if l[0] == 'L':
+        if l[0] in ('L', 'ASM'):
             return False
         if l[0] != 'I':
             continue
@@ -159,6 +159,16 @@ def _walk(lines, lab_in, rec, xstates=None):
             Z = set()
             m8 = False
             fa = False
+            fall = True
+            out.append(l)
+            continue
+        if l[0] == 'ASM':
+            # inline assembly: nothing known after it (registers, memory), flow goes on
+            A, X, Y = set(), set(), set()
+            Z = set()
+            m8 = False
+            fa = False
+            A16, A8 = None, set()
             fall = True
             out.append(l)
             continue
@@ -376,7 +386,7 @@ def xpromote(lines):
         cands = {}
         for k in body:
             l = lines[k]
-            if l[0] == 'D':
+            if l[0] in ('D', 'ASM'):
                 ok = False
                 break
             if l[0] != 'I':
@@ -456,7 +466,7 @@ def a_live_after(lines, k, depth=0):
                 break
             seen.add(j)
             l = lines[j]
-            if l[0] == 'D':
+            if l[0] in ('D', 'ASM'):
                 return True
             if l[0] != 'I':
                 j += 1
@@ -535,8 +545,8 @@ def dead_dp(lines):
                 s.append(k + 1)
             if m in ('rts', 'rtl'):
                 s = [-2]
-        elif l[0] == 'D':
-            s = [-1]
+        elif l[0] in ('D', 'ASM'):
+            s = [-1]            # (inline assembly: every register taken as live)
         else:
             s = [k + 1]
         succ.append(s)
@@ -588,7 +598,7 @@ def dead_a(lines):
     rm = set()
     for k, l in enumerate(lines):
         if l[0] != 'I':
-            if l[0] in ('L', 'D'):
+            if l[0] in ('L', 'D', 'ASM'):
                 pend = None
             continue
         m, o = l[1], l[2]
@@ -709,7 +719,7 @@ def simple(lines):
     res = []
     dead = False
     for l in out:
-        if l[0] == 'L' or l[0] == 'D':
+        if l[0] in ('L', 'D', 'ASM'):
             dead = False
             res.append(l)
             continue
@@ -787,9 +797,11 @@ def relax(lines):
                 pos[l[1]] = addr
                 sizes.append(0)
                 continue
-            if l[0] == 'D':
+            if l[0] in ('D', 'ASM'):
                 sizes.append(l[2])
                 addr += l[2]
+                if l[0] == 'ASM':
+                    m8 = False
                 continue
             if l[0] != 'I':
                 sizes.append(0)
@@ -831,4 +843,6 @@ def text(lines):
             out.append(f'\t{l[1]}\t{l[2]}' if l[2] else f'\t{l[1]}')
         elif l[0] == 'D':
             out.append(f'\t{l[1]}')
+        elif l[0] == 'ASM':
+            out.append(l[1])
     return '\n'.join(out)

@@ -28,6 +28,7 @@ WARNINGS = {
     'cpp': True,                        # #warning
     'extern-initializer': True,         # extern int x = 1;
     'multichar': True,                  # 'abc'
+    'attributes': True,                 # a GNU attribute cc816 does not honour
     'unused-variable': False,
     'unused-label': False,
     'parentheses': False,               # if (a = b)

@@ -1,6 +1,6 @@
 """C types for the 65816 Horizon model.
 
-char 8 (unsigned by default, as the SDK), short/int 16, long 32, near data pointers 16
+char 8 (unsigned by default, as the SDK), short/int 16, long 32, long long 64, near data pointers 16
 (an offset in the code bank = DBR), far pointers 32 (offset, bank, 0), function pointers
 16 (code bank), float, double and long double 32 (IEEE 754 single precision, all three).
 Structures are packed (no padding), as the SDK's parameter blocks need.
@@ -227,6 +227,8 @@ INT = IntT(2, True, 'int')
 UINT = IntT(2, False, 'unsigned')
 LONG = IntT(4, True, 'long')
 ULONG = IntT(4, False, 'unsigned long')
+LLONG = IntT(8, True, 'long long')
+ULLONG = IntT(8, False, 'unsigned long long')
 FLOAT = FloatT('float')
 DOUBLE = FloatT('double')
 LDOUBLE = FloatT('long double')
@@ -247,6 +249,11 @@ def same(a, b):
     return True
 
 
+def vsz(t):
+    """the size of the virtual register that holds a scalar of type t: 2, 4 or 8"""
+    return 8 if t.size == 8 else 4 if t.size == 4 else 2
+
+
 def promote(t):
     """integer promotions"""
     if t.is_int and t.size < 2:
@@ -263,6 +270,10 @@ def arith_conv(a, b):
         r = max((t for t in (a, b) if t.is_float), key=lambda t: t.rank)
         return r.unqual()
     a, b = promote(a), promote(b)
+    if a.size == 8 or b.size == 8:
+        if (a.size == 8 and not a.signed) or (b.size == 8 and not b.signed):
+            return ULLONG
+        return LLONG            # (long long holds every unsigned long)
     if a.size == 4 or b.size == 4:
         if (a.size == 4 and not a.signed) or (b.size == 4 and not b.signed):
             return ULONG

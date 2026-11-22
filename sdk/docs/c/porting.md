@@ -2,8 +2,8 @@
 
 What usually breaks when C written for a PC (or for cc65 on the 8-bit Ataris and C64)
 comes to Horizon, and how to find it. The SDK's compiler is cc816 (vbcc 65816 with `hcc
---cc vbcc` for `setjmp` and the tiny model); where they differ the table says which. The
-details are in [reference.md](reference.md).
+--cc vbcc` for its tiny model); where they differ the table says which. The details are
+in [reference.md](reference.md).
 
 ## The usual suspects
 
@@ -15,12 +15,12 @@ details are in [reference.md](reference.md).
 | pointers | 32/64 bits, flat | cc816: 16 bits, an offset in the program's code bank (`__far`: 32 bits, any bank); vbcc: large model 32 bits (offset + bank), tiny 16 bits | memory from `hz_far_alloc` needs `__far` pointers with cc816: `unsigned char __far *p`. Casts between pointers and `int` lose the bank: `long` keeps it (`(unsigned long)p` is p's whole address with cc816). Build far pointers with `hz_farptr(bank, offset)` |
 | big arrays | anything | one object must stay inside one 64 KB bank; a program's code, constants, globals, heap and (cc816) software stack share one bank (65,264 bytes); vbcc's tiny model's data, heap and stack share 32 KB | `hcc` says what does not fit, with the sizes. Move big tables to a bank of their own: `hz_far_alloc()` and `__far` pointers |
 | `malloc` | gigabytes | the rest of the code bank (cc816: below the software stack, about 48 KB for a small program; vbcc large: about 56 KB), or of the window (vbcc tiny: about 27 KB) | check every `malloc` for NULL; big buffers from `hz_far_alloc` (64 KB each; `hz_mem_info()` says how many banks are free) |
-| `long long` | 64 bits | **not supported** (neither compiler) | 32-bit arithmetic, or pairs of `long` |
+| `long long` | 64 bits | cc816: 64 bits, as on a PC (vbcc: none) | works as it is; it is slow (a 64-bit divide is about 1 ms, reference.md, "long long (cc816)"): keep it out of inner loops, use `long` where 32 bits are enough |
 | `double` | 64 bits (about 16 digits) | **32 bits, the same as `float`** (about 7 digits). cc816: IEEE 754 single precision, so results round as a PC's `float` does; vbcc: MS BASIC's format | code that needs more than 7 digits (whole numbers above 16,777,216, which a float cannot all hold; sums of many small values; seconds since 1970 in a double) gives other answers: use `long` (or fixed point: `hgame.h` has `hg_fix8`, `hg_fix16`) there. Compare with a tolerance, not `==`. Constants such as `0.1` and `M_PI` are rounded to 32 bits too. Floating point costs code: with cc816 about 1.8 KB for the arithmetic, 3.7 KB more for printf's `%f`, 0.5 to 5 KB a math.h function (reference.md, "Floating point") |
 | recursion, big locals | megabytes of stack | cc816: local arrays, structures and `&x` locals on an 8 KB software stack (`hcc --stack N`), the rest on a 32 KB hardware stack; vbcc: 32 KB (large), 4 KB (tiny) | arrays of more than a few hundred bytes as `static` or from `malloc`, not as locals. `hcc --debug` reports the stacks a run used; an overflow is reported at exit |
 | files | as many as you like | **4 file handles for the whole system** (every program together) | close files as soon as you can; `fopen` returns NULL with `errno == ENFILE` when none is left. Do not keep a log file open across the program's life |
 | paths | `/home/x/file.txt`, `C:\x` | FAT, case-insensitive, `/` separators, long names; relative to the current folder | no `\`; no drive letters |
-| `printf("%lld")`, `%a` | yes | no | `%ld`, `%lu` (`%zu` works with cc816) |
+| `printf("%lld")`, `%a` | yes | cc816: yes (`%a` in programs with floating point); vbcc: no | nothing with cc816 (`%zu` works too) |
 | `fopen(..., "rb")` | binary vs text | the same (no line-end conversion) | nothing |
 | `system()`, `getenv()`, signals, `time` zones | yes | not there (they return failure); `time()` counts from Horizon's clock | `hz_spawn_path` to start another program |
 | `stdin` | a pipe or a terminal | the keyboard: a line with echo and editing; ctrl-D on an empty line (or ctrl-C) ends the input | prompts without a newline are shown before reading (stdout is flushed) |
@@ -35,7 +35,7 @@ details are in [reference.md](reference.md).
 | `<conio.h>`, `<atari.h>`, `<peekpoke.h>` | not there: Horizon programs never touch the hardware. The console is `printf` / `hz_puts`; keys: `hz_input_read` and `hz_key_ascii`; the screen: the window system or full screen (`horizon.h`) |
 | POKE / PEEK to hardware registers | not allowed (the program runs in user mode and is killed); use the syscalls: sound (`hz_beep`, `hz_sound_write`, `hz_sample_play`), joysticks (`hz_joystick`) |
 | the 6502's 256-byte stack | 32 KB of hardware stack (cc816 and vbcc large): deeper recursion works |
-| `asm("...")` in ca65 syntax | no inline assembly; a `.s` file in ca65 syntax is cc816's (reference.md, "Calling convention") |
+| `asm("...")` in ca65 syntax | the same with cc816: the text goes out as it is, in ca65 syntax; C variables are named `%[name]`, not with cc65's `%v`/`%o` (reference.md, "Inline assembly (cc816)"). cc65's own zero-page names (`sp`, `ptr1`, `tmp1`) do not exist: use `__rg+0` .. `__rg+47` as scratch. A `.s` file works too |
 | linker configs (`.cfg`) | none: `hcc` does the layout (cc816 links with ld65 and `sdk/c/rt/cc816/hzprog.cfg`) |
 
 ## How to find what broke
@@ -104,14 +104,13 @@ hcc: undefined: fire_laser (used in game.c)
 
 | cc816 does not support | Do this instead |
 | --- | --- |
-| `long long`, `int64_t`, `LL` constants | `long` (32 bits); for wider numbers a pair of `long`s |
-| a 64-bit `double` | `double` is the 32-bit `float` format: use `long` or fixed point where 7 digits are not enough |
+| a 64-bit `double` | `double` is the 32-bit `float` format: use `long`, `long long` or fixed point where 7 digits are not enough |
 | variable-length arrays (`int a[n];`) | a fixed size, or `malloc(n * sizeof *a)` |
-| inline assembly (`asm`, `__asm__`) | a `.s` file in ca65 syntax, called as a C function (reference.md, "Calling convention") |
-| `setjmp` / `longjmp` | `hcc --cc vbcc`; or return an error code up the calls |
+| GNU asm operand lists (`asm("..." : "=r"(x))`) | `%[x]` in the text (reference.md, "Inline assembly (cc816)") |
+| `__int128` | `long long` (64 bits) |
+| a `long long` bit-field | a `long` one (up to 32 bits) |
 | `_Complex` | a structure with the real and the imaginary part |
 | an `int` bit-field wider than 16 bits | make it `long` or `unsigned long` (up to 32 bits) |
-| `case 1 ... 5:`, `[0 ... 9] = x` (GNU ranges) | a `case` for each value, or an `if`; a loop to fill the array |
 | `&&label`, `goto *p` (GNU) | a `switch` on a state number |
 | nested functions (GNU) | a function at file scope; pass it what it needs |
 | `__builtin_...` functions | the C library's function, or a few lines of C |
@@ -146,5 +145,5 @@ pointer is an offset in the code bank, so:
 Floating point needs vbcc no more: cc816 has it (IEEE 754, 32 bits for `float` and
 `double` alike, as vbcc). A program that used `--cc vbcc --float` for it builds with cc816
 as it is. The numbers can differ in the last digit, because vbcc's format rounds
-differently (cc816's results are those of a PC's `float`). What still needs vbcc:
-`setjmp`/`longjmp` and the tiny model.
+differently (cc816's results are those of a PC's `float`). `setjmp`/`longjmp` need vbcc
+no more either. What still needs vbcc: only its tiny model.

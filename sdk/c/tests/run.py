@@ -22,6 +22,9 @@ Tests (in tests/):
            + - * / compares conversions, genfmt.py's printf and strtod against glibc,
            math.h against the same C built for the host), and that a program without
            floating point links none of it
+  ll       cc816 only: long long and setjmp (tests/ll/llbench.c): the time of one
+           operation and its checks; a program without long long links none of its code
+           (no 64-bit helpers, no %lld in printf), one with long long and printf links them
   stack    the stack guard (cc816's software stack and vbcc's tiny model: an overflow is
            reported; --debug's report)
   bench    the compiler trials' benchmark, its six check values (-O1 and -O3)
@@ -164,6 +167,39 @@ def fpu_test(b, horizon):
            if ok else f"links {fl} {fl2} {(out + out2).strip()[-120:]}")
 
 
+def ll_test(b, horizon):
+    """long long and setjmp: tests/ll/llbench.c's times and checks; the 64-bit code only
+    in programs that use long long"""
+    prg = os.path.join(b, "LLBENCH.PRG")
+    rc, out = hcc(prg, [os.path.join(HERE, "ll", "llbench.c")], "cc816", ["--map"])
+    if rc:
+        report("ll", "cc816", False, "build: " + out.strip().splitlines()[-1])
+        return
+    mp = os.path.join(b, "LLBENCH.map")
+    names = open(mp, encoding="latin-1").read() if os.path.exists(mp) else ""
+    rc, con, _ = emu(prg, os.path.join(b, "run-ll"), horizon, seconds=40)
+    times = re.findall(r"^(\w+)\s+(\d+) us", con, re.M)
+    ok = "llbench done" in con and "check 488427781 6640827 1500000026624" in con and \
+        len(times) == 12 and all(re.search(r"\b" + n + r"\b", names)
+                                 for n in ("__mul64", "__udiv64", "___hz_fmtll", "_setjmp"))
+    report("ll", "cc816", ok, " ".join(f"{n} {t}" for n, t in times) + " us" +
+           ("" if ok else " " + " | ".join(l for l in con.splitlines() if "check" in l)))
+    src = os.path.join(b, "noll.c")
+    with open(src, "w") as f:
+        f.write('#include <stdio.h>\n#include <stdlib.h>\nint main(void)\n{\n'
+                '    long x = atol("123456789");\n    printf("%ld %lu %d\\n", x * 3, '
+                '(unsigned long)x / 7, (int)sizeof x);\n    return 0;\n}\n')
+    rc, out = hcc(os.path.join(b, "NOLL.PRG"), [src], "cc816", ["--map"])
+    mp = os.path.join(b, "NOLL.map")
+    names = open(mp, encoding="latin-1").read() if os.path.exists(mp) else ""
+    ll = [n for n in ("__mul64", "__udiv64", "__shl64", "___hz_fmtll", "___hz_scanll",
+                      "__cc816_fmtll", "___lltof") if re.search(r"\b" + n + r"\b", names)]
+    size = grab(out, r"[\d,]+ bytes on the card")
+    report("ll", "noll", rc == 0 and names != "" and not ll,
+           f"a program without long long links none of its code ({size})" if not ll
+           else f"links {ll}")
+
+
 def allsys(path):
     names = []
     for ln in open(os.path.join(SDKC, "include", "hzsys.h")):
@@ -252,6 +288,9 @@ def run_model(model, horizon, only):
 
     if want("fpu") and model == "cc816":
         fpu_test(b, horizon)
+
+    if want("ll") and model == "cc816":
+        ll_test(b, horizon)
 
     if want("stack"):
         prg = os.path.join(b, "STACK.PRG")
@@ -361,12 +400,19 @@ def hcc_messages(only, models):
         report("hcc", "mixed", ok, "objects of the other compiler refused" if ok
                else (out2 + out3).strip()[-200:])
     if "cc816" in models:
-        # cc816: one model, no long long: one plain line each; float is built (--float too)
+        # cc816: one model: one plain line; long long and float are built (--float too),
+        # what is not supported is one plain line with file:line (a VLA)
         rc, out = hcc(os.path.join(b, "BAD.PRG"), [undef], "cc816", ["--model", "tiny"])
         ok1 = rc != 0 and "--model tiny is for vbcc" in out
         ll = W("ll.c", "int main(void)\n{\n    long long x = 1;\n    return (int)x;\n}\n")
         rc, out = hcc(os.path.join(b, "LL.PRG"), [ll], "cc816")
-        ok2 = rc != 0 and re.search(r"ll\.c:3(:\d+)?: error: cc816 does not support long long", out) is not None
+        ok2 = rc == 0
+        vla = W("vla.c", "int f(int n)\n{\n    int a[n];\n    a[0] = n;\n    return a[0];\n}\n"
+                "int main(void) { return f(1); }\n")
+        rc, out5 = hcc(os.path.join(b, "VLA.PRG"), [vla], "cc816")
+        ok2 = ok2 and rc != 0 and re.search(r"vla\.c:3(:\d+)?: error: cc816 does not support "
+                                            r"variable-length arrays", out5) is not None
+        out += out5
         fl = W("fl.c", "int main(void)\n{\n    float f = 2;\n    return (int)f;\n}\n")
         rc, out3 = hcc(os.path.join(b, "FL.PRG"), [fl], "cc816", ["--float"])
         ok3 = rc == 0
@@ -375,8 +421,8 @@ def hcc_messages(only, models):
         rc, out4 = hcc(os.path.join(b, "FS.PRG"), [fs], "cc816")
         ok4 = rc != 0 and re.search(r"fs\.c:4(:\d+)?: error: switch on a value that is not an integer",
                                     out4) is not None
-        report("hcc", "cc816", ok1 and ok2 and ok3 and ok4, "--model and long long refused "
-               "with file:line, float built, a float switch refused" if ok1 and ok2 and ok3
+        report("hcc", "cc816", ok1 and ok2 and ok3 and ok4, "--model and a VLA refused "
+               "with file:line, long long and float built, a float switch refused" if ok1 and ok2 and ok3
                and ok4 else (out + out3 + out4).strip()[-200:])
 
 

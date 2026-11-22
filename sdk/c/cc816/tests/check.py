@@ -38,9 +38,10 @@ import prog  # noqa: E402
 CONFORM = os.path.join(HERE, 'conform', 'conform.py')
 
 
-def conform(files, out, spt=1.0):
+def conform(files, out, spt=1.0, slow=()):
     r = subprocess.run([sys.executable, CONFORM, '--out', out, '--seconds-per-test', str(spt)]
-                       + files, capture_output=True, text=True)
+                       + [x for s in slow for x in ('--slow', s)] + files,
+                       capture_output=True, text=True)
     print(r.stdout.strip())
     if r.returncode:
         print(r.stderr[-2000:])
@@ -131,8 +132,10 @@ def main():
         bad += sum(1 for r in res.values() if r['status'] != 'pass')
     if cts:
         print('== c-testsuite')
+        # (00040.c, 8 queens by brute force, is right but needs about 260 emulated
+        # seconds: 1.5 million calls of its check function)
         res = conform(sorted(glob.glob(os.path.join(cts, 'tests', 'single-exec', '*.c'))),
-                      os.path.join(prog.BUILD, 'cts'))
+                      os.path.join(prog.BUILD, 'cts'), slow=['00040.c=400'])
         known = {}
         for ln in open(os.path.join(HERE, 'cts-known.txt')):
             if ln.strip() and not ln.startswith('#'):

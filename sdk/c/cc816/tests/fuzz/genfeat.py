@@ -30,6 +30,12 @@ same type, no structure layout in the checksums.
     misc      enumerations with negative and large values, _Bool (++, --, compound
               assignments), the comma operator, ?: of mixed widths, statement expressions,
               compound literal arrays indexed
+    llong     long long (int64_t, uint64_t) mixed with every other width: + - * / % << >>
+              & | ^ ~ unary -, compares, ?:, casts both ways, compound assignments, ++/--,
+              shifts by variables, globals with initialisers, arrays, a structure member,
+              parameters and results (also through a function pointer), variadic
+              va_arg(ap, int64_t), a switch on a 64-bit value, sprintf %lld %llu %llx %llo,
+              conversions to float and back (guarded); checked against gcc
     float     (not in "all": --features basic,float) float and double (dbl: double on the
               target, float in the host build: cc816's double is a float) arithmetic,
               compares, conversions both ways (guarded: no out-of-range conversion),
@@ -41,7 +47,7 @@ same type, no structure layout in the checksums.
 from genfuzz import TYPES, OPS, CMPS, Gen
 
 FEATURES = ['basic', 'struct', 'bitfield', 'fptr', 'vararg', 'far', 'switch', 'spill', 'ptr',
-            'globals', 'init', 'union', 'goto', 'misc']
+            'globals', 'init', 'union', 'goto', 'misc', 'llong']
 EXTRA_FEATURES = ['float']          # chosen by name only (all keeps its old programs)
 AVOID_KNOWN = False     # True: leave out the shapes of the compiler bugs in regress/ (while they are open)
 LOWOPS = ['add', 'sub', 'mul', 'and', 'or', 'xor']      # low bits independent of the width
@@ -1373,6 +1379,198 @@ class FGen(Gen):
         return '\n'.join(G + self.G), F, pick
 
 
+# ---------------------------------------------------------------------- long long
+LTYPES = dict(TYPES)
+LTYPES['i64'] = ('int64_t', 64, True)
+LTYPES['u64'] = ('uint64_t', 64, False)
+
+
+def llit(t, v):
+    ct, bits, signed = LTYPES[t]
+    v &= (1 << bits) - 1
+    if signed and v >> (bits - 1):
+        v -= 1 << bits
+    if bits == 64:
+        if signed:
+            return '(-9223372036854775807LL - 1)' if v == -(1 << 63) else f'(({ct}){v}LL)'
+        return f'(({ct}){v}ULL)'
+    return lit(t, v)
+
+
+class LLongMixin:
+    def ll_helpers(self):
+        if getattr(self, 'llhelpers', False):
+            return
+        self.llhelpers = True
+        G = self.G
+        # the 64-bit ops: the same on the host and on the target (no promotion beyond them)
+        for t, ct, ut in (('i64', 'int64_t', 'uint64_t'), ('u64', 'uint64_t', 'uint64_t')):
+            for op, sym in OPS.items():
+                if op in ('add', 'sub', 'mul'):
+                    G.append(f'#define {op.upper()}_{t}(a, b) (({ct})(({ut})({ct})(a) {sym} ({ut})({ct})(b)))')
+                else:
+                    G.append(f'#define {op.upper()}_{t}(a, b) (({ct})(({ct})(a) {sym} ({ct})(b)))')
+            for op, sym in CMPS.items():
+                G.append(f'#define {op.upper()}_{t}(a, b) ((int16_t)(({ct})(a) {sym} ({ct})(b)))')
+            G.append(f'#define SHL_{t}(a, n) (({ct})(({ut})({ct})(a) << ((n) & 63)))')
+            G.append(f'#define SHR_{t}(a, n) (({ct})(({ct})(a) >> ((n) & 63)))')
+            G.append(f'#define NEG_{t}(a) (({ct})(0 - ({ut})({ct})(a)))')
+            G.append(f'#define COM_{t}(a) (({ct})~({ct})(a))')
+            G.append(f'static {ct} div_{t}({ct} a, {ct} b) {{ if (b == 0{" || b == -1" if t == "i64" else ""}) b = 7; return a / b; }}')
+            G.append(f'static {ct} mod_{t}({ct} a, {ct} b) {{ if (b == 0{" || b == -1" if t == "i64" else ""}) b = 7; return a % b; }}')
+        G.append('static void mix64(uint64_t v) { mix((uint32_t)v); mix((uint32_t)(v >> 32)); }')
+        G.append('static int64_t LZ_i64(float x) { return x > -9.2e18f && x < 9.2e18f ? (int64_t)x : (int64_t)4321; }')
+        G.append('static uint64_t LZ_u64(float x) { return x > -1.0f && x < 1.8e19f ? (uint64_t)x : (uint64_t)8765; }')
+        G.append('static int64_t LZ_vsum(int16_t n, ...) { va_list ap; int64_t s = 0; va_start(ap, n); '
+                 'while (n-- > 0) { s = (int64_t)((uint64_t)s * 3u + (uint64_t)va_arg(ap, int64_t)); '
+                 's ^= (int16_t)va_arg(ap, int); } va_end(ap); return s; }')
+
+    def lconst(self, t):
+        if t not in ('i64', 'u64'):
+            return self.const(t)
+        r = self.r.random()
+        if r < 0.25:
+            v = self.r.choice([0, 1, 2, 3, 7, 10, 100, 255, 256, 65535, 65536, 1 << 31,
+                               (1 << 32) - 1, 1 << 32, 1000000007, 10 ** 12, 1 << 62])
+        elif r < 0.45:
+            v = (1 << 64) - self.r.choice([1, 2, 128, 256, 1 << 32, 1 << 63])
+        elif r < 0.6:
+            v = self.r.getrandbits(self.r.choice([16, 32, 40]))
+        else:
+            v = self.r.getrandbits(64)
+        return llit(t, v)
+
+    def lleaf(self, t, vars_):
+        r = self.r.random()
+        cands = [n for n, vt in vars_ if vt == t]
+        if r < 0.25 or not vars_:
+            return self.lconst(t)
+        if r < 0.7 and cands:
+            return self.r.choice(cands)
+        n, vt = self.r.choice(vars_)
+        return f'(({LTYPES[t][0]}){n})'
+
+    def lexpr(self, t, vars_, d):
+        """an expression of type t (any of LTYPES) over vars_ (which may hold 64-bit
+        variables), mixing 64-bit and narrower operations"""
+        r = self.r
+        if d <= 0 or r.random() < 0.2:
+            return self.lleaf(t, vars_)
+        k = r.random()
+        ct = LTYPES[t][0]
+        if k < 0.4:
+            op = r.choice(list(OPS))
+            return f'{op.upper()}_{t}({self.lexpr(t, vars_, d - 1)}, {self.lexpr(t, vars_, d - 1)})'
+        if k < 0.5:
+            op = r.choice(['SHL', 'SHR'])
+            return f'{op}_{t}({self.lexpr(t, vars_, d - 1)}, {self.lexpr("u8", vars_, d - 2)})'
+        if k < 0.58:
+            op = r.choice(['div', 'mod'])
+            return f'{op}_{t}({self.lexpr(t, vars_, d - 1)}, {self.lexpr(t, vars_, d - 1)})'
+        if k < 0.66:
+            c2 = r.choice(list(LTYPES))
+            op = r.choice(list(CMPS))
+            return f'(({ct}){op.upper()}_{c2}({self.lexpr(c2, vars_, d - 1)}, {self.lexpr(c2, vars_, d - 1)}))'
+        if k < 0.72:
+            return f'{r.choice(["NEG", "COM"])}_{t}({self.lexpr(t, vars_, d - 1)})'
+        if k < 0.8:
+            c2 = r.choice(list(LTYPES))
+            op = r.choice(list(CMPS))
+            c = f'{op.upper()}_{c2}({self.lexpr(c2, vars_, d - 1)}, {self.lexpr(c2, vars_, d - 1)})'
+            return f'({c} ? {self.lexpr(t, vars_, d - 1)} : {self.lexpr(t, vars_, d - 1)})'
+        c2 = r.choice(list(LTYPES))
+        return f'(({ct}){self.lexpr(c2, vars_, d - 1)})'
+
+    def feat_llong(self, idx):
+        r = self.r
+        P = f'F{idx}_'
+        G = self.G
+        self.ll_helpers()
+        self.float_helpers()
+        G.append(f'static int64_t {P}ga[5] = {{ {", ".join(self.lconst("i64") for _ in range(r.randint(1, 5)))} }};')
+        G.append(f'static uint64_t {P}gu = {self.lconst("u64")};')
+        G.append(f'struct {P}S {{ int16_t k; int64_t v; uint8_t c; uint64_t w; }};')
+        G.append(f'static struct {P}S {P}gs = {{ {r.randint(-99, 99)}, {self.lconst("i64")}, 7, {self.lconst("u64")} }};')
+        G.append(f'static int64_t {P}h1(int64_t a, uint64_t b, int16_t c) {{ return (int64_t)((uint64_t)a * {self.lconst("u64")} ^ (b >> (c & 63))); }}')
+        G.append(f'static uint64_t {P}h2(uint32_t a, int64_t b) {{ return (uint64_t)a * (uint64_t)a + (uint64_t)b; }}')
+        G.append(f'static int64_t {P}rec(int16_t n, int64_t x) {{ n &= 15; return n == 0 ? x : {P}rec(n - 1, (int64_t)((uint64_t)x * 5u + (uint64_t)n)); }}')
+        G.append(f'static int64_t (*{P}fp)(int64_t, uint64_t, int16_t) = {P}h1;')
+        L = self.head(idx)
+        vars_ = self.scalars(L, r.randint(1, 3))
+        nl = r.randint(2, 5)
+        for k in range(nl):
+            t = r.choice(['i64', 'u64'])
+            L.append(f'    {LTYPES[t][0]} w{k} = {self.lexpr(t, vars_, 2)};')
+            vars_.append((f'w{k}', t))
+        L.append(f'    int64_t la[6];')
+        L.append(f'    struct {P}S st = {P}gs;')
+        L.append('    float fl;')
+        L.append('    char buf[120];')
+        L.append('    const char *s;')
+        L.append('    H = 0;')
+        L.append(f'    for (i = 0; i < 6; i++) la[i] = {self.lexpr("i64", vars_ + [("i", "i16")], 2)};')
+        wv = [(n, t) for n, t in vars_]
+        for _ in range(r.randint(6, 12)):
+            k = r.random()
+            n, t = r.choice(wv)
+            ct = LTYPES[t][0]
+            if k < 0.3:
+                L.append(f'    {n} = {self.lexpr(t, vars_, 3)};')
+            elif k < 0.4:
+                n2, t2 = r.choice([(a, b) for a, b in vars_ if b in ('i64', 'u64')])
+                op = r.choice(['+=', '-=', '*=', '&=', '|=', '^='])
+                L.append(f'    {n2} {op} ({LTYPES[t2][0]}){self.lexpr(t2, vars_, 2)};')
+                if r.random() < 0.3:
+                    L.append(f'    {n2} {r.choice(["<<=", ">>="])} ({self.lexpr("u8", vars_, 1)} & 63);')
+            elif k < 0.47:
+                n2, t2 = r.choice([(a, b) for a, b in vars_ if b in ('i64', 'u64')])
+                L.append(f'    {r.choice([n2 + "++", n2 + "--", "++" + n2, "--" + n2])}; mix64((uint64_t){n2}++); mix64((uint64_t)--{n2});')
+            elif k < 0.55:
+                L.append(f'    if ({self.cond(vars_, 1)} && {self.lexpr("i16", vars_, 1)}) {n} = {self.lexpr(t, vars_, 2)}; '
+                         f'else {n} = ({ct}){self.lexpr("i64", vars_, 2)};')
+            elif k < 0.62:
+                j = r.randrange(6)
+                L.append(f'    la[{j}] = ({P}ga[{r.randrange(5)}] += {self.lexpr("i64", vars_, 1)}); {P}gu ^= (uint64_t)la[{j}];')
+                L.append(f'    st.v = st.v * 3 + la[{j}]; st.w -= {P}gu; mix64((uint64_t)st.v); mix64(st.w);')
+            elif k < 0.69:
+                a1, a2 = self.lexpr('i64', vars_, 2), self.lexpr('u64', vars_, 1)
+                L.append(f'    {n} = ({ct}){r.choice([P + "h1", "(*" + P + "fp)"])}({a1}, {a2}, {self.expr("i16", [v for v in vars_ if v[1] in TYPES], 1)});')
+                L.append(f'    mix64({P}h2((uint32_t){self.lexpr("u32", vars_, 1)}, {self.lexpr("i64", vars_, 1)})); mix64((uint64_t){P}rec({r.randint(0, 9)}, {n}));')
+            elif k < 0.75:
+                args = []
+                for _ in range(r.randint(0, 3)):
+                    args += [f'(int64_t){self.lexpr("i64", vars_, 1)}', f'(int16_t){self.lexpr("i16", vars_, 1)}']
+                L.append(f'    mix64((uint64_t)LZ_vsum({len(args) // 2}{"".join(", " + a for a in args)}));')
+            elif k < 0.82:
+                cs = sorted(set([0, 1, -1, 1 << 32, -(1 << 40), r.getrandbits(48)] +
+                                [r.getrandbits(64) - (1 << 63) for _ in range(2)]))
+                cs = r.sample(cs, r.randint(2, len(cs)))
+                L.append(f'    switch ((int64_t){self.lexpr("i64", vars_, 1)} & {r.choice(["-1", "7", "0xFFFFFFFFFFLL"])}) {{')
+                for c in cs:
+                    L.append(f'    case {llit("i64", c)}: mix({r.randint(1, 99)}); break;')
+                L.append('    case 3: mix(333);')
+                L.append(f'    default: mix64((uint64_t){n});')
+                L.append('    }')
+            elif k < 0.9:
+                L.append(f'    fl = (float){self.lexpr(r.choice(["i64", "u64"]), vars_, 2)}; mix(FZ_fb(fl));')
+                L.append(f'    fl = fl * {fconst(r)}; mix64((uint64_t)LZ_i64(fl)); mix64(LZ_u64(fl));')
+            else:
+                fmts = [r.choice(['%lld', '%llu', '%llx', '%llX', '%llo', '%20lld', '%-21llu', '%+lld',
+                                  '%.15llx', '%#llx', '%022lld']) for _ in range(r.randint(1, 3))]
+                args = []
+                for f_ in fmts:
+                    args.append(('(long long)' if 'd' in f_ else '(unsigned long long)') + self.lexpr(r.choice(['i64', 'u64']), vars_, 2))
+                L.append(f'    mix((uint32_t)sprintf(buf, "{"|".join(fmts)}"{"".join(", " + a for a in args)}));')
+                L.append('    for (s = buf; *s; s++) mix((uint8_t)*s);')
+            L.append(f'    mix64((uint64_t){n});')
+        L.append('    for (i = 0; i < 6; i++) mix64((uint64_t)la[i]);')
+        L.append(f'    mix64((uint64_t){P}ga[0]); mix64({P}gu); mix64((uint64_t)st.v);')
+        for n, t in vars_:
+            if t in ('i64', 'u64'):
+                L.append(f'    mix64((uint64_t){n});')
+        return self.tail(L, [v for v in vars_ if v[1] in TYPES])
+
+
 # ---------------------------------------------------------------------- float
 FCMPS = ['<', '<=', '>', '>=', '==', '!=']
 
@@ -1571,7 +1769,7 @@ class FloatMixin:
         return ''.join(fmt), args
 
 
-FGen.__bases__ = FGen.__bases__ + (FloatMixin,)
+FGen.__bases__ = FGen.__bases__ + (FloatMixin, LLongMixin)
 
 
 def OPS_UP(r):

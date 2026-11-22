@@ -21,13 +21,15 @@ Instructions (Ins.op):
   br  cc a b Lt Lf             compare and branch (cc: eq ne ult ule ugt uge slt sle sgt sge)
   jmp L
   ret a
-  sw  a cases default          jump table / compare chain: cases = [(value, label)]
+  sw  a cases default          jump table / compare chain: cases = [(value, label)];
+                               ranges = [(lo, hi, label)] (GNU case ranges, tested first)
   copy dst src n               memcpy of n bytes between near addresses
   fcopy dst src n              the same between far addresses (32-bit operands: __fcopy)
   zero dst n                   memset 0
   vastart d                    d(4) = far address of the first variadic argument
   cop d n a x y                syscall: COP #n with A, X, Y -> d (A)
-  asm text
+  asm text vars                inline assembly; vars: the V it names (%[name]), each used
+                               and changed by it (they live in direct-page registers)
 """
 
 
@@ -147,9 +149,13 @@ class Ins:
                 o = self.x.get(k)
                 if isinstance(o, V):
                     r.append(o)
+        elif self.op == 'asm':
+            r.extend(self.x.get('vars') or ())
         return r
 
     def defs(self):
+        if self.op == 'asm':
+            return list(self.x.get('vars') or ())
         return [self.d] if isinstance(self.d, V) else []
 
     def subst(self, f):
@@ -186,7 +192,8 @@ class Ins:
         if self.op == 'jmp':
             return [self.x['t']]
         if self.op == 'sw':
-            return [l for _, l in self.x['cases']] + [self.x['default']]
+            return [l for _, _, l in self.x.get('ranges', ())] + \
+                [l for _, l in self.x['cases']] + [self.x['default']]
         return []
 
 

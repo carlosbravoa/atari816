@@ -1,7 +1,9 @@
 /* scan.c - scanf's reading for cc816 (scanf.c and sscanf.c call it).
  *
- * %d %i %u %o %x %X %p %c %s %[set] %[^set] %n %%; the sizes hh h l (j: long, z t: int);
- * * (no assignment) and widths. White space in the format skips any white space.
+ * %d %i %u %o %x %X %p %c %s %[set] %[^set] %n %%; the sizes hh h l (z t: int); ll and j
+ * (intmax_t is long long) go to __hz_scan_ll (scanll.c), which a program that uses long
+ * long has installed (rt/cc816/ll_hooks.s); without it they are read as l; * (no
+ * assignment) and widths. White space in the format skips any white space.
  * %f %F %e %E %g %G %a %A (float *, and with l or L double * and long double *: the same
  * 32-bit format) go to __hz_scan_float (scanfp.c), which a program that uses floating
  * point has installed (rt/cc816/fp_hooks.s); without it they fail. The result: the number
@@ -18,6 +20,10 @@ typedef void (*hz_ungetfn)(int c, void *ctx);
  * characters read) -> 1, or 0 (no number there) */
 int (*__hz_scan_float)(hz_getfn get, hz_ungetfn unget, void *ctx, unsigned width,
                        unsigned long *bits, unsigned *nread);
+/* the long long conversion: (get, unget, ctx, width, base (0: %i), the count of
+ * characters read, where the value goes or 0) -> 1, or 0 (no number there) */
+int (*__hz_scan_ll)(hz_getfn get, hz_ungetfn unget, void *ctx, unsigned width,
+                    unsigned base, unsigned *nread, void *to);
 
 static int digit(int c, unsigned base)
 {
@@ -78,14 +84,14 @@ int __hz_vscan(hz_getfn get, hz_ungetfn unget, void *ctx, const char *fmt, va_li
         while (*fmt >= '0' && *fmt <= '9')
             width = width * 10 + (unsigned)(*fmt++ - '0');
         size = 0;
-        for (;;) {
-            if (*fmt == 'h')
+        for (;; ++fmt) {
+            k = (unsigned char)*fmt;
+            if (k == 'h')
                 size = size == 2 ? 1 : 2;
-            else if (*fmt == 'l' || *fmt == 'j' || *fmt == 'L')
-                size = 4;
-            else if (*fmt != 'z' && *fmt != 't')
+            else if (k == 'l' || k == 'j' || k == 'L')
+                size = (size == 4 || k == 'j') && __hz_scan_ll ? 8 : 4;
+            else if (k != 'z' && k != 't')
                 break;
-            ++fmt;
         }
         fc = (unsigned char)*fmt++;
         if (!fc)
@@ -208,6 +214,13 @@ int __hz_vscan(hz_getfn get, hz_ungetfn unget, void *ctx, const char *fmt, va_li
         /* a number */
         if (!width)
             width = 0xFFFF;
+        if (size == 8 && fc != 'p') {
+            if (!__hz_scan_ll(get, unget, ctx, width, base, &nread,
+                              skip ? 0 : va_arg(ap, void *)))
+                return assigned;
+            assigned += !skip;
+            continue;
+        }
         neg = 0;
         any = 0;
         v = 0;

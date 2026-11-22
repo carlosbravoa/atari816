@@ -32,6 +32,7 @@ def allocate(f):
         inter.setdefault(a, set()).add(b)
         inter.setdefault(b, set()).add(a)
     moves = []
+    twice = set()        # live across a setjmp call (it returns twice)
     sameor = []          # (d, u, weight): coalesce, else they interfere
     weight = {}
     # interference and weights
@@ -44,18 +45,20 @@ def allocate(f):
             for v in ds + us:
                 allv.add(v)
                 weight[v] = weight.get(v, 0) + w
-            if ins.op == 'call' or ins.op == 'cop':
+            if ins.op == 'call' or ins.op == 'cop' or ins.op == 'asm':
                 for v in live:
                     if v not in ds:
                         across.add(v)
+                        if ins.x.get('twice'):
+                            twice.add(v)
             for d in ds:
                 for v in live:
                     if ins.op == 'mov' and v is ins.a:
                         continue
                     addi(d, v)
-                if ins.op != 'mov' and (d.size == 4 or any(u.size == 4 for u in us)):
+                if ins.op != 'mov' and (d.size >= 4 or any(u.size >= 4 for u in us)):
                     for u in us:
-                        if ins.op in SAME_OK and d.size == 4 and u.size == 4 and u is not d:
+                        if ins.op in SAME_OK and d.size >= 4 and u.size == d.size and u is not d:
                             # a 32-bit op that reads each word of u before it writes that
                             # word of d: d may take u's place (never a part of it)
                             sameor.append((d, u, w))
@@ -79,6 +82,14 @@ def allocate(f):
     for v in entry_live:
         for u in entry_live:
             addi(u, v)
+
+    # a value live across setjmp must hold its place until longjmp comes back: from the
+    # setjmp to any later call that may longjmp, which the flow graph does not show.
+    # It shares its location with nothing (a callee-saved register gets its value at the
+    # setjmp back from the jmp_buf; a stack slot keeps the last one).
+    for v in twice:
+        for u in allv:
+            addi(v, u)
 
     # coalescing (union-find), heaviest moves first
     parent = {}
@@ -144,10 +155,24 @@ def allocate(f):
                 return p
             p += align
         return None
-    order = sorted(reps, key=lambda v: (-(weight.get(v, 0)), v.id))
+    # a variable an asm statement names (%[name]) lives in a callee-saved register, so
+    # that the text can use the scratch ones freely: those first
+    asmv = {find(v) for v in allv if v.pinned == 'asm'}
+    order = sorted(reps, key=lambda v: (v not in asmv, -(weight.get(v, 0)), v.id))
     for v in order:
         w = weight.get(v, 0)
         acr = v in across
+        if v in asmv:
+            p = pick(v, 'dp', SCR, SCR + CS)
+            if p is None:
+                from .ctypes816 import CError
+                raise CError(f"too many variables named in asm statements in "
+                             f"{getattr(f, 'cname', f.name)} (they share 48 bytes of "
+                             f"registers)")
+            loc[v] = ('dp', p)
+            for k in range(p, p + v.size, 2):
+                used_cs.add(k)
+            continue
         if v.param is not None:
             if acr and w < 16 or not acr and w < 3:
                 loc[v] = ('home', v.param)

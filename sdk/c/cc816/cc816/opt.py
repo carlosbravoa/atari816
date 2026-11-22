@@ -67,6 +67,8 @@ def cleanup_cfg(f):
                     changed = True
             elif t.op == 'sw':
                 t.x['cases'] = [(v, res(l)) for v, l in t.x['cases']]
+                if 'ranges' in t.x:
+                    t.x['ranges'] = [(lo, hi, res(l)) for lo, hi, l in t.x['ranges']]
                 t.x['default'] = res(t.x['default'])
         # unreachable blocks
         reach = set()
@@ -163,10 +165,10 @@ def simplify(ins):
         return Ins('mov', ins.d, Imm(fp.cmp(ins.a.val, ins.b.val)))
     if op in ('zx', 'sx', 'tr', 'x8u', 'x8s', 'neg', 'com') and isinstance(ins.a, Imm):
         v = ins.a.val
-        if op == 'sx' and v & 0x8000:
-            v |= 0xFFFF0000
+        if op == 'sx' and v >> (8 * ins.a.size - 1):
+            v -= 1 << (8 * ins.a.size)
         elif op == 'tr':
-            v &= 0xFFFF
+            v &= (1 << (8 * ins.d.size)) - 1
         elif op == 'x8u':
             v &= 0xFF
         elif op == 'x8s':

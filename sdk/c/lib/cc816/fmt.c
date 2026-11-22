@@ -1,7 +1,10 @@
 /* fmt.c - printf's formatting for cc816 (printf.c and sprintf.c call it).
  *
- * %d %i %u %o %x %X %c %s %p %n %%; the sizes hh h l (and j z t: long, int, int; ll is
- * read as l); flags - + space # 0; width and precision, * for either.
+ * %d %i %u %o %x %X %c %s %p %n %%; the sizes hh h l (and z t: int); flags - + space # 0;
+ * width and precision, * for either.
+ * ll and j (intmax_t is long long) with d i u o x X go to __hz_fmt_ll (fmtll.c), which a
+ * program that uses long long has installed (rt/cc816/ll_hookp.s); without it they are
+ * read as l.
  * %f %F %e %E %g %G %a %A (a float, double or long double: one 32-bit format) go to
  * __hz_fmt_float (fmtfp.c), which a program that uses floating point has installed
  * (rt/cc816/fp_hookp.s); without it they print as they are written.
@@ -16,6 +19,11 @@ typedef void (*hz_outfn)(int c, void *ctx);
  * float's bits) -> characters written */
 int (*__hz_fmt_float)(hz_outfn out, void *ctx, unsigned c, unsigned flags, unsigned width,
                       int prec, unsigned long bits);
+/* the long long conversion: (out, ctx, conversion letter, flags, width, precision,
+ * whether there is one, where the argument is) -> characters written, or -1 (not d i u o
+ * x X: done here) */
+int (*__hz_fmt_ll)(hz_outfn out, void *ctx, unsigned c, unsigned flags, unsigned width,
+                   unsigned prec, int hasprec, va_list ap);
 
 static const char lower[] = "0123456789abcdef";
 static const char upper[] = "0123456789ABCDEF";
@@ -83,7 +91,8 @@ int __hz_vformat(hz_outfn out, void *ctx, const char *fmt, va_list ap)
         for (;;) {
             c = (unsigned char)*fmt;
             if (c == 'h') size = size == 2 ? 1 : 2;
-            else if (c == 'l' || c == 'j' || c == 'L') size = 4;
+            else if (c == 'l' || c == 'j' || c == 'L')
+                size = (size == 4 || c == 'j') && __hz_fmt_ll ? 8 : 4;
             else if (c == 'z' || c == 't') size = 0;
             else break;
             ++fmt;
@@ -91,6 +100,14 @@ int __hz_vformat(hz_outfn out, void *ctx, const char *fmt, va_list ap)
         c = (unsigned char)*fmt++;
         if (!c)
             break;
+        if (size == 8) {
+            int n = __hz_fmt_ll(out, ctx, c, flags, width, prec, hasprec, ap);
+            if (n >= 0) {
+                ap += 8;
+                total += n;
+                continue;
+            }
+        }
         prefix = "";
         neg = 0;
         digits = lower;

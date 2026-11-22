@@ -50,7 +50,7 @@ HORIZON = os.path.abspath(os.environ.get('HORIZON') or os.path.join(SDKC, '..', 
 
 PREDEF = ['__CC816__ 1', '__65816__ 1', '__HORIZON__ 1', '__ATARI816__ 1', '__far _Atomic',
           '__STDC__ 1', '__STDC_VERSION__ 199901L', '__CHAR_UNSIGNED__ 1', '__SIZE_T_INT 1',
-          '__attribute__(x) ', '__near ', '__builtin_expect(x, y) (x)', '__extension__ ']
+          '__near ', '__builtin_expect(x, y) (x)', '__extension__ ']
 
 TIMES = {}
 
@@ -334,6 +334,7 @@ def _compile(path, incs, defs, level, dump_ir, split, o, diag):
     _fail(diag)
     t0 = _tick('preprocess', t0)
     src = _strip_gnu(src)
+    src, attrs = gnu_attributes(src, diag)
     parser = c_parser.CParser()
     try:
         ast = parser.parse(src, path)
@@ -350,7 +351,7 @@ def _compile(path, incs, defs, level, dump_ir, split, o, diag):
             diag.error(path, f'syntax error: {str(e).split(": ", 1)[-1]}')
         _fail(diag)
     t0 = _tick('parse', t0)
-    fr = Front(path, diag, parser.implicit_int)
+    fr = Front(path, diag, parser.implicit_int, attrs)
     fr.compound_end = parser.compound_end
     _CURRENT['front'] = fr
     unit = fr.translate(ast)
@@ -360,6 +361,11 @@ def _compile(path, incs, defs, level, dump_ir, split, o, diag):
     helpers = set()
     for f in unit.funcs:
         _CURRENT['fn'] = getattr(f, 'cname', f.name)
+        if getattr(f, 'naked', None) is not None:
+            # a naked function: its asm statements alone (no prologue, no epilogue)
+            from .gen import asm_size
+            lines_all.append((f, [('L', f.name), ('ASM', f.naked, asm_size(f.naked))], set()))
+            continue
         optmod.optimise(f, level)
         t0 = _tick('optimise', t0)
         if dump_ir:
@@ -381,10 +387,179 @@ def _compile(path, incs, defs, level, dump_ir, split, o, diag):
 
 def _strip_gnu(src):
     # tolerate a few GNU spellings pycparser does not know
-    for a, b in (('__inline__', 'inline'), ('__inline', 'inline'), ('__restrict', 'restrict'),
-                 ('__const', 'const'), ('__signed__', 'signed'), ('__volatile__', 'volatile')):
-        src = src.replace(a, b)
-    return src
+    return _GNU_WORDS.sub(lambda m: _GNU_SPELL[m.group(0)], src)
+
+
+_GNU_SPELL = {'__inline__': 'inline', '__inline': 'inline', '__restrict__': 'restrict',
+              '__restrict': 'restrict', '__const__': 'const', '__const': 'const',
+              '__signed__': 'signed', '__signed': 'signed', '__volatile__': 'volatile',
+              '__volatile': 'volatile', '__typeof__': 'typeof', '__typeof': 'typeof',
+              '__alignof__': '_Alignof', '__alignof': '_Alignof'}
+_GNU_WORDS = re.compile(r'\b(?:' + '|'.join(sorted(_GNU_SPELL, key=len, reverse=True)) +
+                        r')\b')
+
+# GNU attributes: read (and taken out of the text: pycparser does not know them).
+# noreturn and naked are used; the ones that change nothing here (packed: structures are
+# packed anyway) are ignored; the ones cc816 cannot honour get a warning
+_ATTR_USED = {'noreturn', 'naked'}
+_ATTR_QUIET = {'unused', 'used', 'packed', 'const', 'pure', 'noinline', 'always_inline',
+               'inline', 'gnu_inline', 'artificial', 'format', 'format_arg', 'nonnull',
+               'returns_nonnull', 'warn_unused_result', 'deprecated', 'unavailable',
+               'malloc', 'cold', 'hot', 'visibility', 'nothrow', 'leaf', 'flatten',
+               'may_alias', 'fallthrough', 'sentinel', 'externally_visible', 'optimize',
+               'no_instrument_function', 'noclone', 'noipa', 'access', 'alloc_size',
+               'assume_aligned', 'designated_init', 'transparent_union', 'mode_unused',
+               'no_sanitize', 'retain', 'nonstring', 'warning', 'error', 'copy',
+               'target', 'interrupt', 'signal'}
+_IDENT = re.compile(r'[A-Za-z_]\w*')
+_C_WORDS = {'void', 'char', 'short', 'int', 'long', 'float', 'double', 'signed', 'unsigned',
+            '_Bool', 'struct', 'union', 'enum', 'const', 'volatile', 'static', 'extern',
+            'inline', 'register', 'auto', 'typedef', 'restrict', '_Noreturn', 'sizeof',
+            'return', 'if', 'while', 'for', 'switch', '_Atomic'}
+
+
+def _skip_literal(src, i):
+    """i at a quote: the index after the string or character constant"""
+    q = src[i]
+    i += 1
+    while i < len(src) and src[i] != q:
+        i += 2 if src[i] == '\\' else 1
+    return i + 1
+
+
+def _places(src):
+    """offset -> 'file:line:col' of the preprocessed text (its #line lines followed)"""
+    marks = []
+    f, ln = '?', 1
+    pos = 0
+    for line in src.split('\n'):
+        m = re.match(r'#\s*(?:line\s+)?(\d+)\s*(?:"([^"]*)")?', line)
+        if m:
+            ln = int(m.group(1)) - 1
+            f = m.group(2) or f
+        marks.append((pos, f, ln))
+        pos += len(line) + 1
+        ln += 1
+
+    def place(off):
+        import bisect
+        k = bisect.bisect_right([p for p, _, _ in marks], off) - 1
+        p, f, ln = marks[k]
+        return f'{f}:{ln}:{off - p + 1}'
+    return place
+
+
+def gnu_attributes(src, diag):
+    """__attribute__((...)) taken out of the text (blanks in its place: the lines and
+    columns stay) -> (text, {'noreturn': names, 'naked': names}): the functions declared
+    where those attributes appear"""
+    if '__attribute' not in src:
+        return src, {}
+    out = list(src)
+    found = {'noreturn': set(), 'naked': set()}
+    place = None
+    i = 0
+    n = len(src)
+    while i < n:
+        c = src[i]
+        if c in '"\'':
+            i = _skip_literal(src, i)
+            continue
+        if c == '\n' and src.startswith('#', i + 1):
+            i = src.find('\n', i + 1)
+            if i < 0:
+                break
+            continue
+        if c != '_' or not src.startswith('__attribute', i) or \
+                (i and (src[i - 1].isalnum() or src[i - 1] == '_')):
+            i += 1
+            continue
+        m = re.match(r'__attribute(?:__)?\s*\(', src[i:])
+        if not m:
+            i += 1
+            continue
+        start = i
+        j = i + m.end()
+        depth = 1
+        while j < n and depth:
+            if src[j] in '"\'':
+                j = _skip_literal(src, j)
+                continue
+            depth += {'(': 1, ')': -1}.get(src[j], 0)
+            j += 1
+        body = src[i + m.end():j - 1]
+        for k in range(start, j):
+            if out[k] != '\n':
+                out[k] = ' '
+        names = []
+        for a in _split_attrs(body):
+            nm = re.match(r'\s*([A-Za-z_]\w*)', a)
+            if nm:
+                names.append((nm.group(1).strip('_'), a))
+        for name, a in names:
+            if name in _ATTR_USED:
+                fn = _declared_function(src, start, j)
+                if fn:
+                    found[name].add(fn)
+                continue
+            if name in _ATTR_QUIET:
+                continue
+            if name == 'aligned':
+                arg = re.search(r'\(\s*(\d+)\s*\)', a)
+                if arg and int(arg.group(1)) <= 1:
+                    continue
+            place = place or _places(src)
+            why = {'aligned': 'cc816 does not align objects (structures are packed, '
+                              '_Alignof is 1)',
+                   'constructor': "use a function named _INIT_<n>_name (run before main)",
+                   'destructor': "use a function named _EXIT_<n>_name (run at exit)",
+                   'section': 'the code and data go to the usual segments',
+                   'weak': 'ld65 has no weak symbols',
+                   'alias': 'ld65 has no aliases: write a function that calls the other',
+                   'cleanup': 'call the function yourself where the variable ends'}.get(
+                       name, 'cc816 does not know it')
+            diag.warning(place(start), f"the attribute '{name}' is ignored: {why}",
+                         'attributes')
+        i = j
+    return ''.join(out), found
+
+
+def _split_attrs(body):
+    """the attributes of (( a, b(1, 2) )) -> ['a', 'b(1, 2)']"""
+    body = body.strip()
+    if body.startswith('(') and body.endswith(')'):
+        body = body[1:-1]
+    parts, depth, cur = [], 0, ''
+    for ch in body:
+        if ch == ',' and depth == 0:
+            parts.append(cur)
+            cur = ''
+            continue
+        depth += {'(': 1, ')': -1}.get(ch, 0)
+        cur += ch
+    parts.append(cur)
+    return [p for p in parts if p.strip()]
+
+
+def _declared_function(src, a, b):
+    """the name of the function declared by the declaration around src[a:b] (an
+    attribute): the first identifier followed by '(' in it, from its start (after the
+    last ; { or } before it) to its end (; { or =)"""
+    s = a
+    while s > 0 and src[s - 1] not in ';{}':
+        s -= 1
+    e = b
+    while e < len(src) and src[e] not in ';{=':
+        e += 1
+    text = src[s:a] + ' ' * (b - a) + src[b:e]
+    for m in _IDENT.finditer(text):
+        w = m.group(0)
+        if w in _C_WORDS or w.startswith('__attribute'):
+            continue
+        rest = text[m.end():].lstrip()
+        if rest.startswith('('):
+            return w
+    return None
 
 
 # a function named _INIT_<n>_name / _EXIT_<n>_name (vbcc's convention) is a constructor
@@ -399,7 +574,16 @@ def emit(unit, funcs, helpers):
     body = []
     exports = set()
     body.append('\t.segment "CODE"')
-    for f, lines in funcs:
+    tops = list(getattr(unit, 'asm', ()))
+
+    def top_asm(upto):
+        # file-scope asm statements, where they were among the functions (a .macro must
+        # come before its use); the code segment and 16-bit registers again after each
+        while tops and tops[0][0] <= upto:
+            body.append(tops.pop(0)[1])
+            body.extend(['\t.segment "CODE"', '\t.a16', '\t.i16'])
+    for k, (f, lines) in enumerate(funcs):
+        top_asm(k)
         if not f.static:
             exports.add(f.name)
             m = _CONDES.match(getattr(f, 'cname', ''))
@@ -408,6 +592,7 @@ def emit(unit, funcs, helpers):
                 body.append(f'\t.{kind} {f.name}, {min(max(int(m.group(2)), 1), 31)}')
         body.append('')
         body.append(text(lines))
+    top_asm(len(funcs) + 1)
     segs = {'RODATA': [], 'DATA': [], 'BSS': []}
     for d in unit.data:
         lines = segs[d.section]
@@ -448,6 +633,11 @@ def emit(unit, funcs, helpers):
         out.append('\t.forceimport __cc816_fmtf')
     if getattr(unit, 'float_scanf', False):
         out.append('\t.forceimport __cc816_scanf')
+    # the same for long long: printf's and scanf's %lld (rt/cc816/ll_hookp.s, ll_hooks.s)
+    if getattr(unit, 'll_printf', False):
+        out.append('\t.forceimport __cc816_fmtll')
+    if getattr(unit, 'll_scanf', False):
+        out.append('\t.forceimport __cc816_scanll')
     return '\n'.join(out) + '\n' + text_all + '\n'
 
 
@@ -538,6 +728,9 @@ def emit_split(unit, funcs, path):
         name_defs = [f.name] + [d.name for d in own.get(f.name, [])]
         module(f.name.lstrip('_'), texts[f.name], own.get(f.name, []), helpers)
     data = [d for d in unit.data if not d.name.startswith('L_')] + shared
+    if getattr(unit, 'asm', None):
+        raise CError(f'{path}: error: asm at file scope is not allowed in a library file '
+                     f'(one module a function): put it in a function, or in a .s file')
     if data or condes_funcs:
         name_defs = [d.name for d in data] + [f.name for f, _ in condes_funcs]
         code = []
