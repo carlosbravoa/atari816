@@ -2,7 +2,8 @@
 # tests/check.sh - after make test's scripted game (tests/play.script, in build/test):
 #   1. the high score was saved: DIGGER.SCO on the card has HZD with 50 points;
 #   2. the sound: POKEY's 16-bit voices were set up and played (emu816 --log-sound);
-#   3. the screenshots are the reference pictures (tests/ref/play-N.png);
+#   3. the pictures of a recorded game at given game frames are the reference pictures
+#      (tests/frames.sh, tests/ref/frame-N.png);
 #   4. upstream's recorded games play out as upstream's (tests/drf.sh).
 # HORIZON: the Horizon tree (0.28 or later: DIGGER.PRG is a large program).
 HZ=${1:-../../horizon}
@@ -30,7 +31,7 @@ if [ -n "$rec" ]; then
     *) bad "the recording played back: '$got' (want score=50 level=1)";;
   esac
 else bad "no recording HZD50.DRF saved (F8)"; fi
-python3 tests/cmpshots.py build/test tests/ref play || fail=1
+sh tests/frames.sh "$HZ" || fail=1
 sh tests/drf.sh "$HZ" || fail=1
 grep -a '^digger: ' build/test/console.txt
 [ $fail = 0 ] && echo "digger: ALL TESTS PASSED"

@@ -148,6 +148,7 @@ void sys_write(uint32_t a, uint8_t v)
         if (M.cpu.cycles < s->dbg_busy_until) { s->dbg_dropped++; break; }   /* dropped, as on hardware */
         putchar(v);
         if (v == 10) fflush(stdout);
+        emu_console_byte(v);
         if (s->console_cycles) s->dbg_busy_until = M.cpu.cycles + s->console_cycles;
         break;
     }

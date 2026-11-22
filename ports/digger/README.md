@@ -127,11 +127,14 @@ PORTING-NOTES.md ("Speed", "The board's report") has the figures before and afte
 
 1. the scripted game, `tests/play.script`: title, a game, two emeralds, a shot, three
    lives lost, game over, initials HZD, the title with the new high score, F8, Esc;
-   the console's frame statistics are expected;
+   the console's frame statistics are expected (no pictures: see 2);
 2. `tests/check.sh`: `DIGGER.SCO` has HZD 50; POKEY's 16-bit voices were set up and
    played (the logged writes); the game's own recording (F8) plays back to the same
-   score; the seven screenshots equal `tests/ref/` pixel for pixel (`make refs` writes
-   them again after a change meant to show: look at them first);
+   score; `tests/frames.sh`: the game's recording of that game (`tests/play.drf`) played
+   back, a picture at each game frame of `tests/frames.txt` (the program stops there and
+   asks for it: `run816.py --shot-on`), each equal to `tests/ref/frame-N.png` pixel for
+   pixel; the pictures are of game frames, so the program's timing does not move them
+   (`make refs` writes them again after a change meant to show: look at them first);
 3. `tests/drf.sh`: seven of upstream's recorded games (`tests/drf/`, from upstream's
    `tests/data`) played back at full speed; each must end with upstream's own result
    (score, level, frame count: `tests/drf/*.out`, from upstream's CI). The game logic

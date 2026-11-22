@@ -63,6 +63,17 @@ int main(int argc, char *argv[])
         hz_progdir[0] = 0;
     t0 = (unsigned long)hz_uptime();
     atexit(report);
+    {                                   /* the pictures' test (hz_timer.c): SHOTS.TXT */
+        extern unsigned long hzt_shots[16];
+        extern unsigned hzt_nshots;
+        FILE *f = fopen("SHOTS.TXT", "r");
+        unsigned long v;
+        if (f) {
+            while (hzt_nshots < 16 && fscanf(f, "%lu", &v) == 1)
+                hzt_shots[hzt_nshots++] = v;
+            fclose(f);
+        }
+    }
     return digger_main(argc, argv);
 }
 

@@ -34,6 +34,8 @@
 #include "sound.h"
 #include "hz_plat.h"
 
+uint32_t getframe(void);
+
 #define TICK_US  3434UL                 /* the music timer's period: a quarter sound step */
 #define FRAME_US 16658UL                /* a vertical blank (60.03 a second) */
 #define SND_US   13736UL                /* the sound's interrupt: 72.8 a second */
@@ -41,6 +43,7 @@
 
 bool hzt_fast;
 bool hzt_title;                         /* the title screen is shown (hz_vid.c) */
+extern unsigned hzt_nshots;             /* (the pictures' test, below) */
 
 /* ---------------------------------------------------------------- the clock */
 
@@ -109,6 +112,8 @@ static int view = 0, title_t = 0;
 static int view_target(void)
 {
     int i, n = 0, sum = 0;
+    if (hzt_title && hzt_nshots)        /* (the pictures' test: the title's top, still) */
+        return 0;
     if (hzt_title) {
         /* the title: its top part 6 s, then down to show the bottom line (the copyright)
          * 3 s, and up again; a key that changes the mode brings the top back */
@@ -313,11 +318,51 @@ void olddelay(int16_t t)
     (void)t;
 }
 
+/* ---------------------------------------------------------------- the pictures' test */
+
+/* SHOTS.TXT next to the program (tests/frames.sh): game frames (upstream's frame count,
+ * getframe) at which the picture is to be taken. There the game stops for a moment: the
+ * frame drawn goes to the screen, the view goes straight to its place, and when both are
+ * shown the program prints "digger: shot N frame F"; the emulator (run816.py --shot-on)
+ * takes the picture two vertical blanks later; the picture stays for six. So a picture is
+ * of a game frame, whatever the program's timing (its code's place, the clock's phase). */
+unsigned long hzt_shots[16];
+unsigned hzt_nshots;
+static unsigned shot_i;
+
+static void blank_wait(void)            /* the next vertical blank, its work, the screen */
+{
+    unsigned f = hz_frame();
+    while (hz_frame() == f)
+        hz_vsync();
+    clock_update(false);
+    vbl_seen = hz_frame();
+    vbl_clk = clk;
+    vblank(true);
+}
+
+static void shot_check(void)
+{
+    unsigned i;
+    if (shot_i >= hzt_nshots || getframe() != hzt_shots[shot_i])
+        return;
+    view = view_target();               /* the view at its place at once */
+    hg_split(HZ_PANEL, 0, HZ_PANEL + view);
+    blank_wait();                       /* the frame drawn shown, the view sent */
+    blank_wait();                       /* (the view taken at this blank) */
+    printf("digger: shot %u frame %lu\n", shot_i + 1, (unsigned long)getframe());
+    for (i = 0; i < 6; i++)
+        blank_wait();
+    ++shot_i;
+}
+
 void gethrt(bool minsleep, int mult)
 {
     unsigned long period, busy, d;
     (void)minsleep;
     clock_init();
+    if (hzt_nshots && mult == 1)
+        shot_check();
     service(true, false);
     if (frame_t && mult == 1 && dgstate.ftime > 1) {
         busy = clk - frame_t;

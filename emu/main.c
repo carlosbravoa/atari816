@@ -232,10 +232,39 @@ static void sdl_frame(void)
 }
 #endif
 
+/* --shot-on TEXT, --shot-on-prefix PATH: a screenshot when the program prints a console line
+ * holding TEXT (PATH1.ppm, PATH2.ppm, ...): taken two vertical blanks later (the frame then
+ * fetched whole), so a program shows what it wants seen, prints the line and holds the
+ * picture for a few frames: pictures at given points of a program's own progress, whatever
+ * its timing */
+static const char *shoton_text, *shoton_prefix;
+static char shoton_line[256];
+static int shoton_len, shoton_req, shoton_n;
+
+void emu_console_byte(uint8_t v)
+{
+    if (!shoton_text) return;
+    if (v == 10 || v == 13) {
+        shoton_line[shoton_len] = 0;
+        if (shoton_len && strstr(shoton_line, shoton_text) && !shoton_req) shoton_req = 3;
+        shoton_len = 0;
+    } else if (shoton_len < (int)sizeof shoton_line - 1)
+        shoton_line[shoton_len++] = (char)v;
+}
+
 static void on_frame(void)
 {
     /* Marga only fetches and keeps lines when someone will look at them */
     double now = M.cpu.cycles / CPU_HZ;
+    if (shoton_req) {
+        M.nvc.want = 1;
+        if (--shoton_req == 0) {
+            char path[1024];
+            snprintf(path, sizeof path, "%s%d.ppm", shoton_prefix ? shoton_prefix : "shoton", ++shoton_n);
+            nvc_render();
+            if (nvc_write_ppm(path)) fprintf(stderr, "emu816: cannot write %s\n", path);
+        }
+    }
     for (int i = 0; i < nshots; i++) {
         if (shot_done[i]) continue;
         if (now >= shot_at[i] - 0.1) M.nvc.want = 1;
@@ -339,6 +368,8 @@ static void usage(void)
         "  --prof-from S, --prof-to S  only between these emulated seconds\n"
         "  --shot FILE.ppm      write the 1280x720 output frame (at exit, or at --shot-at); repeatable\n"
         "  --shot-at SECONDS    emulated time for the preceding --shot (first VBLANK at or after it)\n"
+        "  --shot-on TEXT       a screenshot each time the program prints a console line holding TEXT\n"
+        "                       (two frames later): PREFIXn.ppm, n = 1, 2, ... (--shot-on-prefix PREFIX)\n"
         "  --stats              print speed and counters on stderr at exit\n"
         "  --boot-cart PATH     a cartridge (FAT path on --sd) the I/O processor loaded at power-on\n"
         "                       (boot=ash): CLASSIC_STATE ($1E) reports it\n"
@@ -445,6 +476,8 @@ int main(int argc, char **argv)
         else if (!strcmp(a, "--rev") && i + 1 < argc) M.sys.rev = (uint8_t)strtol(argv[++i], NULL, 0);
         else if (!strcmp(a, "--log-sound")) M.sys.snd_log |= 1;
         else if (!strcmp(a, "--log-sound-us")) M.sys.snd_log |= 32;
+        else if (!strcmp(a, "--shot-on") && i + 1 < argc) shoton_text = argv[++i];
+        else if (!strcmp(a, "--shot-on-prefix") && i + 1 < argc) shoton_prefix = argv[++i];
         else if (!strcmp(a, "--kbd-release") && i + 1 < argc) kbd_release = (uint64_t)(atof(argv[++i]) * CPU_HZ / 1000.0);
         else if (!strcmp(a, "--log-lau")) M.sys.snd_log |= 2;
         else if (!strcmp(a, "--log-lau-us")) M.sys.snd_log |= 4;

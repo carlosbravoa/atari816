@@ -3,9 +3,10 @@
 #   make            DIGGER.PRG and DIGGER.DAT (the pictures, from upstream's C files)
 #   make run        the scripted game (tests/play.script) in the emulator: build/run/
 #   make test       the same, checked (tests/check.sh): the high score file, the sound
-#                   writes, the screenshots against tests/ref/, and upstream's recorded
-#                   games played back as upstream plays them (tests/drf.sh)
-#   make refs       new reference screenshots (after a change meant to show)
+#                   writes, the game's own recording played back; pictures at given game
+#                   frames of a recorded game against tests/ref/ (tests/frames.sh); and
+#                   upstream's recorded games played back as upstream plays them (drf.sh)
+#   make refs       new reference pictures (after a change meant to show: look at them)
 #   make clean
 # HORIZON=DIR: a Horizon tree with a built card, 0.28 or later (a large program).
 
@@ -32,8 +33,7 @@ DIGGER.DAT build/alpha_ok.c: tools/mkdata.py src/data/vgagrafx.c src/data/alpha.
 run test: DIGGER.DAT
 
 refs: $(PRG) DIGGER.DAT $(CARD)
-	$(RUN816) $(PRG) --out build/test $(RUNFLAGS) $(TESTFLAGS)
-	$(PYTHON) tests/cmpshots.py build/test tests/ref play --update
+	sh tests/frames.sh $(HORIZON) --update
 .PHONY: refs
 
 clean: cleandat

@@ -157,10 +157,34 @@ the compiler in this port.
 `make test` also plays a scripted game (`tests/play.script`): the title, a game started,
 digging up through two emeralds, a shot, three lives lost to the nobbins, game over, the
 initials typed, the new high score on the title and in `DIGGER.SCO`, the game's recording
-saved with F8 and played back to the same score. The screenshots are compared with
-`tests/ref/` pixel for pixel (the game is deterministic: no random seed outside playback,
-and the emulator's time is exact) — any change of the program's timing (even a different
-placement of its code) moves them, and then `make refs` writes them again after a look.
+saved with F8 and played back to the same score. It is checked by the game's state (the
+score file, the recording's end, the sound's writes), not by pictures.
+
+**The pictures' test (tests/frames.sh).** At first the scripted game took screenshots at
+given moments and compared them with references pixel for pixel. That broke whenever the
+program's timing moved: a key held from 6.5 s to 9 s lands in other game frames when the
+program, the SDK or Horizon changes by a little, and the whole game goes another way; even
+the title's view (it glides by vertical blanks) was at another place. Now the pictures are
+of game frames: the game's own recording of the scripted game (`tests/play.drf`) is played
+back (`/P`, at full speed), the program reads `SHOTS.TXT` (`tests/frames.txt`: nine game
+frames, from the level's start to the title's parade), and at each it stops a moment: the
+frame drawn goes to the screen, the view goes straight to its place (the title's top), and
+it prints `digger: shot N frame F`; the emulator takes the picture two vertical blanks
+later (`emu816 --shot-on TEXT`, `run816.py --shot-on TEXT`: new, any program can use it).
+A playback is the same frame by frame however fast the program runs, so the pictures do
+not move with the timing. Checked: (a) a fresh `git archive` checkout passes; (b) so does
+the same tree with code added to hgame's `hg_frame` (it runs every vertical blank) and with
+every function moved out of the main bank (`hcc --main-room 0`: two other banks instead
+of one); (c) a fault on purpose (an emerald drawn two rows short) fails 7 of the 9
+pictures (the two of the title pass, rightly).
+
+The first pictures differed in a fresh checkout (play-3, -4, -7) because they had been
+taken in a tree whose Horizon card was built from another agent's work in progress
+(Horizon 0.29): the files extracted from `git archive` HEAD keep the commit's (older)
+times, so `make -C horizon` did not rebuild over the newer build of the work in progress
+(the same tree's SDK test then complained of a `SYS_INFO $36` that is only in that work).
+The build itself is reproducible but for its 4-byte stamp; the same program on the same
+card gives the same pictures run after run.
 
 ## How long each kind of thing took
 

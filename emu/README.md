@@ -22,7 +22,7 @@ make sst             # downloads the SingleStepTests sample that make test uses 
 emu816 [--sd DIR] [--load FILE@ADDR]... [--max-seconds N] [--trace]
        [--keys LIST] [--mouse LIST] [--shot FILE.ppm] [--shot-at SECONDS] [--stats] [--headless] [--fast]
        [--ideal-timing] [--boot-cart PATH] [--pc-folder DIR] [--pc-time T]
-       [--card-kbps R:W] [--pc-kbps R:W] [--net] [--net-root DIR] [--net-delay MS]
+       [--card-kbps R:W] [--card-free BYTES] [--pc-kbps R:W] [--net] [--net-root DIR] [--net-delay MS]
        [--no-pc-print] [--classic-print FILE@SECONDS]... PROGRAM.BIN
 ```
 
@@ -41,6 +41,7 @@ emu816 [--sd DIR] [--load FILE@ADDR]... [--max-seconds N] [--trace]
 | `--wav FILE.wav` | Write the sound the board's HDMI output carries, without the classic machine's part: Lau's left and right plus the OPL2's output on both (REV $0C), saturated to 16 bits, 48 kHz stereo, from the start of the run. Not in it: POKEY (the native bank and the classic machine's) and GTIA. See "OPL2", the mix |
 | `--log-sound` | Print every accepted write to the sound page ($00:DB00-$DB13; from REV $0C $DB00-$DB0F) on stderr |
 | `--log-sound-us` | The same as `--log-sound`, each line with the emulated time in microseconds: `sound 1234567 $DB01 = $AA` (ports/digger/tests/sndtime.py measures a game's sound steps from it) |
+| `--shot-on TEXT`, `--shot-on-prefix PATH` | A screenshot (PATH1.ppm, PATH2.ppm, ...) each time the program prints a console line holding TEXT, taken two vertical blanks later: pictures at points of the program's own progress, whatever its timing (the program shows what it wants seen, prints the line, holds the picture a few frames; `run816.py --shot-on`, ports/digger/tests/frames.sh) |
 | `--log-lau` | Print every write to Lau, the sample player ($00:DB20-$DBFF, REV $0A), on stderr as `lau $DBxx = $yy` (Horizon's sample-call test compares it) |
 | `--log-lau-us` | The same as `--log-lau`, each line with the emulated time in microseconds: `lau 1234567 $DB89 = $12` (the music tests rebuild Lau's voice state at every tick from it) |
 | `--kbd-release MS` | Release the keys held when no key has changed for MS ms. The I/O processor's firmware did so after 1,000 ms until 2026-11: a USB keyboard (the CH9350 or the Pico/TinyUSB bridge) reports only when its keys change, so on the board a key held longer than a second went up by itself. With this the emulator shows that board's behaviour (`--kbd-release 1000`); without it, the firmware's of now |
@@ -56,6 +57,7 @@ emu816 [--sd DIR] [--load FILE@ADDR]... [--max-seconds N] [--trace]
 | `--pc-drop-at SECONDS` | The PC link drops at this emulated time: open PC handles answer $88, new `/PC:` calls $87, the `PC:` entry leaves the root. Streams too (see "The internet"): open streams answer $88, requests put aside answer $88, each connection gets an $E4 event, new URL opens answer $87 |
 | `--pc-back-at SECONDS` | The link comes back at this time (after `--pc-drop-at`): a new session; handles from before the drop stay dead ($88) |
 | `--card-kbps R:W` | Slow card (see "Slow transfers"): READ and LOAD at R KB/s, WRITE at W KB/s, and 1 ms for every request on the card. 0 = instant. Default: off (every request instant). The board: about `170:100` |
+| `--card-free BYTES` | (Horizon 0.29's tests) The card has room for BYTES more, written in this run: once they are used up, a WRITE on the card writes what still fits and answers that count (FatFs on a full volume: FR_OK, fewer bytes), and MKDIR answers FR_DENIED. Default: no limit |
 | `--pc-kbps R:W` | Slow PC volume: the same, with 6 ms for every request on the PC. The board: about `100:55` |
 | `--net` | The Net service of the PC link (step 2): `tcp://host:port` paths are real TCP connections from the host (see "The internet (PC link step 2)"). Without it they answer $8A |
 | `--net-root DIR` | The Fetch service: `http://`, `https://` and `ftp://` URLs are served from files in DIR (`scheme://host[:port]/path` = the file `DIR/host/path`). Without it they answer $8A |

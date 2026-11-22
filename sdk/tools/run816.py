@@ -42,6 +42,9 @@ Options:
   --log-sound     log every write to POKEY 2 / the DACs in emu.err
   --log-sound-us  the same with the emulated time in microseconds ("sound US $DBxx = $yy")
   --log-lau       log every write to Lau, the sample player, in emu.err ("lau $DBxx = $yy")
+  --shot-on TEXT  a screenshot (OUT/autoN.png) each time the program prints a console line
+                  holding TEXT, taken two frames later: pictures at points of the program's
+                  own progress (hold the picture a few frames after printing the line)
   --kbd-release MS  release the keys held when no key changed for MS ms: the board's
                   firmware before 2026-11 did so after 1000 ms (a held key went up)
   --wav FILE      (Horizon 0.26) record Lau's output (48 kHz stereo WAV): listen on the PC;
@@ -104,7 +107,7 @@ def main():
             return a[i + 1]
         if w in ('--horizon', '--emu', '--dest', '--args', '--script', '--seconds', '--out',
                  '--rev', '--mode', '--net-root', '--wav', '--cd', '--prof', '--prof-from',
-                 '--prof-to', '--kbd-release'):
+                 '--prof-to', '--kbd-release', '--shot-on'):
             opt[w[2:]] = val(); i += 2
         elif w == '--shot':
             opt['shots'].append(float(val())); i += 2
@@ -142,7 +145,7 @@ def main():
         shutil.rmtree(card)
     os.makedirs(out, exist_ok=True)
     for f in os.listdir(out):
-        if re.fullmatch(r'shot\d+\.(png|ppm)', f):
+        if re.fullmatch(r'(shot|auto)\d+\.(png|ppm)', f):
             os.remove(os.path.join(out, f))
     shutil.copytree(card0, card)
 
@@ -239,6 +242,8 @@ def main():
         p = os.path.join(out, f'shot{n}.ppm')
         ppms.append(p)
         cmdl += ['--shot', p, '--shot-at', f'{s:g}']
+    if opt.get('shot-on'):
+        cmdl += ['--shot-on', opt['shot-on'], '--shot-on-prefix', os.path.join(out, 'auto')]
     cmdl.append(os.path.join(card, 'SYSTEM', 'HORIZON.SYS'))
     with open(os.path.join(out, 'console.raw'), 'wb') as so, \
             open(os.path.join(out, 'emu.err'), 'wb') as se:
@@ -248,6 +253,10 @@ def main():
     open(os.path.join(out, 'console.txt'), 'w', encoding='latin-1').write(con)
     os.remove(os.path.join(out, 'console.raw'))
 
+    k = 1
+    while os.path.exists(os.path.join(out, f'auto{k}.ppm')):     # --shot-on's
+        ppms.append(os.path.join(out, f'auto{k}.ppm'))
+        k += 1
     pngs = []
     try:
         from PIL import Image

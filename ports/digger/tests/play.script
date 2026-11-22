@@ -1,20 +1,14 @@
 # tests/play.script - a game by keys (make test): the title, a game started, the digger
 # digging up the middle column (two emeralds), a shot fired up, then left alone until the
 # nobbins have taken its three lives; game over, the initials; the title again with the
-# new high score, Esc. (Time 0: the program started.)
-1500 shot
+# new high score, Esc. (Time 0: the program started.) No pictures: those are of a recorded
+# game, at game frames (tests/frames.sh), so that they do not move with the program's timing.
 2500 key enter 100
 6500 key up 2500
-9100 shot
 9300 key f1 100
-9500 shot
 # the third life ends at about 56 s: game over, the initials (50 points is a high score)
-30000 shot
-58500 shot
 59000 HZD
-60500 shot
 # the title with the new high score; F8 saves the game's recording (HZD50.DRF: check.sh
 # plays it back); then Esc (upstream's Exit key is F10; Esc too here)
-67500 shot
 68000 key f8 100
 70000 key esc 100

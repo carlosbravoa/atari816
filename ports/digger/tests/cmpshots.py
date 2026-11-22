@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
-"""cmpshots.py RUN REFDIR NAME [--update]: RUN/shotK.png against REFDIR/NAME-K.png, pixel
-for pixel (the game is deterministic: no random seed when not playing back, the emulator's
-time is exact). --update writes the references."""
+"""cmpshots.py RUN REFDIR NAME [--prefix P] [--update]: RUN/PK.png (P: shot, or auto for
+run816.py --shot-on's) against REFDIR/NAME-K.png, pixel for pixel. --update writes the
+references."""
 import os
 import shutil
 import sys
 
 run, ref, name = sys.argv[1:4]
 update = '--update' in sys.argv
+pre = sys.argv[sys.argv.index('--prefix') + 1] if '--prefix' in sys.argv else 'shot'
 try:
     from PIL import Image, ImageChops
 except ImportError:
@@ -15,8 +16,8 @@ except ImportError:
     sys.exit(0)
 fail = 0
 k = 1
-while os.path.exists(os.path.join(run, f'shot{k}.png')):
-    s = os.path.join(run, f'shot{k}.png')
+while os.path.exists(os.path.join(run, f'{pre}{k}.png')):
+    s = os.path.join(run, f'{pre}{k}.png')
     r = os.path.join(ref, f'{name}-{k}.png')
     if update:
         shutil.copy(s, r)
