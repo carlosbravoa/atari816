@@ -534,7 +534,9 @@ def strength_reduce(f):
                 ivs[v] = ds
         if not ivs:
             continue
-        # candidate multiplies: t = iv * k / iv << s, inside the loop
+        # candidate multiplies: t = iv * k / iv << s, inside the loop (one j for each iv
+        # and k: a[i] and b[i] of the same element size share it)
+        made = {}
         for b in body:
             for n, ins in enumerate(b.ins):
                 if ins.op not in ('mul', 'shl') or ins.a not in ivs or not isinstance(ins.b, Imm):
@@ -545,7 +547,12 @@ def strength_reduce(f):
                 k = ins.b.val if ins.op == 'mul' else 1 << ins.b.val
                 if k in (0, 1):
                     continue
+                if (iv, k) in made:
+                    b.ins[b.ins.index(ins)] = Ins('mov', ins.d, made[(iv, k)])
+                    changed = True
+                    continue
                 j = f.newv(2, (iv.name or 'iv') + 'x')
+                made[(iv, k)] = j
                 # j = iv * k in the preheader; j += c*k after every update of iv
                 pre.ins.insert(len(pre.ins) - 1, Ins(ins.op, j, iv, ins.b))
                 for upd in ivs[iv]:
@@ -651,6 +658,88 @@ def entry_const(b, v, depth=0):
     return None
 
 
+# ---------------------------------------------------------------------- loop-invariant code
+PURE = {'mov', 'add', 'sub', 'and', 'or', 'xor', 'com', 'neg', 'shl', 'ushr', 'sshr', 'mul', 'zx',
+        'sx', 'tr', 'x8u', 'x8s', 'mkfar'}
+
+
+def preheader(f, head, body):
+    """the block every entry into the loop comes through (made when the entry is a
+    conditional branch), or None when the loop has several entries"""
+    outside = [p for p in head.preds if p not in body]
+    if len(outside) != 1:
+        return None
+    pre = outside[0]
+    t = pre.term
+    if t is None or t.op not in ('jmp', 'br'):
+        return None
+    if t.op == 'jmp':
+        return pre
+    ph = Block(head.label + '_pre')
+    ph.depth = pre.depth
+    ph.ins = [Ins('jmp', t=head)]
+    for k in ('t', 'f'):
+        if t.x.get(k) is head:
+            t.x[k] = ph
+    f.blocks.insert(f.blocks.index(head), ph)
+    preds(f)
+    return ph
+
+
+def licm(f):
+    """loop-invariant code motion: a computation (no load, no call: PURE) in a loop whose
+    operands do not change in it, into the loop's preheader, so that it is done once (the
+    row address map + r * 32 of map[r][c] in the inner loop). Only a value defined once in
+    the whole function and not live into the loop moves; innermost loops first; a loop at
+    a time (its preheader changes the loops' blocks: they are found again)"""
+    changed = False
+    for _round in range(24):
+        preds(f)
+        loops = natural_loops(f)
+        if not loops:
+            break
+        ndefs = {}
+        for b in f.blocks:
+            for ins in b.ins:
+                for d in ins.defs():
+                    ndefs[d] = ndefs.get(d, 0) + 1
+        lin, _ = liveness(f)
+        moved = False
+        for head, body in sorted(loops.items(), key=lambda kv: len(kv[1])):
+            defs_in = set()
+            for b in body:
+                for ins in b.ins:
+                    defs_in.update(ins.defs())
+            cand = []
+            for b in f.blocks:
+                if b not in body:
+                    continue
+                for ins in b.ins:
+                    d = ins.d
+                    if ins.op not in PURE or not isinstance(d, V) or ndefs.get(d) != 1 or \
+                            d in lin[head] or d.param is not None or d.pinned is not None:
+                        continue
+                    ops = [o for o in (ins.a, ins.b) if o is not None]
+                    if not any(isinstance(o, V) for o in ops) and ins.op != 'mkfar':
+                        continue        # (constants: local_prop's)
+                    if any(isinstance(o, V) and o in defs_in for o in ops):
+                        continue
+                    cand.append((b, ins))
+            if not cand:
+                continue
+            pre = preheader(f, head, body)
+            if pre is None:
+                continue
+            for b, ins in cand:
+                b.ins.remove(ins)
+                pre.ins.insert(len(pre.ins) - 1, ins)
+            changed = moved = True
+            break
+        if not moved:
+            break
+    return changed
+
+
 # ---------------------------------------------------------------------- driver
 def optimise(f, level=2):
     cleanup_cfg(f)
@@ -664,7 +753,9 @@ def optimise(f, level=2):
     if level >= 2:
         preds(f)
         iv_unsigned(f)
-        if strength_reduce(f):
+        sr = strength_reduce(f)
+        preds(f)
+        if licm(f) or sr:
             for _ in range(3):
                 c1 = local_prop(f)
                 c2 = dce(f)

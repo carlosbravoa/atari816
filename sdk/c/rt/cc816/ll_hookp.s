@@ -18,6 +18,13 @@
 
 __cc816_fmtll:
 ll_initp:
+	; (a function pointer: in the large code model its 16-bit address is __T<name>, the
+	; function itself or a thunk when hcc puts it in another bank)
+.if LARGE
+	.import	__T___hz_fmtll
+	lda	#__T___hz_fmtll
+.else
 	lda	#___hz_fmtll
+.endif
 	sta	___hz_fmt_ll
 	RET

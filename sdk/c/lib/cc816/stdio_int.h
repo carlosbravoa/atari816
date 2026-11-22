@@ -13,6 +13,7 @@
 #define F_STATIC 0x0800         /* stdin, stdout, stderr (not malloc'd) */
 
 #define FILEBUF  1024           /* a file's buffer */
+#define FILESMALL 128           /* ... when the heap has not 1 KB free */
 #define CONBUF   128            /* the console's */
 
 extern FILE *__hz_files;

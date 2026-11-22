@@ -18,6 +18,13 @@
 
 __cc816_scanf:
 fp_inits:
+	; (a function pointer: in the large code model its 16-bit address is __T<name>, the
+	; function itself or a thunk when hcc puts it in another bank)
+.if LARGE
+	.import	__T___hz_scanfp
+	lda	#__T___hz_scanfp
+.else
 	lda	#___hz_scanfp
+.endif
 	sta	___hz_scan_float
 	RET

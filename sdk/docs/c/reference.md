@@ -113,16 +113,21 @@ linked for the large one").
 
 ### What goes where
 
-**The main bank** (the .PRG, loaded by Horizon as any program) holds the startup, the C
-library and every other library (hgame, the controls library, ulib), the `.s` files, the
-C functions that have inline assembly or are `naked`, the constructors and destructors
-(`_INIT_n_name`, `_EXIT_n_name`), the thunks, all the constants (string literals, `const`
-tables, floating-point constants), the initialised data, the bss, the heap and the
-software stack. These are limited to the main bank, as in the small model.
+**The main bank** (the .PRG, loaded by Horizon as any program) holds the startup, the
+assembly (the C library's runtime: arithmetic, memory and string routines, floating point;
+the syscall stubs; hgame's and the controls library's assembly; your `.s` files), the C
+functions that have inline assembly or are `naked`, the constructors and destructors
+(`_INIT_n_name`, `_EXIT_n_name`), the loader of the other banks (`xload.c`, with
+`misc.c`: they run before the other banks are there), the thunks, the constants (string
+literals, `const` tables, floating-point constants), the initialised data, the bss, the
+heap and the software stack. These are limited to the main bank, as in the small model.
+`__far` objects are not: they go to banks of their own ("Far objects", below).
 
-**The other C functions can move.** cc816 puts each one in a segment of its own (in a
-file of more than 100 of them, runs of consecutive functions share one: ca65 and ar65
-take only so many segments a module), and hcc places them after it has linked the rest:
+**The other C functions can move**: the program's and the libraries' alike (the C
+library's, hgame's, the controls library's C part). cc816 puts each one in a segment of
+its own (in a file of more than 100 of them, runs of consecutive functions share one:
+ca65 and ar65 take only so many segments a module), and hcc places them after it has
+linked the rest:
 first in the main bank, as long as it has room (it keeps `--heap N` bytes free for
 `malloc`, 4096 by default), then in other banks, each function in the first bank with
 room, in the order of the files and of the functions in them. A function must fit in one
@@ -140,12 +145,46 @@ GAME.PRG: 210,710 bytes on the card, 415 relocations
 ```
 
 (a program of 1,600 functions, `sdk/c/tests/large/genbig.py`: about 180 KB of code).
+Two more lines come when they apply: `far data: N bytes of __far objects in K bank(s) of
+their own`, and `the main bank without its movable code: N bytes (code that must stay,
+constants, data, bss)`: what the main bank needs whatever hcc does with the code. For
+Digger that is 33,488 bytes (8,241 of code, 7,764 of constants, 2,142 of data, 15,341 of
+bss); before the libraries could move it was 53,946.
+
+### Far objects
+
+A table declared `__far` at file scope is a **far object**:
+
+```c
+__far const unsigned char level[8][2000] = { ... };     /* 16,000 bytes */
+__far const struct enemy kinds[40] = { ... };
+__far short work[4096];                                 /* writable too */
+extern __far const unsigned char level[8][2000];        /* in another file */
+
+const unsigned char __far *row = level[n];              /* its address is a far one */
+x = kinds[k].speed;                                     /* read with long addressing */
+```
+
+In the large code model hcc puts every far object of the program in a bank of far data
+(each object in one bank; as many banks as they need, after the code banks), which is in
+the program file and loaded at the start with the code. Nothing of it is in the main bank.
+In the small model a far object stays in the code bank; the same source builds in both.
+
+Its elements are reached through far pointers: `level[n][i]` builds the far address and
+reads through it, as `p[i]` with a `__far` pointer does (a little slower than a main-bank
+array: a 32-bit address). A pointer to it is a far pointer (`&level[3][0]` is `const
+unsigned char __far *`); giving it to a near pointer keeps the offset only (cc816 warns).
+A far object may hold pointers (near ones, to main-bank data or functions, and far ones,
+to other far objects). An object is at most 65,535 bytes, as any. In a library built
+split (one module a function: the SDK's own libraries) far objects stay in the main bank.
+Test: `sdk/c/cc816/tests/regress/r028_far_objects.c`.
 
 | Limit | |
 | --- | --- |
 | Code | the main bank's room, plus 64 banks of 64 KB (about 4 MB); an 8 MB machine has about 80 free banks when nothing else runs |
 | One function | 65,535 bytes |
-| The main bank | startup + libraries + `.s` files + functions with inline assembly + constructors + thunks (4 bytes for each function in another bank whose address is used) + constants + data + bss + 4 KB of heap (`--heap N`) + the software stack (`--stack N`) must fit in 65,264 bytes |
+| The main bank | startup + the libraries' assembly + `.s` files + functions with inline assembly + constructors + thunks (4 bytes for each function in another bank whose address is used) + constants + data + bss + 4 KB of heap (`--heap N`) + the software stack (`--stack N`) must fit in 65,264 bytes |
+| Far data | `__far` objects: up to 64 banks together with the code banks |
 | The .PRG file | its o65 part (the main bank and its relocations) below 64 KB: Horizon's loader reads only the first 65,535 bytes of a larger file. The whole file has no limit |
 | Horizon | 0.28 or later when code went to other banks (it loads a file of 64 KB or more, and tells the program its own path) |
 
@@ -675,10 +714,11 @@ Where it differs from the table below:
 
 | | cc816 |
 | --- | --- |
-| `printf` family | `%d %i %u %x %X %o %c %s %p %n %%`, the sizes `hh h l` (and `z t`), widths, precision, `-+ 0#`, `*`; `%f %F %e %E %g %G %a %A` (also with `l`, `L`) in programs that use floating point ("Floating point", below); `%lld %lli %llu %llo %llx %llX` (and `j`: `intmax_t` is `long long`; `inttypes.h`'s `PRId64` ...) in programs that use `long long` ("long long (cc816)") |
-| `scanf` family | `%d %i %u %o %x %c %s %[...] %p %n`, `*`, widths, the sizes `hh h l`; `%f %e %g %a` (`float *`; with `l` or `L` `double *`, `long double *`: the same 32 bits) in programs that use floating point; `%lld %lli %llu %llo %llx` (and `j`, `SCNd64` ...) in programs that use `long long` |
+| `printf` family | `%d %i %u %x %X %o %c %s %p %n %%`, the sizes `hh h l` (and `z t`), widths, precision, `-+ 0#`, `*`; `%f %F %e %E %g %G %a %A` (also with `l`, `L`) in programs that use them ("Floating point", below: "Only for programs that use it"); `%lld %lli %llu %llo %llx %llX` (and `j`: `intmax_t` is `long long`; `inttypes.h`'s `PRId64` ...) in programs that use `long long` ("long long (cc816)") |
+| `scanf` family | `%d %i %u %o %x %c %s %[...] %p %n`, `*`, widths, the sizes `hh h l`; `%f %e %g %a` (`float *`; with `l` or `L` `double *`, `long double *`: the same 32 bits) in programs that use them; `%lld %lli %llu %llo %llx` (and `j`, `SCNd64` ...) in programs that use `long long` |
 | `fgetpos`, `fsetpos` | 32-bit positions |
-| `malloc` | first fit over the heap; NULL when it is full (the libc test: 25 blocks of 1 KB) |
+| `malloc` | first fit over the heap; NULL when it is full (the libc test: 25 blocks of 1 KB). `hz_heap_free()`, `hz_heap_largest()`, `hz_heap_peak()` (horizon.h) |
+| `fopen` | 1 KB of buffer from the heap; when the heap has no 1 KB free, 128 bytes; when not even that, the FILE's own 2 bytes (slow, but the file opens and works). `setvbuf(f, NULL, _IONBF, 0)` gives the 1 KB back. The FILE structures are static (4, one for each of Horizon's handles). `strerror(ENOMEM)`: "Not enough memory (the heap, or no free bank)" |
 | `clock()` | CLOCKS_PER_SEC 50, as vbcc's |
 | `strtod`, `strtof`, `strtold`, `atof` | exact (rounded to nearest, ties to even, from any number of digits), hexadecimal (`0x1.8p3`), `inf`, `infinity`, `nan`, `nan(...)`; ERANGE on overflow and when a nonzero number becomes 0 |
 | `math.h` | the list under "Floating point", below |
@@ -768,14 +808,19 @@ an `unsigned long`) and `__builtin_bitsf(u)` (back).
 
 **Only for programs that use it.** The arithmetic helpers are linked as any helper is:
 when the code calls them. printf's float conversions (`lib/cc816/fmtfp.c`, 3,677 bytes)
-and scanf's (`scanfp.c`, 1,699 bytes, with `strtod`, 4,848 bytes) are linked in two cases.
-A file that uses floating point (it defines a float object, has a float constant, converts
-to or from a float, or calls a function with a float argument or result; a prototype
-alone, as in `stdlib.h`, does not count) and that calls a printf function (`printf`,
-`sprintf`, `vsnprintf`, ...) or gives a float to any variadic function (a wrapper of
-printf) links `rt/cc816/fp_hookp.s`, whose constructor gives printf its float
-conversions. The same with a scanf function, or a float pointer given to a variadic
-function, links `fp_hooks.s` for scanf. So a program without floating point has no float
+and scanf's (`scanfp.c`, 1,699 bytes, with `strtod`, 4,848 bytes) are linked only when a
+file may need them. A printf call (`printf`, `sprintf`, `vsnprintf`, ...) whose format is
+a string constant links the float conversions when the format has one (`%f %e %g %a` and
+their capitals), and nothing for floats when it has none: `printf("%d\n", n)` in a file
+full of `double`s brings no float printing. A printf whose format is not a constant (a
+variable, a parameter) links them when the file uses floating point (it defines a float
+object, has a float constant, converts to or from a float, or calls a function with a
+float argument or result; a prototype alone, as in `stdlib.h`, does not count); so does
+a float given to any variadic function (a wrapper of printf). That links
+`rt/cc816/fp_hookp.s`, whose constructor gives printf its float conversions. The same
+for scanf: `sscanf(s, "%d", &n)` links no float scanning; `%f` in its format, a format
+that is not a constant in a file with floating point, or a float pointer given to a
+variadic function links `fp_hooks.s`. So a program without floating point has no float
 code in its printf, and a program that computes with floats but prints none has no float
 printf (`tests/run.py`'s fpu test checks both). The rule misses only odd code: a printf
 whose float argument was never a float in any file (`printf("%f", some_long)`).
@@ -853,8 +898,9 @@ bytes on the stack, a result comes back in `__h0`..`__h1` ("Calling convention")
 
 **Only for programs that use it.** The helpers are linked when the code calls them.
 printf's and scanf's `%lld` family (`lib/cc816/fmtll.c`, `scanll.c`) is linked as the
-float conversions are: by a file that uses `long long` and calls a printf (or a scanf)
-function, or gives a `long long` to a variadic function. A program without `long long`
+float conversions are: by a constant format with `%lld` (or `%jd`, ...), by a format that
+is not a constant in a file that uses `long long`, or by a `long long` given to a
+variadic function. A program without `long long`
 links none of it (`tests/run.py`'s `ll` test checks it); its printf is 106 bytes bigger
 than before `long long` came (the test for `ll` and the call of the hook), scanf 137.
 
@@ -958,9 +1004,40 @@ hz_close(h);
   vbcc: `build/lib/large/hzsys.s`):
   the arguments into A, X, Y, `cop #$NN`, `bcs` to an error path.
 
-## The stacks
+## The heap and the stacks (cc816)
 
-**cc816** has two. The **hardware stack** is the window's top part (about 32 KB): return
+The main bank (the code bank of the small model) from bottom to top:
+
+```
+$0100   code, constants, data, bss      (hcc --map: their sizes)
+        heap (malloc, and fopen's buffers) ... grows up
+        software stack guard zone (256 bytes)
+        software stack ... grows down    --stack N (default 8192)
+$FFF0
+```
+
+| | How big | Who sets it |
+| --- | --- | --- |
+| Heap | what is left between the bss and the software stack. `hcc --map` prints it ("heap 11,283") | the small model: everything else; the large model: hcc fills the main bank with code but keeps at least `--heap N` bytes for the heap (default 4096) |
+| Software stack | `--stack N` bytes (512 to 32,768, even; default 8,192) | `hcc --stack N` |
+| Hardware stack | about 32,000 bytes, in the window | fixed |
+
+`malloc` returns NULL (errno ENOMEM) when the heap has no block big enough. Each open file
+takes 1 KB of it (less when there is no 1 KB: "The C library on Horizon"). To see what a
+program uses:
+
+- `hcc --debug`: at exit the program prints `stack: N of M bytes used`, `software stack: N
+  of M bytes used` and `heap: N of M bytes used at most` (the most in use at once, block
+  headers counted);
+- at any time: `hz_heap_free()` (the free bytes), `hz_heap_largest()` (the biggest
+  `malloc` that would work now), `hz_heap_peak()` (the most in use so far),
+  `hz_sstack_free()`, `hz_stack_free()`.
+
+A program short of heap: give it more with `--heap N` (large model) or less software
+stack (`--stack N`, when `--debug` shows it uses little), and put big buffers in banks of
+their own (`hz_far_alloc`).
+
+**cc816** has two stacks. The **hardware stack** is the window's top part (about 32 KB): return
 addresses, arguments and the values the register allocator spills. The **software stack**
 is the top of the code bank (`--stack N` bytes, default 8,192): arrays, structures and
 locals whose address is taken. Big local arrays and deep recursion with arrays use it up.

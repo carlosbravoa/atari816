@@ -1,6 +1,6 @@
 /* emu816 — software model of the Atari816 native side (65C816 + FREDDIE II + system I/O).
  *
- *   emu816 [--sd DIR] [--load FILE@ADDR]... [--max-seconds N] [--trace]
+ *   emu816 [--sd DIR] [--load FILE@ADDR]... [--max-seconds N] [--trace] [--prof FILE]
  *          [--shot FILE.ppm] [--shot-at SECONDS] [--stats] [--headless] [--fast] PROGRAM.BIN
  */
 #include "machine.h"
@@ -23,6 +23,35 @@ static int shot_done[MAXSHOTS], nshots;
 static int sdl_on = 1, fast, mute;
 static SDL_AudioDeviceID adev;      /* the live sound (0: none) */
 #endif
+
+/* ── --prof: the CPU's cycles by address (user mode), by syscall, in the kernel, idle ──
+ * Written at exit as text (sdk/c/game/tests/tools/prof816.py reads it): a header, then
+ * "u BBPPPP cycles opcode" for every user-mode instruction address that ran, "s NN cycles
+ * calls" for every syscall (COP #NN: the kernel's cycles from the COP to the return to
+ * user mode), "k cycles" (the kernel otherwise: interrupts, other tasks) and "i cycles"
+ * (WAI). Only between --prof-from and --prof-to (emulated seconds). */
+static const char *prof_path;
+static double prof_from, prof_to = 1e30;
+static uint32_t *prof_u;            /* cycles by 24-bit address (user mode) */
+static uint8_t *prof_op;            /* the opcode seen there */
+static uint64_t prof_sys[256], prof_sysn[256], prof_k, prof_i;
+static int prof_insys = -1;
+
+static void prof_write(void)
+{
+    FILE *f = fopen(prof_path, "w");
+    if (!f) { fprintf(stderr, "emu816: cannot write %s\n", prof_path); return; }
+    fprintf(f, "# emu816 --prof: %.3f to %.3f s; cycles a second %.0f\n", prof_from,
+            prof_to > 1e29 ? -1.0 : prof_to, CPU_HZ);
+    for (uint32_t a = 0; a < 0x1000000; a++)
+        if (prof_u[a]) fprintf(f, "u %06X %u %02X\n", a, prof_u[a], prof_op[a]);
+    for (int n = 0; n < 256; n++)
+        if (prof_sys[n] || prof_sysn[n])
+            fprintf(f, "s %02X %llu %llu\n", n, (unsigned long long)prof_sys[n],
+                    (unsigned long long)prof_sysn[n]);
+    fprintf(f, "k %llu\ni %llu\n", (unsigned long long)prof_k, (unsigned long long)prof_i);
+    fclose(f);
+}
 
 /* ── host keyboard: SDL or --keys ── */
 #define HID_F12 0x45
@@ -291,6 +320,8 @@ static void usage(void)
         "  --load FILE@ADDR     load FILE at 24-bit hex address ADDR (e.g. data.bin@02:0000)\n"
         "  --max-seconds N      stop after N seconds of emulated time (exit code 3)\n"
         "  --trace              one line per instruction on stderr\n"
+        "  --prof FILE          the CPU's cycles by instruction address, syscall, kernel, idle (at exit)\n"
+        "  --prof-from S, --prof-to S  only between these emulated seconds\n"
         "  --shot FILE.ppm      write the 1280x720 output frame (at exit, or at --shot-at); repeatable\n"
         "  --shot-at SECONDS    emulated time for the preceding --shot (first VBLANK at or after it)\n"
         "  --stats              print speed and counters on stderr at exit\n"
@@ -355,6 +386,9 @@ int main(int argc, char **argv)
         else if (!strcmp(a, "--load") && i + 1 < argc && nloads < 64) loads[nloads++] = argv[++i];
         else if (!strcmp(a, "--max-seconds") && i + 1 < argc) max_sec = atof(argv[++i]);
         else if (!strcmp(a, "--trace")) M.trace = 1;
+        else if (!strcmp(a, "--prof") && i + 1 < argc) prof_path = argv[++i];
+        else if (!strcmp(a, "--prof-from") && i + 1 < argc) prof_from = atof(argv[++i]);
+        else if (!strcmp(a, "--prof-to") && i + 1 < argc) prof_to = atof(argv[++i]);
         else if (!strcmp(a, "--shot") && i + 1 < argc && nshots < MAXSHOTS) {
             shot_path[nshots] = argv[++i];
             shot_at[nshots++] = 1e30;                  /* at exit unless --shot-at follows */
@@ -482,6 +516,13 @@ int main(int argc, char **argv)
     Cpu65816 *c = &M.cpu;
     int rc = 0;
     uint64_t wai_cycles = 0;            /* (--stats) cycles the CPU spent waiting in WAI */
+    uint64_t prof_c0 = (uint64_t)(prof_from * CPU_HZ), prof_c1 = (uint64_t)(prof_to * CPU_HZ);
+    if (prof_to > 1e29) prof_c1 = UINT64_MAX;
+    if (prof_path) {
+        prof_u = calloc(0x1000000, sizeof *prof_u);
+        prof_op = calloc(0x1000000, 1);
+        if (!prof_u || !prof_op) { fprintf(stderr, "emu816: out of memory (--prof)\n"); return 1; }
+    }
 
     while (!c->stopped) {
         if (c->cycles >= M.next_event) {
@@ -492,6 +533,7 @@ int main(int argc, char **argv)
             uint64_t w0 = c->cycles;
             c->cycles = M.next_event > c->cycles ? M.next_event : c->cycles + 1;
             wai_cycles += c->cycles - w0;
+            if (prof_u && w0 >= prof_c0 && w0 < prof_c1) prof_i += c->cycles - w0;
             if (c->cycles >= limit) { rc = 3; break; }
             continue;
         }
@@ -501,7 +543,28 @@ int main(int argc, char **argv)
             else trace_line();
         }
         uint64_t na = c->n_abort;
-        cpu_step(c);
+        if (prof_u) {
+            uint64_t p0 = c->cycles;
+            uint32_t pa = (uint32_t)c->pbr << 16 | c->pc;
+            int user = M.fr.mode_user, wasw = c->waiting;
+            uint8_t op = user ? bus_peek(pa) : 0;
+            if (user) prof_insys = -1;
+            cpu_step(c);
+            if (p0 >= prof_c0 && p0 < prof_c1) {
+                uint64_t d = c->cycles - p0;
+                if (wasw) prof_i += d;
+                else if (user) {
+                    prof_u[pa] += (uint32_t)d;
+                    prof_op[pa] = op;
+                } else if (prof_insys >= 0) prof_sys[prof_insys] += d;
+                else prof_k += d;
+            }
+            if (user && op == 0x02) {                         /* COP #n: a syscall */
+                prof_insys = bus_peek((pa & 0xFF0000) | ((pa + 1) & 0xFFFF));
+                if (p0 >= prof_c0 && p0 < prof_c1) prof_sysn[prof_insys]++;
+            }
+        } else
+            cpu_step(c);
         if (M.trace && c->n_abort != na)
             fprintf(stderr, "%10llu *** ABORT at %06X cause %02X\n", (unsigned long long)c->cycles,
                     M.fr.abort_addr, M.fr.abort_cause);
@@ -509,6 +572,7 @@ int main(int argc, char **argv)
     }
     fflush(stdout);
     audio_wav_close();
+    if (prof_u) prof_write();
 
     for (int i = 0; i < nshots; i++) if (!shot_done[i]) {
         nvc_render();

@@ -322,9 +322,10 @@ def run_model(model, horizon, only):
             rc, con, _ = emu(prg, os.path.join(b, "run-stackd"), horizon, args="ok", seconds=3)
             m = re.search(r"stack: (\d+) of (\d+) bytes used", con)
             m2 = re.search(r"software stack: (\d+) of (\d+) bytes used", con)
-            ok = bool(m) and "overflow" not in con and (bool(m2) or not c816(model))
+            m3 = re.search(r"heap: (\d+) of (\d+) bytes used at most", con)
+            ok = bool(m) and "overflow" not in con and (bool(m2 and m3) or not c816(model))
             report("stackdbg", model, ok, (m.group(0) if m else "no report") +
-                   (", " + m2.group(0) if m2 else ""))
+                   (", " + m2.group(0) if m2 else "") + (", " + m3.group(0) if m3 else ""))
         else:
             report("stackdbg", model, False, "build: " + out.strip().splitlines()[-1])
 

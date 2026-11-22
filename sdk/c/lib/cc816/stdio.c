@@ -4,8 +4,13 @@
  *                             line is sent at '\n', before stdin is read and at exit),
  *                             stdin a line typed with echo and editing (hz_getline);
  *                             ctrl-C, or ctrl-D at the start of a line, is its end (EOF)
- *   fopen fclose freopen      files: 1 KB of buffer each; modes r w a, + for both ways,
- *                             x (fail when it exists), b (ignored)
+ *   fopen fclose freopen      files: 1 KB of buffer each, from the heap (malloc); when
+ *                             the heap has no 1 KB free, 128 bytes, else the FILE's own
+ *                             2 bytes (slow, but the file opens: setvbuf(f, NULL,
+ *                             _IONBF, 0) chooses that too, and frees the 1 KB). The
+ *                             FILE structures themselves are static (FOPEN_MAX: Horizon
+ *                             has 4 handles). Modes r w a, + for both ways, x (fail when
+ *                             it exists), b (ignored)
  *   fseek ftell rewind fgetpos fsetpos
  *                             any 32-bit position; Horizon's seek is absolute and there is
  *                             no "tell", so the position and the size are kept here (the
@@ -289,6 +294,7 @@ static FILE *open_into(FILE *f, const char *name, const char *mode)
     const char *m;
     hz_fileinfo st;
     unsigned char *buf;
+    unsigned size;
 
     for (m = mode + 1; *m; ++m) {
         if (*m == '+')
@@ -309,16 +315,23 @@ static FILE *open_into(FILE *f, const char *name, const char *mode)
         errno = EEXIST;
         return 0;
     }
-    buf = malloc(FILEBUF);
-    if (!buf) {
-        errno = ENOMEM;
-        return 0;
-    }
     h = hz_open(name, hmode);
     if (h < 0) {
-        free(buf);
         __hz_seterrno();
         return 0;
+    }
+    /* the buffer: 1 KB from the heap, or less, or the FILE's own two bytes */
+    size = FILEBUF;
+    buf = malloc(FILEBUF);
+    if (!buf) {
+        size = FILESMALL;
+        buf = malloc(FILESMALL);
+    }
+    flags |= F_MYBUF;
+    if (!buf) {
+        size = sizeof f->tiny;
+        buf = f->tiny;
+        flags &= ~F_MYBUF;
     }
     f->pos = f->fsize = 0;
     if (*mode != 'w' && hz_stat_path(name, &st) == 0)
@@ -326,23 +339,50 @@ static FILE *open_into(FILE *f, const char *name, const char *mode)
     if (*mode == 'a')
         f->pos = f->fsize;              /* Horizon's append mode opens at the end */
     f->fh = h;
-    f->flags = flags | F_MYBUF;
+    f->flags = flags;
     f->cnt = 0;
-    f->size = FILEBUF;
+    f->size = size;
     f->ptr = f->base = buf;
     f->ungot = EOF;
     return f;
 }
 
+/* the FILE structures: static, one for each of Horizon's handles (a FILE beyond them,
+ * from freopen's or a program's own use, comes from the heap) */
+static FILE pool[FOPEN_MAX];
+static unsigned char inpool[FOPEN_MAX];
+
+static FILE *new_file(void)
+{
+    unsigned i;
+    for (i = 0; i < FOPEN_MAX; i++)
+        if (!inpool[i]) {
+            inpool[i] = 1;
+            return &pool[i];
+        }
+    return malloc(sizeof(FILE));
+}
+
+static void free_file(FILE *f)
+{
+    unsigned i;
+    for (i = 0; i < FOPEN_MAX; i++)
+        if (f == &pool[i]) {
+            inpool[i] = 0;
+            return;
+        }
+    free(f);
+}
+
 FILE *fopen(const char *name, const char *mode)
 {
-    FILE *f = malloc(sizeof(FILE));
+    FILE *f = new_file();
     if (!f) {
         errno = ENOMEM;
         return 0;
     }
     if (!open_into(f, name, mode)) {
-        free(f);
+        free_file(f);
         return 0;
     }
     f->next = __hz_files;
@@ -373,7 +413,7 @@ int fclose(FILE *f)
         return fflush(f);
     r = close_handle(f);
     unlink_file(f);
-    free(f);
+    free_file(f);
     return r ? EOF : 0;
 }
 
@@ -386,7 +426,7 @@ FILE *freopen(const char *name, const char *mode, FILE *f)
     close_handle(f);
     if (!open_into(f, name, mode)) {
         unlink_file(f);
-        free(f);
+        free_file(f);
         return 0;
     }
     return f;
@@ -402,7 +442,16 @@ int setvbuf(FILE *f, char *buf, int mode, size_t size)
         f->flags |= F_LINE;
     else if (mode == _IONBF)
         f->flags |= F_NOBUF;
-    if (buf && size > 1 && !(f->flags & F_CON)) {
+    if (f->flags & F_CON)
+        return 0;
+    if (!buf && mode == _IONBF) {
+        /* no buffer: the library's (1 KB of heap) is given back; the FILE's own 2 bytes */
+        buf = (char *)f->tiny;
+        size = sizeof f->tiny;
+    }
+    if (buf && size > 1) {
+        if (f->flags & F_RDING)
+            drop_read(f);
         if (f->flags & F_MYBUF)
             free(f->base);
         f->flags &= ~F_MYBUF;

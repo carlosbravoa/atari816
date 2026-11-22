@@ -102,7 +102,7 @@ char *strerror(int e)
     case E2BIG:        return "Argument list too long";
     case EBADF:        return "Bad file handle";
     case ECHILD:       return "No child process";
-    case ENOMEM:       return "Not enough memory";
+    case ENOMEM:       return "Not enough memory (the heap, or no free bank)";
     case EACCES:       return "Access denied";
     case EFAULT:       return "Bad address";
     case EBUSY:        return "Busy";

@@ -5,7 +5,10 @@ Horizon loads as it loads any program (an o65 file, NAME.PRG). Its code may fill
 banks: cc816 puts each function that can move in a segment of its own (F_name, or
 FS<tag>_name for a static one); hcc places them, and writes the banks other than the
 main one after the o65 in the same file, where the startup reads them (lib/cc816/xload.c).
-Horizon 0.28 and later load such a file and ignore what follows the o65.
+Horizon 0.28 and later load such a file and ignore what follows the o65. The libraries'
+functions move as the program's (cc816 splits them, one segment a function; only the loader
+of the banks, xload.c and misc.c, is resident). The program's __far objects (segment
+FD_name) go to banks of far data after the code banks, loaded the same way.
 
 The steps (ld65 runs four to six times; each is quick):
   1. the movable segments and their sizes: from the objects themselves (tools/ca65obj.py),
@@ -60,6 +63,10 @@ OFFSET = {"A": 0, "B": 0, "C": 1}
 MAX_BANKS = 64                  # (xload.c)
 HEAP = 4096                     # the main bank's room kept for malloc (hcc --heap N)
 MOVABLE = re.compile(r"^F(?:S[0-9a-f]{6})?_\w+$")
+# a __far object of the program (cc816: segment FD_name, FD<tag>_name for a static one):
+# placed in banks of far data after the code banks, loaded with them (offset 0 in every
+# link: only their bank bytes differ)
+FARDATA = re.compile(r"^FD(?:S[0-9a-f]{6})?_\w+$")
 # the main bank's segments, in their order (STARTUP first: Horizon enters at $0100)
 MAIN_RO = ("STARTUP", "CODE", "THUNK")
 MAIN_RO2 = ("RODATA",)
@@ -67,9 +74,9 @@ MAIN_RW = ("DATA",)
 MAIN_BSS = ("BSS", "HEAPSTART")
 
 
-def movable_segments(paths):
-    """[(segment, size)] of the movable functions, in the objects' order (a segment met
-    twice: its sizes added; ld65 joins them)"""
+def movable_segments(paths, rx=MOVABLE):
+    """[(segment, size)] of the movable functions (rx: of the far objects, FARDATA), in
+    the objects' order (a segment met twice: its sizes added; ld65 joins them)"""
     order, size = [], {}
     for p in paths:
         try:
@@ -77,7 +84,7 @@ def movable_segments(paths):
         except (ca65obj.ObjError, OSError, IndexError, struct.error) as e:
             raise HccError(f"{p}: cannot read the object's segments ({e})")
         for n, s in segs:
-            if MOVABLE.match(n):
+            if rx.match(n):
                 if n not in size:
                     order.append(n)
                     size[n] = 0
@@ -85,9 +92,11 @@ def movable_segments(paths):
     return [(n, size[n]) for n in order]
 
 
-def config(place, nbanks, tmp, room, trial=False, fake=FAKE["A"], off=0):
+def config(place, nbanks, tmp, room, trial=False, fake=FAKE["A"], off=0, dplace=(),
+           ndata=0):
     """the ld65 configuration: place maps each movable segment to 'MAIN', 'POOL' or a bank
-    number (1..)"""
+    number (1..); dplace each far object's segment to 'POOL' or a far-data bank (1..),
+    which follow the nbanks code banks"""
     mem = ["    ZP:   start = $0000, size = $0100, type = rw;",
            f"    MAIN: start = $0100, size = ${room:X}, file = %O;",
            f'    XR:   start = $0000, size = $1000000, file = "{tmp}/xrel.bin";']
@@ -98,6 +107,11 @@ def config(place, nbanks, tmp, room, trial=False, fake=FAKE["A"], off=0):
     for k in range(1, nbanks + 1):
         b = fake(k)
         mem.append(f'    B{k}: start = ${b:02X}{off:04X}, size = ${0x10000 - off:X}, '
+                   f'file = "{tmp}/bank{k}.bin";')
+        files.append(f'    "{tmp}/bank{k}.bin": format = bin;')
+    for j in range(1, ndata + 1):
+        k = nbanks + j
+        mem.append(f'    B{k}: start = ${fake(k):02X}0000, size = $10000, '
                    f'file = "{tmp}/bank{k}.bin";')
         files.append(f'    "{tmp}/bank{k}.bin": format = bin;')
     seg = ["    ZEROPAGE: load = ZP, type = zp;",
@@ -115,7 +129,11 @@ def config(place, nbanks, tmp, room, trial=False, fake=FAKE["A"], off=0):
             "    XREL:     load = XR, type = ro, optional = yes;"]
     for n, area in place:
         if area != "MAIN":
-            seg.append(f"    {n}: load = {'POOL' if area == 'POOL' else 'B%d' % area}, type = ro;")
+            seg.append(f"    {n}: load = {'POOL' if area == 'POOL' else 'B%d' % area}, "
+                       f"type = ro{', optional = yes' if trial else ''};")
+    for n, area in dplace:
+        seg.append(f"    {n}: load = {'POOL' if area == 'POOL' else 'B%d' % (nbanks + area)}, "
+                   f"type = rw{', optional = yes' if trial else ''};")
     return "\n".join([
         "# made by hcc (tools/hzlarge.py): the large code model's link",
         "SYMBOLS {", "    __HZ_SSTACK__: type = weak, value = $2000;",
@@ -129,11 +147,11 @@ def config(place, nbanks, tmp, room, trial=False, fake=FAKE["A"], off=0):
         "FORMATS {", "    o65: os = cc65, type = small;", "}", ""])
 
 
-def run_ld65(cfg_text, tmp, name, inputs, defs, out, mp):
+def run_ld65(cfg_text, tmp, name, inputs, defs, out, mp, lbl=None):
     cfg = os.path.join(tmp, name + ".cfg")
     with open(cfg, "w") as f:
         f.write(cfg_text)
-    cmd = [hzc816.tool("ld65"), "-C", cfg, "-o", out, "-m", mp]
+    cmd = [hzc816.tool("ld65"), "-C", cfg, "-o", out, "-m", mp] + (["-Ln", lbl] if lbl else [])
     for d in defs:
         cmd += ["-D", d]
     cmd += inputs
@@ -234,16 +252,21 @@ def link(objs, out, sstack, debug=False, mapfile=None, libs=(), keep=None, heap=
     tail = list(libs) + [hzc816.lib_path("large")]
     # (the glue goes before the libraries: its ___hz_xload must win over the library's)
     try:
+        # (the libraries' functions too: the C library's, hgame's, the controls
+        # library's C part; only those the program links are placed, below)
         moved = movable_segments([o for o in objs if os.path.exists(o)] +
-                                 [x for x in libs if os.path.exists(x)])
+                                 [x for x in tail if os.path.exists(x)])
+        fardata = movable_segments([o for o in objs if os.path.exists(o)] +
+                                   [x for x in tail if os.path.exists(x)], FARDATA)
         # 2. the trial link (twice when __T_ names are missing: then with thunks for them)
         pool = [(n, "POOL") for n, _ in moved]
         tmo = os.path.join(tmp, "trial.o65")
         tmp_map = os.path.join(tmp, "trial.map")
         need = set()
-        for attempt in range(3):
+        for attempt in range(12):
             g = glue(tmp, need, (), 0, 0, progname, "large")
-            rc, msg = run_ld65(config(pool, 0, tmp, 0xFF00, trial=True), tmp, "trial",
+            rc, msg = run_ld65(config(pool, 0, tmp, 0xFF00, trial=True,
+                                      dplace=[(n, "POOL") for n, _ in fardata]), tmp, "trial",
                                head + [g] + tail, defs, tmo, tmp_map)
             if rc == 0:
                 break
@@ -258,6 +281,24 @@ def link(objs, out, sstack, debug=False, mapfile=None, libs=(), keep=None, heap=
         else:
             raise HccError(msg.strip())
         sizes = seg_sizes(tmp_map)
+        # only the segments linked (a library's modules the program does not use are not)
+        moved = [(n, s) for n, s in moved if n in sizes]
+        fardata = [(n, s) for n, s in fardata if n in sizes]
+        # the far objects: first fit in banks of 64 KB
+        dplace, dbanks = [], []
+        for n, sz in fardata:
+            if sz > 0x10000:
+                raise HccError(f"{name}: the far object in segment {n} is {sz:,} bytes: more "
+                               f"than a bank")
+            for k, used in enumerate(dbanks):
+                if used + sz <= 0x10000:
+                    dbanks[k] += sz
+                    dplace.append((n, k + 1))
+                    break
+            else:
+                dbanks.append(sz)
+                dplace.append((n, len(dbanks)))
+        nd = len(dbanks)
         fixed = sum(sizes.get(s, (0, 0))[1] for s in MAIN_RO + MAIN_RO2 + MAIN_RW + MAIN_BSS)
         # each global function's segment, when it is a movable one (from the trial's map: a
         # segment may hold several functions), and the thunks that may be needed: one for
@@ -329,8 +370,9 @@ def link(objs, out, sstack, debug=False, mapfile=None, libs=(), keep=None, heap=
                     banks.append(s)
                     place.append((n, len(banks)))
             nb = len(banks)
-            if nb > MAX_BANKS:
-                raise HccError(f"{name}: {nb} code banks: more than {MAX_BANKS}")
+            if nb + nd > MAX_BANKS:
+                raise HccError(f"{name}: {nb} code banks and {nd} of far data: more than "
+                               f"{MAX_BANKS}")
             where = dict(place)
             thunks = {x for x in need if x in seg_of and where[seg_of[x]] != "MAIN"}
             aliases = need - thunks
@@ -342,7 +384,8 @@ def link(objs, out, sstack, debug=False, mapfile=None, libs=(), keep=None, heap=
                 if os.path.exists(p):
                     hs.update(open(p, "rb").read())
             stamp = int.from_bytes(hs.digest()[:4], "little") | 1
-            g = glue(tmp, thunks, aliases, nb, stamp, progname, "large", noload=nb == 0)
+            g = glue(tmp, thunks, aliases, nb + nd, stamp, progname, "large",
+                     noload=nb + nd == 0)
             # 5. links A and B
             res = {}
             for tag in ("A", "B", "C"):
@@ -350,19 +393,20 @@ def link(objs, out, sstack, debug=False, mapfile=None, libs=(), keep=None, heap=
                 mp = os.path.join(tmp, f"link{tag}.map")
                 sub = os.path.join(tmp, tag)
                 os.makedirs(sub, exist_ok=True)
-                rc, msg = run_ld65(config(place, nb, sub, room, fake=FAKE[tag], off=OFFSET[tag]),
-                               tmp, "link" + tag,
-                                   head + [g] + tail, defs, o65, mp)
+                rc, msg = run_ld65(config(place, nb, sub, room, fake=FAKE[tag], off=OFFSET[tag],
+                                          dplace=dplace, ndata=nd),
+                                   tmp, "link" + tag, head + [g] + tail, defs, o65, mp,
+                                   os.path.join(tmp, "linkA.lbl") if tag == "A" else None)
                 if rc:
                     raise HccError(link_error(msg, name, sstack, mp))
                 imgs = []
-                for k in range(1, nb + 1):
+                for k in range(1, nb + nd + 1):
                     p = os.path.join(sub, f"bank{k}.bin")
                     imgs.append(open(p, "rb").read() if os.path.exists(p) else b"")
                 xr = os.path.join(sub, "xrel.bin")
                 res[tag] = (open(o65, "rb").read(), imgs,
                             open(xr, "rb").read() if os.path.exists(xr) else b"", mp)
-            relocs = relocations(res, nb, name)
+            relocs = relocations(res, nb + nd, name)
             # (every function's 16-bit address in the main bank: a thunk or the function)
             bad = [x for x, a in map_exports(res["A"][3]).items() if x.startswith("__T_") and
                    a > 0xFFFF]
@@ -384,7 +428,7 @@ def link(objs, out, sstack, debug=False, mapfile=None, libs=(), keep=None, heap=
                 cap = max(0, inmain - 2 * (fsize - 0xFFFF) - 1024)
                 continue
             xblock = 0
-            if fsize <= 0xFFFF and nb:
+            if fsize <= 0xFFFF and nb + nd:
                 xblock = append_banks(out, res["A"][1], relocs, stamp)
             if os.path.exists(prx):
                 os.remove(prx)
@@ -399,7 +443,8 @@ def link(objs, out, sstack, debug=False, mapfile=None, libs=(), keep=None, heap=
         s["sstack"] = sstack
         s["heap"] = max(0, hzc816.SSTOP - sstack - (0x100 + s["code"]))
         s["relocs"] = hzc816.o65_relocs(out)
-        s["banks"] = [len(x) for x in res["A"][1]]
+        s["banks"] = [len(x) for x in res["A"][1][:nb]]
+        s["fardata"] = [len(x) for x in res["A"][1][nb:]]
         s["xblock"] = xblock
         s["moved"] = sum(sz for n, sz in moved if where[n] != "MAIN")
         s["text"] -= s["moved"]                 # (the main bank's own)
@@ -409,7 +454,10 @@ def link(objs, out, sstack, debug=False, mapfile=None, libs=(), keep=None, heap=
         s["thunks"] = len(thunks)
         s["xrelocs"] = sum(len(v) for v in relocs.values())
         if mapfile:
+            # (the map, and every label: the main bank's at bank 0, code bank k's at bank
+            # k: prof816.py reads them)
             shutil.copy(mp, mapfile)
+            shutil.copy(os.path.join(tmp, "linkA.lbl"), os.path.splitext(mapfile)[0] + ".lbl")
         return s
     finally:
         if not keep:

@@ -354,6 +354,9 @@ def _compile(path, incs, defs, level, dump_ir, split, o, diag):
         _fail(diag)
     t0 = _tick('parse', t0)
     fr = Front(path, diag, parser.implicit_int, attrs)
+    # __far objects in banks of their own: a large-model program's file (a library's
+    # stay in the main bank, reached by far pointers as any object there)
+    fr.unit.fardata = bool(o.get('large')) and not o.get('resident') and not split
     fr.compound_end = parser.compound_end
     _CURRENT['front'] = fr
     unit = fr.translate(ast)
@@ -390,7 +393,8 @@ def _compile(path, incs, defs, level, dump_ir, split, o, diag):
         lines_all.append((f, lines, g.helpers))
     _CURRENT.pop('fn', None)
     if split:
-        return emit_split(unit, lines_all, path, large), unit.warnings
+        return emit_split(unit, lines_all, path, large,
+                          large and not o.get('resident')), unit.warnings
     return emit(unit, [(f, l) for f, l, _ in lines_all], helpers, path,
                 large and not o.get('resident'), large), unit.warnings
 
@@ -604,6 +608,13 @@ def far_lines(lines, fname, recs):
             out.append(('D', f'.word .loword({l[1][6:]})', l[2]))
             continue
         out.append(l)
+        if l[0] == 'I' and l[1] not in ('mvn', 'mvp') and len(l) > 2 and \
+                str(l[2]).startswith('#^'):
+            # a __far object's bank (lda #^name: a 16-bit immediate, the bank its low byte)
+            lab = f'L{fname[1:]}_x{len(recs)}'
+            out.append(('L', lab))
+            recs.append(f'\t.faraddr {lab}-2')
+            continue
         if l[0] == 'I' and l[1] in ('jsl', 'jml', 'mvn', 'mvp'):
             lab = f'L{fname[1:]}_x{len(recs)}'
             out.append(('L', lab))
@@ -668,8 +679,15 @@ def emit(unit, funcs, helpers, path='?', far=False, large=False):
         body.append(text(lines))
     top_asm(len(funcs) + 1)
     segs = {'RODATA': [], 'DATA': [], 'BSS': []}
+    ftag = _tag(path)
     for d in unit.data:
-        lines = segs[d.section]
+        if getattr(d, 'far', False):
+            # a __far object (the large model): a segment of its own, FD_name (a static
+            # one's FD<tag>_name), which hcc places in a bank of far data
+            sg = 'FD' + ('' if d.export else ftag) + d.name
+            lines = segs.setdefault(sg, [])
+        else:
+            lines = segs[d.section]
         lines.append(f'{d.name}:')
         if d.export:
             exports.add(d.name)
@@ -684,6 +702,11 @@ def emit(unit, funcs, helpers, path='?', far=False, large=False):
             elif it[0] == 'w':
                 lines.append(f'\t.addr {_so(_hn(it[1], fnames), it[2])}')
             elif it[0] == 'f':
+                if getattr(d, 'far', False):
+                    # (a far address in far data: its bank byte recorded for the link)
+                    lab = f'Lfd_x{len(recs)}'
+                    lines.append(f'{lab}:')
+                    recs.append(f'\t.faraddr {lab}+2')
                 lines.append(f'\t.faraddr {_so(_hn(it[1], fnames), it[2])}')
                 lines.append('\t.byte 0')
     for s, l in segs.items():
@@ -736,20 +759,26 @@ def _hn(name, fnames):
 _WORD = re.compile(r'[A-Za-z_][A-Za-z0-9_]*')
 
 
-def emit_split(unit, funcs, path, large=False):
+def emit_split(unit, funcs, path, large=False, far=False):
     """the unit as several modules: one a function (with the string literals only it
     uses), and one with the file's data and its constructors and destructors (so they
     are linked whenever the data is). Names private to the file (statics, literals) get a
-    file-unique prefix and are exported, so the modules can reach each other."""
+    file-unique prefix and are exported, so the modules can reach each other.
+    far (the large code model, a library that is not resident): each movable function in a
+    segment of its own (F<name>, or F<tag><name> for a static one: hcc places it in any
+    code bank, as a program's own); its 16-bit address __T<name> is then hcc's (a thunk
+    or the function), a static one's a thunk in its module (THUNK) when it is used. A
+    resident library's functions are all in the main bank: __T<name> is the function"""
     tag = _tag(path)
     fnames = unit.funcnames if large else set()
     private = {f.name for f, _, _ in funcs if f.static} | \
         {d.name for d in unit.data if not d.export}
     if large:
-        # (a library's functions are in the main bank: __T<name>, their 16-bit address, is
-        # the function itself)
         private |= {'__T' + f.name for f, _, _ in funcs if f.static}
     ren = {n: tag + n for n in private}
+    mov = {f.name for f, _, _ in funcs if far and movable(f) and
+           not (_CONDES.match(getattr(f, 'cname', '')) and not f.static)}
+    recs_of = {}                # a movable function -> its XREL lines
 
     def rn(text):
         return _WORD.sub(lambda m: ren.get(m.group(0), m.group(0)), text)
@@ -770,8 +799,24 @@ def emit_split(unit, funcs, path, large=False):
                 out.append('\t.byte 0')
         return out
 
-    texts = {f.name: (f'__T{f.name}:\n' if large else '') + text(lines)
-             for f, lines, _ in funcs}
+    texts = {}
+    for f, lines, _ in funcs:
+        if f.name in mov:
+            recs_of[f.name] = []
+            texts[f.name] = text(far_lines(lines, f.name, recs_of[f.name]))
+        else:
+            texts[f.name] = (f'__T{f.name}:\n' if large else '') + text(lines)
+    # the static movable functions whose 16-bit address is used (in the file's code or
+    # data): a thunk each
+    used = set()
+    for t in texts.values():
+        used |= set(_WORD.findall(t))
+    for d in unit.data:
+        for it in d.items:
+            if it[0] in ('w', 'f'):
+                used.add(_hn(it[1], fnames))
+    thunked = {f.name for f, _, _ in funcs if f.name in mov and f.static and
+               '__T' + f.name in used}
     users = {}                  # literal -> the functions that use it
     lits = [d for d in unit.data if d.name.startswith('L_')]
     litnames = {d.name for d in lits}
@@ -791,11 +836,20 @@ def emit_split(unit, funcs, path, large=False):
     if large:
         defined_all |= {'__T' + f.name for f, _, _ in funcs}
 
-    def module(name, code, data, helpers, condes=()):
+    def module(name, code, data, helpers, condes=(), fn=None):
         body = []
         for c in condes:
             body.append(c)
-        if code:
+        if code and fn in mov:
+            f = fn
+            body.append(f'\t.segment "F{ren.get(f, f) if f in private else f}"')
+            body.append(code)
+            if f in thunked:
+                body += ['\t.segment "THUNK"', f'__T{f}:', f'\tjml\t{f}']
+            if recs_of.get(f):
+                body.append('\t.segment "XREL"')
+                body += recs_of[f]
+        elif code:
             body.append('\t.segment "CODE"')
             body.append(code)
         segs = {'RODATA': [], 'DATA': [], 'BSS': []}
@@ -825,8 +879,8 @@ def emit_split(unit, funcs, path, large=False):
             condes_funcs.append((f, m))
             continue
         name_defs = [f.name] + [d.name for d in own.get(f.name, [])] + \
-            (['__T' + f.name] if large else [])
-        module(f.name.lstrip('_'), texts[f.name], own.get(f.name, []), helpers)
+            (['__T' + f.name] if large and (f.name not in mov or f.name in thunked) else [])
+        module(f.name.lstrip('_'), texts[f.name], own.get(f.name, []), helpers, fn=f.name)
     data = [d for d in unit.data if not d.name.startswith('L_')] + shared
     if getattr(unit, 'asm', None):
         raise CError(f'{path}: error: asm at file scope is not allowed in a library file '

@@ -249,6 +249,58 @@ static void t_files(void)
     check(fopen("/X", "q") == 0 && errno == EINVAL, "bad mode");
 }
 
+#ifdef __CC816__
+/* fopen with the heap full: the file still opens (a 128-byte buffer, or the FILE's own
+ * 2 bytes) and works; setvbuf _IONBF gives the 1 KB back; the heap's counts (the Digger
+ * port: a recording could not be saved, fopen failed with ENOMEM and no hint) */
+static void t_fullheap(void)
+{
+    static void *p[400];
+    FILE *f;
+    unsigned n = 0, k, peak0 = hz_heap_peak(), free0 = hz_heap_free();
+    char line[64];
+    check(free0 >= hz_heap_largest() && hz_heap_largest() > 1024, "hz_heap_free, largest");
+    while (n < 200 && (p[n] = malloc(512)) != 0)            /* the heap filled ... */
+        n++;
+    k = n;
+    while (n < 400 && (p[n] = malloc(6)) != 0)              /* ... to the last bytes */
+        n++;
+    check(k > 10 && n < 400 && hz_heap_largest() < 6, "the heap filled");
+    check(hz_heap_peak() >= peak0 && hz_heap_peak() >= 512u * k, "hz_heap_peak");
+    f = fopen("/CFULL.TXT", "w");
+    check(f != 0 && f->size == 2, "fopen with the heap full");
+    if (f) {
+        for (k = 0; k < 100; k++)
+            fprintf(f, "%03u\n", k);
+        check(fclose(f) == 0, "fclose with the heap full");
+    }
+    free(p[0]);                 /* 512 bytes free: the 128-byte buffer this time */
+    p[0] = 0;
+    f = fopen("/CFULL.TXT", "r");
+    check(f != 0 && f->size == 128, "fopen r with the heap nearly full");
+    if (f) {
+        for (k = 0; k < 99; k++)
+            fgets(line, sizeof line, f);
+        check(fgets(line, sizeof line, f) && !strcmp(line, "099\n"), "read with the heap full");
+        check(fseek(f, 4, SEEK_SET) == 0 && fgets(line, sizeof line, f) &&
+              !strcmp(line, "001\n"), "fseek with the heap full");
+        fclose(f);
+    }
+    while (n)
+        free(p[--n]);
+    check(hz_heap_free() == free0, "the heap whole again");
+    f = fopen("/CFULL.TXT", "r");
+    check(f != 0 && setvbuf(f, NULL, _IONBF, 0) == 0 && hz_heap_free() == free0,
+          "setvbuf _IONBF gives the buffer back");
+    if (f) {
+        check(fgets(line, sizeof line, f) && !strcmp(line, "000\n"), "read unbuffered");
+        fclose(f);
+    }
+    remove("/CFULL.TXT");
+    check(strstr(strerror(ENOMEM), "heap") != 0, "strerror(ENOMEM) names the heap");
+}
+#endif
+
 static void t_dir(void)
 {
     DIR *d = opendir("/");
@@ -278,7 +330,8 @@ static void t_time(void)
     hz_sleep(200);
     c2 = clock();
     check(c2 - c1 >= 9 && c2 - c1 <= 12, "clock() counts 50 a second");
-    check(hz_uptime() - ms >= 200, "hz_sleep and hz_uptime");
+    /* (hz_uptime counts in steps of 10 ms: one step less may show) */
+    check(hz_uptime() - ms >= 190, "hz_sleep and hz_uptime");
 }
 
 static void t_far(void)
@@ -327,6 +380,9 @@ int main(int argc, char **argv)
     t_string();
     t_stdlib();
     t_malloc();
+#ifdef __CC816__
+    t_fullheap();
+#endif
     t_files();
     t_dir();
     t_time();

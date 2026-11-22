@@ -1,6 +1,7 @@
 /* stdio.h - cc816 (Horizon C SDK; lib/cc816/stdio.c, printf.c, scanf.c).
  * stdout and stderr: the console, line-buffered; stdin: a line typed at the keyboard;
- * files on the card, buffered (1 KB a file). Horizon has 4 file handles for the whole
+ * files on the card, buffered (1 KB a file from the heap; a smaller buffer, or none, when
+ * the heap has no room: fopen does not fail for want of it). Horizon has 4 file handles for the whole
  * system (fopen fails with errno ENFILE when none is left). printf's %f %e %g %a and
  * scanf's %f are there in programs that use floating point (docs/c/reference.md). */
 #ifndef _STDIO_H
@@ -31,6 +32,7 @@ typedef struct __hz_file {
     long pos;                   /* the handle's position on the card */
     long fsize;                 /* the file's size (SEEK_END) */
     struct __hz_file *next;     /* every open file */
+    unsigned char tiny[2];      /* the buffer when the heap has no room for one */
 } FILE;
 extern FILE *stdin, *stdout, *stderr;
 

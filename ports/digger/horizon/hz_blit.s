@@ -58,6 +58,37 @@ setrow: lda     row
         sta     rows
 .endmacro
 
+; The copies of whole rows use MVN (7 cycles a byte, against about 12 for a loop of
+; [dp],y loads and stores), whose two bank bytes are written into the instruction itself
+; (self-modifying code: the code bank is writable, docs/reference/program.md) when the
+; routine starts and when the framebuffer's row moves into its next bank (every 128 rows).
+; MVN sets DBR to the destination's bank: PHB / PLB around it. The masked put reads the
+; sprite with absolute,Y addressing (DBR the sprite's bank), the operands written for each
+; row. Each label of a patched instruction ends the routine's @ labels' scope: those
+; routines name their labels.
+;
+; patch label, srcbank, dstbank: the MVN at label moves from bank srcbank to dstbank (A8)
+.macro  patch   label, srcbank, dstbank
+        sep     #$20
+        .a8
+        lda     dstbank
+        sta     label+1
+        lda     srcbank
+        sta     label+2
+        rep     #$20
+        .a16
+.endmacro
+
+; the next row of the framebuffer: fbp += 512; carry set when it went into the next bank
+.macro  nextrow
+        lda     fbp
+        clc
+        adc     #512
+        sta     fbp
+.endmacro
+
+bw1     = __rg+20               ; bw - 1: MVN's count
+
 ; void hzb_put(unsigned x, unsigned row, const uint8_t __far *buf, unsigned bw,
 ;              unsigned rows): a buffer (rows of bw bytes) to the screen
 _hzb_put:
@@ -71,23 +102,27 @@ _hzb_get:
         lda     ARGS+6,s
         sta     src+2
         lda     rows
-        beq     @done
-@r:     jsr     setrow
-        ldy     #0
-@c:     lda     [fbp],y
-        sta     [src],y
-        iny
-        iny
-        cpy     bw
-        bcc     @c
-        lda     src
-        clc
-        adc     bw
-        sta     src
-        inc     row
-        dec     rows
-        bne     @r
-@done:  RET
+        beq     get_done
+        lda     bw
+        dec     a
+        sta     bw1
+        jsr     setrow
+        patch   getmv, fbp+2, src+2
+get_r:  ldx     fbp
+        ldy     src
+        lda     bw1
+        phb
+getmv:  mvn     #0, #0
+        plb
+        sty     src             ; (MVN leaves Y at the next row of the buffer)
+        nextrow
+        bcc     get_n
+        inc     fbp+2
+        patch   getmv, fbp+2, src+2
+get_n:  dec     rows
+        bne     get_r
+get_done:
+        RET
 
 ; void hzb_putm(unsigned x, unsigned row, unsigned long src, unsigned bw, unsigned rows):
 ; screen = (screen & M) | S; M follows S (bw * rows bytes on, in the same bank)
@@ -97,25 +132,37 @@ _hzb_putm:
         sta     src
         lda     ARGS+6,s
         sta     src+2
-        sta     msk+2
         ldx     rows
-        beq     @done
+        beq     putm_done
         lda     src
 @m:     clc
         adc     bw
         dex
         bne     @m
         sta     msk
-@r:     jsr     setrow
-        ldy     #0
-@c:     lda     [fbp],y
-        and     [msk],y
-        ora     [src],y
+        jsr     setrow
+        phb                     ; DBR = the sprite's bank (S and M)
+        sep     #$20
+        .a8
+        lda     src+2
+        pha
+        plb
+        rep     #$20
+        .a16
+putm_r: lda     msk             ; this row's M and S: the operands below
+        sta     f:pm_and+1
+        lda     src
+        sta     f:pm_ora+1
+        ldy     bw              ; the row from its end: Y = bw - 2 ... 0
+        dey
+        dey
+pm_c:   lda     [fbp],y
+pm_and: and     a:$0000,y
+pm_ora: ora     a:$0000,y
         sta     [fbp],y
-        iny
-        iny
-        cpy     bw
-        bcc     @c
+        dey
+        dey
+        bpl     pm_c
         lda     src
         clc
         adc     bw
@@ -124,10 +171,14 @@ _hzb_putm:
         clc
         adc     bw
         sta     msk
-        inc     row
-        dec     rows
-        bne     @r
-@done:  RET
+        nextrow
+        bcc     putm_n
+        inc     fbp+2
+putm_n: dec     rows
+        bne     putm_r
+        plb
+putm_done:
+        RET
 
 ; void hzb_copy(unsigned x, unsigned row, unsigned long src, unsigned bw, unsigned rows)
 _hzb_copy:
@@ -137,23 +188,27 @@ _hzb_copy:
         lda     ARGS+6,s
         sta     src+2
         lda     rows
-        beq     @done
-@r:     jsr     setrow
-        ldy     #0
-@c:     lda     [src],y
-        sta     [fbp],y
-        iny
-        iny
-        cpy     bw
-        bcc     @c
-        lda     src
-        clc
-        adc     bw
-        sta     src
-        inc     row
-        dec     rows
-        bne     @r
-@done:  RET
+        beq     copy_done
+        lda     bw
+        dec     a
+        sta     bw1
+        jsr     setrow
+        patch   copymv, src+2, fbp+2
+copy_r: ldx     src
+        ldy     fbp
+        lda     bw1
+        phb
+copymv: mvn     #0, #0
+        plb
+        stx     src             ; (MVN leaves X at the next row of the source)
+        nextrow
+        bcc     copy_n
+        inc     fbp+2
+        patch   copymv, src+2, fbp+2
+copy_n: dec     rows
+        bne     copy_r
+copy_done:
+        RET
 
 ; void hzb_fill(unsigned x, unsigned row, unsigned bw, unsigned rows, unsigned word)
 _hzb_fill:
@@ -162,16 +217,19 @@ _hzb_fill:
         sta     src
         lda     rows
         beq     @done
-@r:     jsr     setrow
-        ldy     #0
+        jsr     setrow
+@r:     ldy     bw
+        dey
+        dey
         lda     src
 @c:     sta     [fbp],y
-        iny
-        iny
-        cpy     bw
-        bcc     @c
-        inc     row
-        dec     rows
+        dey
+        dey
+        bpl     @c
+        nextrow
+        bcc     @n
+        inc     fbp+2
+@n:     dec     rows
         bne     @r
 @done:  RET
 
@@ -180,27 +238,37 @@ _hzb_fill:
 _hzb_show:
         args3   4
         lda     rows
-        beq     @done
-@r:     jsr     setrow
-        lda     fbp
-        sta     msk
+        beq     show_done
+        lda     bw
+        dec     a
+        sta     bw1
+        jsr     setrow
+        jsr     showbank
+show_r: ldx     fbp
+        txy
+        lda     bw1
+        phb
+showmv: mvn     #0, #0
+        plb
+        nextrow
+        bcc     show_n
+        inc     fbp+2
+        jsr     showbank
+show_n: dec     rows
+        bne     show_r
+show_done:
+        RET
+
+; the MVN of hzb_show: from the drawing buffer's bank of this row to the shown one's
+showbank:
         lda     fbp+2
         sec
         sbc     _hzb_fbbank
         clc
         adc     _hzb_showbank
         sta     msk+2
-        ldy     #0
-@c:     lda     [fbp],y
-        sta     [msk],y
-        iny
-        iny
-        cpy     bw
-        bcc     @c
-        inc     row
-        dec     rows
-        bne     @r
-@done:  RET
+        patch   showmv, fbp+2, msk+2
+        rts
 
         .segment "BSS"
 _hzb_showbank: .res 2

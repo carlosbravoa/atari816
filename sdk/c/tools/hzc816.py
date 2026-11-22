@@ -100,12 +100,20 @@ def compile_c(src, obj, opt="2", incs=(), defs=(), asm_out=None, opts=None, code
             assemble(path, obj, src_name=src, code=code)
 
 
-def compile_split(src, outdir, opt="2", incs=(), defs=(), code=None):
+# the library files whose code must stay in the main bank in the large code model: the
+# loader of the other banks (it runs before they are there) and what it calls
+RESIDENT = ("xload.c", "misc.c")
+
+
+def compile_split(src, outdir, opt="2", incs=(), defs=(), code=None, resident=None):
     """a library file: one object a function (ld65 links only those a program uses)
-    -> the objects. In the large code model a library's code is in the main bank"""
+    -> the objects. In the large code model a library's functions move to other banks as
+    a program's do (hcc places them), except a resident file's (RESIDENT: the main bank)"""
     from cc816.ctypes816 import CError
     level = {"0": 0, "1": 1}.get(opt, 2)
-    opts = {"large": True, "resident": True} if is_large(code) else None
+    if resident is None:
+        resident = os.path.basename(src) in RESIDENT
+    opts = {"large": True, "resident": bool(resident)} if is_large(code) else None
     try:
         mods, warns = cc().compile_c(src, list(incs) + [os.path.join(SDKC, "include")], defs,
                                      level, split=True, opts=opts)
@@ -439,8 +447,10 @@ def map_sizes(mp):
                 break
     text = sum(seg.get(s, 0) for s in seg if s not in ("DATA", "BSS", "ZEROPAGE", "ZPEND",
                                                        "HEAPSTART", "XREL")
-               and (s in ("STARTUP", "CODE", "RODATA", "THUNK") or s.startswith("F")))
+               and (s in ("STARTUP", "CODE", "RODATA", "THUNK") or s.startswith("F"))
+               and not re.match(r"^FD(?:S[0-9a-f]{6})?_", s))       # (far data: its banks)
     s = {"text": text, "data": seg.get("DATA", 0), "bss": seg.get("BSS", 0),
+         "rodata": seg.get("RODATA", 0),
          "zp": seg.get("ZEROPAGE", 0), "codeonly": seg.get("STARTUP", 0) + seg.get("CODE", 0)}
     s["code"] = s["text"] + s["data"] + s["bss"]
     return s
@@ -496,4 +506,11 @@ def size_report(out, s):
         + f"; {s['thunks']} thunks",
         f"  one file: the o65 {s['o65']:,} bytes, then the other banks {s['xblock']:,} bytes; "
         f"{s['xrelocs']} bank bytes patched at the start"
-        if s["banks"] else "  one file: everything is in the main bank, no other banks to load"]))
+        if s["banks"] or s.get("fardata") else
+        "  one file: everything is in the main bank, no other banks to load"]
+        + ([f"  far data: {sum(s['fardata']):,} bytes of __far objects in "
+            f"{len(s['fardata'])} bank(s) of their own"] if s.get("fardata") else [])
+        + ([f"  the main bank without its movable code: {s['code'] - s['inmain']:,} bytes "
+            f"(code that must stay {s['text'] - s['inmain'] - s.get('rodata', 0):,}, "
+            f"constants {s.get('rodata', 0):,}, data {s['data']:,}, bss {s['bss']:,})"]
+           if "inmain" in s else [])))

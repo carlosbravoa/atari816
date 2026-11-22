@@ -43,6 +43,7 @@
 	.export	_exit, __Exit, _atexit, _abort
 	.export	_hz_stack_free, _hz_sstack_free
 	.export	___hz_heapstart, ___hz_heapend, ___hz_paintflag
+	.export	___hz_heapuse, ___hz_heappeak
 	.import	_main, ___hz_mkargs, ___hz_argv, ___hz_exitchk
 	.import	__HZ_SSTACK__, __HZ_PAINT__
 	.import	__CONSTRUCTOR_TABLE__, __CONSTRUCTOR_COUNT__
@@ -289,6 +290,8 @@ inexit:	.res	2
 exitcode: .res	2
 nexit:	.res	2
 exittab: .res	MAXEXIT * 2
+___hz_heapuse:	.res	2	; the heap's bytes in use (lib/cc816/malloc.c), and the most
+___hz_heappeak:	.res	2	; since the start (hz_heap_peak, --debug's report)
 
 	.segment "HEAPSTART"		; (hzprog.cfg: after every module's bss)
 heap0:	.res	2

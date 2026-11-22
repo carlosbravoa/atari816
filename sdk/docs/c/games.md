@@ -439,15 +439,24 @@ C library), and its source 404 lines against 1,332.
   (`fastmul16`): Glimmer spends 5 % of its time there.
 - Console output is slow (`printf`: about 2 ms a line on the debug console): no `printf` in
   the frame loop of a finished game.
-- Profile: `sdk/c/game/tests/tools/prof816.py` turns emu816's instruction trace into time per
-  function, per syscall and idle (see its header; `emu-prof.sh` runs it through run816):
+- Profile: `run816.py --prof FILE` makes the emulator count the CPU's cycles by
+  instruction address, syscall, kernel and idle (`--prof-from S --prof-to S`: only that
+  stretch, in seconds after the program's start, as `--shot`'s); `sdk/c/game/tests/tools/
+  prof816.py` turns the counts into a table of the program's functions. It reads hcc
+  `--map`'s map and the label file beside it, in both code models (the large model's code
+  banks are matched by their bytes with the banks the program got), and vbcc's maps:
 
 ```
-cd sdk/c/examples/glimmer && hcc --map -o GLIMMER.PRG main.c
-PROF_MAP=GLIMMER.map PROF_FROM=9 PROF_TO=11 PROF_OUT=prof.txt \
-  python3 ../../../tools/run816.py GLIMMER.PRG --emu ../../game/tests/tools/emu-prof.sh \
-  --script test.script --out build/prof
+cd ports/digger && make          # (hcc --map: DIGGER.map and DIGGER.lbl)
+python3 ../../sdk/tools/run816.py DIGGER.PRG --mode shell --args "/Q /S:0 /E:THEVOIDS.DRF" \
+  --file DIGGER.DAT:/APPS/DIGGER.DAT --file tests/drf/thevoids.drf:/APPS/THEVOIDS.DRF \
+  --seconds 120 --prof prof.txt --prof-from 20 --prof-to 120 --out build/prof
+python3 ../../sdk/c/game/tests/tools/prof816.py --counts prof.txt --map DIGGER.map --top 20
 ```
+
+  100 s of play take about 10 s. The table: cycles and share for each function (an
+  assembly routine by its label), each syscall (with its calls), the kernel and idle.
+  (`emu-prof.sh` still pipes `emu816 --trace` through it, for a short stretch.)
 
 **What is in assembly inside the library** (`sdk/c/game/hg_fast.s`, vasm syntax; a game never
 sees it): the record builder (clipping, the queue, the runs), `hg_fill`, `hg_draw` and

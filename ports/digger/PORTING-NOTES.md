@@ -130,9 +130,9 @@ PC speaker synthesizer (`newsnd.c`, `soundgen.c`: POKEY plays the tones itself),
 | 3 | **No way to show a game taller than the screen.** 320 x 200 and 640 x 400 are the commonest PC sizes; the screen modes are 180 / 360 rows. hgame's full screen had a framebuffer of exactly the screen, and its scroll registers were only reachable through `hg_map` (tiles) | hgame gap | added `hg_screen_fb(mode, title, stride, rows)` (any framebuffer shape; a stride of 512 / 1024 keeps rows in one bank for CPU drawing) and `hg_scroll` / `hg_split` (the view; a fixed panel over a part that scrolls). Test `sdk/c/game/tests/gt_view.c`, documented in games.md | 30 min |
 | 4 | **No exact-pitch tone.** hgame's POKEY voices are 8-bit dividers on the 64 kHz clock: about 4 % between steps at 1 kHz, nothing below 125 Hz. A PC speaker port (and any music) needs exact pitches | hgame gap | added `hg_note(v, hz, vol)`: the two 16-bit voices (channels joined, 1.79 MHz). Tested in gt_view (AUDCTL logged) | 15 min |
 | 5 | **No ordered key events.** `hg_key_pressed` is a bitmap per frame (order lost, no character), `hg_getchar` has no usage. SDL code reads `SDL_KEYDOWN` events: usage and symbol, in order | hgame gap | added `hg_key_next()`: usage in bits 0-7, character in 8-15. Tested in gt_view | 10 min |
-| 6 | **The main bank fills up even with `--code large`.** Libraries stay in the main bank: here 30 KB of C library (printf and scanf with floating point: one `double` in the program brings `%f` formatting and, with any `sscanf`, float scanning), 7.5 KB of hgame code and 8.5 KB of hgame bss (its record queues, also when only `hg_screen` is used). Digger's own data and bss are 17 KB. The first link failed by 8.5 KB | SDK limit | worked around in the game (save-unders and tables in far memory, no `sscanf`; see above). Suggestions: let library code move to other banks in the large model; link the float `printf` / `scanf` parts only when a `%f`-like conversion appears in a constant format string; give hgame's record queues lazily (or from far memory) | 30 min |
-| 7 | **`fopen` failed with ENOMEM** (saving a recording): with `--code large` hcc fills the main bank with code up to `--heap N` bytes, and every `fopen` mallocs a 1 KB buffer. With `--heap 1024` (tried to make room) the second file failed silently | doc / usability | `--heap 4096` (the default) again. Suggestion: porting.md should say that `fopen` takes 1 KB of heap and that `--heap` is the room for it; a `setvbuf(f, NULL, _IONBF, 0)`-style path without a buffer would help | 10 min |
-| 8 | **The profiler does not read cc816's maps.** `sdk/c/game/tests/tools/prof816.py` parses vbcc's link maps (`NNN_text.name addr(size)`); cc816's ld65 map (and the large model's banks) give it nothing | tool gap (open) | measured with counters in the game instead (`hz_timer.c`: frames late, CPU a frame). Suggestion: teach prof816.py ld65's map: the "Exports list" for the main bank and the `F_name` segments (pool addresses) for the other banks | 10 min |
+| 6 | **The main bank fills up even with `--code large`.** Libraries stay in the main bank: here 30 KB of C library (printf and scanf with floating point: one `double` in the program brings `%f` formatting and, with any `sscanf`, float scanning), 7.5 KB of hgame code and 8.5 KB of hgame bss (its record queues, also when only `hg_screen` is used). Digger's own data and bss are 17 KB. The first link failed by 8.5 KB | SDK limit | worked around in the game (save-unders and tables in far memory, no `sscanf`; see above). **Fixed in the SDK since:** the libraries' C functions move to other banks as the program's do (only the startup, the assembly and the loader of the banks stay); a printf's or scanf's constant format links the float (and `long long`) conversions only when it has one; `__far` objects at file scope go to banks of far data (reference.md, "Far objects"). Digger's main bank without its movable code: 53,946 bytes before, 33,488 after. Still open: hgame's record queues (7 KB of bss) | 30 min |
+| 7 | **`fopen` failed with ENOMEM** (saving a recording): with `--code large` hcc fills the main bank with code up to `--heap N` bytes, and every `fopen` mallocs a 1 KB buffer. With `--heap 1024` (tried to make room) the second file failed silently | doc / usability | `--heap 4096` (the default) again. **Fixed in the SDK since:** `fopen` takes 128 bytes, or no buffer at all, when the heap has no 1 KB (the FILE structures are static); `setvbuf(f, NULL, _IONBF, 0)` frees the 1 KB; `strerror(ENOMEM)` names the heap; `hcc --debug` prints the heap's most use at exit, `hz_heap_free()` / `hz_heap_peak()` tell it any time; reference.md, "The heap and the stacks (cc816)" | 10 min |
+| 8 | **The profiler does not read cc816's maps.** `sdk/c/game/tests/tools/prof816.py` parses vbcc's link maps (`NNN_text.name addr(size)`); cc816's ld65 map (and the large model's banks) give it nothing | tool gap | measured with counters in the game instead (`hz_timer.c`: frames late, CPU a frame). **Fixed since:** `emu816 --prof` (`run816.py --prof FILE --prof-from S --prof-to S`) counts the cycles by address, and prof816.py reads cc816's maps and label files in both code models (games.md, "Speed") | 10 min |
 | 9 | **A large program needs Horizon 0.28**, which was not yet committed when the port started (HEAD's 0.27 says "not a Horizon program, or its file is damaged"); the port's tests ran on a copy of the work-in-progress 0.28 tree, which has since been committed (`560701b`) | state of the repository | none needed now | 5 min |
 | 10 | **POKEY is silent in the emulator** (only logged): the game's sound can only be checked by its register writes (`--log-sound`) or on the board | emulator limit (known) | the test checks the writes | - |
 
@@ -193,13 +193,30 @@ puts back and redraws every overlapping sprite for each one that moves (quadrati
 to about 100 ms a frame here; for a few seconds the game is then up to a fifth slower
 than the PC (which did the same work in microseconds). Without the drawing buffer (the
 game drawing straight into the shown framebuffer) the same playback had 115 late frames:
-the copying to the screen costs about 1-3 ms a frame. Not done (yet): unrolled blit loops
-and a near-memory cache of the sprites' addresses (the table is in far memory: every
-sprite drawn reads it with long addressing and builds a 32-bit address in C).
+the copying to the screen costs about 1-3 ms a frame.
 
-At full speed (`/S:0`, `tests/drf.sh`) a game frame takes 30-45 ms on average with the
-level drawing and the copying to the screen after every vertical blank: about twice the
-original's speed.
+**Later: faster blits and compiler.** A profile (`run816.py --prof`, `prof816.py`; 100 s
+of `thevoids.drf` at full speed) put 47 % of the CPU in the six blit routines of
+`horizon/hz_blit.s`, a third of that in finding each row's address. Now the rows' copies
+are MVN (its banks written into it), the next row's address is a 512-byte step, and the
+masked put reads the sprite with absolute,Y addressing; cc816 also learnt to share one
+induction variable among arrays of one element size, to move loop-invariant arithmetic
+out of loops, to step a far pointer's `*p++` in place, and to compare an `unsigned char`
+unsigned. The same runs after that:
+
+| Run | Late frames | CPU a frame (average, most) | Time |
+| --- | --- | --- | --- |
+| The scripted game (`make test`) | 11 (21 before) | 8 ms, 466 ms (12, 616 before) | |
+| `thevoids.drf` at the game's pace | 95 (425 before) | 7 ms, 133 ms (17, 166 before) | 3,358 s (3,365 before; 3,325 at exactly 80 ms) |
+| `thevoids.drf` at full speed (`/S:0`) | | | 948.5 s (1,236.7 before) |
+
+Still not done: a near-memory cache of the sprites' addresses (the table is in far
+memory: every sprite drawn reads it with long addressing and builds a 32-bit address in
+C; `hzd_sprite` is about 1 % now).
+
+At full speed (`/S:0`, `tests/drf.sh`) a game frame takes 20-31 ms on average with the
+level drawing and the copying to the screen after every vertical blank (30-45 ms before
+the faster blits): about three times the original's speed.
 
 ## Suggestions for the porting guide (sdk/docs/c/porting.md)
 

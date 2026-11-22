@@ -79,6 +79,7 @@ class DataObj:
         self.items = items       # list of ('b', bytes) / ('w', sym, off) / ('f', sym, off)
         self.size = size
         self.export = export
+        self.far = False         # a __far object in a bank of its own (segment FD_name)
 
 
 def mangle(name):
@@ -94,6 +95,8 @@ class Unit:
         self.defined = set()
         self.warnings = []
         self.asm = []            # file-scope asm: (the number of functions before it, text)
+        self.farsyms = set()     # the __far objects' names (their address is a far one)
+        self.fardata = False     # __far objects in banks of their own (the large model)
 
 
 class Front:
@@ -122,6 +125,10 @@ class Front:
         self.calls_printf = False    # ... and calls a printf (links printf's %f) ...
         self.calls_scanf = False     # ... or a scanf (scanf's %f)
         self.uses_ll = False         # the unit uses long long (printf's and scanf's %lld)
+        # a printf's or a scanf's constant format had a float conversion (%f %e %g %a) or
+        # a long long one (%lld, %jd)
+        self.fmt_float_printf = self.fmt_float_scanf = False
+        self.fmt_ll_printf = self.fmt_ll_scanf = False
 
     # ------------------------------------------------------------------ errors
     def place_of(self, node):
@@ -459,7 +466,9 @@ class Front:
                 self.err(f'the array is {el.size * n:,} bytes: an object is at most 65,535 '
                          f'bytes in cc816 (a bigger table can live in its own bank: '
                          f'hz_far_alloc and a __far pointer)', node)
-            return ArrT(el, n)
+            a = ArrT(el, n)
+            # (an array of __far elements is a __far object: &a is a far pointer too)
+            return a.qual(far=True) if el.far else a
         if isinstance(node, c_ast.FuncDecl):
             ret = self.decl_type(node.type)
             if ret.is_arr:
@@ -997,10 +1006,10 @@ class Front:
         u = self.unit
         u.externs -= u.defined
         u.uses_float = self.uses_float
-        u.float_printf = self.uses_float and self.calls_printf
-        u.float_scanf = self.uses_float and self.calls_scanf
-        u.ll_printf = self.uses_ll and self.calls_printf
-        u.ll_scanf = self.uses_ll and self.calls_scanf
+        u.float_printf = self.uses_float and self.calls_printf or self.fmt_float_printf
+        u.float_scanf = self.uses_float and self.calls_scanf or self.fmt_float_scanf
+        u.ll_printf = self.uses_ll and self.calls_printf or self.fmt_ll_printf
+        u.ll_scanf = self.uses_ll and self.calls_scanf or self.fmt_ll_scanf
         return u
 
     def end_of_unit(self):
@@ -1136,10 +1145,14 @@ class Front:
         self.note_float(t)
         if t.is_arr and t.n is None:
             t = ArrT(t.elem, 1)
+        far = self.unit.fardata and _far_obj(t)
+        if far:
+            self.unit.farsyms.add(asm)
         if init is None:
             o = DataObj(asm, 'BSS', [], t.size, export)
             o.ctype, o.node = t, node     # its size again at the end (a structure
-            self.unit.data.append(o)      # completed later)
+            o.far = far                   # completed later)
+            self.unit.data.append(o)
             return
         if t.is_struct and not t.complete:
             self.err(f"'{getattr(node, 'name', None) or asm}' has an incomplete type "
@@ -1147,7 +1160,9 @@ class Front:
         img = Image(t.size)
         self.static_init(img, 0, t, init)
         sec = 'RODATA' if _is_const(t) else 'DATA'
-        self.unit.data.append(DataObj(asm, sec, img.items(), t.size, export))
+        o = DataObj(asm, sec, img.items(), t.size, export)
+        o.far = far
+        self.unit.data.append(o)
 
     def str_init(self, t, init):
         """the string literal that initialises the array t (char a[] = "x", or {"x"}),
@@ -2298,6 +2313,15 @@ class Front:
             return
         self.emit(Ins('sx' if t.is_int and t.signed else 'zx', dst, op))
 
+    def far_addr(self, s):
+        """the far address of the __far object s (a global) -> a 4-byte value. In the
+        large code model a program's __far objects are in banks of their own (hcc places
+        them: segment FD_name); else in the code bank, as any object"""
+        self.unit.farsyms.add(s.asm)
+        d = self.newv(4)
+        self.emit(Ins('mkfar', d, Sym(s.asm)))
+        return d
+
     def mkfar_into(self, dst, op):
         """a near address -> dst (4 bytes: far; 8: the far address zero-extended)"""
         if dst.size == 4:
@@ -2337,6 +2361,8 @@ class Front:
             if s.cval is not None:
                 return self.to_dst(RV(self.cimm(s.cval, s.t.unqual()), s.t.unqual()), dst)
             self.unit.externs.add(s.asm)
+            if s.t.is_arr and _far_obj(s.t):
+                return RV(self.far_addr(s), s.t)
             if s.t.is_func or s.t.is_arr:
                 return RV(Sym(s.asm), s.t)
         if s.kind == 'reg':
@@ -2357,6 +2383,8 @@ class Front:
                 return LV('mem', s.t, base=s.base, off=0)
             if s.kind == 'global':
                 self.unit.externs.add(s.asm)
+                if not s.t.is_func and _far_obj(s.t):
+                    return LV('mem', s.t, base=self.far_addr(s), off=0)
                 return LV('mem', s.t, base=Sym(s.asm), off=0)
             if s.kind == 'enum':
                 self.err(f"'{e.name}' is an enumeration constant, which cannot be assigned "
@@ -2366,9 +2394,10 @@ class Front:
             x = e.expr
             if isinstance(x, c_ast.UnaryOp) and x.op in ('p++', 'p--') and isinstance(x.expr, c_ast.ID):
                 s = self.lookup(x.expr.name)
-                if s is not None and s.kind == 'reg' and s.t.is_ptr and not s.t.isfar and \
+                if s is not None and s.kind == 'reg' and s.t.is_ptr and \
                         s.t.to.is_scalar and s.t.to.size in (1, 2, 4):
-                    # *p++: access through p, then step p (no copy of the old pointer)
+                    # *p++: access through p, then step p (no copy of the old pointer; a
+                    # far p too: a 32-bit step)
                     lv = LV('mem', s.t.to, base=s.v, off=0)
                     lv.post = (s.v, s.t.to.size if x.op == 'p++' else -s.t.to.size)
                     return lv
@@ -2513,7 +2542,7 @@ class Front:
     def finish(self, lv):
         if lv.post is not None:
             v, k = lv.post
-            self.emit(Ins('add', v, v, Imm(k & 0xFFFF)))
+            self.emit(Ins('add', v, v, Imm(k, v.size) if v.size == 4 else Imm(k & 0xFFFF)))
             lv.post = None
 
     def load(self, lv, dst=None, final=True):
@@ -3338,10 +3367,23 @@ class Front:
             self.err(f'calling a function with an incomplete return type ({cname(ft.ret)})',
                      e)
         self.note_float(ft.ret)
-        if name in PRINTF_NAMES:
-            self.calls_printf = True
-        elif name in SCANF_NAMES:
-            self.calls_scanf = True
+        if name in PRINTF_NAMES or name in SCANF_NAMES:
+            # a constant format links exactly the conversions it has (%f: the float ones,
+            # %lld: the long long ones); any other format, what the unit may need
+            kinds = self.format_kinds(name, args)
+            scan = name in SCANF_NAMES
+            if kinds is None:
+                if scan:
+                    self.calls_scanf = True
+                else:
+                    self.calls_printf = True
+            else:
+                if 'f' in kinds:
+                    self.uses_float = True
+                    setattr(self, 'fmt_float_scanf' if scan else 'fmt_float_printf', True)
+                if 'll' in kinds:
+                    self.uses_ll = True
+                    setattr(self, 'fmt_ll_scanf' if scan else 'fmt_ll_printf', True)
         ops = []
         sret = None
         if ft.ret.is_struct:
@@ -3493,6 +3535,38 @@ class Front:
                 if sy.kind == 'reg' and sy.v in vars_ and sy not in out:
                     out.append(sy)
         return out
+
+    def format_kinds(self, name, args):
+        """the conversions of a printf's or a scanf's constant format: a set of 'f' (a
+        floating-point one) and 'll' (a long long one); None when the format is not a
+        string constant (or the call has none)"""
+        fi = FMT_ARG.get(name)
+        if fi is None or len(args) <= fi:
+            return None
+        f = args[fi]
+        if not (isinstance(f, c_ast.Constant) and f.type == 'string'):
+            return None
+        try:
+            fmt = bytes(self.strbytes(f)).decode('latin-1')
+        except CError:
+            return None
+        scan = name in SCANF_NAMES
+        rx = _SCANF_CONV if scan else _PRINTF_CONV
+        out = set()
+        pos = 0
+        while True:
+            k = fmt.find('%', pos)
+            if k < 0:
+                return out
+            m = rx.match(fmt, k)
+            if not m:
+                return None             # (one the library may still know: be safe)
+            pos = m.end()
+            conv, ln = m.group('conv'), m.group('len') or ''
+            if conv in 'fFeEgGaA':
+                out.add('f')
+            elif ln in ('ll', 'j', 'q') and conv in 'diouxXn':
+                out.add('ll')
 
     def check_format(self, name, args, e):
         """a printf's or a scanf's format string against its arguments (-Wformat): the
@@ -3706,6 +3780,10 @@ class Front:
                 else:
                     t = arith_conv(a.t, b.t)
                     signed = t.signed
+                    if signed and self.nonneg(e.left, lt_, t) and self.nonneg(e.right, rt_, t):
+                        # (both sides 0 or more: an unsigned char promoted to int, a
+                        # constant: the unsigned compare is the same, and cheaper)
+                        signed = False
                     ao = self.convert(a, t).op
                     bo = self.convert(b, t).op
                 cc = {'<': 'lt', '>': 'gt', '<=': 'le', '>=': 'ge', '==': 'eq', '!=': 'ne'}[op]
@@ -3731,6 +3809,14 @@ class Front:
             op = m
         self.emit(Ins('br', a=op, b=Imm(0, op.size), cc='ne', t=lt, f=lf))
 
+
+    def nonneg(self, e, et, t):
+        """e (of type et), converted to the type t of a compare, is never negative: a
+        constant of 0 or more, or an unsigned integer narrower than t"""
+        v = self.const_eval(e)
+        if isinstance(v, int):
+            return 0 <= v < (1 << (8 * t.size - 1))
+        return et.is_int and not et.signed and et.size < t.size
 
     def check_compare(self, e, lt, rt):
         """warnings for a comparison: one whose result its types decide (a char compared
@@ -4062,6 +4148,15 @@ class Image:
         return out
 
 
+def _far_obj(t):
+    """a __far object (its type, or its arrays' elements, __far)"""
+    while t.is_arr:
+        if t.far:
+            return True
+        t = t.elem
+    return t.far
+
+
 def _is_const(t):
     """a constant object (an array of constants too): read-only data"""
     while t.is_arr:
@@ -4181,6 +4276,10 @@ def _q(name):
 
 
 # the format argument's index of the printf and scanf functions (-Wformat)
+# the format's argument of every printf and scanf (the v ones too)
+FMT_ARG = {'printf': 0, 'fprintf': 1, 'sprintf': 1, 'snprintf': 2, 'vprintf': 0,
+           'vfprintf': 1, 'vsprintf': 1, 'vsnprintf': 2, 'scanf': 0, 'fscanf': 1,
+           'sscanf': 1, 'vscanf': 0, 'vfscanf': 1, 'vsscanf': 1}
 FORMATS = {'printf': 0, 'fprintf': 1, 'sprintf': 1, 'snprintf': 2, 'dprintf': 1,
            'cprintf': 0, 'scanf': 0, 'fscanf': 1, 'sscanf': 1}
 _PRINTF_CONV = re.compile(r"%(?P<flags>[-+ #0']*)(?P<width>\*|\d+)?(?:\.(?P<prec>\*|\d*))?"

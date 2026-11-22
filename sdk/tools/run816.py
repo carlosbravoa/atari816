@@ -47,6 +47,10 @@ Options:
                   become real connections of the PC running the emulator
   --net-root DIR  (Horizon 0.22) http://, https://, ftp:// URLs are served from the
                   files DIR/host/path (a missing file is HTTP status 404)
+  --prof FILE     a profile: emu816's cycles by instruction address, syscall, kernel
+                  and idle in FILE (sdk/c/game/tests/tools/prof816.py makes it a table of
+                  the program's functions); --prof-from S --prof-to S: only from S to S
+                  seconds after the program's start (as --shot's times)
   --expect TEXT   fail unless console.txt contains TEXT (repeatable)
   --window        open the emulator's SDL window instead (needs emu816 built with SDL=1;
                   real time; type and click yourself)
@@ -96,7 +100,8 @@ def main():
                 die(f'{w} needs a value')
             return a[i + 1]
         if w in ('--horizon', '--emu', '--dest', '--args', '--script', '--seconds', '--out',
-                 '--rev', '--mode', '--net-root', '--wav', '--cd'):
+                 '--rev', '--mode', '--net-root', '--wav', '--cd', '--prof', '--prof-from',
+                 '--prof-to'):
             opt[w[2:]] = val(); i += 2
         elif w == '--shot':
             opt['shots'].append(float(val())); i += 2
@@ -208,6 +213,12 @@ def main():
         cmdl += ['--wav', os.path.abspath(opt['wav'])]
     if opt.get('net'):
         cmdl.append('--net')
+    if opt.get('prof'):
+        cmdl += ['--prof', os.path.abspath(opt['prof'])]
+        if opt.get('prof-from'):
+            cmdl += ['--prof-from', f"{t0 / 1000.0 + float(opt['prof-from']):g}"]
+        if opt.get('prof-to'):
+            cmdl += ['--prof-to', f"{t0 / 1000.0 + float(opt['prof-to']):g}"]
     if opt.get('net-root'):
         if not os.path.isdir(opt['net-root']):
             die(f'--net-root {opt["net-root"]}: not a folder')

@@ -91,13 +91,13 @@ _hg_draw:
 	lda	r8
 	jsr	hgf_sheetrec
 @out:	RET
-@slow:	jmp	_hg__draw_c		; (the same arguments on the stack)
+@slow:	TAILJ	_hg__draw_c		; (the same arguments on the stack)
 
 ; ------------------------------------------------------------------ void hg_draw_part
 ; (const hg_image *img, unsigned sx, unsigned sy, unsigned w, unsigned h, int x, int y):
 ; 3,s img, 5,s sx, 7,s sy, 9,s w, 11,s h, 13,s x, 15,s y. The sheet path here, the rest
 ; in C (hg__draw_part_c, the same arguments).
-dp_slow:	jmp	_hg__draw_part_c	; (here: in reach of the branches)
+dp_slow:	TAILJ	_hg__draw_part_c	; (here: in reach of the branches)
 _hg_draw_part:
 	lda	ARGS,s
 	beq	dp_slow
@@ -225,7 +225,19 @@ _hg__blitmem:
 	lda	r8
 	cmp	#$FFFF
 	bne	@keyed
-	ldx	r9
+	lda	r6			; a plain row inside one bank on both sides: MVN
+	dec	a			; (7 cycles a byte; its banks written into it: the
+	clc				; code bank is writable)
+	adc	r2
+	bcs	@loop
+	lda	r6
+	dec	a
+	clc
+	adc	r0
+	bcs	@loop
+	jsr	mvrow
+	bra	@next
+@loop:	ldx	r9
 	beq	@odd
 @pair:	lda	[r2],y
 	sta	[r0],y
@@ -269,6 +281,25 @@ _hg__blitmem:
 @n2:	dec	r7
 	bne	@row
 @done:	RET
+
+; hg__blitmem's row by MVN: r6 bytes from r3:r2 to r1:r0 (neither crosses a bank). A label
+; of its own (the MVN's, patched) would end the routine's @ labels: a subroutine
+mvrow:	sep	#$20
+	.a8
+	lda	r1
+	sta	bmv+1			; MVN dst, src: the destination's bank first
+	lda	r3
+	sta	bmv+2
+	rep	#$20
+	.a16
+	ldx	r2
+	ldy	r0
+	lda	r6
+	dec	a
+	phb
+bmv:	mvn	#0, #0
+	plb
+	rts
 
 ; ------------------------------------------------------------------ void hg__fillmem
 ; (unsigned long dst, unsigned dstride, unsigned w, unsigned h, unsigned c): 3,s dst,

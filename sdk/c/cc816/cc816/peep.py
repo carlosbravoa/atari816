@@ -617,6 +617,23 @@ def dead_a(lines):
     return False
 
 
+_PI = __import__('itertools').count()
+
+
+def _inc32(lines, i):
+    """lines[i:i + 7]: clc ; lda R ; adc #$0001 ; sta R ; lda R+2 ; adc #$0000 ; sta R+2 with
+    R a direct-page register"""
+    w = lines[i:i + 7]
+    if any(x[0] != 'I' for x in w):
+        return False
+    ms = [x[1] for x in w]
+    if ms != ['clc', 'lda', 'adc', 'sta', 'lda', 'adc', 'sta']:
+        return False
+    r, r2 = _rg(w[1][2]), _rg(w[4][2])
+    return r is not None and r2 == r + 2 and w[3][2] == w[1][2] and w[6][2] == w[4][2] and \
+        w[2][2] == '#$0001' and w[5][2] == '#$0000'
+
+
 def simple(lines):
     changed = False
     out = []
@@ -673,6 +690,18 @@ def simple(lines):
                     i += 2
                     changed = True
                     continue
+        # a 32-bit register + 1 (a far pointer's p++): clc ; lda R ; adc #1 ; sta R ;
+        # lda R+2 ; adc #0 ; sta R+2  ->  inc R ; bne L ; inc R+2 ; L:  (A, the carry and
+        # the flags unused after)
+        if l == ('I', 'clc', '') and i + 6 < n and _inc32(lines, i) and \
+                not a_live_after(lines, i + 6) and not flags_needed(lines, i + 6, 'c') and \
+                not flags_needed(lines, i + 6, 'nz'):
+            r, r2 = lines[i + 1][2], lines[i + 4][2]
+            lab = f'Lpi{next(_PI)}'
+            out += [('I', 'inc', r), ('I', 'bne', lab), ('I', 'inc', r2), ('L', lab)]
+            i += 7
+            changed = True
+            continue
         # rep #$20 ; sep #$20 (or the reverse) -> nothing
         if l[0] == 'I' and l[1] in ('rep', 'sep') and l[2] == '#$20' and i + 1 < n and \
                 lines[i + 1][0] == 'I' and lines[i + 1][1] in ('rep', 'sep') and \

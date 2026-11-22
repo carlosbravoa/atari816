@@ -6,6 +6,8 @@
 ;            address is 2 bytes), 4 in the large model (JSL's is 3)
 ;   RET      the return of a routine C code calls: rts / rtl
 ;   CALL x   a call of such a routine (a C function, an arithmetic helper): jsr / jsl
+;   TAILJ x  a tail call of a C function (the same arguments, the same return): jmp, or
+;            jml in the large model (the function may be in another bank)
 ;   LARGE    1 in the large model, else 0
 ;
 ; Only the routines generated code calls change: a routine the library's assembly calls
@@ -19,6 +21,9 @@ ARGS	= 4
 .macro	CALL target
 	jsl	target
 .endmacro
+.macro	TAILJ target
+	jml	target
+.endmacro
 .else
 LARGE	= 0
 ARGS	= 3
@@ -27,5 +32,8 @@ ARGS	= 3
 .endmacro
 .macro	CALL target
 	jsr	target
+.endmacro
+.macro	TAILJ target
+	jmp	target
 .endmacro
 .endif

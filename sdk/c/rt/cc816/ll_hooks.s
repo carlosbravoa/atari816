@@ -18,6 +18,13 @@
 
 __cc816_scanll:
 ll_inits:
+	; (a function pointer: in the large code model its 16-bit address is __T<name>, the
+	; function itself or a thunk when hcc puts it in another bank)
+.if LARGE
+	.import	__T___hz_scanll
+	lda	#__T___hz_scanll
+.else
 	lda	#___hz_scanll
+.endif
 	sta	___hz_scan_ll
 	RET

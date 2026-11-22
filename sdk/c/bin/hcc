@@ -46,8 +46,8 @@ Options:
                     banks (JSL/RTL; data, constants and stacks stay in the main bank):
                     still one file, NAME.PRG: the other code banks follow its o65 (it needs
                     Horizon 0.28 then; docs/c/reference.md, "The two code models")
-  --heap N          --code large: bytes of the main bank kept free for malloc when hcc
-                    fills it with code (default 4096)
+  --heap N          --code large: bytes of the main bank kept free for malloc (and
+                    fopen's 1 KB buffers) when hcc fills it with code (default 4096)
   --bank-room N, --main-room N, --spread N
                     --code large, for tests: at most N bytes of code in each other bank,
                     and in the main bank (--main-room 0: every function that can move
@@ -59,8 +59,10 @@ Options:
   --ui              link Horizon's controls library (hui.h: windows with buttons,
                     fields, lists, dialogs; large model only); hcc also adds it by
                     itself when the program uses a name of hui.h (docs/c/apps.md)
-  --map             write FILE.map (the link map) and print the sizes
-  --debug           paint the stack; at exit the program prints how much it used
+  --map             write FILE.map (the link map) and print the sizes; cc816 also
+                    FILE.lbl (every label's address: the profiler, prof816.py, reads it)
+  --debug           paint the stack; at exit the program prints how much it used (cc816:
+                    both stacks, and the most of the heap in use at once)
   -l FILE           link an extra object or library (.o, .a)
   --game            link hgame, the game library (sdk/c/game); hcc also does it by
                     itself when a C source includes <hgame.h>, <conio.h> or <joystick.h>

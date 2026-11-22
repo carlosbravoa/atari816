@@ -900,9 +900,21 @@ class Gen:
 
     def g_mkfar(self, i):
         """a near address -> far: the code bank as the high word (0 for a null pointer)"""
+        if isinstance(i.a, Sym) and getattr(self.unit, 'fardata', False) and \
+                i.a.name in self.unit.farsyms:
+            # a __far object in a bank of its own (the large model): its offset, and its
+            # bank, which hcc's link patches (the bank byte is recorded: driver.far_lines)
+            a = self.symoff(i.a.name, i.a.off)
+            self.I('lda', f'#.loword({a})')
+            self.sta(i.d, 0)
+            self.I('lda', f'#^({a})')
+            self.sta(i.d, 1)
+            return
         self.lda(i.a)
         self.sta(i.d, 0)
-        if isinstance(i.a, (Sym, Frame)):
+        if False:
+            pass
+        elif isinstance(i.a, (Sym, Frame)):
             self.I('lda', '__cbank')
         else:
             skip = self.newlab()

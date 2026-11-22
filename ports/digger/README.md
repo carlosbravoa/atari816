@@ -91,14 +91,16 @@ The game runs at the original's 12.5 frames a second (upstream's default frame t
 80 ms; frames come 5, 5, 5, 5, 4 vertical blanks apart). Measured in the emulator (which
 models the board's timing within a few per cent):
 
-- the scripted game (`make test`): 792 game frames, 21 of them later than their time (the
-  level start, the deaths), 12 ms of CPU a frame of 80 on average;
+- the scripted game (`make test`): 798 game frames, 11 of them later than their time (the
+  level start, the deaths), 8 ms of CPU a frame of 80 on average;
 - upstream's recorded `thevoids.drf` played back at the game's pace (9 levels, 41,561
-  frames): 3,365 s against 3,325 s at exactly 80 ms a frame (1.2 % slower in all, level
-  drawing included); 1 % of the frames late, in short runs where many sprites overlap
-  (upstream's software sprites redraw every overlapping one: up to about 100 ms a frame
-  here, so for a few seconds the game runs up to a fifth slower than on a PC);
-- at full speed (`/S:0`) a frame takes 30-45 ms on average, level drawing included.
+  frames): 3,358 s against 3,325 s at exactly 80 ms a frame (1.0 % slower in all, level
+  drawing included); 95 frames late (0.2 %), in short runs where many sprites overlap
+  (upstream's software sprites redraw every overlapping one: up to 133 ms a frame here);
+- at full speed (`/S:0`) a frame takes 20-31 ms on average, level drawing included.
+
+(Before the faster blits and compiler of PORTING-NOTES.md, "Speed": 21 late frames and
+12 ms a frame in the scripted game; 425 late, up to 166 ms, in `thevoids.drf`.)
 
 ## What differs from the original
 

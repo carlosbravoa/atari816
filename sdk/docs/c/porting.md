@@ -120,18 +120,20 @@ bank in it. Copy it to the card, into any folder. It needs Horizon 0.28 or later
 Makefile made with c.mk: `HZ_CODE := large` (or
 `make HZ_CODE=large`). The whole of it is in reference.md, "The two code models (cc816)".
 
-**What still must fit in the main bank** (the PRG's bank): the startup, the C library and
-the other libraries (hgame, the controls library), your `.s` files and the functions with
-inline assembly, the constants (string literals and `const` tables), the initialised
-data, the bss, the heap and the software stack. Only C functions move to other banks. If
-hcc then says "does not fit in its code bank (the main bank)", the data is too big:
+**What still must fit in the main bank** (the PRG's bank): the startup, the assembly
+(the C library's runtime, your `.s` files) and the functions with inline assembly, the
+constants (string literals and `const` tables), the initialised data, the bss, the heap
+and the software stack. C functions move to other banks: yours and the libraries' (the C
+library, hgame, the controls library's C part). If hcc then says "does not fit in its code
+bank (the main bank)", the data is too big:
 
 - **Big tables go to banks of their own.** A level map, a tile set, a sound: load them
   from a file into a bank from `hz_far_alloc()` and read them through a `__far` pointer
   (`unsigned char __far *map`). The program gets smaller and starts faster too.
-- **Big `const` tables** (a sine table, a font) are constants: they stay in the main bank.
-  Make them smaller (bytes instead of ints, half a sine wave), compute them at the start
-  into a far bank, or load them from a file.
+- **Big `const` tables** (a sine table, a font, level maps): declare them `__far`
+  (`__far const short sine[1024] = {...};`). hcc then puts them in a bank of their own,
+  loaded with the program, and the code reads them through far pointers. Without `__far`
+  they are constants of the main bank.
 - **Big buffers** (`static char screen[32000];`) are bss: take them from `hz_far_alloc()`.
 - **The heap**: `malloc` takes what is left of the main bank. With `--code large` hcc keeps
   at least 4 KB for it when it fills the bank with code (`--heap N` keeps more). Big
@@ -165,30 +167,136 @@ __CC816_LARGE__` tells the two models apart in C and in inline assembly.
 | one object of 64 KB or more | a bank of its own (`hz_far_alloc`) |
 | one function of 64 KB or more | split it (with `--code large` a function must fit in one bank) |
 
-## Lessons from a real port (Digger)
+## Porting a DOS or SDL game, step by step
 
-`ports/digger` is Digger Remastered (6,600 lines of PC C, SDL) on Horizon; its
-`PORTING-NOTES.md` lists every change and every SDK problem met. In short:
+This is the way `ports/digger` was done: Digger Remastered, 6,600 lines of PC C with an SDL
+back end, playing on Horizon in about 45 minutes of work, its tests in 2.5 hours. Its
+`PORTING-NOTES.md` lists every change; `ports/digger/horizon/` is the worked example of
+every part below.
 
-- **Test against the PC first.** If the game can replay recorded input (Digger's `.DRF`
-  files), build it on a PC, keep its results, and compare them with the port's replays in
-  the emulator: the strongest check of the compiler and of 16-bit `int` there is.
-- **Format strings are where 16-bit `int` bites first**: `printf("%d", an_int32_t)`.
-  Build with `-Wall` and fix every `-Wformat` (cast to `long`, `%ld`).
-- **With `--code large` the main bank is the limit**, not the code: the libraries stay
-  there (the C library with printf and floating point about 30 KB, hgame about 16 KB with
-  its buffers), with the constants, data and bss. Move big buffers to far memory
-  (`__far`; DOS's `far` / `huge` keywords map to it naturally), and avoid `sscanf` in a
-  program that uses any `double` (it brings float scanning: 7.6 KB).
-- **Each `fopen` takes 1 KB of heap**; with `--code large` the heap is what `--heap N`
-  keeps (default 4096): smaller, and `fopen` fails with ENOMEM.
-- **A 320 x 200 or 640 x 400 game**: `hg_screen_fb` with the taller framebuffer and
-  `hg_split` (a fixed score line, the rest following the player); do not squash.
-- **A game that draws by the CPU into the framebuffer** flickers when its drawing takes
-  milliseconds: draw into a buffer of your own and copy the changed rectangles just after
-  `hg_frame()` (Digger's `horizon/hz_vid.c`).
-- **The PC speaker** maps to `hg_note(v, 1193182 / divisor, vol)`; `SDL_KEYDOWN` to
-  `hg_key_next()` (SDL's scancodes are HID usages: key tables port as they are).
+### 1. Before you start
+
+- [ ] **Build the game on a PC first** and run it there. Keep what it prints.
+- [ ] **Find its tests.** If the game can record and replay input (Digger's `.DRF` files,
+  a demo mode, a "playback" option), keep some recordings and the PC's result for each:
+  the score, the level, the number of frames. A replay that ends the same on Horizon is
+  the strongest test a port can have. It checks the compiler, 16-bit `int` and the game
+  logic at once.
+- [ ] **Find the back end.** Most games keep the platform in a few files: `sdl_*.c`,
+  `vga.c`, `sound.c`, `timer.c`. List the functions the game calls there. That list is
+  your platform layer's interface.
+- [ ] **Leave out what Horizon does not need**: the other back ends, threads and their
+  locks, network play, a software synthesizer when POKEY can play the tones itself.
+
+### 2. Make it compile
+
+- [ ] Add the game's C files to a Makefile made with `sdk/c/c.mk`. Use `HZ_CODE := large`
+  for anything bigger than a small game. Add `-fsigned-char` if the PC build has signed
+  `char` (gcc and clang on x86 do).
+- [ ] Choose your platform with a macro, as upstream chooses SDL: `-D_HORIZON`, and
+  `#if defined(_HORIZON)` beside upstream's `#if defined(_SDL)`. Keep every change to the
+  game's own files small, so the changes are easy to see (Digger: 79 lines added).
+- [ ] If the game has its own `main` in a file you keep as it is, rename it:
+  `-Dmain=game_main`, and write `main` in your platform layer.
+- [ ] Build with `-Wall` and **read every warning**.
+- [ ] Missing POSIX names: `<strings.h>` is there; `stricmp` is `strcasecmp`.
+- [ ] DOS's `far` and `huge` keywords: `#define huge __far` (and `far`). A qualifier
+  before a declarator's `*` (`char huge *a, huge *b;`) was Borland's: write one
+  declaration each.
+
+### 3. The 16-bit int traps
+
+`int` is 16 bits here. Code from 16-bit DOS is usually safe already (it uses `long` or
+`int32_t` where it matters). Code written for 32-bit `int` is not.
+
+- [ ] **Format strings first.** `printf("%d", an_int32_t)` prints garbage. cc816's
+  `-Wformat` warning finds most of them at the first compile: cast to `long` and use `%ld`
+  (`%lu` for unsigned). Digger had four, three found by the warning.
+- [ ] **Counters that pass 32,767**: frame counts, scores, times in milliseconds, file
+  sizes. Make them `long`. `-Wtype-limits` warns about `x > 40000` with an `int` x.
+- [ ] **Constants**: `int x = 40000;` and `320 * 200` overflow (`-Woverflow`).
+- [ ] **Products of two ints**: `a * b` is 16 bits. Write `(long)a * b`.
+- [ ] **Sizes**: `size_t` is 16 bits. One object, one `malloc`, one `fread` is at most
+  65,535 bytes.
+- [ ] **`char` signedness**: with `-fsigned-char` it is as on a PC. Without it, `char c =
+  getc(f); if (c == EOF)` never matches (cc816 warns).
+
+### 4. Memory: what goes where
+
+With `--code large` the code goes to other banks: the program's functions and the
+libraries' (the C library's, hgame's). What stays in the **main bank** (64 KB with
+everything else) is the startup and the assembly, the constants (string literals and
+`const` tables), the initialised data, the bss, the heap and the software stack. That is
+the real limit of a big port. `hcc --map` prints its parts:
+
+```
+the main bank without its movable code: 33,488 bytes (code that must stay 8,241,
+constants 7,764, data 2,142, bss 15,341)
+```
+
+- [ ] **Big tables in banks of their own.** Declare a big table `__far` at file scope:
+  `__far const unsigned char level_maps[8][2000] = { ... };`. hcc puts every `__far`
+  object in a bank of far data, loaded with the program; the code reaches it through far
+  pointers (`const unsigned char __far *p = level_maps[3];`). The same source works in
+  the small model (there the table stays in the code bank). Reference: reference.md,
+  "Far objects".
+- [ ] **Pictures and sounds from a file.** Art is best converted at build time into a
+  data file (Digger: `tools/mkdata.py` makes `DIGGER.DAT` from upstream's C arrays) and
+  loaded at the start into banks from `hz_far_alloc()`.
+- [ ] **Big buffers** (`static char buf[32000];`): from `hz_far_alloc()`, with a `__far`
+  pointer.
+- [ ] **One `double` does not bring all of printf.** cc816 links printf's `%f` only when a
+  constant format has a float conversion (or the format is not a constant), and scanf's
+  only for a scanf with one. Still, `sscanf` brings scanf: for one number, `strtol` is
+  smaller.
+- [ ] **The heap** is what is left of the main bank (`--heap N` keeps at least N bytes of it
+  free of code; the default is 4096). Each `fopen` takes 1 KB of it for its buffer. When
+  the heap has no 1 KB, the file gets a 128-byte buffer, or none, and still opens.
+  `setvbuf(f, NULL, _IONBF, 0)` gives the 1 KB back.
+- [ ] **See what a run used**: `hcc --debug` makes the program print at exit how much of
+  each stack and of the heap it used. `hz_heap_free()`, `hz_heap_largest()` and
+  `hz_heap_peak()` tell it at any time.
+
+### 5. The platform layer
+
+Write it in a folder of its own (Digger: `horizon/`). Keep upstream's interface: the game
+calls the same functions as before.
+
+| Part | What Digger does | Files |
+| --- | --- | --- |
+| **Video** | hgame's full screen with a taller framebuffer (`hg_screen_fb`: 640 x 400 in a 512-row buffer). `hg_split` keeps the score line fixed while the playfield follows the player (a 400-row game on a 360-row screen). The game draws by the CPU into a buffer of its own; the changed rectangles are copied to the shown framebuffer just after each vertical blank, so a sprite is never seen half drawn | `hz_vid.c`, `hz_blit.s` |
+| **Input** | `hg_key_next()` gives the keys in order, with their characters: SDL's scancodes are HID usages, so upstream's key table works as it is. Joysticks: `hg_joy` | `hz_kbd.c` |
+| **Sound** | The PC speaker's two timers become POKEY's two 16-bit voices: `hg_note(v, 1193182 / divisor, vol)`. The sound "interrupt" (72.8 Hz on the PC) runs from the frame loop as often as it is due | `hz_snd.c` |
+| **Timer** | The game waits for the end of each of its frames by hgame's frames (60 a second, the frame counter as the clock). `hg_frame()` also reads the events | `hz_timer.c` |
+| **Files** | The program goes to its own folder at the start (`hz_prog_dir`), so its scores, settings and recordings are kept next to it | `hz_main.c` |
+| **Data** | The pictures are loaded from `DIGGER.DAT` into far memory at the start | `hz_data.c` |
+
+- [ ] **Draw into a buffer, show after the vertical blank.** A game that draws by the CPU
+  straight into the shown framebuffer flickers when its drawing takes milliseconds.
+- [ ] **Do not squash a 400-row picture into 360 rows.** The PC's pixels were not square
+  either; show it at its size and scroll (`hg_split`).
+- [ ] **Hot drawing loops in assembly.** Digger's six blit routines are short ca65 loops
+  (`hz_blit.s`); a copy of whole rows uses MVN.
+
+### 6. Test it
+
+- [ ] **The replays first.** Play the recordings back in the emulator at full speed and
+  compare each result with the PC's (Digger: `tests/drf.sh`, seven recordings, from 1,330
+  to 41,561 frames). They passed at the first run: that found no bug, which is the result.
+- [ ] **A scripted game** (`run816.py --script`): keys at given times, screenshots, the
+  console. The game is deterministic in the emulator (no random seed outside a replay,
+  exact time), so screenshots can be compared pixel for pixel with references
+  (`tests/cmpshots.py`). Any change of timing moves them: look at the new pictures before
+  you accept them (`make refs`).
+- [ ] **Check the files it writes**: the high-score file on the emulated card
+  (`build/test/card/`), a saved recording played back to the same score.
+- [ ] **Sound**: POKEY is silent in the emulator. Check its register writes
+  (`run816.py --log-sound`) and listen on the board.
+- [ ] **Measure the speed.** Count late frames and the CPU time of a frame in the game
+  itself (Digger: `hz_timer.c` prints them at the end). Then profile:
+  `run816.py --prof prof.txt --prof-from 20 --prof-to 80` and
+  `sdk/c/game/tests/tools/prof816.py --counts prof.txt --map GAME.map` give the share
+  of each function (both code models; games.md, "Speed").
 
 ## A ported program, step by step
 

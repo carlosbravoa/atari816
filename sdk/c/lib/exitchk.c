@@ -24,7 +24,8 @@
  * both stacks with --debug), and has hz_stack_free() and hz_sstack_free(). */
 #define HSLO  0x0100
 #define SSTOP 0xFFF0
-extern unsigned __hz_stktop, __hz_sslo, __hz_paintflag;
+extern unsigned __hz_stktop, __hz_sslo, __hz_paintflag, __hz_heappeak;
+extern char *__hz_heapstart, *__hz_heapend;
 
 static unsigned __far *win(unsigned off)
 {
@@ -99,6 +100,8 @@ void __hz_exitchk(void)
             ;
         say("software stack: ", SSTOP - (unsigned)p, " of ", SSTOP - __hz_sslo - ZONE,
             " bytes used\n");
+        say("heap: ", __hz_heappeak, " of ", (unsigned)(__hz_heapend - __hz_heapstart),
+            " bytes used at most (malloc; a file open with fopen takes 1 KB)\n");
     }
 }
 

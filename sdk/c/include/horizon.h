@@ -328,6 +328,13 @@ int hz_stack_check(void);
 /* cc816's software stack (arrays, structures, locals whose address is taken): how many
  * bytes are free below its pointer now */
 unsigned hz_sstack_free(void);
+/* the heap (malloc: the main bank from the end of bss to the software stack): its free
+ * bytes now, the biggest block malloc can give now, and the most bytes in use at once
+ * since the program started (block headers counted). hcc --debug prints the heap's use
+ * at exit, with the stacks' */
+unsigned hz_heap_free(void);
+unsigned hz_heap_largest(void);
+unsigned hz_heap_peak(void);
 #endif
 
 /* ---- console */
