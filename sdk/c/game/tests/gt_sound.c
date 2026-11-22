@@ -70,6 +70,23 @@ int main(void)
     wait(50);
     st = hz_sample_stat();
     check("hg_stop", !((st >> v) & 1));
+    {                                               /* samples in far memory */
+        signed char __far *fb = (signed char __far *)hz_far_alloc();
+        hg_sound *fs;
+        check("a bank for a sample", fb != 0);
+        if (fb) {
+            for (i = 0; i < 8000; i++)
+                fb[i] = (signed char)((i & 31) < 16 ? 90 : -90);
+            fs = hg_sound_from(fb, 8000, 16000, 8);
+            check("hg_sound_from far memory", fs && fs->addr == (unsigned long)fb &&
+                  fs->len == 8000);
+            v = fs ? hg_play(fs, 160) : -1;
+            st = hz_sample_stat();
+            check("... plays", v >= 0 && ((st >> v) & 1));
+            wait(300);
+            hg_stop(v);
+        }
+    }
     w = hg_sound_load("/BEEP.WAV");
     check("a WAV file loaded (8 bits, 16 kHz, 4000 samples)", w && w->len == 4000 &&
           w->rate == 16000 && w->bits == 8);
@@ -101,6 +118,42 @@ int main(void)
     hg_sound_off();
     hg_music_stop();
     wait(200);
+    /* the OPL2 by the game itself: a register stream (IMF records), timed by the frame */
+    check("the OPL2 there (REV $0C)", hg_has_opl());
+    check("hg_opl_write", hg_opl_write(0x20, 0x01) == 0);
+    {
+        static const unsigned char tune[] = {
+            0x20, 0x01, 0, 0,   0x40, 0x10, 0, 0,   0x60, 0xF0, 0, 0,   0x80, 0x77, 0, 0,
+            0x23, 0x01, 0, 0,   0x43, 0x00, 0, 0,   0x63, 0xF0, 0, 0,   0x83, 0x77, 0, 0,
+            0xC0, 0x00, 0, 0,
+            0xA0, 0x44, 0, 0,   0xB0, 0x32, 30, 0,  /* A4 (block 4, fnum 580), 30 ticks */
+            0xA0, 0xB1, 0, 0,   0xB0, 0x32, 15, 0,  /* C5 (fnum 689), 15 ticks */
+            0xB0, 0x12, 6, 0                        /* off, then 6 ticks to the end */
+        };
+        unsigned n1, n2;
+        int check_quiet = 1;
+        check("hg_opl_play: a stream at 60 ticks a second", hg_opl_play(tune, sizeof tune,
+              60, 0) == 0 && hg_opl_playing());
+        for (n1 = 0; n1 < 120 && hg_opl_playing() && hg_frame(); n1++)
+            ;
+        check("... plays 51 ticks (51 frames, 3 early or late)", n1 >= 48 && n1 <= 54);
+        printf("gt_sound: the OPL stream played %u frames\n", n1);
+        check("hg_opl_play with loop", hg_opl_play(tune, sizeof tune, 120, 1) == 0);
+        for (n2 = 0; n2 < 90 && hg_frame(); n2++)
+            ;
+        check("... still plays after three times its length", hg_opl_playing());
+        hg_opl_stop();
+        check("hg_opl_stop", !hg_opl_playing());
+        /* hg_poll: the stream goes on without hg_frame (a game that keeps its own time) */
+        hg_opl_play(tune, sizeof tune, 60, 0);
+        for (n1 = 0; n1 < 120 && hg_opl_playing(); n1++) {
+            hz_vsync();
+            check_quiet = hg_poll();
+        }
+        check("hg_poll plays the stream without hg_frame (51 blanks, 3 early or late)",
+              n1 >= 48 && n1 <= 54 && check_quiet);
+    }
+    wait(100);
     printf("gt_sound: %u failed\n", fails);
     return 0;
 }

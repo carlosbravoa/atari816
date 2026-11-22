@@ -10,7 +10,7 @@ in [reference.md](reference.md).
 | What | On a PC | Here | What to do |
 | --- | --- | --- | --- |
 | `int` | 32 bits | **16 bits** (-32768 to 32767; `unsigned`: 0 to 65535) | `long` (32 bits) where values pass 32767: counters of bytes, file sizes and positions, products of two ints, `x * 1000` in milliseconds. `<stdint.h>` has `int32_t` and friends. cc816 warns where it can see it: `int x = 40000;` and `320 * 200` (`-Woverflow`), `x > 40000` with an `int` x (`-Wtype-limits`), `printf("%d", a_long)` (`-Wformat`). Look also at every `int` that holds a size or a sum |
-| `size_t` | 32/64 bits | `unsigned int`, 16 bits | one object, one `malloc`, one `fread` is at most 65,535 bytes |
+| `size_t` | 32/64 bits | `unsigned int`, 16 bits | one object, one `malloc`, one `fread` is at most 65,535 bytes; `hz_read`'s result is an `int`: read in pieces of at most 32,767 bytes (or compare with the length asked) |
 | `char` | usually signed | **unsigned** (the library is built that way) | `signed char` where negative bytes matter; `c == EOF` tests on a `char` never match (cc816 warns: "comparison is always true"): keep `getc`'s result in an `int`. `hcc -fsigned-char` makes plain `char` signed for code that cannot be changed |
 | pointers | 32/64 bits, flat | cc816: 16 bits, an offset in the program's code bank (`__far`: 32 bits, any bank); vbcc: large model 32 bits (offset + bank), tiny 16 bits | memory from `hz_far_alloc` needs `__far` pointers with cc816: `unsigned char __far *p`. Casts between pointers and `int` lose the bank: `long` keeps it (`(unsigned long)p` is p's whole address with cc816). Build far pointers with `hz_farptr(bank, offset)` |
 | big arrays | anything | one object must stay inside one 64 KB bank; a program's code, constants, globals, heap and (cc816) software stack share one bank (65,264 bytes); vbcc's tiny model's data, heap and stack share 32 KB | `hcc` says what does not fit, with the sizes. Move big tables to a bank of their own: `hz_far_alloc()` and `__far` pointers |
@@ -172,7 +172,9 @@ __CC816_LARGE__` tells the two models apart in C and in inline assembly.
 This is the way `ports/digger` was done: Digger Remastered, 6,600 lines of PC C with an SDL
 back end, playing on Horizon in about 45 minutes of work, its tests in 2.5 hours. Its
 `PORTING-NOTES.md` lists every change; `ports/digger/horizon/` is the worked example of
-every part below.
+every part below. `ports/xargon` is the second: a 16-bit DOS game (Turbo C, 9,000 lines,
+its VGA mode X, keyboard, timer and Sound Blaster parts in assembly that was not released),
+scrolling in 256 colours with FM music; its `PORTING-NOTES.md` has the same lists.
 
 ### 1. Before you start
 
@@ -203,6 +205,25 @@ every part below.
 - [ ] DOS's `far` and `huge` keywords: `#define huge __far` (and `far`). A qualifier
   before a declarator's `*` (`char huge *a, huge *b;`) was Borland's: write one
   declaration each.
+- [ ] **Turbo C / Borland C code** (`ports/xargon`): its `dos.h`, `conio.h`, `io.h`,
+  `alloc.h`, `mem.h` are small headers of your own (`-I compat`), and Borland's names in
+  one header given to every file with `hcc -include` (`max`/`min`, `itoa`, `ltoa`,
+  `ultoa`, `random(n)`, `#define far __far`). The file calls (`open`, `read`, `write`,
+  `lseek`, `close`, `creat`) are in the SDK (`fcntl.h`, `unistd.h`); `_open`, `_creat`,
+  `filelength` are macros or a few lines over them. Keep Turbo C's `rand` (seed * 0x015A4E35
+  + 1, bits 16-30) if the game records demos: they replay only with the same numbers.
+  `#include "\develop\game\include\x.h"` (absolute DOS paths) must become `"x.h"`.
+  Sources in code page 437 (bytes above 127 in strings) and with CRLF line ends compile
+  as they are.
+- [ ] **Code that reads hardware**: DOS games read the BIOS tick (`0040:006C`, through a
+  pointer), the VGA's status port (`inportb(0x3DA)`: the retrace) and write the DAC
+  (`outportb(0x3C8/0x3C9)`: the palette) and the CRTC (the page shown). Rather than
+  changing the game, make those few calls functions of the platform layer: the tick
+  pointer a macro over a function that counts the vertical blanks (and waits for the next
+  one when it is read in a loop), the port reads and writes a small emulation (the
+  palette into a shadow sent once a frame with `hg_palette`, the start address to the
+  page shown). `ports/xargon/horizon/hz_dos.c` and `hz_frame.c` do so; the game's
+  graphics.c (fades, palette cycling, page flipping) then runs unchanged.
 
 ### 3. The 16-bit int traps
 
@@ -277,17 +298,43 @@ calls the same functions as before.
   either; show it at its size and scroll (`hg_split`).
 - [ ] **Hot drawing loops in assembly.** Digger's six blit routines are short ca65 loops
   (`hz_blit.s`); a copy of whole rows uses MVN.
+- [ ] **Or let the blitter draw.** Every CPU write to the framebuffer waits for the SDRAM
+  (about 12 cycles a byte even with MVN): a 320 x 200 game that redraws 50 tiles and 16
+  sprites a frame spends 15-20 ms on it. Xargon (`ports/xargon/horizon/hz_vga.c`) keeps
+  its art in an atlas of 512-byte rows registered as two of the kernel's sheets, and each
+  tile or sprite is one `sheet_draw` record (a copy or a keyed copy, about 300 cycles to
+  queue and send); Ali draws while the CPU runs the game. What the blitter cannot do (a
+  font in colours chosen at run time) can be made once by the CPU into a cache sheet and
+  drawn from there too.
+- [ ] **A scrolling game on page flips**: the hardware scroll registers replace the copy
+  of the playfield a VGA or EGA game makes each frame (Marga's horizontal wrap: a row of
+  the framebuffer is a ring; vertically, move the rows back to the middle when the view
+  nears the end, one blitter move every few screens). Both pages in one framebuffer,
+  flipping is the scroll registers' choice of rows.
+- [ ] **Late frames still need their events.** A game whose frame takes longer than its
+  tick never waits, so it never reaches `hg_frame`: call `hg_poll()` once a frame (keys,
+  the pause, the music's stream).
 
 ### 6. Test it
 
 - [ ] **The replays first.** Play the recordings back in the emulator at full speed and
   compare each result with the PC's (Digger: `tests/drf.sh`, seven recordings, from 1,330
   to 41,561 frames). They passed at the first run: that found no bug, which is the result.
-- [ ] **A scripted game** (`run816.py --script`): keys at given times, screenshots, the
-  console. The game is deterministic in the emulator (no random seed outside a replay,
-  exact time), so screenshots can be compared pixel for pixel with references
-  (`tests/cmpshots.py`). Any change of timing moves them: look at the new pictures before
-  you accept them (`make refs`).
+- [ ] **A scripted game** (`run816.py --script`) that **follows the program, not the
+  clock.** Keys at fixed seconds break as soon as anything changes how long things take
+  (Horizon's start, the SDK, the program's own code): a key lands in another game frame
+  and the game goes elsewhere. Let the program print a line at each state a script waits
+  for (Digger: `digger: title`, `digger: play`, `digger: dead`, `digger: initials`) and
+  write `+0 wait digger: play` in the script: the next steps come when the line has been
+  printed (or at once if it came since the step before), every later time moved by as
+  long as the wait took (`sdk/tools/inputscript.py`). Digger's `tests/play.script` still
+  passes with the program's start delayed by 1.5 or 3 seconds.
+- [ ] **Pictures of game states, not of moments.** Compare screenshots pixel for pixel
+  only where the game is in the same state whatever the timing: Digger plays back a
+  recording of its scripted game and takes each picture at a game frame (the program
+  stops there and prints a line; `run816.py --shot-on TEXT` takes the picture then:
+  `ports/digger/tests/frames.sh`). Look at new pictures before you accept them
+  (`make refs`).
 - [ ] **Check the files it writes**: the high-score file on the emulated card
   (`build/test/card/`), a saved recording played back to the same score.
 - [ ] **Sound**: POKEY is silent in the emulator. Check its register writes

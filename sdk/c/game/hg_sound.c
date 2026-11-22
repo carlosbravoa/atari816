@@ -182,7 +182,8 @@ static hg_sound *newsound(unsigned long addr, unsigned long len, unsigned rate,
     return s;
 }
 
-hg_sound *hg_sound_from(const void *data, unsigned long len, unsigned rate, unsigned bits)
+hg_sound *hg_sound_from(const void __far *data, unsigned long len, unsigned rate,
+                        unsigned bits)
 {
     if (!data || !len || (bits != 8 && bits != 16) || rate < 1000) {
         hg__fail("hg_sound_from", "data, a length, 8 or 16 bits, a rate of 1000 or more");

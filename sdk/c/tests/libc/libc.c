@@ -250,6 +250,79 @@ static void t_files(void)
 }
 
 #ifdef __CC816__
+#include <fcntl.h>
+#include <unistd.h>
+/* POSIX descriptors (fcntl.h, unistd.h: DOS and Unix programs' open/read/write/lseek;
+ * the Xargon port's board and config files) */
+static void t_posix(void)
+{
+    static char buf[300];
+    int fd, i, fds[5];
+    fd = open("/CPOSIX.BIN", O_RDONLY);
+    check(fd == -1 && errno == ENOENT, "open of a missing file: -1, ENOENT");
+    fd = open("/CPOSIX.BIN", O_WRONLY | O_CREAT | O_TRUNC | O_BINARY, 0666);
+    check(fd >= 3, "open O_CREAT: a descriptor 3 or above");
+    for (i = 0; i < 300; i++)
+        buf[i] = (char)i;
+    check(write(fd, buf, 300) == 300, "write 300");
+    check(lseek(fd, 0, SEEK_CUR) == 300, "lseek SEEK_CUR: the position after writing");
+    check(lseek(fd, 10, SEEK_SET) == 10 && write(fd, "AB", 2) == 2, "lseek and overwrite");
+    check(lseek(fd, 0, SEEK_END) == 300, "lseek SEEK_END: the size");
+    check(read(fd, buf, 4) == -1 && errno == EBADF, "read on a write-only descriptor");
+    check(close(fd) == 0, "close");
+    check(close(fd) == -1 && errno == EBADF, "close again: EBADF");
+    fd = open("/CPOSIX.BIN", O_CREAT | O_EXCL | O_WRONLY);
+    check(fd == -1 && errno == EEXIST, "O_EXCL on a file that exists");
+    fd = open("/CPOSIX.BIN", O_RDONLY);
+    check(fd >= 3, "open O_RDONLY");
+    memset(buf, 0, sizeof buf);
+    check(read(fd, buf, 100) == 100 && buf[9] == 9 && buf[10] == 'A' && buf[11] == 'B'
+          && buf[12] == 12, "read back");
+    check(lseek(fd, -10, SEEK_END) == 290 && read(fd, buf, 100) == 10
+          && buf[0] == (char)290 && buf[9] == (char)299, "lseek from the end, a short read");
+    check(read(fd, buf, 100) == 0, "read at the end: 0");
+    {                                   /* small reads (the read-ahead), seeks among them */
+        int ok = 1;
+        unsigned char b1;
+        lseek(fd, 0, SEEK_SET);
+        for (i = 0; i < 300; i++)
+            if (read(fd, &b1, 1) != 1 || b1 != (unsigned char)(i == 10 ? 'A' : i == 11 ? 'B' : i))
+                ok = 0;
+        check(ok, "300 reads of 1 byte");
+        check(lseek(fd, 20, SEEK_SET) == 20 && read(fd, &b1, 1) == 1 && b1 == 20 &&
+              lseek(fd, 5, SEEK_CUR) == 26 && read(fd, &b1, 1) == 1 && b1 == 26 &&
+              lseek(fd, 0, SEEK_CUR) == 27 && read(fd, buf, 280) == 273 && buf[0] == 27,
+              "seeks between small reads, a read to the end");
+        check(lseek(fd, 100, SEEK_SET) == 100 && read(fd, &b1, 1) == 1 && b1 == 100 &&
+              lseek(fd, 400, SEEK_SET) == 400 && read(fd, &b1, 1) == 0 &&
+              lseek(fd, 2, SEEK_SET) == 2 && read(fd, buf, 200) == 200 &&
+              buf[0] == 2 && buf[199] == (char)201, "a seek past the end, back, a read");
+    }
+    check(lseek(fd, -1, SEEK_SET) == -1 && errno == EINVAL, "lseek before the start");
+    check(write(fd, buf, 1) == -1 && errno == EBADF, "write on a read-only descriptor");
+    check(isatty(fd) == 0 && isatty(1) == 1, "isatty");
+    close(fd);
+    fd = open("/CPOSIX.BIN", O_WRONLY | O_APPEND);
+    check(fd >= 3 && write(fd, "end", 3) == 3 && close(fd) == 0, "O_APPEND");
+    fd = open("/CPOSIX.BIN", O_RDWR);
+    check(fd >= 3 && lseek(fd, 0, SEEK_END) == 303 && lseek(fd, 300, SEEK_SET) == 300
+          && read(fd, buf, 3) == 3 && !memcmp(buf, "end", 3), "appended at the end");
+    close(fd);
+    fd = creat("/CPOSIX.BIN", 0);
+    check(fd >= 3 && lseek(fd, 0, SEEK_END) == 0, "creat empties the file");
+    close(fd);
+    for (i = 0; i < 5; i++)
+        fds[i] = open("/CPOSIX.BIN", O_RDONLY);
+    check(fds[0] >= 3 && fds[3] >= 3 && fds[4] == -1, "4 descriptors at once, the 5th fails");
+    for (i = 0; i < 5; i++)
+        if (fds[i] >= 0)
+            close(fds[i]);
+    check(read(9, buf, 1) == -1 && errno == EBADF, "read on a descriptor not open");
+    check(write(1, "posix: write(1)\n", 16) == 16, "write to stdout");
+    check(unlink("/CPOSIX.BIN") == 0, "unlink");
+    check(unlink("/CPOSIX.BIN") == -1 && errno == ENOENT, "unlink again: ENOENT");
+}
+
 /* fopen with the heap full: the file still opens (a 128-byte buffer, or the FILE's own
  * 2 bytes) and works; setvbuf _IONBF gives the 1 KB back; the heap's counts (the Digger
  * port: a recording could not be saved, fopen failed with ENOMEM and no hint) */
@@ -384,6 +457,9 @@ int main(int argc, char **argv)
     t_fullheap();
 #endif
     t_files();
+#ifdef __CC816__
+    t_posix();
+#endif
     t_dir();
     t_time();
     t_far();

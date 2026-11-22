@@ -1,0 +1,6 @@
+# tests/demo.script - the recorded demo (DEMO-PREVIEW in the main menu); tests/check.sh
+# compares the game at the demo's frame 1,500 with tests/demo.ref
+6000 key space 100
+13000 key d 100
+40000 shot
+95000 shot

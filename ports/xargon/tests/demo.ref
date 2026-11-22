@@ -1,0 +1,4 @@
+# the game at the recorded demo's frame 1,500 (tests/check.sh): written by a run, and the
+# same on a slower machine; the demo's end (frame 5,077): score 15050, health 5, emeralds
+# 14, the hero at 1208, 952, 158 objects
+xargon: demo reached at frame 1500: score 5050, health 5, emeralds 8, hero 0 at 688, 952, 161 objects

@@ -1298,6 +1298,15 @@ class Preprocessor(PreprocessorHooks):
                     m = Macro(name.value,mvalue,[x[0].value for x in args] if args != [[]] else [],variadic)
                     self.macro_prescan(m)
                     add_macro(self, name, m)
+            elif name.type == self.t_ID:
+                # (cc816) no white space between the name and the replacement: "#define
+                # A= 1" (Xargon's keyboard.h). C99 asks for it; gcc warns and takes the
+                # rest of the line, from '=', as the replacement: so does cc816
+                if hasattr(self, 'on_warning'):
+                    self.on_warning(name.source, name.lineno,
+                                    "missing whitespace after the macro name")
+                m = Macro(name.value,self.tokenstrip(linetok[1:]))
+                add_macro(self, name, m)
             else:
                 self.on_error(name.source,name.lineno,"Bad macro definition")
         #except LookupError:

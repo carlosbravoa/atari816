@@ -111,6 +111,11 @@ void hg_end(void);
 unsigned hg_steps(unsigned hz);
 /* ask hg_frame to return 0 */
 void hg_quit(void);
+/* the events (keys, mouse, the pause on a lost focus), the POKEY envelopes and the OPL2's
+ * stream now, without waiting for the vertical blank: for a game whose frames run late, or
+ * that keeps time by itself (a DOS game's clock), between its calls of hg_frame. 0 once the
+ * game was closed */
+int hg_poll(void);
 /* full screen: pause by itself when the focus goes (default 1) */
 void hg_autopause(int on);
 /* counters: frames begun, frames missed (more than one vertical blank between two), the CPU
@@ -347,8 +352,11 @@ typedef struct hg_sound {
     unsigned char loop;         /* 1: plays again and again (hg_stop ends it) */
 } hg_sound;
 int hg_has_lau(void);
-/* signed samples in memory (a C array, any bank: not copied, keep it) */
-hg_sound *hg_sound_from(const void *data, unsigned long len, unsigned rate, unsigned bits);
+/* signed samples in memory, not copied (keep them): a C array, or far memory (a bank of
+ * hz_far_alloc / hg_banks: a __far pointer; a sound may run on into the next bank when
+ * the banks are consecutive) */
+hg_sound *hg_sound_from(const void __far *data, unsigned long len, unsigned rate,
+                        unsigned bits);
 /* a .WAV file (PCM, 8 or 16 bits, mono) or raw signed 8-bit at 16 kHz (any other name) */
 hg_sound *hg_sound_load(const char *path);
 /* made here: HG_SQUARE, HG_SINE, HG_TRIANGLE, HG_SAW, HG_NOISE_WAVE at hz for ms
@@ -365,6 +373,26 @@ void hg_sound_free(hg_sound *s);
 int hg_play(const hg_sound *s, unsigned vol);
 int hg_play_ex(const hg_sound *s, unsigned vol, int pan, int semitones);
 void hg_stop(int voice);                /* -1: all of the game's voices */
+
+/* The OPL2 (REV $0C: a Yamaha YM3812, nine FM voices; AdLib and Sound Blaster music).
+ * hg_has_opl: 0 on older boards (the calls then return -1). The chip has one owner at a
+ * time: the first program that writes it (-1 while another one, or the music engine
+ * playing a MIDI file, has it); hg_close gives it up. hg_opl_write: a register ($00-$F5;
+ * about 45 us a write), hg_opl_reset: every register 0 (10 ms).
+ * hg_opl_play: an AdLib register stream in memory (any bank, and it may run on into the
+ * next banks when they are consecutive, as hg_banks gives them; not copied, keep it): id
+ * Software's IMF records of 4 bytes {u8 register, u8 value, u16 delay} (a record must not
+ * cross a bank: start the stream at an address divisible by 4), each value written,
+ * then the next record waits delay ticks of 1/hz s (560 or 700 for IMF files). hg_frame
+ * plays the records that came due (the timing is the frame's, within 1/60 s); loop: from
+ * the start again at the end. A pause (focus lost) keys the voices off and the stream
+ * waits. hg_opl_stop: the stream stops, the voices off. */
+int hg_has_opl(void);
+int hg_opl_write(unsigned reg, unsigned val);
+int hg_opl_reset(void);
+int hg_opl_play(const void __far *imf, unsigned long len, unsigned hz, int loop);
+void hg_opl_stop(void);
+int hg_opl_playing(void);
 
 /* Music by Horizon's music engine (/SYSTEM/MUSICD.PRG, started for you): a MOD module, a
  * WAV file or (REV $0C, on the OPL2) a MIDI file, from the card. It plays on Lau's highest

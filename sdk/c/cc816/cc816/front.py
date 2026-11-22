@@ -37,9 +37,10 @@ class RV:
 
 class LV:
     """an lvalue: kind 'reg' (op = V) or 'mem' (base, idx, off); bit-fields: fld"""
-    __slots__ = ('kind', 'op', 'base', 'idx', 'off', 't', 'fld', 'vol', 'post')
+    __slots__ = ('kind', 'op', 'base', 'idx', 'off', 't', 'fld', 'vol', 'post', 'farobj')
 
     def __init__(self, kind, t, op=None, base=None, idx=None, off=0, fld=None):
+        self.farobj = False  # inside a __far object (in one bank: [base],y with a 16-bit Y)
         self.kind = kind
         self.t = t
         self.op = op
@@ -451,6 +452,15 @@ class Front:
                 if n is None:
                     if self.in_params:
                         return ArrT(el, None)
+                    # (an undeclared name in the size is that, not a variable length: the
+                    # Xargon port's numobjkinds without x_obj.h)
+                    stack = [node.dim]
+                    while stack:
+                        d = stack.pop()
+                        if isinstance(d, c_ast.ID) and self.lookup(d.name) is None:
+                            self.undeclared(d.name, d)
+                        if not isinstance(d, (c_ast.Typename, c_ast.FuncCall)):
+                            stack.extend(c for _, c in d.children())
                     self.unsup('variable-length arrays: give the array a constant size, '
                                'or take the memory from malloc', node)
                 if n < 0:
@@ -2384,7 +2394,9 @@ class Front:
             if s.kind == 'global':
                 self.unit.externs.add(s.asm)
                 if not s.t.is_func and _far_obj(s.t):
-                    return LV('mem', s.t, base=self.far_addr(s), off=0)
+                    lv = LV('mem', s.t, base=self.far_addr(s), off=0)
+                    lv.farobj = True
+                    return lv
                 return LV('mem', s.t, base=Sym(s.asm), off=0)
             if s.kind == 'enum':
                 self.err(f"'{e.name}' is an enumeration constant, which cannot be assigned "
@@ -2428,6 +2440,7 @@ class Front:
             lv = LV('mem', ft, base=base.base, idx=base.idx, off=base.off + foff,
                     fld=f if f.bits is not None else None)
             lv.vol = lv.vol or base.vol
+            lv.farobj = base.farobj and e.type == '.'
             return lv
         if isinstance(e, c_ast.CompoundLiteral):
             t = self.expr_type(e)
@@ -2506,28 +2519,47 @@ class Front:
             koff += k if idx.op == '+' else -k
             idx = idx.left
         kv = self.const_eval(idx)
-        # the base address
-        if isinstance(arr, c_ast.ID) and self.lookup(arr.name) and self.lookup(arr.name).t.is_arr:
+        # the base address: an array (a variable, an element of an array of arrays, a
+        # member) as an lvalue, its element's index added to its own (a[i][j]: one 16-bit
+        # index); else a pointer's value
+        if isinstance(arr, (c_ast.ID, c_ast.ArrayRef, c_ast.StructRef)) and \
+                self.expr_type(arr).is_arr and \
+                not (isinstance(arr, c_ast.ID) and not self.lookup(arr.name)):
             base = self.lval(arr)
         else:
             p = self.rv(arr)
             base = self.mem_at(p.op, el, p.t.isfar)
         if kv is not None:
-            return LV('mem', el, base=base.base, idx=base.idx, off=base.off + (kv + koff) * size)
+            lv = LV('mem', el, base=base.base, idx=base.idx, off=base.off + (kv + koff) * size)
+            lv.farobj = base.farobj
+            return lv
         iv = self.convert(self.rv(idx), INT if self.expr_type(idx).signed else UINT)
         sc = self.scale(iv.op, size)
+        if isinstance(base.base, V) and base.base.size == 4 and not base.farobj and \
+                base.idx is not None:
+            # (through a far pointer, an earlier unsigned index goes into the pointer first)
+            z = self.newv(4)
+            self.emit(Ins('zx', z, base.idx))
+            nv = self.newv(4)
+            self.emit(Ins('add', nv, base.base, z))
+            base = LV('mem', base.t, base=nv, off=base.off)
         if base.idx is not None:
             nv = self.newv(2)
             self.emit(Ins('add', nv, base.idx, sc))
             sc = nv
-        if isinstance(base.base, V) and base.base.size == 4:
-            # far pointer + index
+        if isinstance(base.base, V) and base.base.size == 4 and \
+                not base.farobj and iv.t.signed:
+            # far pointer + a signed index: a 32-bit step (the index may be negative)
             z = self.newv(4)
             self.emit(Ins('sx' if iv.t.signed else 'zx', z, sc))
             nv = self.newv(4)
             self.emit(Ins('add', nv, base.base, z))
             return LV('mem', el, base=nv, off=base.off + koff * size)
-        return LV('mem', el, base=base.base, idx=sc, off=base.off + koff * size)
+        # (a far pointer + an unsigned index, and any index into a __far object, which lies
+        # in one bank: the index in Y, [pointer],y; the Xargon port's 2-D board)
+        lv = LV('mem', el, base=base.base, idx=sc, off=base.off + koff * size)
+        lv.farobj = base.farobj
+        return lv
 
     def scale(self, op, size):
         if size == 1:

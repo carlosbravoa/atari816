@@ -1,0 +1,53 @@
+# tests/play.script - a game by keys (make test; tests/check.sh checks what it left).
+# Time 0: the program started.
+#  1. the title (any key), the main menu: PLAY NEW GAME (Enter)
+6000 key space 100
+11500 shot
+12500 key enter 100
+#  2. the map: the game saved (S, the first slot, the name HZTEST)
+16000 key s 100
+17000 shot
+17500 key enter 100
+18200 HZTEST\n
+19500 shot
+#  3. the map's paths (each move held until a wall stops it), past the journal (Enter
+#     closes it), into level 1
+20500 key down 1000
+21600 key right 2600
+24300 key up 600
+25000 key right 1500
+26500 shot
+27500 key enter 100
+28000 key right 1500
+29600 key down 2500
+32500 shot
+#  4. level 1: right, a jump (Ctrl) across the water, a shot (Space), another jump, then
+#     into the water: the hero dies and starts the level again
+34000 key right 400
+34500 down lctrl
+34500 down right
+35200 up lctrl
+35600 up right
+35700 shot
+36000 key space 100
+36300 shot
+37000 key right 300
+37500 down lctrl
+37500 down right
+38200 up lctrl
+38600 up right
+39000 shot
+40000 key right 2000
+42500 shot
+45000 shot
+#  5. Esc: the game's menu; Q: quit the game; the high scores (a key); the main menu
+47000 key esc 100
+48000 shot
+48500 key q 100
+50000 shot
+51000 key space 100
+#  6. LOAD GAME: the first slot (the map, where it was saved)
+53000 key l 100
+54000 shot
+54500 key enter 100
+60000 shot

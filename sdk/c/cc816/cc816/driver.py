@@ -105,6 +105,11 @@ class PP(Preprocessor):
             file, line = self.here
         self.diag.error(self.place(file, line), _pp_message(msg))
 
+    def on_warning(self, file, line, msg):
+        if file in (None, 'unknown') and self.here:
+            file, line = self.here
+        self.diag.warning(self.place(file, line), msg, 'cpp')
+
     def on_directive_handle(self, directive, toks, ifpassthru, precedingtoks):
         self.here = (getattr(directive, 'source', None) or '?', directive.lineno)
         return super().on_directive_handle(directive, toks, ifpassthru, precedingtoks)
@@ -255,6 +260,7 @@ def preprocess(path, incs, defs, diag=None, opts=None):
             p.undef([_tok(p, u)])
     for i in list(incs) + INCLUDE:
         p.add_path(i)
+    p.assume_encoding = 'latin-1'           # (included files too: bytes as they are)
     try:
         with open(path, encoding='latin-1') as fh:
             src = fh.read()

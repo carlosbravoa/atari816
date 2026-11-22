@@ -685,19 +685,63 @@ class Gen:
         self.I('lda', '__h0+2')
         self.sta(i.d, 1)
 
+    @staticmethod
+    def naf(k):
+        """k's digits (-1, 0, 1), the highest first, with the fewest non-zero ones (the
+        non-adjacent form: 31 = 32 - 1 is 1 0 0 0 0 -1)"""
+        out = []
+        while k:
+            if k & 1:
+                z = 2 - (k & 3)
+                k -= z
+            else:
+                z = 0
+            out.append(z)
+            k >>= 1
+        return out[::-1]
+
     def mul_const(self, d, a, k):
-        """x * k by shifts and adds (k with few one-bits)"""
-        if bin(k).count('1') > 4 or isinstance(a, Frame):
+        """x * k by shifts and adds or subtracts (k with few non-zero digits in the binary
+        or the non-adjacent form: x * 31 = x * 32 - x; an array of 31-byte structures)"""
+        if isinstance(a, Frame):
+            return False
+        k &= 0xFFFF
+        if k == 0:
+            return False
+        digits = [int(c) for c in bin(k)[2:]]
+        nf = self.naf(k)
+        if sum(1 for z in nf if z) < sum(digits):
+            digits = nf
+        if sum(1 for z in digits if z) > 4:
             return False
         s = self.src(a)
-        bits = bin(k)[3:]
         self.lda(a)
-        for c in bits:
+        for z in digits[1:]:
             self.I('asl', 'a')
-            if c == '1':
+            if z == 1:
                 self.I('clc')
                 self.I('adc', s)
+            elif z == -1:
+                self.I('sec')
+                self.I('sbc', s)
         self.sta(d)
+        return True
+
+    def sdiv_pow2(self, i):
+        """a signed x / 2^n: (x + (x < 0 ? 2^n - 1 : 0)) >> n, arithmetically (C rounds
+        toward zero): no call (the Xargon port: every position / 16)"""
+        k = i.b.val & 0xFFFF
+        if k < 2 or k & (k - 1) or k >= 0x8000:
+            return False
+        n = k.bit_length() - 1
+        pos = self.newlab()
+        self.lda(i.a)
+        self.I('cmp', '#$8000')         # (carry: negative)
+        self.I('bcc', pos)
+        self.I('adc', f'#{k - 2}')      # (+ k - 1 with the carry)
+        self.L(pos)
+        self.shift_a('sshr', n)
+        self.sta(i.d)
         return True
 
     def divmod16(self, i, h):
@@ -715,6 +759,8 @@ class Gen:
 
     def g_sdiv(self, i):
         if i.d.size == 2:
+            if isinstance(i.b, Imm) and self.sdiv_pow2(i):
+                return
             return self.divmod16(i, '__sdiv16')
         if i.d.size == 8:
             return self.call64('__sdiv64', i)

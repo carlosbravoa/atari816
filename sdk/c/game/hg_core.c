@@ -25,6 +25,8 @@ void (*hg__hook_close_sound)(void);
 void (*hg__hook_close_images)(void);
 void (*hg__hook_close_map)(void);
 void (*hg__hook_pause)(int on);
+void (*hg__hook_opl)(void);             /* hg_opl.c: the stream's records due */
+void (*hg__hook_opl_pause)(int on);     /* 1 pause, 0 go on, 2 the end (hg_close) */
 
 static unsigned char ws_own, atexit_set, quit_req, autopause = 1;
 static unsigned lastf, endf;
@@ -387,6 +389,8 @@ void hg_close(void)
     hg__nruns = 0;
     if (hg__hook_close_sound)
         hg__hook_close_sound();
+    if (hg__hook_opl_pause)
+        hg__hook_opl_pause(2);
     if (hg__hook_close_sprites)
         hg__hook_close_sprites();
     if (hg__hook_close_map)
@@ -558,6 +562,8 @@ void hg_begin(void)
     events();
     if (hg__hook_sound)
         hg__hook_sound();
+    if (hg__hook_opl)
+        hg__hook_opl();
     hg__began = 1;
     t_begin = (unsigned long)hz_uptime();
 }
@@ -692,6 +698,8 @@ void hg__pause(void)
     keys_up();
     if (hg__hook_pause)                         /* (sound in use: silence) */
         hg__hook_pause(1);
+    if (hg__hook_opl_pause)
+        hg__hook_opl_pause(1);
     for (;;) {
         if (hz_win_event(0, &ev))
             break;
@@ -704,6 +712,8 @@ void hg__pause(void)
     }
     if (hg__hook_pause)
         hg__hook_pause(0);
+    if (hg__hook_opl_pause)
+        hg__hook_opl_pause(0);
     lastf = endf = hz_frame();                  /* the pause is not missed frames */
     st_last = 0;
 }
@@ -767,6 +777,21 @@ int hg__poll(void)
     if (hg__kind != HG__NONE)
         events();
     return quit_req;
+}
+
+/* the events (keys, the pause), the sound's envelopes and the OPL2's stream now, without
+ * waiting for a vertical blank: for a game whose frames are late (its frame loop does not
+ * reach hg_frame every blank) or that keeps its own time. 0 once the game was closed */
+int hg_poll(void)
+{
+    if (hg__kind == HG__NONE)
+        return !quit_req;
+    events();
+    if (hg__hook_sound)
+        hg__hook_sound();
+    if (hg__hook_opl)
+        hg__hook_opl();
+    return !quit_req;
 }
 
 int hg_key(unsigned k)

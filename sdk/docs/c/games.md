@@ -259,6 +259,7 @@ Every function is described in `hgame.h`. In short:
 | `hg_begin()`, `hg_end()` | the two halves, for programs that want them apart |
 | `hg_steps(hz)` | logic steps due at hz a second (fixed time step; at most 4 after a stall) |
 | `hg_quit()`, `hg_autopause(on)` | make `hg_frame` return 0; the pause on lost focus |
+| `hg_poll()` | the events, the POKEY envelopes and the OPL2 stream now, without waiting for the blank: for a game whose frames run late or that keeps its own time (a DOS port's clock: ports/xargon); 0 once closed |
 | `hg_frames`, `hg_missed`, `hg_pauses`, `hg_cpu_ms`, `hg_stats(name)` | counters; "NAME: N frames, M missed, CPU X ms a frame" on the console |
 
 | Drawing | |
@@ -303,9 +304,11 @@ Every function is described in `hgame.h`. In short:
 | --- | --- |
 | `hg_tone(v, pitch, vol, ticks)`, `hg_sfx(v, pitch, dpitch, vol, dvol, ticks, dist)`, `hg_pitch(hz)` | POKEY, voices 0-3, envelopes stepped every 20 ms (by the clock) |
 | `hg_note(v, hz, vol)` | POKEY's two 16-bit voices (channels joined in pairs at 1.79 MHz): a square tone at any pitch from 14 Hz, exact (music; a PC speaker's tones, hz = 1193182 / the PIT divisor), until changed |
-| `hg_has_lau()`, `hg_sound_make(wave, hz, ms, fade)`, `hg_sound_from(data, len, rate, bits)`, `hg_sound_load(path)` | samples: made here, from an array, from a `.WAV` (PCM 8/16-bit mono) or raw file |
+| `hg_has_lau()`, `hg_sound_make(wave, hz, ms, fade)`, `hg_sound_from(data, len, rate, bits)`, `hg_sound_load(path)` | samples: made here, from memory (a C array, or far memory: a `__far` pointer into a bank of `hz_far_alloc` / `hg_banks`), from a `.WAV` (PCM 8/16-bit mono) or raw file |
 | `hg_play(s, vol)`, `hg_play_ex(s, vol, pan, semitones)`, `hg_stop(voice)`, `hg_sound_off()` | on Lau's free voices |
 | `hg_music_play(path, loop)`, `hg_music_stop`, `hg_music_pause`, `hg_music_volume`, `hg_music_state` | MOD, WAV or (REV $0C) MIDI files by Horizon's music engine; `hg_music_play` returns once it plays |
+| `hg_has_opl()`, `hg_opl_write(reg, val)`, `hg_opl_reset()` | the OPL2 (REV $0C, a YM3812: AdLib and Sound Blaster FM) by the game itself: its registers (one owner at a time; `hg_close` gives it up) |
+| `hg_opl_play(imf, len, hz, loop)`, `hg_opl_stop()`, `hg_opl_playing()` | an AdLib register stream from memory (any bank, on across consecutive banks): id Software's IMF records {register, value, u16 delay in 1/hz s}, played by `hg_frame` / `hg_poll` as they come due (to the frame: within 1/60 s); a pause keys the voices off. Most DOS games' AdLib music converts to it (ports/xargon's CMF songs: `tools/mkdata.py`) |
 
 | Helpers | |
 | --- | --- |
@@ -356,6 +359,15 @@ file or (REV $0C: the OPL2) a MIDI file. The replayer library (`horizon/build/mo
 a ca65 object: vlink (vbcc) cannot link it, and with cc816 (ld65) hgame has no binding for
 it: the engine is the way from C. It loads the file at priority 0, which holds the game up while
 it loads (about 0.2 s for a 31 KB module in the emulator): start the music before play.
+
+**AdLib music.** A DOS game's FM music (AdLib, Sound Blaster: IMF, DRO, CMF, ROL, ...) is
+register writes to the OPL2 at given times. Convert it on the PC to an IMF stream (records
+of {register, value, delay}) and play it with `hg_opl_play`: the game keeps the chip, no
+engine is started, the timing is the frame's. `ports/xargon/tools/mkdata.py` converts
+Creative's CMF songs so (SBFMDRV's voice allocation, rhythm mode and transposition, after
+AdPlug's CMF player). The board mixes the OPL2 three times louder than a Lau voice at full
+volume: music written for a Sound Blaster may clip there (Xargon's songs did, 1-2 % of the
+samples: the converter makes their carriers 10.5 dB quieter).
 
 **Fonts.** The built-in font is Horizon's console font (8 x 10 cells here, ASCII 32-126;
 `make -C sdk/c/game font` makes `hg_font.c` from it). For another font, draw it as images.
