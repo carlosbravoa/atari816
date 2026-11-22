@@ -105,37 +105,45 @@ def main():
         for k, st, msg in ex.map(compile_one, [(k, f, out, level) for k, f in enumerate(files)]):
             results[k] = {'test': files[k], 'status': st, 'msg': msg}
     todo = [k for k in results if results[k]['status'] == 'built']
-    while todo:
-        ks = todo[:batch]
-        r = run_batch(out, ks, runner, int(6 + spt * len(ks)))
-        done = 0
-        for k in ks:
-            if k not in r:
-                break
-            how, code, text = r[k]
-            done += 1
-            exp_f = files[k] + '.expected'
-            if how == 'timeout':
-                results[k].update(status='timeout', msg=text[-120:])
-                break
-            if how == 'spawn-error':
-                results[k].update(status='killed', msg=f'spawn error {code}')
-                continue
-            if '[kill]' in text:
-                results[k].update(status='killed', msg=text[text.index('[kill]'):][:120])
-                continue
-            want = open(exp_f, encoding='latin-1').read() if os.path.exists(exp_f) else None
-            got_ok = want is None or text.strip() == want.strip()
-            if code == 0 and got_ok:
-                results[k].update(status='pass', msg='')
-            else:
-                results[k].update(status='fail', msg=(f'exit {code}' if code else '') +
-                                  ('' if got_ok else ' output differs: ' + repr(text[:100])))
-        if done == 0:
+    # the emulator runs: groups of up to `batch` programs, `jobs` groups at a time (each
+    # group has its own run-N folder; a group that stops half-way goes on after the stop)
+    size = max(1, min(batch, -(-len(todo) // jobs)))
+
+    def run_group(todo):
+        while todo:
+            ks = todo[:batch]
+            r = run_batch(out, ks, runner, int(6 + spt * len(ks)))
+            done = 0
             for k in ks:
-                results[k].update(status='timeout', msg='batch produced nothing')
-            done = len(ks)
-        todo = todo[done:]
+                if k not in r:
+                    break
+                how, code, text = r[k]
+                done += 1
+                exp_f = files[k] + '.expected'
+                if how == 'timeout':
+                    results[k].update(status='timeout', msg=text[-120:])
+                    break
+                if how == 'spawn-error':
+                    results[k].update(status='killed', msg=f'spawn error {code}')
+                    continue
+                if '[kill]' in text:
+                    results[k].update(status='killed', msg=text[text.index('[kill]'):][:120])
+                    continue
+                want = open(exp_f, encoding='latin-1').read() if os.path.exists(exp_f) else None
+                got_ok = want is None or text.strip() == want.strip()
+                if code == 0 and got_ok:
+                    results[k].update(status='pass', msg='')
+                else:
+                    results[k].update(status='fail', msg=(f'exit {code}' if code else '') +
+                                      ('' if got_ok else ' output differs: ' + repr(text[:100])))
+            if done == 0:
+                for k in ks:
+                    results[k].update(status='timeout', msg='batch produced nothing')
+                done = len(ks)
+            todo = todo[done:]
+
+    with cf.ThreadPoolExecutor(jobs) as ex:
+        list(ex.map(run_group, [todo[i:i + size] for i in range(0, len(todo), size)]))
     summ = {}
     for r in results.values():
         summ[r['status']] = summ.get(r['status'], 0) + 1

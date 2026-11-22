@@ -580,8 +580,15 @@ def main():
         models = [m for m in models if m != "cc816"] or ["large", "tiny"]
     t0 = time.time()
     hcc_messages(only, models)
-    for m in models:
-        run_model(m, horizon, only)
+    # the configurations side by side (each has its own build folder; the libraries are
+    # built first, one after another, so no two of them build the same one)
+    sh([sys.executable, HCC, "--build-lib"] + ["cc816"] * ("cc816" in models))
+    if [m for m in models if m != "cc816"]:
+        sh([sys.executable, HCC, "--build-lib"] + [m for m in models if m != "cc816"])
+        sh([sys.executable, HCC, "--build-ui"])
+    import concurrent.futures as cf
+    with cf.ThreadPoolExecutor(len(models)) as ex:
+        list(ex.map(lambda m: run_model(m, horizon, only), models))
     for m in ("cc816", "large"):
         if m in models:
             run_ui(horizon, only, m)
