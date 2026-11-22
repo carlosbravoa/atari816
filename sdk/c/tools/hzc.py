@@ -311,9 +311,10 @@ def assemble(src, obj, model, defs=(), incs=(), src_name=None):
 # ---- the library -------------------------------------------------------------------
 
 def lib_sources():
-    """(kind, path) of everything in libhz.a, both models."""
+    """(kind, path) of everything in libhz.a, both models: lib/ (shared with cc816),
+    lib/vbcc/ (vbcc's only: its FILE layout, vasm), fastrt/."""
     srcs = []
-    for d, kind in (("lib", "c"), ("fastrt", "s")):
+    for d in ("lib", os.path.join("lib", "vbcc"), "fastrt"):
         p = os.path.join(SDKC, d)
         for f in sorted(os.listdir(p)):
             if f.endswith(".c") or f.endswith(".s"):

@@ -1,0 +1,31 @@
+/* inttypes.h - cc816 (Horizon C SDK): printf / scanf formats of stdint.h's types */
+#ifndef _INTTYPES_H
+#define _INTTYPES_H
+#include <stdint.h>
+#define PRId8 "d"
+#define PRIi8 "i"
+#define PRIu8 "u"
+#define PRIx8 "x"
+#define PRIX8 "X"
+#define PRId16 "d"
+#define PRIi16 "i"
+#define PRIu16 "u"
+#define PRIx16 "x"
+#define PRIX16 "X"
+#define PRIo16 "o"
+#define PRId32 "ld"
+#define PRIi32 "li"
+#define PRIu32 "lu"
+#define PRIx32 "lx"
+#define PRIX32 "lX"
+#define PRIo32 "lo"
+#define PRIdMAX "ld"
+#define PRIuMAX "lu"
+#define PRIxPTR "x"
+#define SCNd16 "d"
+#define SCNu16 "u"
+#define SCNx16 "x"
+#define SCNd32 "ld"
+#define SCNu32 "lu"
+#define SCNx32 "lx"
+#endif

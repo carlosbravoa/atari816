@@ -12,7 +12,7 @@ int hg_cam_x, hg_cam_y, hg_play_y, hg_panel_y;
 
 int hg__fb_new(unsigned stride, unsigned rows);
 
-static unsigned char *map;      /* the game's map, copied (hg_map_set writes it) */
+static unsigned char __far *map;      /* the game's map, copied (hg_map_set writes it) */
 static unsigned mw, mh, tw, th, rc, rr, playh, border;
 static const hg_image *tiles;
 static unsigned ltx, lty;       /* the first world column / row in the ring */

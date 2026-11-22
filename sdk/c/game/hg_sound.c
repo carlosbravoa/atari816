@@ -184,7 +184,7 @@ static unsigned long le32(const unsigned char *p)
 /* unsigned 8-bit samples (WAV) -> signed */
 static void flip(unsigned long a, unsigned long n)
 {
-    unsigned char *p;
+    unsigned char __far *p;
     unsigned k, i;
     unsigned long room;
     while (n) {
@@ -285,7 +285,7 @@ hg_sound *hg_sound_make(unsigned wave, unsigned hz, unsigned ms, unsigned fade)
     unsigned long n, i, fstart, a;
     unsigned ph = 0, step, amp, k, room, fn, fk = 0, acc = 0;
     int v;
-    signed char *p;
+    signed char __far *p;
     unsigned noise = 0x1234, hold = 0;
     signed char tab[256];
 
@@ -320,7 +320,7 @@ hg_sound *hg_sound_make(unsigned wave, unsigned hz, unsigned ms, unsigned fade)
     for (i = 0; i < n; ) {
         room = (unsigned)(0x10000UL - ((a + i) & 0xFFFF) > 0xFFFF ? 0xFFFF
                           : 0x10000UL - ((a + i) & 0xFFFF));
-        p = (signed char *)HG__PTR(a + i);
+        p = (signed char __far *)HG__PTR(a + i);
         for (k = 0; k < room && i < n; k++, i++) {
             if (wave == HG_NOISE_WAVE) {         /* a new value every few samples */
                 if ((hold += step) >= 0x4000) {

@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """run.py - build and run the runtime tests (tests/rt/rttest.c) in emu816.
 
-    run.py [--model large|tiny|both] [--horizon DIR] [--out DIR] [--quick] [--seconds N]
+    run.py [--model cc816|large|tiny|both|all] [--horizon DIR] [--out DIR] [--quick]
+           [--seconds N]
 
-Generates the table (tools/genrt.py), builds RTTEST.PRG with bin/hcc for each model
+Generates the table (tools/genrt.py), builds RTTEST.PRG with bin/hcc for each
+configuration (cc816: its runtime, rt/cc816; large and tiny: vbcc's, fastrt/)
 (HZ_BUILD in the environment is honoured, as hcc does), runs it in the text shell with the
 table on the card, prints its "rt ..." lines and "RT PASS"/"RT FAIL" per model.
 Exit 0 when every model passed. --quick: fewer cases (for a fast check). --seconds: how
@@ -20,7 +22,7 @@ SDK = os.path.dirname(SDKC)
 
 def main():
     a = sys.argv[1:]
-    models = ["large", "tiny"]
+    models = ["cc816", "large", "tiny"]
     hz = os.environ.get("HORIZON") or os.path.join(SDK, "..", "horizon")
     out = os.path.join(os.environ.get("HZ_BUILD") or os.path.join(SDKC, "build"), "test", "rt")
     quick = False
@@ -28,7 +30,7 @@ def main():
     i = 0
     while i < len(a):
         if a[i] == "--model":
-            models = ["large", "tiny"] if a[i + 1] == "both" else [a[i + 1]]; i += 2
+            models = ["cc816", "large", "tiny"] if a[i + 1] == "both" else [a[i + 1]]; i += 2
         elif a[i] == "--horizon":
             hz = a[i + 1]; i += 2
         elif a[i] == "--out":
@@ -47,15 +49,16 @@ def main():
     subprocess.run(gen, check=True)
     ok = True
     for m in models:
-        prg = os.path.join(out, f"RTTEST{'T' if m == 'tiny' else ''}.PRG")
-        r = subprocess.run([os.path.join(SDKC, "bin", "hcc"), "--model", m, "-o", prg,
+        prg = os.path.join(out, f"RTTEST{ {'tiny': 'T', 'cc816': 'C'}.get(m, '') }.PRG")
+        cc = ["--cc", "cc816"] if m == "cc816" else ["--cc", "vbcc", "--model", m]
+        r = subprocess.run([os.path.join(SDKC, "bin", "hcc")] + cc + ["-o", prg,
                             os.path.join(HERE, "rttest.c")])
         if r.returncode:
             print(f"rt ({m}): build FAILED")
             ok = False
             continue
         run = os.path.join(out, "run-" + m)
-        secs = seconds or (40 if quick else (260 if m == "large" else 130))
+        secs = seconds or (40 if quick else (130 if m == "tiny" else 260))
         subprocess.run([sys.executable, os.path.join(SDK, "tools", "run816.py"), prg,
                         "--horizon", hz, "--mode", "shell", "--seconds", str(secs),
                         "--file", table + ":/RTTAB.BIN", "--out", run],

@@ -50,8 +50,8 @@ sprites, scrolling, draw lists) and the classic machine.
   colours, blitter blocks, samples made or loaded and played by note name.
 
 Programs are written in 65816 assembly with ca65 / ld65 from the cc65 suite, or in **C**
-with the C SDK ([c/](c), on the vbcc 65816 compiler: one command, `hcc`, builds a program;
-[docs/c/getting-started.md](docs/c/getting-started.md)), and run in **emu816**, the
+with the C SDK ([c/](c), with its own compiler, cc816 (vbcc 65816 for floating point): one
+command, `hcc`, builds a program; [docs/c/getting-started.md](docs/c/getting-started.md)), and run in **emu816**, the
 machine's emulator, with scripted input and screenshots.
 
 ## The SDK
@@ -60,10 +60,10 @@ machine's emulator, with scripted input and screenshots.
 | --- | --- |
 | [docs/getting-started.md](docs/getting-started.md) | Install, build the emulator and Horizon, hello as a console and a window program, run, screenshot, script input, the real machine |
 | [docs/reference/](docs/reference/README.md) | The programmer's reference: program format and memory, every syscall with an example, the window system, drawing, the controls library, sound, the internet ([internet.md](docs/reference/internet.md)), the games calls (full screen, sprites, scrolling, draw lists, palette entries, frame sync: [games.md](docs/reference/games.md)), the classic machine, the hardware, performance, game patterns, limits |
-| [c/](c) | The C SDK: `hcc` (one command from .c files to a program), the C library on Horizon (stdio with files, argc/argv, time, far memory), every syscall as a C function (`horizon.h`), examples, tests; [docs/c/](docs/c/getting-started.md): getting started, the reference (memory models, calling convention, speed), porting |
+| [c/](c) | The C SDK: `hcc` (one command from .c files to a program), cc816 (the SDK's C compiler, [c/cc816](c/cc816)) and vbcc 65816 (`hcc --cc vbcc`), the C library on Horizon (stdio with files, argc/argv, time, far memory), every syscall as a C function (`horizon.h`), examples, tests; [docs/c/](docs/c/getting-started.md): getting started, the reference (the compilers, memory, calling convention, speed), porting |
 | [c/ (applications)](docs/c/apps.md) | Desktop applications in C: the controls library as `hui.h` (windows with menus, buttons, fields, lists, scroll bars, the file dialog, alerts, dialogs; callbacks into C), linked by hcc when used; a tutorial in five steps ([c/examples/guests](c/examples/guests)), a text viewer ([c/examples/viewer](c/examples/viewer)) |
-| (C games) | (the game layer of the C SDK: its line goes here) |
-| [docs/roadmap-notes.md](docs/roadmap-notes.md) | The C compiler candidates (vbcc 65816 was chosen: [c/](c)) |
+| [c/ (games)](docs/c/games.md) | Games in C: `hgame.h` (full screen or a window, the blitter, images, sprites, scrolling maps, input, sound, music), `conio.h`, `joystick.h`; a tutorial in five steps, Glimmer, Catch, Gem Run in C ([templates/c-game](templates/c-game)) |
+| [docs/roadmap-notes.md](docs/roadmap-notes.md) | The C compiler candidates (vbcc 65816 was chosen first; the SDK's own cc816 is now the default: [c/](c)) |
 | [templates/console](templates/console) | Arguments, output, a line of input, a file |
 | [templates/c-console](templates/c-console) | The same in C (hcc, `make` with sdk/c/c.mk) |
 | [templates/c-window-app](templates/c-window-app) | The window-app template in C (`hui.h`): the same window, menus, field, buttons, file dialog and alert |
@@ -101,6 +101,6 @@ passes its scripted test, every reference example assembles and links, and the r
 matches horizon.inc and the kernel's syscall tables. Not verified: the real board (no access
 while writing), sound (the emulator logs it, and writes Lau's and, since Horizon 0.27, the
 OPL2's output to a WAV file; POKEY is only logged), the PC link scripts. The C SDK
-(November 2026) is tested in the emulator only (`make -C c test`). The internet examples (Fetch, Echo, Horizon 0.22) are tested in the emulator only
+(November 2026) is tested in the emulator only (`make -C c test`, both compilers). The internet examples (Fetch, Echo, Horizon 0.22) are tested in the emulator only
 (`--net-root` stands in for the web, a local echo server for TCP), not yet through the real gateway. Where a document states something that was not checked,
 it says so.

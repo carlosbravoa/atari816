@@ -169,7 +169,7 @@ void hg_image_free(hg_image *img);
 void hg_image_palette(const hg_image *img);
 /* a pointer to frame k's pixels (rows of img->stride bytes; mind: a pointer's arithmetic
  * stays in its bank, see hg_image_addr) and its 24-bit address */
-unsigned char *hg_image_pixels(const hg_image *img, unsigned frame);
+unsigned char __far *hg_image_pixels(const hg_image *img, unsigned frame);
 unsigned long hg_image_addr(const hg_image *img, unsigned frame);
 
 /* blit frame k of img to (x, y): keyed (its key colour skipped) if it has a key */

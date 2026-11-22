@@ -1,23 +1,91 @@
 # C reference
 
-The C SDK for Horizon: how a C program is laid out in memory, its types, far memory, the
-calling convention (for assembly), the C library on Horizon, syscalls from C, the stack,
-the compiler's known faults and what the SDK does about them, and speed. Getting
-started: [getting-started.md](getting-started.md); window applications (the controls
-library, `hui.h`): [apps.md](apps.md); porting: [porting.md](porting.md).
+The C SDK for Horizon: its two compilers, how a C program is laid out in memory, its
+types, far memory, the calling convention (for assembly), the C library on Horizon,
+syscalls from C, the stacks, the compilers' faults and what the SDK does about them, and
+speed. Getting started: [getting-started.md](getting-started.md); window applications (the
+controls library, `hui.h`): [apps.md](apps.md); games: [games.md](games.md); porting:
+[porting.md](porting.md).
 
 | | |
 | --- | --- |
-| Compiler | vbcc 65816 Release 2 (Volker Barthelmann), C99 without `long long`; installed by `sdk/c/tools/get-toolchain.sh` |
-| Driver | `sdk/c/bin/hcc` (`hcc -h` lists the options) |
-| Headers | `horizon.h` (syscalls, blocks, helpers), `hui.h` (the controls library: [apps.md](apps.md)), `dirent.h`, and vbcc's: `stdio.h`, `stdlib.h`, `string.h`, `ctype.h`, `math.h`, `time.h`, `errno.h`, `stdint.h`, `stdarg.h`, `setjmp.h`, `limits.h`, ... |
-| Library | `sdk/c/lib`, `sdk/c/rt`, `sdk/c/fastrt` over vbcc's C library (binary), built by hcc into `sdk/c/build/lib/<model>/` |
+| Compilers | **cc816**, the SDK's own (`sdk/c/cc816`, Python 3, writes ca65 assembly): the default. **vbcc 65816** Release 2 (Volker Barthelmann): `hcc --cc vbcc`, installed by `sdk/c/tools/get-toolchain.sh` |
+| Driver | `sdk/c/bin/hcc` (`hcc -h` lists the options); `--cc cc816` or `--cc vbcc`, or `HZ_CC` in the environment (`make HZ_CC=vbcc` for a program built with c.mk) |
+| Headers | `horizon.h` (syscalls, blocks, helpers), `hui.h` (the controls library: [apps.md](apps.md)), `hgame.h`, `conio.h`, `joystick.h` ([games.md](games.md)), `dirent.h`; the C library's: cc816's own (`sdk/c/cc816/include`: `stdio.h`, `stdlib.h`, `string.h`, `ctype.h`, `time.h`, `errno.h`, `stdint.h`, `stdarg.h`, `limits.h`, ...), vbcc's (with `math.h`, `setjmp.h`) |
+| Library | `sdk/c/lib` (both compilers), `sdk/c/lib/cc816` and `sdk/c/rt/cc816` (cc816: the whole C library and its runtime), `sdk/c/lib/vbcc`, `sdk/c/rt`, `sdk/c/fastrt` (vbcc: over vbcc's own binary library); hcc builds them into `sdk/c/build/lib/<cc816, large, tiny>/` |
 | Make | `sdk/c/c.mk` (a program's Makefile is three lines) |
 
-## Memory models
+## The two compilers
 
-`hcc --model large` (the default) or `--model tiny`. Every file of a program must be
-built with the same model.
+Every file of a program is built with the same compiler: hcc refuses an object or a
+library made by the other one ("an object or library made by vbcc ...: build every file
+with the same compiler").
+
+| | cc816 (default) | vbcc (`--cc vbcc`) |
+| --- | --- | --- |
+| Memory | one model ("Memory", below) | the large and the tiny model (`--model`) |
+| Data pointer | 16 bits: an offset in the code bank; `__far` 32 bits | large: 32 bits; tiny: 16 bits (the window) |
+| Floating point | **none yet**: a `float` or `double` is an error naming the file and the line | `float`, `double` (32 bits), math.h: `--float` |
+| `long long` | no | no (vbcc 65816 fails on it) |
+| `setjmp` / `longjmp` | no (`setjmp.h` is an `#error`) | in its library, not tested |
+| Assembly files (`.s`) | ca65 syntax ("Calling convention", below) | vasm oldstyle syntax |
+| Linking | ld65, Horizon's own linker: an o65 file straight away | vlink three times, then mko65 ("Program files") |
+| Controls library (`hui.h`) | linked straight in by ld65 | a block made by ld65 at $0100 |
+| Known faults | none open ("Compiler notes") | seven, six repaired by hcc ("Compiler notes") |
+| Needs | Python 3, cc65's ca65, ld65 and ar65 | its toolchain (x86-64 Linux binaries, downloaded), and cc65 for `hui.h` |
+| Licence | the SDK's (pycparser and pcpp inside are BSD) | free for non-commercial use, may be redistributed only unmodified |
+
+**What needs `--cc vbcc`:** floating point (`float`, `double`, `math.h`, `printf("%f")`),
+`setjmp`/`longjmp`, the tiny model. Neither compiler has `long long`, variable-length
+arrays, inline assembly, or a program larger than its one code bank.
+
+## Memory (cc816)
+
+```
+cc816 (one model)
+
+code bank (the program's own 64 KB, DBR)
+$0100   code, then constants (strings, const)
+        initialised data
+        zeroed data (bss)
+        heap (malloc) ...
+        software stack guard zone (256 bytes)
+        software stack ... grows down: arrays, structures,       --stack N (default 8192)
+        locals whose address is taken
+$FFF0
+
+window (bank 0, 32 KB, private)
+$0000   direct page: cc816's registers $00-$77, then the controls
+        library's when the program uses hui.h
+$0100   hardware stack guard zone (256 bytes)
+ ...    hardware stack (grows down): return addresses, arguments,
+        spilled registers
+$7F7F   ... argument string, at most $7FFE
+
+other banks (64 KB each): hz_far_alloc(), __far pointers
+```
+
+Every data pointer is a 16-bit offset in the code bank: globals, string constants,
+`malloc` blocks and the locals that need an address (arrays, structures, `&x`) are all
+there, so any pointer reaches any of them, and code reads them with 16-bit addresses
+through DBR. The other locals live in direct-page registers or on the hardware stack.
+
+| | cc816 |
+| --- | --- |
+| Code + constants + data + bss | 65,264 bytes ($0100-$FFF0) less the software stack: 57,072 with the default 8,192 |
+| Heap | from the end of bss to the software stack's guard zone (a small program: about 48,000 bytes) |
+| Software stack | `--stack N` bytes (512-32,768, even; default 8,192): arrays, structures and locals whose address is taken |
+| Hardware stack | about 32,000 bytes (from just below the argument string to $0100) |
+| Direct page | $00-$77: 48 bytes of scratch registers, 48 callee-saved, the software stack pointer, the runtime helpers' words, the code bank's number |
+| DBR (the data bank) | the code bank |
+
+`hcc` checks the sizes after linking and says what does not fit, in bytes. The loader's
+own limits: the program file is less than 64 KB, and code + data + bss fit in $0100-$FFFF.
+
+## Memory models (vbcc)
+
+`hcc --cc vbcc --model large` (vbcc's default) or `--model tiny`. Every file of a program
+must be built with the same model.
 
 ```
 LARGE (default)                                TINY (--model tiny)
@@ -61,29 +129,30 @@ programs are smaller (16-bit pointers), but all data must fit in 28 KB.
 
 | Type | Size | Range / note |
 | --- | --- | --- |
-| `char` | 8 bits | **unsigned** (0-255; the library is built so); `signed char` for -128-127 |
+| `char` | 8 bits | **unsigned** (0-255; both compilers, the library is built so); `signed char` for -128-127 |
 | `short`, `int` | 16 bits | -32,768-32,767 (`unsigned`: 0-65,535) |
 | `long` | 32 bits | |
-| `long long` | - | not supported by vbcc 65816 |
-| `float`, `double` | 32 bits | MS BASIC's format, about 7 digits (`hcc --float`) |
-| data pointer | 32 bits large, 16 bits tiny | `__far` (32 bits) in both |
-| function pointer | 32 bits | functions are called with JSL in both models |
-| `size_t` | 16 bits | `unsigned int`: one object at most 65,535 bytes |
+| `long long` | - | not supported (neither compiler) |
+| `float`, `double` | cc816: none; vbcc: 32 bits | vbcc: MS BASIC's format, about 7 digits (`hcc --cc vbcc --float`) |
+| data pointer | cc816: 16 bits; vbcc: 32 bits large, 16 bits tiny | `__far` (32 bits: offset, bank, 0) with both |
+| function pointer | cc816: 16 bits (JSR); vbcc: 32 bits (JSL) | |
+| `size_t`, `ptrdiff_t` | 16 bits | `unsigned int`, `int`: one object at most 65,535 bytes |
 
-Structures are packed (no padding): the parameter blocks in `horizon.h` match ABI.md
-byte for byte (each has a compile-time size check). Bytes are little-endian.
+Structures are packed (no padding) with both compilers: the parameter blocks in
+`horizon.h` match ABI.md byte for byte (each has a compile-time size check). Bytes are
+little-endian.
 
-Predefined macros: `__65816__`, `__VBCC__`, `__HORIZON__`, `__ATARI816__`; in the tiny
-model `__MNEAR` (what vbcc defines) and `__MTINY` (the manual's name, added by hcc), in the
-large model `__MLARGE`. `horizon.h` defines `HZ_TINY` in the tiny model.
+Predefined macros: `__65816__`, `__HORIZON__`, `__ATARI816__`, and `__CC816__` with cc816
+or `__VBCC__` with vbcc; with vbcc's tiny model `__MNEAR` (what vbcc defines) and `__MTINY`
+(the manual's name, added by hcc), in its large model `__MLARGE`. `horizon.h` defines
+`HZ_TINY` in the tiny model.
 
 ## Pointers, banks and far memory
 
-A large-model pointer holds an offset and a bank, but arithmetic on it is 16-bit: an
-object (an array, a structure, a `malloc` block) must not cross a bank boundary. A bank
-is 64 KB; Horizon gives a program more of them with `bank_alloc` (`hz_mem_info()` says
-how many are free: 92 banks in all on the 8 MB machine, some used by Horizon and other
-programs).
+An object (an array, a structure, a `malloc` block) must not cross a bank boundary: a
+pointer's arithmetic is 16-bit. A bank is 64 KB; Horizon gives a program more of them
+with `bank_alloc` (`hz_mem_info()` says how many are free: 92 banks in all on the 8 MB
+machine, some used by Horizon and other programs).
 
 ```c
 #include <horizon.h>
@@ -104,14 +173,113 @@ hz_far_free(buf);                            /* back to the system (also at exit
 | `HZ_OFF(p)`, `HZ_BANK(p)` | a pointer's offset and bank |
 | `HZ_U24(field, p)` | fill a parameter block's 3-byte pointer |
 
-**Do not build pointers by casting integers.** `(char *)0x050000` does not give bank 5:
-vbcc turns a constant integer into a pointer in the data bank. Use `hz_farptr(5, 0)`.
+**cc816.** A plain pointer is an offset in the code bank: it cannot point into another
+bank. Memory of other banks is reached through `__far` pointers (`unsigned char __far *p`),
+which read and write with long addressing. A near pointer converts to a far one by itself
+(its bank is the code bank; a null pointer stays null), and so `(unsigned long)p` is the
+whole 24-bit address of p: `HZ_BANK(p)` of any pointer is right. A far pointer converted
+to a near one keeps its offset only. An integer converts to a far pointer as it is:
+`(char __far *)0x050000L` is bank 5, offset 0 (`hz_farptr(5, 0)` is the same). Code
+written for vbcc's large model that keeps far addresses in plain pointers (`(char *)
+hz_far_alloc()`, `(const char *)farbuf`) must say `__far` instead, or copy the data into
+the code bank first (`hz_far_copy`): see [porting.md](porting.md).
 
-In the tiny model a plain pointer cannot point into another bank: declare far data with
-`__far` (`unsigned char __far *p`). A near pointer converts to a far one (bank 0, the
-window) by itself.
+**vbcc.** A large-model pointer holds an offset and a bank, and reaches the code bank, the
+window and any bank alike. **Do not build pointers by casting integers** with vbcc:
+`(char *)0x050000` does not give bank 5 (vbcc turns a constant integer into a pointer in
+the data bank); use `hz_farptr(5, 0)`. In the tiny model a plain pointer cannot point into
+another bank: declare far data with `__far`. A near pointer converts to a far one (bank 0,
+the window) by itself.
 
 ## Calling convention (for assembly)
+
+### cc816
+
+- Functions are called with **JSR** and return with **RTS** (a program's code is all in
+  its code bank). On entry and exit A, X and Y are **16-bit** (M = X = 0), D = 0, DBR =
+  PBR = the code bank: keep D and DBR.
+- **Every argument is on the hardware stack**, pushed last first: at entry the first is at
+  `3,s` (above the 2-byte return address), the next ones after it. Each takes 2 bytes
+  (`char`, `short`, `int`, pointers, function pointers) or 4 (`long`, `__far` pointers:
+  offset, bank, 0). The caller removes them. A structure argument is passed as the address
+  of a copy the caller made (2 bytes); a structure result is written through a hidden
+  first argument (the address of the caller's space), which is also returned in A.
+  Variable arguments are the same (`va_list` is a far pointer into the stack).
+- The **result** is in A (16-bit and smaller) or A/X (32-bit: A the low word).
+- **Registers** (direct page, `.importzp` them): `__rg` is 96 bytes: `__rg+0` to
+  `__rg+47` may be changed by any function, `__rg+48` to `__rg+95` must be kept (save and
+  restore what you use). `__h0`, `__h1`, `__h2`, `__h3` (4 bytes each) and `__rv` (4)
+  are scratch too (the runtime's helpers use them). Never change `__sp` (the software
+  stack pointer) or `__cbank` (a word: the code bank's number).
+- **Names**: a C name gets an underscore: `int add(int, int)` is `_add` in assembly.
+  C's globals are in the code bank: absolute addresses (DBR) reach them.
+
+The assembler is **ca65** (cc65's: `.p816`, `.a16`/`.a8`/`.i16` after `rep`/`sep`, `.export`,
+`.import`, `.importzp`, `.segment "CODE"`/`"RODATA"`/`"DATA"`/`"BSS"`). A file is one
+module for the linker: ld65 links a module when the program uses one of its names, and
+the whole module then.
+
+```asm
+; add3.s - unsigned add3(unsigned a, unsigned b, unsigned c) for cc816:
+; a at 3,s, b at 5,s, c at 7,s (above the 2-byte return address)
+        .p816
+        .a16
+        .i16
+        .export _add3
+
+        .segment "CODE"
+_add3:  lda     3,s
+        clc
+        adc     5,s
+        clc
+        adc     7,s
+        rts
+```
+
+```asm
+; sum.s - unsigned long sum(const unsigned *p, unsigned n): a near pointer is an offset in
+; the code bank (DBR), so (dp),y reaches it; __rg+0.. are scratch registers
+        .p816
+        .a16
+        .i16
+        .importzp __rg
+        .export _sum
+
+        .segment "CODE"
+_sum:   lda     3,s             ; p
+        sta     __rg+0
+        lda     5,s             ; n
+        asl     a
+        sta     __rg+2          ; n * 2: where to stop
+        stz     __rg+4          ; the sum, low word
+        stz     __rg+6          ; high word
+        ldy     #0
+@loop:  cpy     __rg+2
+        bcs     @done
+        lda     (__rg+0),y
+        clc
+        adc     __rg+4
+        sta     __rg+4
+        bcc     :+
+        inc     __rg+6
+:       iny
+        iny
+        bra     @loop
+@done:  lda     __rg+4          ; the result: A low, X high
+        ldx     __rg+6
+        rts
+```
+
+Build them with the C files: `hcc -o PROG.PRG main.c add3.s sum.s`. In C: `unsigned
+add3(unsigned a, unsigned b, unsigned c); unsigned long sum(const unsigned *p, unsigned
+n);` (checked: `add3(1, 20, 300)` is 321, `sum` of {60000, 60000, 1, 2} is 120003). Bank
+bytes (`#^label`, `.faraddr`) are relocated by Horizon's loader. The compiler's own
+output for any C file is `hcc -S` (FILE.s next to it), or `python3 sdk/c/cc816/cc816.py
+-S file.c`. Horizon's assembly libraries (ulib, the controls library) are linked straight
+into a cc816 program: they share the direct page (ld65 places their zero page after
+cc816's registers).
+
+### vbcc
 
 vbcc's 65816 calling convention, the same in both models:
 
@@ -160,19 +328,39 @@ _add3:	sta	r0
 	rtl
 ```
 
-Build it with the C files: `hcc -o PROG.PRG main.c add3.s`. In C: `unsigned
+Build it with the C files: `hcc --cc vbcc -o PROG.PRG main.c add3.s`. In C: `unsigned
 add3(unsigned a, unsigned b, unsigned c);`. A 32-bit far address in data is `dd sym`
 (vbcc writes pointers so); hcc relocates every bank byte (see "Program files" below). Assembly libraries written for ca65 (ulib, the controls library) are
-another matter: they are called with JSR and use the direct page from $50. The controls
-library is bound for C (`hui.h`): [apps.md](apps.md), "How the library gets into a
-program", shows how such a library is linked into a C program (a block made by ld65,
-JSL->JSR shims); a `hui.h` program's own assembly must leave $50-$EF alone.
+another matter: they are called with JSR and use the direct page from $50. With vbcc the
+controls library comes in as a block made by ld65 with JSL->JSR shims ([apps.md](apps.md),
+"How the library gets into a program"); a `hui.h` program's own assembly must leave
+$50-$EF alone.
 
 ## The C library on Horizon
 
-vbcc's C library (binary only, its 65816 "simulator" target) does the formatting,
+Both compilers give the same C library behaviour: the libc test (`tests/libc`, 86 checks:
+formats, strings, sorting, the heap, files, folders, time, far memory, errno, argv, the
+keyboard, atexit) passes unchanged with cc816 and with both of vbcc's models.
+
+**cc816** has a C library of its own (`sdk/c/lib/cc816`, in C, with the memory and string
+routines and the arithmetic in assembly, `sdk/c/rt/cc816`) plus the SDK's shared files
+(`sdk/c/lib`: argv, the console's line input, folders, errno's codes, time, the stack
+checks). It is built split, one function a module, so a program links only what it uses.
+Where it differs from the table below:
+
+| | cc816 |
+| --- | --- |
+| `printf` family | `%d %i %u %x %X %o %c %s %p %n %%`, the sizes `hh h l` (and `j z t`), widths, precision, `-+ 0#`, `*`. No floating point (`%f` is printed as written) |
+| `scanf` family | `%d %i %u %o %x %c %s %[...] %p %n`, `*`, widths, the sizes `hh h l` |
+| `fgetpos`, `fsetpos` | 32-bit positions |
+| `malloc` | first fit over the heap; NULL when it is full (the libc test: 25 blocks of 1 KB) |
+| `clock()` | CLOCKS_PER_SEC 50, as vbcc's |
+| `setjmp`, floating point, `math.h` | not there (`--cc vbcc`) |
+| `assert` | prints the expression, the file and the line on stderr, then exit code 3 |
+
+**vbcc**: its C library (binary only, its 65816 "simulator" target) does the formatting,
 strings, sorting, memory and buffering; the SDK replaces what reaches the machine and what
-does not work in it.
+does not work in it:
 
 | | Status |
 | --- | --- |
@@ -198,9 +386,9 @@ does not work in it.
 | `system`, `getenv`, `signal`, `raise`, locales | not supported (they return failure) |
 | Floating point | `+ - * /`, conversions, `printf("%f")`, `sscanf("%f")`, `atof`, `strtod`, and math.h (`sqrt sin cos exp log pow floor ...`) were checked (tests/float). Cost: about 4.7 KB for arithmetic and printf's `%f` (8,644 bytes for a small printf program, 13,336 with one float multiply); the float test with seven math.h functions is 24 KB. Slow: thousands of cycles an operation. hcc links the float library when the link needs it (or `--float`) |
 
-### The C library's replaced parts
+### vbcc's library: the replaced parts
 
-`lib/stdio.c` replaces the console streams, `__read`/`__write`, `fopen`, `fclose`,
+`lib/vbcc/stdio.c` replaces the console streams, `__read`/`__write`, `fopen`, `fclose`,
 `freopen`, `fseek`, `ftell`, `remove`, `rename`, `sscanf`, `fscanf`, `scanf` and `strtod`;
 `rt/crt0.s` replaces `__main` and `exit`; `lib/hzerr.c` `strerror` and `perror`. The
 reasons: the simulator target has no files; its `ftell` keeps 16 bits; its `__main` gives
@@ -254,33 +442,49 @@ hz_close(h);
   to ASCII, KEY_* for arrows).
 - **A syscall without a wrapper** (a newer kernel's): `hz_syscall(n, a, x, y)` returns A and
   sets hz_errno, hz_x, hz_y. A pointer is two arguments: `HZ_OFF(p)` and `HZ_BANK(p)`. Or
-  write the stub in assembly as the generated ones are (`build/lib/large/hzsys.s`):
+  write the stub in assembly as the generated ones are (cc816: `build/lib/cc816/stubs/*.s`;
+  vbcc: `build/lib/large/hzsys.s`):
   the arguments into A, X, Y, `cop #$NN`, `bcs` to an error path.
 
-## The stack
+## The stacks
 
-The stack is the window's top part: about 32 KB in the large model, 3,968 bytes at least
-in the tiny model (`hcc --stack N` gives it N bytes; the data then has less). Locals,
-arguments and return addresses live there: big local arrays and deep recursion use it up.
+**cc816** has two. The **hardware stack** is the window's top part (about 32 KB): return
+addresses, arguments and the values the register allocator spills. The **software stack**
+is the top of the code bank (`--stack N` bytes, default 8,192): arrays, structures and
+locals whose address is taken. Big local arrays and deep recursion with arrays use it up.
 
-The startup fills the stack's lowest 256 bytes with a pattern (the **guard zone**); at
-exit the program checks it and, if any of it was written, prints `stack overflow: the
-guard zone at window address N (the stack's last 256 bytes) was written`. An overflow is
-only seen if something was written into those 256 bytes (a never-written local array
-larger than that can jump over them), and only at exit (`hz_stack_check()` checks any
-time; `hz_stack_free()` gives the bytes below the stack pointer now). With
-`hcc --debug` the startup paints the whole stack and the exit reports the most used:
-`stack: 751 of 3835 bytes used`. vbcc has no per-function stack check on the 65816.
+**vbcc** has one: the window's top part, about 32 KB in the large model, 3,968 bytes at
+least in the tiny model (`hcc --stack N` gives it N bytes; the data then has less).
+Locals, arguments and return addresses live there.
+
+The startup fills each stack's lowest 256 bytes with a pattern (the **guard zone**); at
+exit the program checks them and, if any of a zone was written, prints `stack overflow:
+the guard zone at window address N (the stack's last 256 bytes) was written` (cc816's
+software stack: `stack overflow: the software stack's guard zone at N ... was written`).
+An overflow is only seen if something was written into those 256 bytes (a never-written
+local array larger than that can jump over them), and only at exit (`hz_stack_check()`
+checks any time; `hz_stack_free()` gives the bytes below the hardware stack pointer now,
+cc816's `hz_sstack_free()` those of the software stack). With `hcc --debug` the startup
+paints the stacks and the exit reports the most used: `stack: 109 of 32251 bytes used`
+and, with cc816, `software stack: 660 of 7936 bytes used`. Neither compiler checks the
+stack in every function.
 
 ## Program files
 
-vlink, vbcc's linker, cannot write a relocatable program Horizon's loader takes (its o65
-output does not relocate bank bytes). So hcc links each program **three times**, as raw
-images at banks $00, $5A and $A5, and `tools/mko65.py` compares them: a byte that is the
-same in all three is copied; a byte that differs must be **exactly** the link's bank in
-each ($00, $5A, $A5) and becomes a SEG relocation (the loader stores the code bank there).
-Anything else stops the build with the byte's address. Offsets never need relocating: the
-loader always puts the program at offset $0100 of its code bank.
+**cc816**: ld65 (cc65's linker, the one Horizon's own programs use) writes the o65 file
+straight away, with the startup first at $0100 (`rt/cc816/hzprog.cfg`), and hcc then
+drops the relocation entries that add nothing (`tools/o65strip.py`, the SDK's copy of
+Horizon's: the loader always puts a program at $0100, so only the bank bytes need it;
+it checks that the result loads the same at three banks). A hello world keeps 8
+relocations.
+
+**vbcc**: vlink, vbcc's linker, cannot write a relocatable program Horizon's loader takes
+(its o65 output does not relocate bank bytes). So hcc links each program **three times**,
+as raw images at banks $00, $5A and $A5, and `tools/mko65.py` compares them: a byte that
+is the same in all three is copied; a byte that differs must be **exactly** the link's
+bank in each ($00, $5A, $A5) and becomes a SEG relocation (the loader stores the code bank
+there). Anything else stops the build with the byte's address. Offsets never need
+relocating: the loader always puts the program at offset $0100 of its code bank.
 
 **Where this could go wrong silently, and the guard.** The loader *replaces* a SEG byte
 with the code bank. A byte holding "the bank + 1" (an address in the next bank, an offset
@@ -293,8 +497,49 @@ Tiny-model data addresses (the window) are the same in every task and need nothi
 
 ## Compiler notes
 
+### cc816
+
+cc816 is new. Its regression set (`make -C sdk/c/cc816 check`) runs, in the emulator,
+one small program for each fault found so far (`cc816/tests/regress/`), random programs
+checked against gcc's results (`cc816/tests/fuzz/genfuzz.py`: arithmetic of every width,
+casts, compares, shifts, division, arrays, structures and their copies, structures by
+value, bit-fields, function pointers, variable arguments, far pointers, switches, loops
+that spill registers), and the c-testsuite when `CTS=` points at a checkout. The faults
+found while it became the SDK's compiler, all fixed in the compiler:
+
+1. **Branch relaxation stopped after 20 branches**: a switch with about 30 cases made code
+   ca65 refused (a branch out of range). Every branch out of reach is now relaxed, pass
+   after pass (`regress/r001_relax.c`).
+2. **A byte read through a far pointer was a 16-bit read**: at a bank's last byte
+   (`b[65535u]`) it touched the next bank and Horizon ended the program. Far and volatile
+   bytes are read with 8-bit loads (`r002_farbyte.c`).
+3. **A far pointer plus an unsigned constant of 32,768 or more** (`p + 65535u`) was
+   sign-extended: the pointer went backwards. Unsigned indexes are zero-extended (`r002`).
+4. **A row of a 2-D array as a static initialiser** (`static int *p = a[2];`) was refused
+   as "not a constant" (`r005_addrconst_array_row.c`).
+5. **The value of an assignment to a bit-field** (`v = (s.f = x)`, and the compound forms)
+   was the right-hand side, not the value stored: it is now cut to the field's width
+   (sign-extended for a signed field) (`r006_bitfield_assign_value.c`).
+6. **A structure copy through `__far` pointers** (`p[1] = p[0]`, a far structure passed
+   or returned by value) moved the bytes inside the code bank: the block move now takes
+   both pointers' banks (`r007_far_struct_copy.c`).
+
+Bugs 4-6 were found by the random programs once they learnt structures, bit-fields and
+far pointers. `r003_nearfar.c` and `r004_coalesce32.c` guard two changes made on the way
+(near pointers widened to far ones; 32-bit results sharing their operand's registers).
+
+The c-testsuite (single-exec, 220 programs): 190 pass. Of the others, 18 need floating
+point, `long long`, a variable-length array or a GNU statement expression; 7 meet gaps of
+the front end (pycparser and pcpp: a structure and a label of the same name, empty macro
+arguments, `#line`, `wchar.h`, one more parse) or `int64_t`; 5 are listed in
+`cc816/tests/cts-known.txt` (two expect a 32-bit `int`, two compiler extensions, and an
+8-queens search too slow for the test's time, with vbcc too). The random programs: seeds
+1, 2 and 3 (1,200 programs) all agree with gcc.
+
+### vbcc
+
 vbcc 65816 is a young back end. These faults were found while building the SDK; the SDK
-works around each, and `tests/codegen` checks the cases:
+works around each, and `tests/codegen` checks the cases (cc816 passes the same test):
 
 1. **The global optimiser** (`-O2`, `-O3`) does not see that a function called with the
    address of a local writes it, and moves or drops reads of the local (seen: a loop
@@ -343,44 +588,53 @@ trials' benchmark (`tests/bench`, `make -C sdk/c test` runs it), in milliseconds
 
 | | sieve | sum16 | mul32 | fib22 | strs | structs |
 | --- | --- | --- | --- | --- | --- | --- |
-| large, -O1 (the default) | 900 | 886 | 1305 | 635 | 1310 | 1397 |
-| tiny, -O1 | 1640 | 556 | 1306 | 687 | 1077 | 1350 |
-| large, -O3 | 1300 | 490 | 1298 | 633 | 1310 | 1348 |
-| tiny, -O3 | 1579 | 500 | 1299 | 634 | 1064 | 1340 |
+| cc816, -O2 (the default) | 809 | 296 | 1277 | 388 | 994 | 670 |
+| cc816, -O1 | 809 | 476 | 1280 | 393 | 999 | 659 |
+| vbcc large, -O1 (its default) | 900 | 886 | 1305 | 635 | 1310 | 1397 |
+| vbcc tiny, -O1 | 1640 | 556 | 1306 | 687 | 1077 | 1350 |
+| vbcc large, -O3 | 1300 | 490 | 1298 | 633 | 1310 | 1348 |
+| vbcc tiny, -O3 | 1579 | 500 | 1299 | 634 | 1064 | 1340 |
 
-(-O3 is faster on sum16 and slower on sieve; it is not the default because of the
-optimiser fault below. The check values are the trials' six: 1899, 27824, 1071602483,
-17711, 3160, 4275534039.)
+(The check values are the trials' six: 1899, 27824, 1071602483, 17711, 3160,
+4275534039. vbcc's -O3 is not its default because of the optimiser fault above.)
 
 What they measure: sieve (byte arrays, 16-bit indexes), sum16 (16-bit arrays), mul32
 (32-bit multiply and divide), fib22 (calls), strs (pointers and bytes), structs (structure
 fields, signed, shifts).
 
-The SDK's tuned runtime (`sdk/c/fastrt`, linked into every program in place of the C
-library's routines) against the library's own, in milliseconds for the loop shown (loop
-overhead included; tests/rt/rtbench.c, large model; the tiny model's figures are within a
-few per cent):
+The runtimes: cc816's (`sdk/c/rt/cc816`) and vbcc's tuned one (`sdk/c/fastrt`, linked
+into every vbcc program in place of its library's routines) against vbcc's library's own,
+in milliseconds for the loop shown (loop overhead included; `tests/rt/rtbench.c`; vbcc's
+large model):
 
-| Operation | fastrt | library |
+| Operation | cc816 (rt/cc816) | vbcc (fastrt) |
 | --- | --- | --- |
-| 16-bit multiply, mixed values, 20,000 times | 696 | 1,425 |
-| 16-bit multiply by 100, 20,000 times | 585 | 1,279 |
-| 16-bit divide, mixed values, 20,000 times | 1,019 | 1,665 |
-| 32-bit multiply, 10,000 times | 1,172 | 2,387 |
-| 32-bit divide by 1000, 10,000 times | 586 | 2,544 |
-| 32-bit modulo 7, 10,000 times | 613 | 2,648 |
-| 32-bit divide by $12345, 10,000 times | 1,328 | 2,666 |
-| memcpy of 1000 bytes, 200 times | 167 | 165 |
-| memmove of 1000 bytes upwards, 200 times | 180 | 918 |
-| memset of 1000 bytes, 200 times | 166 | 247 |
-| strlen of 1000 bytes, 200 times | 163 | 188 |
-| strcpy of 1000 bytes, 200 times | 297 | 336 |
-| memcmp of 1000 bytes, 200 times | 177 | 300 |
+| 16-bit multiply, mixed values, 20,000 times | 625 | 695 |
+| 16-bit multiply by 100, 20,000 times | 544 | 584 |
+| 16-bit divide, mixed values, 20,000 times | 938 | 1,018 |
+| 32-bit multiply, 10,000 times | 1,183 | 1,172 |
+| 32-bit divide by 1000, 10,000 times | 664 | 586 |
+| 32-bit modulo 7, 10,000 times | 707 | 614 |
+| 32-bit divide by $12345, 10,000 times | 1,413 | 1,328 |
+| memcpy of 1000 bytes, 200 times | 163 | 168 |
+| memmove of 1000 bytes upwards, 200 times | 163 | 180 |
+| memset of 1000 bytes, 200 times | 170 | 167 |
+| strlen of 1000 bytes, 200 times | 148 | 164 |
+| strcpy of 1000 bytes, 200 times | 320 | 298 |
+| memcmp of 1000 bytes, 200 times | 199 | 177 |
+| memcpy of 6 bytes, 2000 times | 26 | 50 |
 
-Each routine keeps the library's register contract and is checked against host-made
-tables (3,000 cases per arithmetic operation, 2,000 per memory function, signed and
-unsigned, edge values: `tests/rt`). memcpy was already a block move (MVN) in the library;
-vbcc copies a constant-size memcpy inline.
+(The 32-bit lines of this test read `volatile` operands: cc816 moves each through a
+direct-page register before the helper's own words, about 60 cycles a call more than
+vbcc, whose helpers take vbcc's registers directly. In real loops the operands are already
+in registers: the benchmark's mul32 above is faster with cc816.)
+
+Each routine is checked against host-made tables (3,000 cases per arithmetic operation,
+2,000 per memory function, signed and unsigned, edge values: `tests/rt`, for cc816 and
+both vbcc models). cc816's are fastrt's algorithms with its own calling contract, its
+32-bit multiply's low product unrolled, and its divisions taking a shorter round when the
+divisor is below $8000. Both compilers copy a structure (and vbcc a constant-size memcpy)
+inline with MVN.
 
 Advice, from these numbers and the generated code:
 
@@ -388,9 +642,9 @@ Advice, from these numbers and the generated code:
   65816's own size. Signed division and right shifts of `int` need extra code.
 - Avoid **`long`** in inner loops: every 32-bit operation is two 16-bit ones, and a
   multiply or divide is a call (a 32-bit multiply about 0.1 ms with its loop, table above).
-- Avoid **float** in anything that runs every frame.
-- **Byte arrays** are fast in the large model (sieve), **pointers** are faster in the tiny
-  model (strs, sum16).
+- Avoid **float** (vbcc) in anything that runs every frame.
 - `memcpy`, `memmove`, `memset` move blocks with MVN/MVP (about 7 cycles a byte, 1000
   bytes in under 1 ms); `hz_far_copy` too.
-- `-O1` is the safe default; `-O3 -speed` changes little here and has the faults above.
+- cc816: `-O2` (the default) is the fast one; `-O1` drops the loop optimisations (sum16
+  above). vbcc: `-O1` is its safe default; `-O3 -speed` changes little here and has the
+  faults above.

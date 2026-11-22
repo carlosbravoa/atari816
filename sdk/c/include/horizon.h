@@ -315,10 +315,15 @@ void hz_far_set(void __far *dst, int c, unsigned n);
 void __far *hz_farptr(unsigned bank, unsigned off);
 #define HZ_FARPTR(bank, off) hz_farptr((bank), (off))
 
-/* the stack: its lowest address and how many bytes are free below S now */
+/* the stack: how many bytes are free below S now */
 unsigned hz_stack_free(void);
-/* 0 if the stack's guard word is intact, -1 if the stack overflowed */
+/* 0 if the stack's guard zone is intact (cc816: both stacks'), -1 if a stack overflowed */
 int hz_stack_check(void);
+#ifdef __CC816__
+/* cc816's software stack (arrays, structures, locals whose address is taken): how many
+ * bytes are free below its pointer now */
+unsigned hz_sstack_free(void);
+#endif
 
 /* ---- console */
 /* read a line from the keyboard with echo and editing (Backspace, Left, Right): at most

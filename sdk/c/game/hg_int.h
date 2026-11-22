@@ -58,7 +58,8 @@ extern unsigned long hg__fbbase;
 /* far memory: n bytes, 256-byte aligned (whole banks for n > 65280) -> address, or 0 */
 unsigned long hg__farmem(unsigned long n);
 void hg__farmem_reset(void);
-#define HG__PTR(a) ((unsigned char *)(a))
+/* (a far pointer: with cc816 a plain pointer reaches only the code bank) */
+#define HG__PTR(a) ((unsigned char __far *)(a))
 
 /* a * b in 32 bits (hg_fast.s: cheaper than the runtime's long multiply) */
 unsigned long hg__umul(unsigned a, unsigned b);

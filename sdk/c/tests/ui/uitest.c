@@ -65,7 +65,13 @@ static void part1(void)
     far = hz_far_alloc();
     check(far != 0, "hz_far_alloc");
     hz_far_copy(far, "Hello, world", 13);
+#ifdef __CC816__
+    /* cc816's char * is an offset in the code bank: a far string is copied in first */
+    hz_far_copy(stat, far, 13);
+    check(ui_twidth(stat, 0) == w1, "ui_twidth: a string from a far bank");
+#else
     check(ui_twidth((const char *)far, 0) == w1, "ui_twidth: a string in a far bank");
+#endif
     check(ui_cwidth('W', 1) == 8, "ui_cwidth: the fixed font is 8 wide");
     check(ui_btnw("OK") >= 64, "ui_btnw: at least 64");
     /* an in/out buffer on the stack: copied in, cut, copied back */
@@ -187,7 +193,12 @@ static const char *row_text(ui_list *ls, unsigned row, const ui_rowinfo *ri)
     case 1:
         sprintf(rowbuf, "Row %u (far bank)", row);
         hz_far_copy(rowfar, rowbuf, strlen(rowbuf) + 1);
+#ifdef __CC816__
+        hz_far_copy(rowbuf, rowfar, strlen(rowbuf) + 1);   /* (cc816: back to the code bank) */
+        return rowbuf;
+#else
         return (const char *)rowfar;
+#endif
     }
     return row == 2 ? "Row 2 (constant)" : "A constant row";
 }

@@ -8,14 +8,16 @@
  * come from the table; numbers are printed by subtraction), and the memory checks fill
  * and sum the buffer with byte loops, not with the functions under test. In the large
  * model the memory cases run twice: in a buffer in the code bank, and in a bank of its
- * own (hz_far_alloc), plus copies between the two.
+ * own (hz_far_alloc), plus copies between the two. (cc816's runtime is rt/cc816; its
+ * pointers reach the code bank only: one pass, as the tiny model.)
  */
 #include <string.h>
 #include <horizon.h>
 
 #define BUF 4096
-/* vbcc -mtiny defines __MNEAR (not __MTINY, which its manual names) */
-#if defined(__MTINY) || defined(__MNEAR)
+/* vbcc -mtiny defines __MNEAR (not __MTINY, which its manual names). cc816's pointers
+ * are 16-bit too (the code bank): no far pass, as the tiny model */
+#if defined(__MTINY) || defined(__MNEAR) || defined(__CC816__)
 #define RT_TINY 1
 #endif
 #define MAXSHOW 4
@@ -328,7 +330,9 @@ int main(int argc, char **argv)
     unsigned long t_start = hz_uptime();
     out("rt: the runtime against ");
     out(path);
-#ifdef RT_TINY
+#if defined(__CC816__)
+    out(" (cc816)\n");
+#elif defined(RT_TINY)
     out(" (tiny model)\n");
 #else
     out(" (large model)\n");

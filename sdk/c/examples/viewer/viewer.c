@@ -9,7 +9,7 @@
  * Close, ctrl+W or the close box quits.
  *
  * What it shows of hui.h: a list whose rows come from a C function (the text is in a far
- * bank: the library copies it), scroll bars, laying the controls out again after
+ * bank: a line is copied out for the library), scroll bars, laying the controls out again after
  * WE_RESIZE, a label updated at run time, the file dialog, WE_DROP, menus and keys.
  * The file is read into a bank of its own (64 KB at most: a longer file shows its first
  * 64 KB); the line table is malloc'd (in the code bank, as the library needs nothing
@@ -48,19 +48,24 @@ static ui_alertblk al_err = { AL_WARN, "Viewer", stat, "OK", 0, 0 };
 
 static unsigned win, ww = WIN_W, wh = WIN_H;
 
-/* the row function: the line from the far bank, from the horizontal scroll position
- * (the library copies the text, cuts it with "..." and draws it) */
+/* the row function: the line from the far bank, from the horizontal scroll position,
+ * copied into the code bank (a plain char * is an offset in the code bank with cc816;
+ * the library then cuts it with "..." and draws it) */
 static const char *row_text(ui_list *l, unsigned row, const ui_rowinfo *ri)
 {
-    unsigned len;
-    const char *line;
+    static char buf[256];
+    const char __far *line;
+    unsigned i;
     if (row >= nlines)
         return "";
-    line = (const char *)(text + lines[row]);
-    len = (unsigned)strlen(line);
-    if (hsb.pos >= len)
-        return "";
-    return line + hsb.pos;
+    line = text + lines[row];
+    for (i = 0; i < hsb.pos && line[i]; ++i)
+        ;
+    line += i;
+    for (i = 0; i < sizeof(buf) - 1 && line[i]; ++i)
+        buf[i] = line[i];
+    buf[i] = 0;
+    return buf;
 }
 
 static void status(void)

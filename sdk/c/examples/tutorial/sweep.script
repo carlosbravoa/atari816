@@ -1,0 +1,26 @@
+# steps 3 and 4: the ship sweeps the whole playfield in rows 18 pixels apart, so a star
+# is caught wherever the random numbers put them (hgame seeds them from the clock at
+# hg_screen, so they move when the program's load time changes), then Esc.
+1000 shot
+1200 key left 1400
+1200 key up 700
+2700 key right 2700
+5500 key down 160
+5800 key left 2700
+8600 key down 160
+8900 key right 2700
+11700 key down 160
+12000 key left 2700
+14800 key down 160
+15100 key right 2700
+17900 key down 160
+18200 key left 2700
+21000 key down 160
+21300 key right 2700
+24100 key down 160
+24400 key left 2700
+27200 key down 160
+27500 key right 2700
+30300 key down 160
+30600 shot
+31000 {esc}

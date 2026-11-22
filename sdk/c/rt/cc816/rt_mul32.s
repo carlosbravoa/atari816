@@ -1,0 +1,66 @@
+; rt_mul32.s - part of cc816's arithmetic helpers (ld65 links a module only when a
+; program uses one of its names). The contract, for all of them:
+; cc816's arithmetic helpers, tuned for the 65816 as sdk/c/fastrt is for vbcc (the same
+; algorithms; tests/rt checks them against host-made tables).
+;
+; The code generator calls them with JSR; A, X, Y 16-bit. They keep the __rg registers
+; and __sp; they may change A, X, Y, __h0-__h3 and __rv.
+;
+;   __mul16                A * X -> A (the low 16 bits; signed and unsigned alike)
+;   __udiv16 __sdiv16      A / X -> A (__udiv16 leaves the remainder in X)
+;   __umod16 __smod16      A % X -> A
+;   __mul32                __h0 * __h1 -> __h0 (the low 32 bits; its 16 x 16 -> 32 part
+;                          unrolled: about 80 cycles less than fastrt's loop)
+;   __udiv32 __sdiv32      __h0 / __h1 -> __h0 (__udiv32 leaves the remainder in __h2)
+;   __umod32 __smod32      __h0 % __h1 -> __h0
+;   __shl32 __shr32 __sar32   __h0 shifted by X (0-31 used) -> __h0
+;   __umul1632 __smul1632  __h0 (16 bits) * __h1 (16 bits) -> __h0 (32 bits)
+;
+; C's rules: a quotient truncates toward 0, a remainder has the sign of the dividend.
+; Division by 0 does not trap: the quotient is all ones, the remainder the dividend.
+	.p816
+	.smart	-
+	.a16
+	.i16
+	.importzp __h0, __h1, __h2, __h3, __rv
+	.import	__mul16
+	.export	__mul32
+
+	.segment "CODE"
+
+; ---- 32 x 32 -> 32: low32(M * N) = Mlo*Nlo + ((Mlo*Nhi + Mhi*Nlo) << 16); the cross
+; terms with __mul16 (early stop: nothing when a high word is 0, the common case), the
+; low product with one 16-round 16 x 16 -> 32 shift-add
+__mul32:
+	lda	__h0+2
+	ora	__h1+2
+	beq	@short		; both high words 0: no cross terms
+	lda	__h0		; Mlo * Nhi
+	ldx	__h1+2
+	jsr	__mul16
+	sta	__rv
+	lda	__h1		; + Nlo * Mhi
+	ldx	__h0+2
+	jsr	__mul16
+	clc
+	adc	__rv
+	sta	__rv
+	bra	@lo
+@short:	stz	__rv
+@lo:	lda	__h1		; Mlo * Nlo: the multiplier becomes the product's low word
+	sta	__h2
+	lda	#0
+	lsr	__h2
+	.repeat	16		; (unrolled: no loop counter)
+	bcc	:+
+	clc
+	adc	__h0
+:	ror	a
+	ror	__h2
+	.endrep
+	clc
+	adc	__rv		; + the cross terms
+	sta	__h0+2
+	lda	__h2
+	sta	__h0
+	rts

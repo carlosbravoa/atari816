@@ -9,8 +9,8 @@ games written for cc65.
 | | |
 | --- | --- |
 | Header | `sdk/c/include/hgame.h` (every function documented there); `conio.h`, `joystick.h` |
-| Library | `sdk/c/game/` (C, and assembly for the hot paths); built into `sdk/c/build/game/large/libhgame.a` |
-| Linking | by itself: hcc links the library when a C source includes `hgame.h`, `conio.h` or `joystick.h` (or with `hcc --game`). Large model only (hcc's default) |
+| Library | `sdk/c/game/` (C, and assembly for the hot paths: `game/cc816/*.s` for cc816, `game/hg_fast.s` for vbcc); built into `sdk/c/build/game/cc816/libhgame.lib` (one module a function: a game links what it uses) and `sdk/c/build/game/large/libhgame.a` |
+| Linking | by itself: hcc links the library when a C source includes `hgame.h`, `conio.h` or `joystick.h` (or with `hcc --game`). cc816 (hcc's default) or vbcc's large model |
 | Examples | the tutorial (`sdk/c/examples/tutorial`), Gem Run in C (`sdk/templates/c-game`), Glimmer (`sdk/c/examples/glimmer`, full screen, scrolling), Catch (`sdk/c/examples/catch`, conio only) |
 | Tools | `sdk/tools/img2c.py` (pictures to C arrays or `.HGI` files) |
 | Tests | `make -C sdk/c/game test` |
@@ -176,8 +176,9 @@ blits at all), and a panel stays at the top.
 - The sprites' images must use colour 0 for transparency (`img2c.py --key 0`); positions
   are on the screen, so world positions go through `hg_screen_x` / `hg_screen_y`.
 - No `HG_DOUBLE` and no `hg_clear`: nothing is redrawn each frame, the frame is a camera
-  move, sprite moves and, now and then, a panel update. Measured: about 6 ms of CPU a frame
-  (`hg_stats` at the end: "STEP4: 328 frames, 6 missed").
+  move, sprite moves and, now and then, a panel update. Measured: with cc816 4.4 ms of CPU a frame, with vbcc 6.3 ms
+  (`hg_stats` at the end of its test.script run: "STEP4: 335 frames, 6 missed, CPU 4.41 ms
+  a frame", vbcc "328 frames, 6 missed, CPU 6.34 ms a frame").
 
 ### Step 5: a small game
 
@@ -272,7 +273,7 @@ Every function is described in `hgame.h`. In short:
 | `hg_image_from(pixels, w, h, n, key)`, `hg_image_load(path)`, `hg_image_new(w, h, n)`, `hg_image_free` | from a C array (copied into far memory), from an `.HGI` file, blank |
 | `hg_draw(img, frame, x, y)`, `hg_draw_part(img, sx, sy, w, h, x, y)` | blits; keyed when the image has a key colour |
 | `hg_image_draw(dst, src, frame, x, y)`, `hg_image_fill`, `hg_map_image` | the CPU, image to image (composing a background) |
-| `hg_image_palette(img)`, `hg_image_pixels(img, k)`, `hg_image_addr(img, k)` | the image's own colours; its pixels |
+| `hg_image_palette(img)`, `hg_image_pixels(img, k)`, `hg_image_addr(img, k)` | the image's own colours; its pixels (`unsigned char __far *`: they are in far memory) |
 
 | Sprites | |
 | --- | --- |
@@ -348,8 +349,8 @@ good size for effects (16 KB a second).
 
 **Music.** `hg_music_play("/Music/X.MOD", 1)` starts the music engine with a module, a WAV
 file or (REV $0C: the OPL2) a MIDI file. The replayer library (`horizon/build/modplay.o`) is
-a ca65 object and cannot be linked into a C program (vlink reads vbcc's objects only): the
-engine is the way from C. It loads the file at priority 0, which holds the game up while
+a ca65 object: vlink (vbcc) cannot link it, and with cc816 (ld65) hgame has no binding for
+it: the engine is the way from C. It loads the file at priority 0, which holds the game up while
 it loads (about 0.2 s for a 31 KB module in the emulator): start the music before play.
 
 **Fonts.** The built-in font is Horizon's console font (8 x 10 cells here, ASCII 32-126;
@@ -391,14 +392,22 @@ some room):
   left for everything else; at 640 x 360 a full clear takes four times as long. Clear only
   the part that changes, or use one page and sprites.
 
-Measured programs (emulator, the scripted runs of their tests):
+Measured programs (emulator, the scripted runs of their tests, both compilers; "hg_stats"
+is the program's own line at the end, "busy" emu816 --stats over the whole run against
+13.5 % for an idle desktop over the same time):
 
-| | Frames | CPU a frame |
+| | cc816 | vbcc |
 | --- | --- | --- |
-| Glimmer (full screen 320 x 180, scrolling, 16 sprites, panel, music playing) | 408 frames, 7 missed (each at a pick-up or a hit: a sample started, the panel redrawn, a console line) | about 6 ms: prof816 over 1.6 s of flying, 36 % busy and 64 % waiting for the frame; emu816 --stats over the whole test, 39.7 % busy against 12.3 % for an idle desktop |
-| Gem Run in C (a window, 2 bobs, a background image; 50 steps a second, 60 frames) | 349 frames, 21 missed: most while a level is composed (240 tiles by the CPU, 112 ms, three times in the test; the assembly Gem Run does the same), the others at gems and hits | 2.66 s of CPU over the 8.8 s of the test (33.2 % busy against 13.9 % idle: about 5 ms a frame) |
-| Gem Run in assembly (`sdk/templates/game`, 50 Hz, win_draw) | (draws at most 50 a second) | 1.31 s over the same 8.8 s (23.4 % busy) |
-| Tutorial step 4 (full screen, scrolling, 13 sprites) | 328 frames, 6 missed | about 6 ms |
+| Glimmer (full screen 320 x 180, scrolling, 16 sprites, panel, music playing; 17.1 s run) | 429 frames, 3 missed; hg_stats 4.53 ms a frame; busy 37.3 %; 37,900 bytes on the card | 408 frames, 7 missed; 5.16 ms a frame; busy 39.7 %; 44,649 bytes |
+| Gem Run in C (a window, 2 bobs, a background image; 50 steps a second, 60 frames; 13.8 s run) | 354 frames, 19 missed; 1.73 ms a frame; busy 29.8 %; 28,935 bytes | 349 frames, 21 missed; 2.69 ms a frame; busy 33.2 %; 33,357 bytes |
+| Tutorial step 4 (full screen, scrolling, 13 sprites; test.script) | 335 frames, 6 missed; 4.41 ms a frame; 27,262 bytes | 328 frames, 6 missed; 6.34 ms a frame; 32,173 bytes |
+
+Gem Run's missed frames come mostly while a level is composed (240 tiles by the CPU, about
+112 ms, three times in the test; the assembly Gem Run does the same), Glimmer's at a
+pick-up or a hit (a sample started, the panel redrawn, a console line). For comparison,
+Gem Run in assembly (`sdk/templates/game`, 50 Hz, win_draw) was measured at 23.4 % busy
+over the same run before cc816 (it is not built with a C compiler).
+
 
 `hg_stats` prints the CPU time from `hg_begin` to the sending (10 ms clock steps, averaged
 over the frames; the kernel's sending is not in it): 5.2 ms a frame for Glimmer, 2.7 ms for
@@ -498,7 +507,7 @@ where the game allows.
 
 ## Limits and known faults
 
-- Large model only; at most 32 bobs, 16 hardware sprites, 128 records a send (more are sent
+- cc816 or vbcc's large model; at most 32 bobs, 16 hardware sprites, 128 records a send (more are sent
   in pieces), 460,800 pixels a send (the kernel's limit; hgame splits), 2 KB of text a frame
   before it is sent early.
 - Images are frames one under the other, at most 4096 wide and 1024 rows in all (the sheet
@@ -509,11 +518,12 @@ where the game allows.
 - No collision report from the hardware (boxes only), no scaling, rotation or blending.
 - The emulator has no joystick; `hg_joy` reads 0 there.
 - **vbcc 65816 miscompiles a structure assignment between elements found by an index or
-  a computed pointer** (`a[i] = b[j]`, `*p = s[i]` with `p = &a[i]`; at -O1, the default, and
-  -O0): the copy uses addresses it never loaded and writes into a wrong bank (the program is
-  killed, or memory is damaged). Constant indexes, copies through pointers that are
-  incremented (`*p++ = *q++`) and `memcpy` are right. Use `memcpy(&a[i], &b[j], sizeof a[0])`
-  (hgame's own code does). Found while writing hgame; the repair belongs in hcc.
+  a computed pointer** (`a[i] = b[j]`, `*p = s[i]` with `p = &a[i]`; at -O1, its default,
+  and -O0): the copy uses addresses it never loaded and writes into a wrong bank (the
+  program is killed, or memory is damaged). Constant indexes, copies through pointers
+  that are incremented (`*p++ = *q++`) and `memcpy` are right. With vbcc use
+  `memcpy(&a[i], &b[j], sizeof a[0])` (hgame's own code does). cc816 copies them right
+  (`tests/vbcc_structcopy.c` passes with it).
 
 ## Tests
 
@@ -521,12 +531,14 @@ where the game allows.
 make -C sdk/c/game test
 ```
 
-runs `sdk/c/game/tests/run.py`, then the scripted tests of Glimmer, Catch and Gem Run in C.
-run.py builds eight test programs (`tests/gt_*.c`: drawing, the screen modes and the pause,
+runs `sdk/c/game/tests/run.py` once for each compiler (cc816, vbcc; `CCS=cc816` for one),
+then the scripted tests of Glimmer, Catch, the tutorial and Gem Run in C with each. run.py
+builds eight test programs (`tests/gt_*.c`: drawing, the screen modes and the pause,
 a window with bobs and its menu, hardware sprites, scrolling maps, input, sound and music,
 the helpers and `.HGI` files with bad arguments) and runs each in the emulator with a script;
 it checks the program's own PASS / FAIL lines (each reads the framebuffer back), the
-screenshots against `tests/ref/` (they are the same every run), the POKEY and Lau writes
+screenshots against `tests/ref/` (the same pictures for both compilers: every shot is
+taken while nothing moves, or of what the program draws for a given frame), the POKEY and Lau writes
 the emulator logs and the sound it records (Lau and the OPL2), and reports whether vbcc's
 structure-copy fault is still there (`tests/vbcc_structcopy.c`). `make -C sdk/c/game refs`
 writes new reference pictures after a change that is meant to show.

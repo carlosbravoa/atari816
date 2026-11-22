@@ -78,7 +78,7 @@ int main(void)
     hg_flush(1);
     check("a tile changed in view", slot_is(25, 10, 3, rc, rr) && hg_map_get(25, 10) == 3);
     check("the border outside the world", hg_map_get(MW, 0) == 3);
-    while (hg_ms() - t0 < 3500 && hg_frame())        /* shot 2 at 3 s */
+    while (hg_ms() - t0 < 3500 && hg_frame())        /* shot 2 at 3.3 s: the camera stopped */
         ;
     hg_frame();
     hg_camera(5000, 5000);                  /* kept inside: the world's last screen */

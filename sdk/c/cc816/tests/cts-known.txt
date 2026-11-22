@@ -1,0 +1,7 @@
+# c-testsuite programs whose result differs on purpose (tests/check.py does not count them).
+# file   reason
+00040.c  8 queens by brute force: no result within the test's time (vbcc neither, in 200 emulated seconds)
+00166.c  expects a 32-bit int (octal and hex constants above 32767 printed with %d)
+00168.c  expects a 32-bit int (8! and up printed with %d)
+00206.c  #pragma push_macro / pop_macro: a compiler extension the preprocessor (pcpp) has not
+00212.c  expects one of the __LP64__ / __ILP32__ style macros: cc816 is none of them

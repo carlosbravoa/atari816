@@ -214,7 +214,7 @@ static int fbxy(int *x, int *y)
 
 static void put(unsigned x, unsigned y, unsigned c)
 {
-    unsigned char *p;
+    unsigned char __far *p;
     if (hg__mode == FS_640X4) {
         p = HG__PTR(hg__fbaddr(x >> 1, y));
         if (x & 1)

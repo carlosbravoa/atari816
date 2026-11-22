@@ -62,9 +62,15 @@
 #define UI_DITHER(c1, c2)   ((unsigned long)(WD_DITHER | (unsigned)(c1) << 8) | \
                              (unsigned long)(c2) << 16)
 
-/* where every C list's row callback goes in: the block's header (sdk/c/ui/lib/huidefs.inc)
- * is at the code bank's $0100, so this is the same in every program */
+/* where every C list's row callback goes in. vbcc: the block's header
+ * (sdk/c/ui/lib/huidefs.inc) is at the code bank's $0100, so this is the same in every
+ * program; cc816: the binding's routine (ui/lib816/row.s), linked into the program */
+#ifdef __CC816__
+void hui_rowtramp(void);
+#define HUI_ROWCB   ((unsigned short)hui_rowtramp)
+#else
 #define HUI_ROWCB   0x0109
+#endif
 
 #define HUI_FORWARD
 #include "huigen.h"         /* the structures' names: ui_ctl, ui_button, ui_list, ... */

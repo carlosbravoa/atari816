@@ -128,7 +128,7 @@ unsigned long hg_image_addr(const hg_image *img, unsigned frame)
     return img->addr + hg__umul(frame * img->h, img->stride);
 }
 
-unsigned char *hg_image_pixels(const hg_image *img, unsigned frame)
+unsigned char __far *hg_image_pixels(const hg_image *img, unsigned frame)
 {
     return HG__PTR(hg_image_addr(img, frame));
 }

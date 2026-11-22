@@ -3,27 +3,37 @@
 
     hcc -o GAME.PRG main.c other.c [more.s] [options]
 
-Compiles every .c with vbcc65816, assembles every .s with vasm (vasm oldstyle syntax,
-the syntax vbcc emits), links them with the Horizon C library and writes GAME.PRG, ready
-for the SD card or the emulator (sdk/tools/run816.py).
+Compiles every .c, assembles every .s, links them with the Horizon C library and writes
+GAME.PRG, ready for the SD card or the emulator (sdk/tools/run816.py). Two compilers:
+
+  cc816 (the SDK's own, sdk/c/cc816): one memory model, ca65 assembly (.s files in ca65
+        syntax), linked with ld65. Needs Python 3 and cc65's ca65/ld65/ar65.
+  vbcc  (vbcc 65816, tools/get-toolchain.sh): the large and tiny models, floating point
+        (--float), vasm assembly (.s files in vasm oldstyle syntax).
 
 Options:
+  --cc cc816|vbcc   the compiler (default: $HZ_CC, else cc816); every file of
+                    a program is built with the same one (hcc refuses to mix objects)
   -o FILE           the program (default: the first source's name in capitals, .PRG)
   -c                compile/assemble only: one .o per source (with -o: that name)
   -S                write the compiler's assembly (.s) next to each .c, then go on
   -I DIR            look for #include files in DIR too
   -D NAME[=VALUE]   define a macro
   -O0 -O1 -O2 -O3 -Os
-                    optimisation (default -O1: vbcc's local optimisations; -O2 and -O3
-                    add the global ones, which miscompile some code: see
-                    docs/c/reference.md, "Compiler notes"; -O3 also -speed, -Os -size)
-  --model large     (default) 32-bit pointers: they reach every bank; globals in the
-                    code bank, the stack in the window (about 32 KB)
-  --model tiny      16-bit pointers, all data in the window: faster, but data + bss +
-                    heap are limited to 28,416 bytes (docs/c/reference.md)
-  --stack N         tiny model: bytes for the stack (default 3968; data gets the rest)
-  --float           link the floating-point library (printf %f, math.h); hcc also
-                    adds it by itself when the link needs it
+                    optimisation. cc816: -O2 (the default) and -O3, -Os are the same;
+                    -O1 no loop optimisations, -O0 none. vbcc: default -O1 (its local
+                    optimisations; -O2 and -O3 add the global ones, which miscompile
+                    some code: see docs/c/reference.md, "Compiler notes"; -O3 also
+                    -speed, -Os -size)
+  --model large     vbcc only (cc816 has one model): 32-bit pointers that reach every
+                    bank; globals in the code bank, the stack in the window (32 KB)
+  --model tiny      vbcc only: 16-bit pointers, all data in the window: faster, but
+                    data + bss + heap are limited to 28,416 bytes (docs/c/reference.md)
+  --stack N         cc816: bytes for the software stack (arrays, structures and locals
+                    whose address is taken; default 8192, taken from the code bank);
+                    vbcc tiny model: bytes for the stack (default 3968)
+  --float           vbcc only: link the floating-point library (printf %f, math.h);
+                    hcc also adds it by itself when the link needs it
   --ui              link Horizon's controls library (hui.h: windows with buttons,
                     fields, lists, dialogs; large model only); hcc also adds it by
                     itself when the program uses a name of hui.h (docs/c/apps.md)
@@ -45,10 +55,13 @@ import sys
 HERE = os.path.dirname(os.path.realpath(__file__))
 sys.path.insert(0, os.path.join(os.path.dirname(HERE), "tools"))
 import hzc  # noqa: E402
+import hzc816  # noqa: E402
 sys.path.insert(0, os.path.join(os.path.dirname(HERE), "game"))
 import hgbuild  # noqa: E402
 
-VERSION = "hcc 1.0 (Horizon C SDK, vbcc 65816)"
+VERSION = "hcc 2.0 (Horizon C SDK: cc816 and vbcc 65816)"
+DEFAULT_CC = "cc816"
+COMPILERS = ("cc816", "vbcc")
 
 
 def die(msg, code=1):
@@ -65,8 +78,11 @@ def main(argv):
         return 0
     if argv[0] == "--build-lib":            # the SDK's Makefile: (re)build the library
         try:
-            for m in argv[1:] or hzc.MODELS:
-                hzc.build_lib(m)
+            for m in argv[1:] or ("cc816",) + hzc.MODELS:
+                if m == "cc816":
+                    hzc816.build_lib()
+                else:
+                    hzc.build_lib(m)
         except hzc.HccError as e:
             die(str(e))
         return 0
@@ -76,14 +92,10 @@ def main(argv):
         except hzc.HccError as e:
             die(str(e))
         return 0
-    out = None
-    srcs, incs, defs, libs = [], [], [], []
-    opt = hzc.DEFAULT_OPT
-    model = "large"
-    compile_only = asm_too = want_map = debug = float_ = ui = False
-    game = False
-    stack = None
-    keep = None
+    o = {"out": None, "srcs": [], "incs": [], "defs": [], "libs": [], "opt": None,
+         "model": None, "compile_only": False, "asm_too": False, "want_map": False,
+         "debug": False, "float": False, "ui": False, "game": False, "stack": None,
+         "keep": None, "cc": os.environ.get("HZ_CC") or DEFAULT_CC}
     i = 0
 
     def val(name):
@@ -96,59 +108,163 @@ def main(argv):
     while i < len(argv):
         a = argv[i]
         if a == "-o":
-            out = val("-o")
+            o["out"] = val("-o")
         elif a == "-c":
-            compile_only = True
+            o["compile_only"] = True
         elif a == "-S":
-            asm_too = True
+            o["asm_too"] = True
         elif a.startswith("-I"):
-            incs.append(a[2:] or val("-I"))
+            o["incs"].append(a[2:] or val("-I"))
         elif a.startswith("-D"):
-            defs.append(a[2:] or val("-D"))
+            o["defs"].append(a[2:] or val("-D"))
         elif a.startswith("-O"):
-            o = a[2:] or "2"
-            if o not in hzc.OPTS:
+            v = a[2:] or "2"
+            if v not in hzc.OPTS:
                 die(f"unknown optimisation {a} (use -O0, -O1, -O2, -O3 or -Os)")
-            opt = o
+            o["opt"] = v
+        elif a == "--cc" or a.startswith("--cc="):
+            o["cc"] = a.split("=", 1)[1] if "=" in a else val("--cc")
         elif a == "--model" or a.startswith("--model="):
-            model = a.split("=", 1)[1] if "=" in a else val("--model")
-            if model not in hzc.MODELS:
-                die(f"--model is large or tiny, not {model}")
+            o["model"] = a.split("=", 1)[1] if "=" in a else val("--model")
+            if o["model"] not in hzc.MODELS:
+                die(f"--model is large or tiny, not {o['model']}")
         elif a == "--stack" or a.startswith("--stack="):
             v = a.split("=", 1)[1] if "=" in a else val("--stack")
             try:
-                stack = int(v, 0)
+                o["stack"] = int(v, 0)
             except ValueError:
                 die(f"--stack needs a number of bytes, not {v}")
         elif a == "--float" or a == "-lm":
-            float_ = True
+            o["float"] = True
         elif a == "--ui":
-            ui = True
+            o["ui"] = True
         elif a == "--map":
-            want_map = True
+            o["want_map"] = True
         elif a == "--debug":
-            debug = True
+            o["debug"] = True
         elif a == "-l":
-            libs.append(val("-l"))
+            o["libs"].append(val("-l"))
         elif a == "--game":
-            game = True
+            o["game"] = True
         elif a == "-v":
             hzc.VERBOSE = True
         elif a == "--keep":
-            keep = os.path.abspath(val("--keep"))
+            o["keep"] = os.path.abspath(val("--keep"))
         elif a.startswith("-"):
             die(f"unknown option {a} (hcc -h lists them)")
         else:
-            srcs.append(a)
+            o["srcs"].append(a)
         i += 1
 
+    if o["cc"] not in COMPILERS:
+        die(f"--cc is cc816 or vbcc, not {o['cc']}")
+    srcs = o["srcs"]
     if not srcs:
         die("no source files")
     for s in srcs:
         if not os.path.exists(s):
             die(f"{s}: no such file")
-        if os.path.splitext(s)[1].lower() not in (".c", ".s", ".o", ".a"):
-            die(f"{s}: hcc takes .c, .s (vasm syntax), .o and .a files")
+        if os.path.splitext(s)[1].lower() not in (".c", ".s", ".o", ".a", ".lib"):
+            die(f"{s}: hcc takes .c, .s, .o, .a and .lib files")
+    if o["compile_only"] and o["out"] and \
+            len([s for s in srcs if not s.endswith((".o", ".a", ".lib"))]) > 1:
+        die("-c with -o takes one source")
+    if o["cc"] == "cc816":
+        return main_cc816(o)
+    return main_vbcc(o)
+
+
+def compile_all(o, comp, asm):
+    """every source to an object (comp: .c, asm: .s); objects and libraries as they are
+    -> (objects, tmp dir)"""
+    import tempfile
+    tmp = tempfile.mkdtemp(prefix="hcc")
+    objs = []
+    errors = 0
+    for n, s in enumerate(o["srcs"]):
+        base, ext = os.path.splitext(s)
+        ext = ext.lower()
+        if ext in (".o", ".a", ".lib"):
+            objs.append(s)
+            continue
+        if o["compile_only"]:
+            obj = o["out"] if o["out"] else os.path.basename(base) + ".o"
+        else:
+            obj = os.path.join(tmp, f"{n}_{os.path.basename(base)}.o")
+        try:
+            if ext == ".c":
+                comp(s, obj, (os.path.basename(base) + ".s") if o["asm_too"] else None)
+            else:
+                asm(s, obj)
+        except hzc.HccError as e:
+            print(str(e), file=sys.stderr)
+            errors += 1
+            continue
+        objs.append(obj)
+    if errors:
+        import shutil
+        shutil.rmtree(tmp, ignore_errors=True)
+        die(f"{errors} file(s) did not compile")
+    return objs, tmp
+
+
+def main_cc816(o):
+    if o["model"]:
+        die(f"--model {o['model']} is for vbcc (hcc --cc vbcc): cc816 has one memory model "
+            f"(docs/c/reference.md, \"Memory\")")
+    if o["float"]:
+        die("--float: cc816 has no floating point yet; build with hcc --cc vbcc")
+    stack = o["stack"]
+    if stack is None:
+        stack = hzc816.SSTACK
+    if not 512 <= stack <= 0x8000 or stack & 1:
+        die("--stack: cc816's software stack is an even number of bytes, 512 to 32768")
+    opt = o["opt"] or "2"
+    incs = o["incs"]
+    tmp = None
+    try:
+        hzc816.ensure_lib()
+        objs, tmp = compile_all(
+            o, lambda s, obj, a: hzc816.compile_c(s, obj, opt, incs=incs, defs=o["defs"],
+                                                  asm_out=a),
+            lambda s, obj: hzc816.assemble(s, obj, incs=incs + [os.path.join(hzc.SDKC,
+                                                                            "include")]))
+        if o["compile_only"]:
+            return 0
+        libs = list(o["libs"])
+        if o["game"] or hgbuild.uses_game(o["srcs"]):
+            libs.insert(0, hgbuild.lib_for("cc816"))
+        out = o["out"] or os.path.basename(os.path.splitext(o["srcs"][0])[0]).upper() + ".PRG"
+        mapfile = os.path.splitext(out)[0] + ".map" if o["want_map"] else None
+        ui = o["ui"]
+        while True:
+            try:
+                sizes = hzc816.link(objs, out, sstack=stack, debug=o["debug"], mapfile=mapfile,
+                                    extra_libs=libs, keep=o["keep"], ui=ui)
+                break
+            except hzc.HccError as e:
+                undef = hzc.undefined_names(str(e))
+                if ui or not undef or not undef <= hzc.ui_names() | {"hui_rowtramp"}:
+                    raise
+                ui = True               # only hui.h names missing: the controls library
+        if o["want_map"]:
+            print(hzc816.size_report(out, sizes))
+        return 0
+    except hzc.HccError as e:
+        die(str(e))
+    finally:
+        if tmp:
+            import shutil
+            shutil.rmtree(tmp, ignore_errors=True)
+
+
+def main_vbcc(o):
+    out = o["out"]
+    srcs, incs, defs, libs = o["srcs"], o["incs"], o["defs"], list(o["libs"])
+    opt = o["opt"] or hzc.DEFAULT_OPT
+    model = o["model"] or "large"
+    want_map, debug, float_, ui = o["want_map"], o["debug"], o["float"], o["ui"]
+    stack, keep = o["stack"], o["keep"]
     wend = 0x7000
     if stack is not None:
         if model != "tiny":
@@ -157,45 +273,24 @@ def main(argv):
         if not 256 <= stack <= 0x7000:
             die("--stack: between 256 and 28672 bytes")
         wend = (0x7F80 - stack) & ~15
-    if compile_only and out and len([s for s in srcs if not s.endswith((".o", ".a"))]) > 1:
-        die("-c with -o takes one source")
     if ui and model == "tiny":
         die(hzc.UI_TINY)
-
+    for s in srcs:
+        if s.lower().endswith((".o", ".a", ".lib")) and hzc816.object_kind(s) in ("cc816", "lib"):
+            die(f"{s}: an object or library made by cc816 (ca65); this program is built with "
+                f"vbcc (--cc vbcc): build every file with the same compiler")
     tmp = None
     try:
         hzc.vbcc_dir()
         hzc.ensure_lib(model)
-        objs = []
-        import tempfile
-        tmp = tempfile.mkdtemp(prefix="hcc")
-        errors = 0
-        for n, s in enumerate(srcs):
-            base, ext = os.path.splitext(s)
-            ext = ext.lower()
-            if ext in (".o", ".a"):
-                objs.append(s)
-                continue
-            if compile_only:
-                obj = out if out else os.path.basename(base) + ".o"
-            else:
-                obj = os.path.join(tmp, f"{n}_{os.path.basename(base)}.o")
-            try:
-                if ext == ".c":
-                    hzc.compile_c(s, obj, model, opt=opt, incs=incs, defs=defs,
-                                  asm_out=(os.path.basename(base) + ".s") if asm_too else None)
-                else:
-                    hzc.assemble(s, obj, model, incs=incs + [os.path.join(hzc.SDKC, "include")])
-            except hzc.HccError as e:
-                print(str(e), file=sys.stderr)
-                errors += 1
-                continue
-            objs.append(obj)
-        if errors:
-            die(f"{errors} file(s) did not compile")
-        if compile_only:
+        objs, tmp = compile_all(
+            o, lambda s, obj, a: hzc.compile_c(s, obj, model, opt=opt, incs=incs, defs=defs,
+                                               asm_out=a),
+            lambda s, obj: hzc.assemble(s, obj, model,
+                                        incs=incs + [os.path.join(hzc.SDKC, "include")]))
+        if o["compile_only"]:
             return 0
-        if game or hgbuild.uses_game(srcs):     # the game library (sdk/c/game)
+        if o["game"] or hgbuild.uses_game(srcs):     # the game library (sdk/c/game)
             libs.append(hgbuild.lib_for(model))
         if not out:
             out = os.path.basename(os.path.splitext(srcs[0])[0]).upper() + ".PRG"

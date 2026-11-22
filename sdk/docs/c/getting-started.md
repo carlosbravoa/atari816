@@ -1,42 +1,33 @@
 # Getting started with C
 
 From nothing to a C program running in the emulator and on the Atari816. The SDK's C
-compiler is **vbcc** (Volker Barthelmann's, its 65816 release); `hcc`, the SDK's driver,
-turns `.c` files into a Horizon program in one command. Every command below was run on
-Linux (x86-64) for this guide; the output is what you should see, apart from paths,
+compiler is **cc816**, the SDK's own (`sdk/c/cc816`, in Python); `hcc`, the SDK's driver,
+turns `.c` files into a Horizon program in one command. A second compiler, vbcc 65816, is
+there for what cc816 does not do yet (floating point): section 9. Every command below was
+run on Linux (x86-64) for this guide; the output is what you should see, apart from paths,
 timings and sizes.
-
-**Licence.** vbcc is free for non-commercial use; commercial use needs the author's
-permission (vbcc.pdf, "Legal"). It may be redistributed only unmodified, so the SDK does
-not include it: a script downloads the official archive. The SDK's own files are under
-the SDK's licence.
 
 ## 1. What you need
 
 | Tool | For |
 | --- | --- |
-| Linux on x86-64 (or WSL on Windows) | the vbcc 65816 binaries are x86-64 Linux programs |
-| python3 3.8+ | `hcc`, the SDK's tools |
-| sh, curl or wget, unzip, sha256sum (or shasum) | the toolchain installer |
+| python3 3.8+ | `hcc` and cc816, the SDK's tools |
+| cc65's ca65, ld65 and ar65 | assembling and linking (cc65 2.19; Horizon's own programs are built with them) |
 | make | the templates' and examples' Makefiles |
 | the emulator and Horizon, built | running programs: `make -C emu` and `make -C horizon` (sdk/docs/getting-started.md, section 2) |
-| gcc (only with `--source`) | building vbcc's compiler from its source snapshot instead |
 
-## 2. Install the compiler
+Nothing is downloaded: cc816 and its C library are in the SDK (it vendors pycparser and
+pcpp, both BSD-licensed).
+
+## 2. Check the tools
 
 ```
-$ sdk/c/tools/get-toolchain.sh
-get-toolchain: downloading http://www.ibaug.de/vbcc/vbcc65816_r2.zip
-get-toolchain: vbcc65816_r2.zip OK (sha256 e8950454d55327e50f6a5f98dc22ac020ee3d6084a17c92d37e088d3c63a922c)
-get-toolchain: installed vbcc65816_r2 in /.../sdk/c/toolchain/vbcc
-get-toolchain: hcc (sdk/c/bin/hcc) finds it there; nothing to add to PATH
+$ python3 --version; ca65 --version
+Python 3.14.4
+ca65 V2.19 - Git 547d923
+$ sdk/c/bin/hcc --version
+hcc 2.0 (Horizon C SDK: cc816 and vbcc 65816)
 ```
-
-It downloads "vbcc for 65816 Release 2" (10 MB), checks its SHA-256 sum and unpacks the
-Linux binaries into `sdk/c/toolchain/vbcc` (ignored by git). Running it again does nothing
-(`--force` installs again). Without network, copy `vbcc65816_r2.zip` into
-`sdk/c/toolchain/dl/` (or pass `--dl FOLDER`). If the server ever has a different file,
-the script stops and says so rather than install something untested.
 
 ## 3. Hello in five minutes
 
@@ -56,20 +47,22 @@ int main(int argc, char **argv)
 
 ```
 $ sdk/c/bin/hcc -o HELLO.PRG hello.c
-hcc: building the C library for the large model (/.../sdk/c/build/lib/large)
+hcc: building the C library for cc816 (/.../sdk/c/build/lib/cc816)
 $ ls -l HELLO.PRG
--rw-rw-r-- 1 carlos carlos 8770 Nov 21 17:32 HELLO.PRG
+-rw-rw-r-- 1 carlos carlos 8050 Nov 21 20:51 HELLO.PRG
 ```
 
-The first build of each memory model also builds the SDK's C library (a few seconds);
-after that `hcc` compiles, links and writes the program at once. `--map` adds the sizes:
+The first build also builds the SDK's C library (a few seconds); after that `hcc`
+compiles, links and writes the program at once. `--map` adds the sizes:
 
 ```
 $ sdk/c/bin/hcc --map -o HELLO.PRG hello.c
-HELLO.PRG: 8,770 bytes on the card, 168 bank relocations
-  code bank: code+constants 7,964 + data 91 + bss 776 = 8,831 of 65,280; heap 56,433
-  window:    stack about 32,000 (from $7F7F down to $0100)
+HELLO.PRG: 8,050 bytes on the card, 8 relocations
+  code bank: code+constants 7,830 + data 78 + bss 826 = 8,734 of 57,072; heap 48,338; software stack 8,192
+  window:    stack about 32,000 (from $7F7F down to $0100); direct page 120 bytes
 ```
+
+(HELLO.map and HELLO.lbl, the link map and every label's address, are written too.)
 
 ## 4. Run it in the emulator
 
@@ -113,7 +106,7 @@ include $(SDK)/c/c.mk
 
 ```
 $ make
-python3 ../sdk/c/bin/hcc --model large  -o GREET.PRG main.c
+python3 ../sdk/c/bin/hcc  -o GREET.PRG main.c
 $ make test
 ...
 run816: PASS (3 expected texts found)
@@ -121,31 +114,33 @@ run816: PASS (3 expected texts found)
 
 `make run` runs it with `test.script` (it types "Ada" and Enter) and leaves the console
 and a screenshot in `build/run/`. Every `.c` and `.s` in the folder is part of the
-program; `sdk/c/c.mk` lists the settings (MODEL, HCCFLAGS, RUNMODE, ARGS, ...).
+program; `sdk/c/c.mk` lists the settings (HZ_CC, HCCFLAGS, RUNMODE, ARGS, ...).
 
 ## 6. When something is wrong
 
-Compiler messages come with the file and line:
+Compiler messages come with the file and the line:
 
 ```
 $ sdk/c/bin/hcc -o BAD.PRG bad.c
-bad.c:5: warning: ; expected (vbcc 54)
+bad.c:6: error: syntax error, before: printf
+hcc: 1 file(s) did not compile
 ```
 
-(vbcc repairs some syntax errors with a warning and goes on; read every warning.) A
-program too big for its memory is stopped with the sizes:
+A program too big for its memory is stopped with the sizes:
 
 ```
 $ sdk/c/bin/hcc -o BIG2.PRG big2.c
-hcc: BIG2.PRG does not fit in its code bank: code and constants 4,047 bytes + initialised
-data 91 bytes + zeroed data (bss) 70,776 bytes = 74,914 bytes; a code bank holds 65,280
-bytes ($0100-$FFFF). Put big arrays in a bank of their own (hz_far_alloc,
-docs/c/reference.md) or make them smaller.
+hcc: BIG2.PRG does not fit in its code bank: code, constants, data and bss = 73,140 bytes;
+a code bank holds 65,264 bytes ($0100-$FFF0) and the software stack takes 8,192 of them (hcc
+--stack N), so 57,072 are left. Put big arrays in a bank of their own (hz_far_alloc,
+docs/c/reference.md), make them smaller, or give the software stack less.
 ```
 
+A name nothing defines is said in C's terms (`undefined: nosuch (used in main.s)`).
 A crash shows on the console as `[kill] task N NAME cause CC addr AAAAAA pc PPPPPP`
 (ABI.md, "Faults"): link with `--map`, look up `pc`'s offset (the low 16 bits) in
-`NAME.map`, and you have the function.
+`NAME.lbl` (every label with its address, sorted by the linker: the nearest one below is
+the function or the block in it), and you have the place.
 
 ## 7. On the real machine
 
@@ -159,12 +154,38 @@ were run in the emulator only so far (it models the board's timing within about 
 - `sdk/c/examples/`: `hello`, `window` (a window with text, shapes, mouse clicks and the
   close box, on the raw window calls), `wc` (a file tool). Each has `make`, `make run`,
   `make test`.
-- [reference.md](reference.md): the memory models (where code, data, heap and stack live,
-  the limits), int and pointer sizes, far memory, the calling convention for assembly, the
-  C library on Horizon, syscalls from C, speed.
+- [reference.md](reference.md): the two compilers, memory (where code, data, heap and the
+  stacks live, the limits), int and pointer sizes, far memory, the calling convention for
+  assembly, the C library on Horizon, syscalls from C, speed.
 - [apps.md](apps.md): window applications with Horizon's controls library (`hui.h`:
   buttons, fields, lists, menus, dialogs, the file dialog), a tutorial in five steps;
   the template `sdk/templates/c-window-app`, the example `sdk/c/examples/viewer`.
 - [porting.md](porting.md): what breaks when C from a PC or from cc65 comes over, and how
   to find it.
 - `make -C sdk/c test`: the SDK's own tests in the emulator.
+
+## 9. vbcc, the second compiler
+
+vbcc 65816 (Volker Barthelmann's) has what cc816 has not yet: floating point (`float`,
+`double`, `math.h`; `hcc --float`), `setjmp`, and a tiny memory model. It is free for
+non-commercial use and may be redistributed only unmodified, so a script downloads the
+official archive:
+
+```
+$ sdk/c/tools/get-toolchain.sh
+get-toolchain: downloading http://www.ibaug.de/vbcc/vbcc65816_r2.zip
+get-toolchain: vbcc65816_r2.zip OK (sha256 e8950454d55327e50f6a5f98dc22ac020ee3d6084a17c92d37e088d3c63a922c)
+get-toolchain: installed vbcc65816_r2 in /.../sdk/c/toolchain/vbcc
+get-toolchain: hcc (sdk/c/bin/hcc) finds it there; nothing to add to PATH
+```
+
+It needs Linux on x86-64 (or WSL), sh, curl or wget, unzip and sha256sum. Then `hcc --cc
+vbcc ...` (or `HZ_CC=vbcc` in the environment, `make HZ_CC=vbcc` for a project) builds
+with it; every file of a program must come from the same compiler. A program with a
+`float` tells you so with cc816:
+
+```
+$ sdk/c/bin/hcc -o F.PRG f.c
+f.c:5: error: floating point (float, double) is not supported by cc816 yet: build with hcc --cc vbcc
+hcc: 1 file(s) did not compile
+```

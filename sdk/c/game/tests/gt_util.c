@@ -19,7 +19,7 @@ int main(void)
     unsigned i, r, lo = 0xFFFF, hi = 0, hits[4] = { 0, 0, 0, 0 }, ok;
     unsigned long t;
     hg_image *im;
-    unsigned char *p;
+    unsigned char __far *p;
 
     hg_srand(1234);
     r = hg_rand();

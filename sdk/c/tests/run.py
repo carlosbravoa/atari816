@@ -1,18 +1,22 @@
 #!/usr/bin/env python3
 """run.py - the C SDK's tests: build each test with hcc, run it in emu816, check it.
 
-    python3 sdk/c/tests/run.py [--horizon DIR] [--model large|tiny] [--only NAME ...]
+    python3 sdk/c/tests/run.py [--horizon DIR] [--cc cc816|vbcc] [--model large|tiny]
+                               [--only NAME ...]
 
-Prints one line per test and model (PASS / FAIL and a detail) and a summary; exit code 1
-when anything failed. Build output and the emulator's runs: sdk/c/build/tests/<model>/.
+Every test runs for each compiler and memory model: cc816 (one model), vbcc large, vbcc
+tiny (--cc and --model choose some). Prints one line per test and configuration (PASS /
+FAIL and a detail) and a summary; exit code 1 when anything failed. Build output and the
+emulator's runs: sdk/c/build/tests/<cc816|large|tiny>/.
 Tests (in tests/):
   libc     the C library: printf formats, string.h, stdlib, malloc, files (create, write,
            seek, read back, append, delete, the 5th handle), folders, time, far memory,
            errno, argv, keyboard input (scanf, fgets on stdin), atexit
   sys      every syscall stub linked, the safe ones called, the blocks' sizes
   codegen  the compiler's known trouble spots (32-bit loads from tables)
-  float    floating point with --float
-  stack    the stack guard (tiny model: an overflow is reported; --debug's report)
+  float    floating point with --float (vbcc); cc816 has none: its one-line refusal
+  stack    the stack guard (cc816's software stack and vbcc's tiny model: an overflow is
+           reported; --debug's report)
   bench    the compiler trials' benchmark, its six check values (-O1 and -O3)
   rt       the tuned runtime against host-made tables (tests/rt/run.py), when present
   hcc      the driver's messages: a compile error with file:line, a program too big for
@@ -49,13 +53,19 @@ def report(name, model, ok, detail=""):
     print(f"{'PASS' if ok else 'FAIL'}  {name:<8} {model:<6} {detail}", flush=True)
 
 
+# the configurations: (name, hcc's compiler options)
+CONFIGS = {"cc816": ["--cc", "cc816"], "large": ["--cc", "vbcc", "--model", "large"],
+           "tiny": ["--cc", "vbcc", "--model", "tiny"]}
+
+
 def sh(cmd, cwd=None):
     r = subprocess.run(cmd, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     return r.returncode, r.stdout.decode("latin-1")
 
 
 def hcc(out, srcs, model, extra=()):
-    return sh([sys.executable, HCC, "--model", model, "-o", out] + list(extra) + list(srcs))
+    """model: a configuration (cc816, large, tiny)"""
+    return sh([sys.executable, HCC] + CONFIGS[model] + ["-o", out] + list(extra) + list(srcs))
 
 
 def emu(prg, outdir, horizon, args=None, script=None, seconds=6, expect=(), mode="shell"):
@@ -145,16 +155,26 @@ def run_model(model, horizon, only):
 
     if want("float"):
         prg = os.path.join(b, "FLOAT.PRG")
-        rc, out = hcc(prg, [T("float", "float.c")], model, ["--float", "--map"])
-        if rc:
-            report("float", model, False, "build: " + out.strip().splitlines()[-1])
+        if model == "cc816":
+            # no floating point yet: one plain error line with the file and the line
+            rc, out = hcc(prg, [T("float", "float.c")], model)
+            line = next((l for l in out.splitlines() if "float.c:" in l), "")
+            ok = rc != 0 and re.search(r"float\.c:\d+: error: .*--cc vbcc", line) is not None
+            rc2, out2 = hcc(prg, [T("float", "float.c")], model, ["--float"])
+            ok = ok and rc2 != 0 and "--cc vbcc" in out2
+            report("float", model, ok, ("refused: " + line.split("/")[-1][:110]) if ok
+                   else out.strip()[-200:])
         else:
-            size = grab(out, r"[\d,]+ bytes on the card")
-            rc, con, _ = emu(prg, os.path.join(b, "run-float"), horizon, seconds=4)
-            ok = "FLOAT PASS" in con
-            report("float", model, ok, grab(con, r"float: \d+ checks, \d+ failures") +
-                   f" (program {size})" +
-                   ("" if ok else " " + " | ".join(l for l in con.splitlines() if "FAIL" in l)))
+            rc, out = hcc(prg, [T("float", "float.c")], model, ["--float", "--map"])
+            if rc:
+                report("float", model, False, "build: " + out.strip().splitlines()[-1])
+            else:
+                size = grab(out, r"[\d,]+ bytes on the card")
+                rc, con, _ = emu(prg, os.path.join(b, "run-float"), horizon, seconds=4)
+                ok = "FLOAT PASS" in con
+                report("float", model, ok, grab(con, r"float: \d+ checks, \d+ failures") +
+                       f" (program {size})" +
+                       ("" if ok else " " + " | ".join(l for l in con.splitlines() if "FAIL" in l)))
 
     if want("stack"):
         prg = os.path.join(b, "STACK.PRG")
@@ -162,8 +182,9 @@ def run_model(model, horizon, only):
         if not rc:
             rc, con, _ = emu(prg, os.path.join(b, "run-stack"), horizon, seconds=3)
             overflow = "stack overflow:" in con
-            # 200 levels of ~70 bytes: more than the tiny model's 4 KB, less than 32 KB
-            ok = overflow if model == "tiny" else (not overflow and "intact" in con)
+            # 200 levels of ~70 bytes: more than the tiny model's 4 KB and cc816's 8 KB
+            # software stack (the array is there), less than the large model's 32 KB
+            ok = overflow if model in ("tiny", "cc816") else (not overflow and "intact" in con)
             report("stack", model, ok, "overflow reported" if overflow else "no overflow, guard intact")
         else:
             report("stack", model, False, "build: " + out.strip().splitlines()[-1])
@@ -172,14 +193,18 @@ def run_model(model, horizon, only):
         if not rc:
             rc, con, _ = emu(prg, os.path.join(b, "run-stackd"), horizon, args="ok", seconds=3)
             m = re.search(r"stack: (\d+) of (\d+) bytes used", con)
-            report("stackdbg", model, bool(m) and "overflow" not in con,
-                   m.group(0) if m else "no report")
+            m2 = re.search(r"software stack: (\d+) of (\d+) bytes used", con)
+            ok = bool(m) and "overflow" not in con and (bool(m2) or model != "cc816")
+            report("stackdbg", model, ok, (m.group(0) if m else "no report") +
+                   (", " + m2.group(0) if m2 else ""))
         else:
             report("stackdbg", model, False, "build: " + out.strip().splitlines()[-1])
 
     if want("bench"):
-        for opt in ("-O1", "-O3"):
-            name = "bench" if opt == "-O1" else "bench-O3"
+        # vbcc: -O1 (its default) and -O3; cc816: its default (-O2) and -O1
+        for opt in (("-O2", "-O1") if model == "cc816" else ("-O1", "-O3")):
+            name = "bench" if opt in ("-O1", "-O2") and opt == (
+                "-O2" if model == "cc816" else "-O1") else "bench" + opt
             prg = os.path.join(b, "BENCH.PRG")
             rc, out = hcc(prg, [T("bench", "bench_hz.c"), T("bench", "bench.c")], model, [opt])
             if rc:
@@ -195,41 +220,68 @@ def run_model(model, horizon, only):
     rt = os.path.join(HERE, "rt", "run.py")
     if want("rt") and os.path.exists(rt):
         rc, out = sh([sys.executable, rt, "--model", model, "--horizon", horizon])
+        # (rt/run.py takes the configurations too: cc816, large, tiny)
         lines = [l for l in out.splitlines() if l.strip()]
         summary = [l for l in lines if re.match(r"^rt \w+", l)]
         report("rt", model, rc == 0, f"{len(summary)} operations" +
                ("" if rc == 0 else ": " + " | ".join(l for l in lines if "FAIL" in l)[:300]))
 
 
-def hcc_messages(only):
+def hcc_messages(only, models):
+    """the driver's messages (no emulator), the same for both compilers"""
     if only and "hcc" not in only:
         return
     b = os.path.join(SDKC, "build", "tests", "hcc")
     os.makedirs(b, exist_ok=True)
-    # a compile error: file:line
-    p = os.path.join(b, "bad.c")
-    open(p, "w").write("int main(void)\n{\n    int x = ;\n    return 0;\n}\n")
-    rc, out = hcc(os.path.join(b, "BAD.PRG"), [p], "large")
-    ok = rc != 0 and re.search(r"bad\.c:3: error", out) is not None
-    report("hcc", "-", ok, "compile error reported as bad.c:3" if ok else out.strip()[:200])
-    # too big for the code bank
-    p = os.path.join(b, "big.c")
-    open(p, "w").write("char big[70000u / 2], big2[70000u / 2];\nint main(void) { big[1] = big2[2]; return 0; }\n")
-    rc, out = hcc(os.path.join(b, "BIG.PRG"), [p], "large")
-    ok = rc != 0 and "does not fit in its code bank" in out
-    report("hcc", "-", ok, "too big: " + (grab(out, r"= [\d,]+ bytes; a code bank holds [\d,]+") or out.strip()[:200]))
-    # tiny model: data too big for the window
-    p = os.path.join(b, "bigt.c")
-    open(p, "w").write("char big[30000];\nint main(void) { big[1] = 1; return big[1]; }\n")
-    rc, out = hcc(os.path.join(b, "BIGT.PRG"), [p], "tiny")
-    ok = rc != 0 and "does not fit in the window" in out
-    report("hcc", "-", ok, "tiny data: " + (grab(out, r"= [\d,]+ bytes, the window has [\d,]+ bytes") or out.strip()[:200]))
-    # an undefined function: said in C terms
-    p = os.path.join(b, "undef.c")
-    open(p, "w").write("void nosuch(void);\nint main(void) { nosuch(); return 0; }\n")
-    rc, out = hcc(os.path.join(b, "UNDEF.PRG"), [p], "large")
-    ok = rc != 0 and "undefined: nosuch" in out
-    report("hcc", "-", ok, "undefined function reported as 'undefined: nosuch'" if ok else out.strip()[:200])
+    W = lambda n, t: (open(os.path.join(b, n), "w").write(t), os.path.join(b, n))[1]  # noqa: E731
+    bad = W("bad.c", "int main(void)\n{\n    int x = ;\n    return 0;\n}\n")
+    big = W("big.c", "char big[70000u / 2], big2[70000u / 2];\n"
+                     "int main(void) { big[1] = big2[2]; return 0; }\n")
+    undef = W("undef.c", "void nosuch(void);\nint main(void) { nosuch(); return 0; }\n")
+    for m in [m for m in ("cc816", "large") if m in models]:
+        # a compile error: file:line
+        rc, out = hcc(os.path.join(b, "BAD.PRG"), [bad], m)
+        ok = rc != 0 and re.search(r"bad\.c:3: error", out) is not None
+        report("hcc", m, ok, "compile error reported as bad.c:3" if ok else out.strip()[:200])
+        # too big for the code bank
+        rc, out = hcc(os.path.join(b, "BIG.PRG"), [big], m)
+        ok = rc != 0 and "does not fit in its code bank" in out
+        report("hcc", m, ok, "too big: " + (grab(out, r"= [\d,]+ bytes; a code bank holds [\d,]+")
+                                            or out.strip()[:200]))
+        # an undefined function: said in C terms
+        rc, out = hcc(os.path.join(b, "UNDEF.PRG"), [undef], m)
+        ok = rc != 0 and "undefined: nosuch" in out
+        report("hcc", m, ok, "undefined function reported as 'undefined: nosuch'" if ok
+               else out.strip()[:200])
+    if "tiny" in models:
+        # tiny model: data too big for the window
+        bigt = W("bigt.c", "char big[30000];\nint main(void) { big[1] = 1; return big[1]; }\n")
+        rc, out = hcc(os.path.join(b, "BIGT.PRG"), [bigt], "tiny")
+        ok = rc != 0 and "does not fit in the window" in out
+        report("hcc", "tiny", ok, "tiny data: " + (grab(out, r"= [\d,]+ bytes, the window has [\d,]+ bytes")
+                                                   or out.strip()[:200]))
+    if "cc816" in models and "large" in models:
+        # objects of the two compilers are not mixed
+        rc, out = hcc(os.path.join(b, "undef_v.o"), [undef], "large", ["-c"])
+        rc2, out2 = hcc(os.path.join(b, "MIX.PRG"), [bad.replace("bad.c", "undef_v.o")], "cc816")
+        ok = rc == 0 and rc2 != 0 and "made by vbcc" in out2
+        rc, out = hcc(os.path.join(b, "undef_c.o"), [undef], "cc816", ["-c"])
+        rc3, out3 = hcc(os.path.join(b, "MIX.PRG"), [bad.replace("bad.c", "undef_c.o")], "large")
+        ok = ok and rc == 0 and rc3 != 0 and "made by cc816" in out3
+        report("hcc", "mixed", ok, "objects of the other compiler refused" if ok
+               else (out2 + out3).strip()[-200:])
+    if "cc816" in models:
+        # cc816: one model, no float, no long long: one plain line each
+        rc, out = hcc(os.path.join(b, "BAD.PRG"), [undef], "cc816", ["--model", "tiny"])
+        ok1 = rc != 0 and "--model tiny is for vbcc" in out
+        ll = W("ll.c", "int main(void)\n{\n    long long x = 1;\n    return (int)x;\n}\n")
+        rc, out = hcc(os.path.join(b, "LL.PRG"), [ll], "cc816")
+        ok2 = rc != 0 and re.search(r"ll\.c:3: error: long long is not supported", out) is not None
+        fl = W("fl.c", "int main(void)\n{\n    float f = 2;\n    return (int)f;\n}\n")
+        rc, out = hcc(os.path.join(b, "FL.PRG"), [fl], "cc816")
+        ok3 = rc != 0 and re.search(r"fl\.c:3: error: floating point .*--cc vbcc", out) is not None
+        report("hcc", "cc816", ok1 and ok2 and ok3, "--model, long long and float refused "
+               "with file:line" if ok1 and ok2 and ok3 else out.strip()[-200:])
 
 
 # pixels of uitest's screenshots (1280 x 720): (shot, x, y, RGB, what)
@@ -261,21 +313,24 @@ def pixel_checks(outdir, table):
     return bad, n
 
 
-def run_ui(horizon, only):
-    """The controls library from C (large model only; the tiny model's refusal)."""
+def run_ui(horizon, only, m="large"):
+    """The controls library from C (cc816, vbcc's large model; the tiny model's refusal)."""
     want = lambda n: not only or n in only  # noqa: E731
-    b = os.path.join(SDKC, "build", "tests", "ui")
+    b = os.path.join(SDKC, "build", "tests", "ui" if m == "large" else "ui-" + m)
     os.makedirs(b, exist_ok=True)
     T = lambda *p: os.path.join(HERE, *p)  # noqa: E731
 
     if want("ui"):
         prg = os.path.join(b, "UITEST.PRG")
-        rc, out = hcc(prg, [T("ui", "uitest.c")], "large", ["--map"])
+        rc, out = hcc(prg, [T("ui", "uitest.c")], m, ["--map"])
         if rc:
-            report("ui", "large", False, "build: " + out.strip().splitlines()[-1])
+            report("ui", m, False, "build: " + out.strip().splitlines()[-1])
         else:
-            blk = grab(out, r"block: [\d,]+ bytes") + " for " + \
-                grab(out, r"\d+ hui.h names")
+            if m == "cc816":            # no block: the program's own size
+                blk = "program " + grab(out, r"[\d,]+ bytes on the card")
+            else:
+                blk = grab(out, r"block: [\d,]+ bytes") + " for " + \
+                    grab(out, r"\d+ hui.h names")
             od = os.path.join(b, "run-ui")
             rc, con, _ = emu(prg, od, horizon, script=T("ui", "uitest.script"), seconds=45,
                              mode="desktop")
@@ -292,15 +347,15 @@ def run_ui(horizon, only):
             bad, n = pixel_checks(od, UI_PIXELS)
             ok = "UITEST PASS" in con and "[kill]" not in con and not missing and \
                 not [x for x in bad if not x.startswith("(")]
-            report("ui", "large", ok, grab(con, r"uitest: \d+ checks, \d+ failures") +
+            report("ui", m, ok, grab(con, r"uitest: \d+ checks, \d+ failures") +
                    f", {len(want_lines) - len(missing)} events, {n} pixels; {blk}" + ("" if ok else " | " + " | ".join(
                        [l for l in con.splitlines() if "FAIL" in l] + missing + bad)))
 
     if want("uibad"):
         prg = os.path.join(b, "BADHUI.PRG")
-        rc, out = hcc(prg, [T("ui", "badhui.c")], "large")
+        rc, out = hcc(prg, [T("ui", "badhui.c")], m)
         if rc:
-            report("uibad", "large", False, "build: " + out.strip().splitlines()[-1])
+            report("uibad", m, False, "build: " + out.strip().splitlines()[-1])
         else:
             for arg, text in (("ptr", "hui: ui_draw: ctl: not in the code bank"),
                               ("cb", "hui: ui_lsset: a control routine called inside a "
@@ -308,10 +363,17 @@ def run_ui(horizon, only):
                 rc, con, _ = emu(prg, os.path.join(b, "run-bad" + arg), horizon, args=arg,
                                  seconds=4)
                 i, j = con.find("BADHUI: start"), con.find(text)
+                if m == "cc816" and arg == "ptr":
+                    # cc816: a local is in the code bank too (the software stack): allowed
+                    ok = i >= 0 and "BADHUI: not stopped" in con and "hui:" not in con \
+                        and "[kill]" not in con
+                    report("uibad", m, ok, "ptr: a local control works (cc816's locals are in "
+                           "the code bank)" if ok else con.strip()[-200:])
+                    continue
                 ok = 0 <= i < j and "not stopped" not in con
-                report("uibad", "large", ok, f"{arg}: " + (text if ok else con.strip()[-200:]))
+                report("uibad", m, ok, f"{arg}: " + (text if ok else con.strip()[-200:]))
 
-    if want("uitiny"):
+    if want("uitiny") and m == "large":
         t = os.path.join(b, "tiny")
         os.makedirs(t, exist_ok=True)
         msg = "needs the large model"
@@ -332,14 +394,14 @@ def run_ui(horizon, only):
         report("uitiny", "large", rc == 0 and "block:" in out, "the same in the large model: "
                + (grab(out, r"block: [\d,]+ bytes") or out.strip()[-200:]) + " for ui_beep")
 
-    if want("appsdoc"):
+    if want("appsdoc") and m == "large":
         doc = os.path.join(SDK, "docs", "c", "apps.md")
         guests = os.path.join(SDKC, "examples", "guests")
         cur, blk, inblk, bad, n = None, [], False, [], 0
         for ln in open(doc, encoding="utf-8"):
-            m = re.search(r"From `(step\d\.c)`:", ln)
-            if m:
-                cur = m.group(1)
+            mm = re.search(r"From `(step\d\.c)`:", ln)
+            if mm:
+                cur = mm.group(1)
             elif ln.startswith("## "):
                 cur = None
             elif ln.startswith("```c") and cur:
@@ -359,7 +421,8 @@ def run_ui(horizon, only):
         res = []
         for d in ("c-window-app", "window-app"):
             rc, out = sh(["make", "--no-print-directory", "-C", os.path.join(tpl, d), "test",
-                          "HORIZON=" + horizon])
+                          "HORIZON=" + horizon] + (["HZ_CC=cc816" if m == "cc816" else "HZ_CC=vbcc"]
+                                                   if d == "c-window-app" else []))
             res.append((d, rc, out))
         bad = [f"{d}: make test failed: {out.strip()[-200:]}" for d, rc, out in res if rc]
         n = 0
@@ -380,7 +443,7 @@ def run_ui(horizon, only):
                         bad.append(f"shot {i}: differs in {box}")
             except ImportError:
                 bad.append("(PIL not installed: screenshots not compared)")
-        report("uitwin", "large", not [x for x in bad if not x.startswith("(")],
+        report("uitwin", m, not [x for x in bad if not x.startswith("(")],
                f"both templates' tests pass; {n} screenshots identical" if not bad
                else " | ".join(bad))
 
@@ -388,7 +451,8 @@ def run_ui(horizon, only):
 def main():
     a = sys.argv[1:]
     horizon = os.environ.get("HORIZON") or os.path.join(SDK, "..", "horizon")
-    models = ["large", "tiny"]
+    models = ["cc816", "large", "tiny"]
+    ccs = None
     only = []
     i = 0
     while i < len(a):
@@ -396,6 +460,8 @@ def main():
             horizon = a[i + 1]; i += 2
         elif a[i] == "--model":
             models = [a[i + 1]]; i += 2
+        elif a[i] == "--cc":
+            ccs = a[i + 1]; i += 2
         elif a[i] == "--only":
             only.append(a[i + 1]); i += 2
         else:
@@ -403,12 +469,26 @@ def main():
     horizon = os.path.abspath(horizon)
     if not os.path.exists(os.path.join(horizon, "build", "sd", "SYSTEM", "HORIZON.SYS")):
         sys.exit(f"run.py: no built Horizon card in {horizon}/build/sd (make -C {horizon})")
+    sys.path.insert(0, os.path.join(SDKC, "tools"))
+    import hzc
+    try:
+        hzc.vbcc_dir()
+    except hzc.HccError:
+        if ccs != "cc816" and [m for m in models if m != "cc816"]:
+            print("run.py: the vbcc toolchain is not installed (tools/get-toolchain.sh): "
+                  "its configurations (large, tiny) are skipped")
+        ccs = "cc816"
+    if ccs == "cc816":
+        models = ["cc816"]
+    elif ccs == "vbcc":
+        models = [m for m in models if m != "cc816"] or ["large", "tiny"]
     t0 = time.time()
-    hcc_messages(only)
+    hcc_messages(only, models)
     for m in models:
         run_model(m, horizon, only)
-    if "large" in models:
-        run_ui(horizon, only)
+    for m in ("cc816", "large"):
+        if m in models:
+            run_ui(horizon, only, m)
     bad = [r for r in results if not r[2]]
     print(f"\nC SDK tests: {len(results) - len(bad)} passed, {len(bad)} failed "
           f"({time.time() - t0:.0f} s)")
