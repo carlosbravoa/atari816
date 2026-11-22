@@ -22,6 +22,7 @@
 	.smart	-
 	.a16
 	.i16
+	.include "model.inc"
 	.importzp __h0, __h1, __h2, __h3, __rv
 	.export	__udiv16, __umod16, __sdiv16, __smod16
 
@@ -33,6 +34,10 @@
 __udiv16:
 	sta	__h2
 	stx	__h3
+.if LARGE			; (udiv is also called with JSR below: its RTS is its own)
+	jsr	udiv
+	rtl
+.endif
 udiv:	lda	__h2		; __h2 / __h3 -> A = quotient, X = remainder
 	cmp	__h3
 	bcc	@small		; dividend < divisor: quotient 0
@@ -84,7 +89,7 @@ __umod16:
 	stx	__h3
 	jsr	udiv
 	txa
-	rts
+	RET
 
 __sdiv16:
 	stx	__h3
@@ -109,7 +114,7 @@ __sdiv16:
 	beq	@pos
 	eor	#$FFFF
 	inc	a
-@pos:	rts
+@pos:	RET
 
 __smod16:
 	stx	__h3
@@ -132,4 +137,4 @@ __smod16:
 	beq	@mpos
 	eor	#$FFFF
 	inc	a
-@mpos:	rts
+@mpos:	RET

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """run.py - build and run the runtime tests (tests/rt/rttest.c) in emu816.
 
-    run.py [--model cc816|large|tiny|both|all] [--horizon DIR] [--out DIR] [--quick]
+    run.py [--model cc816|cc816l|large|tiny|both|all] [--horizon DIR] [--out DIR] [--quick]
            [--seconds N]
 
 Generates the table (tools/genrt.py), builds RTTEST.PRG with bin/hcc for each
@@ -49,8 +49,10 @@ def main():
     subprocess.run(gen, check=True)
     ok = True
     for m in models:
-        prg = os.path.join(out, f"RTTEST{ {'tiny': 'T', 'cc816': 'C'}.get(m, '') }.PRG")
-        cc = ["--cc", "cc816"] if m == "cc816" else ["--cc", "vbcc", "--model", m]
+        prg = os.path.join(out, f"RTTEST{ {'tiny': 'T', 'cc816': 'C', 'cc816l': 'L'}.get(m, '') }.PRG")
+        cc = ["--cc", "cc816"] if m == "cc816" else \
+            ["--cc", "cc816", "--code", "large", "--main-room", "0", "--bank-room", "8192"] \
+            if m == "cc816l" else ["--cc", "vbcc", "--model", m]
         r = subprocess.run([os.path.join(SDKC, "bin", "hcc")] + cc + ["-o", prg,
                             os.path.join(HERE, "rttest.c")])
         if r.returncode:

@@ -2,6 +2,11 @@
 """check.py - cc816's regression set, run in emu816 under Horizon (make -C sdk/c/cc816 check).
 
     check.py [--cts DIR] [--fuzz N] [--seeds S1,S2,...] [--features LIST] [--quick]
+             [--code small|large]
+
+--code large: every program built with hcc's large code model (--code large), every
+function that can move placed in another bank, in turn in three banks (--main-room 0
+--spread 3: the same programs, results in build/cc816l).
 
   diag      tests/diag/*.c: the compiler's error and warning messages (tests/diag.py: each
             file says the messages it must give; no emulator)
@@ -62,7 +67,7 @@ def gen_tag():
 def drop_old(prefix, keep):
     """the folders of earlier generators' programs (prefix*), but keep"""
     import shutil
-    for d in glob.glob(os.path.join(prog.BUILD, prefix + '*')):
+    for d in glob.glob(os.path.join(prog.SRCBUILD, prefix + '*')):
         if d != keep and os.path.isdir(d):
             shutil.rmtree(d, ignore_errors=True)
 
@@ -72,6 +77,7 @@ def main():
     cts = os.environ.get('CTS')
     count, seeds, feats = None, [1, 2], 'all'
     flt = True
+    code = 'small'
     i = 0
     while i < len(a):
         if a[i] == '--cts':
@@ -86,8 +92,21 @@ def main():
             count = 50; i += 1
         elif a[i] == '--no-float':
             flt = False; i += 1
+        elif a[i] == '--code':
+            code = a[i + 1]; i += 2
         else:
             sys.exit(__doc__)
+    if code not in ('small', 'large'):
+        sys.exit('check.py: --code is small or large')
+    if code == 'large':
+        # every program in the large code model, every function that can move in another
+        # bank, in turn in three banks: calls, pointers, helpers, switch tables and setjmp
+        # cross banks even in small programs; the runner's /T looked in for .PRX
+        os.environ.update(HZ_CODE='large', HZ_MAIN_ROOM='0', HZ_SPREAD='3',
+                          HZ_PRX_PATH='/T:/APPS')
+        prog.CODE = prog.hzc816.CODE = 'large'
+        prog.BUILD = os.path.join(prog.SDKC, 'build', 'cc816l')
+        print('(the large code model: hcc --code large --main-room 0 --spread 3)')
     bad = 0
     print('== diag')
     r = subprocess.run([sys.executable, os.path.join(HERE, 'diag.py')], capture_output=True,
@@ -104,7 +123,7 @@ def main():
     for seed in seeds:
         n = count or 200 * seed
         print(f'== fuzz, seed {seed}: {n} programs')
-        src = os.path.join(prog.BUILD, f'fuzzsrc{seed}-{n}-{feats.replace(",", "+")}-{gen_tag()}')
+        src = os.path.join(prog.SRCBUILD, f'fuzzsrc{seed}-{n}-{feats.replace(",", "+")}-{gen_tag()}')
         if len(glob.glob(os.path.join(src, 'fz*.c'))) < n * 9 // 10:
             # (a run stopped half-way leaves a partial folder: made again; genfuzz skips the
             # few programs gcc's run rejects, so a full folder may hold a little less than n)
@@ -119,7 +138,7 @@ def main():
     for seed in seeds if flt else ():
         n = (count // 2 if count else 100 * seed)
         print(f'== fuzz float, seed {seed}: {n} programs')
-        src = os.path.join(prog.BUILD, f'fuzzfpsrc{seed}-{n}-{gen_tag()}')
+        src = os.path.join(prog.SRCBUILD, f'fuzzfpsrc{seed}-{n}-{gen_tag()}')
         if len(glob.glob(os.path.join(src, 'fz*.c'))) < n * 9 // 10:
             import shutil
             shutil.rmtree(src, ignore_errors=True)

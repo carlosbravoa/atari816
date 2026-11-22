@@ -7,6 +7,7 @@
 	.smart	-
 	.a16
 	.i16
+	.include "model.inc"
 	.importzp __h0, __h1
 	.import	__fp_ld2, __fp_ldx
 	.export	__fcmp, __fcmpr, __fcmpi, __fcmpx, __fcmprx
@@ -58,17 +59,17 @@ __fcmp:	lda	__h0+2
 	bpl	:+
 	eor	#$FFFF		; both negative: the other way round
 	inc	a
-:	rts
+:	RET
 @ds:	lda	__h0+2		; the signs differ: the negative one is the smaller
 	bmi	@lt
 	lda	#1
-	rts
+	RET
 @lt:	lda	#$FFFF
-	rts
+	RET
 @eq:	lda	#0
-	rts
+	RET
 @un:	lda	#2
-	rts
+	RET
 
 ; __h0 <-> __h1: the ...r entries (the compiler's operands the other way round)
 __fp_swap:

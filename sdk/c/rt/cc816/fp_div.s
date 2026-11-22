@@ -7,6 +7,7 @@
 	.smart	-
 	.a16
 	.i16
+	.include "model.inc"
 	.importzp __h0, __h1, __h2, __h3, __rv
 	.import	__fpack, __fp_unpk, __fp_nan, __fp_inf, __fp_zero, __fp_qa, __fp_qb, __fp_ld2, __fp_st, __fp_ldx
 	.export	__fdiv, __fdivr, __fdivi, __fdivx, __fdivrx
@@ -15,7 +16,7 @@
 
 __fdivi:	pha			; X = &a, Y = &b, A = &result (fp_ind.s)
 	jsr	__fp_ld2
-	jsr	__fdiv
+	CALL	__fdiv
 	pla
 	jmp	__fp_st
 __fdivx:	jsr	__fp_ldx		; a in __h0, X = &b (fp_ind.s)

@@ -36,7 +36,7 @@ in [reference.md](reference.md).
 | POKE / PEEK to hardware registers | not allowed (the program runs in user mode and is killed); use the syscalls: sound (`hz_beep`, `hz_sound_write`, `hz_sample_play`), joysticks (`hz_joystick`) |
 | the 6502's 256-byte stack | 32 KB of hardware stack (cc816 and vbcc large): deeper recursion works |
 | `asm("...")` in ca65 syntax | the same with cc816: the text goes out as it is, in ca65 syntax; C variables are named `%[name]`, not with cc65's `%v`/`%o` (reference.md, "Inline assembly (cc816)"). cc65's own zero-page names (`sp`, `ptr1`, `tmp1`) do not exist: use `__rg+0` .. `__rg+47` as scratch. A `.s` file works too |
-| linker configs (`.cfg`) | none: `hcc` does the layout (cc816 links with ld65 and `sdk/c/rt/cc816/hzprog.cfg`) |
+| linker configs (`.cfg`) | none: `hcc` does the layout (cc816 links with ld65 and `sdk/c/rt/cc816/hzprog.cfg`; with `--code large` hcc writes the configuration and places the functions in banks itself) |
 
 ## How to find what broke
 
@@ -92,13 +92,59 @@ hcc: undefined: fire_laser (used in game.c)
 - **"undefined: NAME (used in FILE)"** comes from the link: no file of the program
   defines NAME. A `.c` or `.s` file is missing from the `hcc` command, or a library
   (`-l`), or the name is misspelt, or the function was declared and never written.
-- **"does not fit in its code bank, by N bytes"**: code, constants, data and bss are more
-  than the code bank holds. The message gives each part's size. Move big arrays to a bank
+- **"program too big by N bytes: build with --code large"** (and "does not fit in its
+  code bank"): code, constants, data and bss are more than the code bank holds. The
+  message gives each part's size. When code is the big part, build with `hcc --code
+  large` ("When the program is too big", below). When data is, move big arrays to a bank
   of their own (`hz_far_alloc` and a `__far` pointer), make them smaller, or give the
   software stack less (`--stack N`).
 - **"internal compiler error"** is a fault of cc816 itself. Please report it with the
   file; `CC816_TRACE=1 hcc ...` shows where it happened. Meanwhile try `-O1` or `-O0`, or
   write the line another way.
+
+## When the program is too big
+
+A small program lives in one 64 KB bank: code, constants, data, bss, heap and the
+software stack together. A big port usually does not fit. hcc says so:
+
+```
+hcc: GAME.PRG: program too big by 133,096 bytes: build with --code large. It does not fit
+in its code bank: code and constants 189,260 + data 78 + bss 830 = 190,168 bytes; the
+biggest part: code and constants. ...
+```
+
+**Build it with `hcc --code large`.** Nothing in the C changes. The code may then fill
+several banks; hcc writes `GAME.PRG` and `GAME.PRX` (the other code banks). Copy both to
+the card, into the same folder. In a Makefile made with c.mk: `HZ_CODE := large` (or
+`make HZ_CODE=large`). The whole of it is in reference.md, "The two code models (cc816)".
+
+**What still must fit in the main bank** (the PRG's bank): the startup, the C library and
+the other libraries (hgame, the controls library), your `.s` files and the functions with
+inline assembly, the constants (string literals and `const` tables), the initialised
+data, the bss, the heap and the software stack. Only C functions move to other banks. If
+hcc then says "does not fit in its code bank (the main bank)", the data is too big:
+
+- **Big tables go to banks of their own.** A level map, a tile set, a sound: load them
+  from a file into a bank from `hz_far_alloc()` and read them through a `__far` pointer
+  (`unsigned char __far *map`). The program gets smaller and starts faster too.
+- **Big `const` tables** (a sine table, a font) are constants: they stay in the main bank.
+  Make them smaller (bytes instead of ints, half a sine wave), compute them at the start
+  into a far bank, or load them from a file.
+- **Big buffers** (`static char screen[32000];`) are bss: take them from `hz_far_alloc()`.
+- **The heap**: `malloc` takes what is left of the main bank. With `--code large` hcc keeps
+  at least 4 KB for it when it fills the bank with code (`--heap N` keeps more). Big
+  allocations belong in far banks anyway (64 KB each).
+- **The software stack** (8 KB): local arrays and structures. A smaller one (`--stack
+  4096`) gives the rest room, if the program's locals are small: `hcc --debug` reports how
+  much a run used.
+- **String literals** are constants too. A program with thousands of messages can keep
+  them in a file and load them into a far bank.
+
+`hcc --map` shows the main bank's parts and the other banks' sizes.
+
+**Assembly in a large program** follows the large model's calling convention (JSL/RTL,
+the first argument at `4,s`): reference.md, "Calling convention". `#ifdef
+__CC816_LARGE__` tells the two models apart in C and in inline assembly.
 
 ## Not supported, and what to do instead
 
@@ -115,6 +161,7 @@ hcc: undefined: fire_laser (used in game.c)
 | nested functions (GNU) | a function at file scope; pass it what it needs |
 | `__builtin_...` functions | the C library's function, or a few lines of C |
 | one object of 64 KB or more | a bank of its own (`hz_far_alloc`) |
+| one function of 64 KB or more | split it (with `--code large` a function must fit in one bank) |
 
 ## A ported program, step by step
 

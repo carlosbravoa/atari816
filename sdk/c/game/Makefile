@@ -3,7 +3,8 @@
 #   make            the library: ../build/game/cc816/libhgame.lib (cc816) and
 #                   ../build/game/large/libhgame.a (vbcc); hcc also builds it by itself
 #                   when a program includes one of the headers
-#   make test       for each compiler (CCS, default "cc816 vbcc"): tests/run.py (every
+#   make test       for each compiler (CCS, default "cc816 vbcc"; with cc816 also its large
+#                   code model, cc816l: hcc --code large): tests/run.py (every
 #                   part of the library in the emulator: the programs' own checks,
 #                   screenshots against tests/ref/ (the same pictures for both), the
 #                   sound logs and the recorded output), then the examples (glimmer,
@@ -26,7 +27,8 @@ all:
 	$(if $(filter vbcc,$(CCS)),,@echo "(no vbcc toolchain: cc816 only)")
 
 test: all
-	@set -e; for cc in $(CCS); do $(PYTHON) tests/run.py --horizon $(HORIZON) --cc $$cc; done
+	@set -e; for cc in $(CCS) $(if $(filter cc816,$(CCS)),cc816l); do \
+	  $(PYTHON) tests/run.py --horizon $(HORIZON) --cc $$cc; done
 	@set -e; for cc in $(CCS); do for p in $(PROGRAMS); do echo "== $$p ($$cc)"; \
 	  rm -f $$p/*.PRG; $(MAKE) --no-print-directory -C $$p test HORIZON=$(HORIZON) HZ_CC=$$cc; \
 	  done; done

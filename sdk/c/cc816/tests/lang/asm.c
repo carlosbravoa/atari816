@@ -17,15 +17,31 @@ asm(".macro ADD2\n"
 
 int twice(int x) { return 2 * x; }
 
+/* the code model's call: JSR/RTS, the first argument at 3,s; the large code model's
+ * (hcc --code large): JSL/RTL, 4,s */
+#ifdef __CC816_LARGE__
+#define CALL "jsl"
+#define RET "rtl"
+#define A1 "4"
+#define A2 "6"
+#define A3 "8"
+#else
+#define CALL "jsr"
+#define RET "rts"
+#define A1 "3"
+#define A2 "5"
+#define A3 "7"
+#endif
+
 /* unsigned add3(a, b, c): the arguments at 3,s 5,s 7,s, the result in A */
 __attribute__((naked)) unsigned add3(unsigned a, unsigned b, unsigned c)
 {
-    __asm__("\tlda 3,s\n"
+    __asm__("\tlda " A1 ",s\n"
             "\tclc\n"
-            "\tadc 5,s\n"
+            "\tadc " A2 ",s\n"
             "\tclc\n"
-            "\tadc 7,s\n"
-            "\trts");
+            "\tadc " A3 ",s\n"
+            "\t" RET);
 }
 
 /* the fill loop of a porter: 8-bit stores, Y the index (scratch: no need to keep it) */
@@ -81,7 +97,7 @@ int main(void)
     bad |= (big != 100001L) << 3;
     asm("\tlda #$1234\n\tsta %[c]");    /* a char: made a valid char again after it */
     bad |= (c != 0x34) << 4;
-    asm("\tpei (%[x])\n\tjsr _twice\n\tply\n\tsta %[r]");      /* a C function */
+    asm("\tpei (%[x])\n\t" CALL " _twice\n\tply\n\tsta %[r]");  /* a C function */
     bad |= (r != 20) << 5;
     bad |= (add3(1, 20, 300) != 321) << 6;
     for (i = 0; i < 3; i++)                                    /* in a loop */

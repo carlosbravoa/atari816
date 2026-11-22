@@ -22,6 +22,7 @@
 	.smart	-
 	.a16
 	.i16
+	.include "model.inc"
 	.importzp __h0, __h1, __h2, __h3, __rv
 	.export	__mul16
 
@@ -50,4 +51,4 @@ __mul16:
 	beq	@done
 	asl	__h3
 	bra	@loop
-@done:	rts
+@done:	RET

@@ -22,6 +22,7 @@
 	.smart	-
 	.a16
 	.i16
+	.include "model.inc"
 	.importzp __h0, __h1, __h2, __h3, __rv
 	.export	__udiv32, __umod32, __sdiv32, __smod32
 
@@ -65,7 +66,7 @@ __udiv32:
 	bne	@s2
 	sta	__h2
 	stz	__h2+2
-	rts
+	RET
 @w16:	lda	__h0+2		; divisor < $10000: the high word first
 	cmp	__h1
 	bcc	@hlow
@@ -97,7 +98,7 @@ __udiv32:
 	bne	@l2
 	sta	__h2
 	stz	__h2+2
-	rts
+	RET
 @b2:	sbc	__h1
 	sec
 	bra	@z2
@@ -109,7 +110,7 @@ __udiv32:
 	lda	#$FFFF
 	sta	__h0
 	sta	__h0+2
-	rts
+	RET
 @full:	lda	__h0+2		; divisor >= $10000: the remainder starts as the high word
 	sta	__h2
 	stz	__h2+2
@@ -131,7 +132,7 @@ __udiv32:
 	dex
 	bne	@l3
 	stz	__h0+2
-	rts
+	RET
 @b3:	lda	__h2
 	sec
 	sbc	__h1
@@ -143,12 +144,12 @@ __udiv32:
 	bra	@z3
 
 __umod32:
-	jsr	__udiv32
+	CALL	__udiv32
 	lda	__h2
 	sta	__h0
 	lda	__h2+2
 	sta	__h0+2
-	rts
+	RET
 
 neg_h0:	lda	#0
 	sec
@@ -177,11 +178,11 @@ __sdiv32:
 @a:	lda	__h1+2
 	bpl	@b
 	jsr	neg_h1
-@b:	jsr	__udiv32
+@b:	CALL	__udiv32
 	lda	__rv+2
 	bpl	@r
 	jsr	neg_h0
-@r:	rts
+@r:	RET
 
 __smod32:
 	lda	__h0+2
@@ -191,8 +192,8 @@ __smod32:
 @a:	lda	__h1+2
 	bpl	@b
 	jsr	neg_h1
-@b:	jsr	__umod32
+@b:	CALL	__umod32
 	lda	__rv+2
 	bpl	@r
 	jsr	neg_h0
-@r:	rts
+@r:	RET

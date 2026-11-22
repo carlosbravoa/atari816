@@ -46,6 +46,8 @@ def compile_one(args):
     except Exception as e:
         tb = traceback.extract_tb(e.__traceback__)[-1]
         return k, 'crash', f'{type(e).__name__}: {e} ({os.path.basename(tb.filename)}:{tb.lineno})'[:200]
+    if os.path.exists(base + '.PRX'):
+        os.remove(base + '.PRX')
     try:
         prog.link([base + '.o'], base + '.PRG')
     except LinkError as e:
@@ -61,6 +63,9 @@ def run_batch(out, ks, runner, seconds):
            '--out', os.path.join(out, f'run-{first}')]
     for k in ks:
         cmd += ['--file', os.path.join(out, f'T{k:03d}.PRG') + f':/T/T{k:03d}.PRG']
+        x = os.path.join(out, f'T{k:03d}.PRX')      # (hcc --code large: its code banks)
+        if os.path.exists(x):
+            cmd += ['--file', x + f':/T/T{k:03d}.PRX']
     subprocess.run(cmd, capture_output=True, text=True)
     con = open(os.path.join(out, f'run-{first}', 'console.txt'), encoding='latin-1').read()
     res = {}

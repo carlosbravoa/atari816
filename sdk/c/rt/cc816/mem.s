@@ -14,6 +14,7 @@
 	.smart	-
 	.a16
 	.i16
+	.include "model.inc"
 	.importzp __h0, __h1, __h2
 	.export	_memcpy, _memmove, _memset, _strlen, _strcpy, _memcmp
 
@@ -21,34 +22,34 @@
 
 ; void *memcpy(void *d, const void *s, size_t n)
 _memcpy:
-	lda	7,s		; n
+	lda	ARGS+4,s		; n
 	beq	@z
 	dec	a
 	tay			; (n - 1 for a moment)
-	lda	5,s		; s
+	lda	ARGS+2,s		; s
 	tax
 	tya
 	pha
-	lda	5,s		; d (3,s + 2)
+	lda	ARGS+2,s		; d (3,s + 2)
 	tay
 	pla
 	mvn	#^_memcpy, #^_memcpy
-@z:	lda	3,s
-	rts
+@z:	lda	ARGS,s
+	RET
 
 ; void *memmove(void *d, const void *s, size_t n)
 _memmove:
-	lda	7,s		; n
+	lda	ARGS+4,s		; n
 	beq	@z
 	dec	a
 	sta	__h0		; n - 1
-	lda	5,s		; s
-	cmp	3,s
+	lda	ARGS+2,s		; s
+	cmp	ARGS,s
 	bcs	@fwd		; s >= d: upwards is safe
 	clc
 	adc	__h0
 	tax			; the last source byte
-	lda	3,s
+	lda	ARGS,s
 	clc
 	adc	__h0
 	tay			; the last destination byte
@@ -56,51 +57,51 @@ _memmove:
 	mvp	#^_memcpy, #^_memcpy
 	bra	@z
 @fwd:	tax
-	lda	3,s
+	lda	ARGS,s
 	tay
 	lda	__h0
 	mvn	#^_memcpy, #^_memcpy
-@z:	lda	3,s
-	rts
+@z:	lda	ARGS,s
+	RET
 
 ; void *memset(void *d, int c, size_t n)
 _memset:
-	lda	3,s
+	lda	ARGS,s
 	tax
-	lda	7,s		; n
+	lda	ARGS+4,s		; n
 	beq	@done
 	cmp	#4
 	bcs	@mvn
 	tay
 	sep	#$20
 	.a8
-	lda	5,s		; c
+	lda	ARGS+2,s		; c
 @l:	sta	a:0,x
 	inx
 	dey
 	bne	@l
 	rep	#$20
 	.a16
-@done:	lda	3,s
-	rts
+@done:	lda	ARGS,s
+	RET
 @mvn:	sep	#$20
 	.a8
-	lda	5,s
+	lda	ARGS+2,s
 	sta	a:0,x		; the first byte
 	rep	#$20
 	.a16
 	txy
 	iny
-	lda	7,s
+	lda	ARGS+4,s
 	sec
 	sbc	#2		; n - 1 more bytes: the count is n - 2
 	mvn	#^_memcpy, #^_memcpy
-	lda	3,s
-	rts
+	lda	ARGS,s
+	RET
 
 ; size_t strlen(const char *s)
 _strlen:
-	lda	3,s
+	lda	ARGS,s
 	sta	__h0
 	tax
 	lsr	a
@@ -131,15 +132,15 @@ _strlen:
 @d:	txa
 	sec
 	sbc	__h0
-	rts
+	RET
 @zero:	lda	#0
-	rts
+	RET
 
 ; char *strcpy(char *d, const char *s)
 _strcpy:
-	lda	3,s
+	lda	ARGS,s
 	tay
-	lda	5,s
+	lda	ARGS+2,s
 	tax
 	lsr	a
 	bcc	@w
@@ -170,17 +171,17 @@ _strcpy:
 	sta	a:0,y		; the 0
 	rep	#$20
 	.a16
-@ret:	lda	3,s
-	rts
+@ret:	lda	ARGS,s
+	RET
 
 ; int memcmp(const void *a, const void *b, size_t n): -1, 0 or 1 (unsigned bytes)
 _memcmp:
-	lda	3,s
+	lda	ARGS,s
 	sta	__h0
-	lda	5,s
+	lda	ARGS+2,s
 	sta	__h1
 	ldy	#0
-	lda	7,s
+	lda	ARGS+4,s
 	beq	@ret0
 	and	#$FFFE
 	sta	__h2		; where the pairs end
@@ -192,7 +193,7 @@ _memcmp:
 	iny
 	cpy	__h2
 	bne	@w
-@tail:	lda	7,s
+@tail:	lda	ARGS+4,s
 	lsr	a
 	bcc	@ret0
 	sep	#$20
@@ -204,7 +205,7 @@ _memcmp:
 	beq	@ret0
 	bcc	@lt
 	lda	#1
-	rts
+	RET
 @diff:	sep	#$20		; the first byte (the low one) decides if it differs
 	.a8
 	cmp	(__h1),y
@@ -216,8 +217,8 @@ _memcmp:
 	.a16
 	bcc	@lt
 	lda	#1
-	rts
+	RET
 @lt:	lda	#$FFFF
-	rts
+	RET
 @ret0:	lda	#0
-	rts
+	RET

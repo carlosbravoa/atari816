@@ -2,10 +2,13 @@
 """run.py - the C SDK's tests: build each test with hcc, run it in emu816, check it.
 
     python3 sdk/c/tests/run.py [--horizon DIR] [--cc cc816|vbcc] [--model large|tiny]
-                               [--only NAME ...]
+                               [--code small|large] [--only NAME ...]
 
-Every test runs for each compiler and memory model: cc816 (one model), vbcc large, vbcc
-tiny (--cc and --model choose some). Prints one line per test and configuration (PASS /
+Every test runs for each compiler and model: cc816 (its small code model), cc816l
+(cc816's large code model, hcc --code large, with --main-room 0 --bank-room 8192: every
+function that can move goes to another bank, a bank holds at most 8 KB of code, so calls,
+pointers, callbacks, helpers and setjmp all cross banks), vbcc large, vbcc tiny (--cc,
+--model and --code choose some: --code large is cc816l alone). Prints one line per test and configuration (PASS /
 FAIL and a detail) and a summary; exit code 1 when anything failed. Build output and the
 emulator's runs: sdk/c/build/tests/<cc816|large|tiny>/.
 Tests (in tests/):
@@ -46,6 +49,7 @@ Tests (in tests/):
 """
 import os
 import re
+import shutil
 import subprocess
 import sys
 import time
@@ -66,8 +70,15 @@ def report(name, model, ok, detail=""):
 
 
 # the configurations: (name, hcc's compiler options)
-CONFIGS = {"cc816": ["--cc", "cc816"], "large": ["--cc", "vbcc", "--model", "large"],
+LARGE_CODE = ["--code", "large", "--main-room", "0", "--bank-room", "8192"]
+CONFIGS = {"cc816": ["--cc", "cc816"], "cc816l": ["--cc", "cc816"] + LARGE_CODE,
+           "large": ["--cc", "vbcc", "--model", "large"],
            "tiny": ["--cc", "vbcc", "--model", "tiny"]}
+
+
+def c816(model):
+    """a cc816 configuration (either code model)"""
+    return model in ("cc816", "cc816l")
 
 
 def sh(cmd, cwd=None):
@@ -106,7 +117,7 @@ def grab(con, pattern):
     return m.group(0) if m else ""
 
 
-def fpu_test(b, horizon):
+def fpu_test(b, horizon, model="cc816"):
     """cc816's floating point bit for bit: the runtime, the conversions, printf, strtod and
     math.h against tables (tests/fpu); a program without float links none of it"""
     fpu = os.path.join(HERE, "fpu")
@@ -122,9 +133,9 @@ def fpu_test(b, horizon):
         if "mathhost" in cmd[1]:
             acc = out
     prg = os.path.join(b, "FPTEST.PRG")
-    rc, out = hcc(prg, [os.path.join(fpu, "fptest.c")], "cc816")
+    rc, out = hcc(prg, [os.path.join(fpu, "fptest.c")], model)
     if rc:
-        report("fpu", "cc816", False, "build: " + out.strip().splitlines()[-1])
+        report("fpu", model, False, "build: " + out.strip().splitlines()[-1])
         return
     cmd = [sys.executable, RUN816, prg, "--horizon", horizon, "--mode", "shell", "--seconds",
            "600", "--out", os.path.join(b, "run-fpu"), "--file", tab + ":/FPTAB.BIN",
@@ -133,7 +144,7 @@ def fpu_test(b, horizon):
     con = open(os.path.join(b, "run-fpu", "console.txt"), encoding="latin-1").read()
     ok = "FPU PASS" in con and "[kill]" not in con
     worst = max((int(w) for w in re.findall(r"worst\s+(\d+) ulp", acc)), default=-1)
-    report("fpu", "cc816", ok, grab(con, r"fpu: \d+ cases, \d+ failures") +
+    report("fpu", model, ok, grab(con, r"fpu: \d+ cases, \d+ failures") +
            f"; math.h within {worst} ulp of glibc (100,000 arguments a function)" +
            ("" if ok else " | " + " | ".join(l.strip() for l in con.splitlines()
                                              if l.startswith("  ") or "failures" in l
@@ -143,7 +154,7 @@ def fpu_test(b, horizon):
     with open(src, "w") as f:
         f.write('#include <stdio.h>\n#include <stdlib.h>\nint main(void)\n{\n'
                 '    printf("%d %s\\n", atoi("42"), "x");\n    return 0;\n}\n')
-    rc, out = hcc(os.path.join(b, "NOFLOAT.PRG"), [src], "cc816", ["--map"])
+    rc, out = hcc(os.path.join(b, "NOFLOAT.PRG"), [src], model, ["--map"])
     mp = os.path.join(b, "NOFLOAT.map")
     names = open(mp, encoding="latin-1").read() if os.path.exists(mp) else ""
     fl = [n for n in ("__fadd", "__fmul", "___hz_fmtfp", "__fpack", "__cc816_fmtf", "__cc816_scanf")
@@ -155,25 +166,25 @@ def fpu_test(b, horizon):
         f.write('#include <horizon.h>\n#include <math.h>\nvolatile float x = 2.0f;\n'
                 'int main(void)\n{\n    hz_puts(sqrt(x) * 3.0f > 4.0f ? "big" : "small");\n'
                 '    return 0;\n}\n')
-    rc2, out2 = hcc(os.path.join(b, "NOPRINTF.PRG"), [src2], "cc816", ["--map"])
+    rc2, out2 = hcc(os.path.join(b, "NOPRINTF.PRG"), [src2], model, ["--map"])
     mp2 = os.path.join(b, "NOPRINTF.map")
     names2 = open(mp2, encoding="latin-1").read() if os.path.exists(mp2) else ""
     fl2 = [n for n in ("___hz_fmtfp", "___hz_scanfp", "_strtod", "__cc816_fmtf")
            if re.search(r"\b" + n + r"\b", names2)]
     ok = rc == 0 and not fl and names != "" and rc2 == 0 and not fl2 and "__fmul" in names2
-    report("fpu", "nofloat", ok,
+    report("fpu", "nofloat" if model == "cc816" else "nofloatl", ok,
            f"a program without float links no float code ({size}); one with float but no "
            f"printf no float printf ({grab(out2, r'[\d,]+ bytes on the card')})"
            if ok else f"links {fl} {fl2} {(out + out2).strip()[-120:]}")
 
 
-def ll_test(b, horizon):
+def ll_test(b, horizon, model="cc816"):
     """long long and setjmp: tests/ll/llbench.c's times and checks; the 64-bit code only
     in programs that use long long"""
     prg = os.path.join(b, "LLBENCH.PRG")
-    rc, out = hcc(prg, [os.path.join(HERE, "ll", "llbench.c")], "cc816", ["--map"])
+    rc, out = hcc(prg, [os.path.join(HERE, "ll", "llbench.c")], model, ["--map"])
     if rc:
-        report("ll", "cc816", False, "build: " + out.strip().splitlines()[-1])
+        report("ll", model, False, "build: " + out.strip().splitlines()[-1])
         return
     mp = os.path.join(b, "LLBENCH.map")
     names = open(mp, encoding="latin-1").read() if os.path.exists(mp) else ""
@@ -182,20 +193,20 @@ def ll_test(b, horizon):
     ok = "llbench done" in con and "check 488427781 6640827 1500000026624" in con and \
         len(times) == 12 and all(re.search(r"\b" + n + r"\b", names)
                                  for n in ("__mul64", "__udiv64", "___hz_fmtll", "_setjmp"))
-    report("ll", "cc816", ok, " ".join(f"{n} {t}" for n, t in times) + " us" +
+    report("ll", model, ok, " ".join(f"{n} {t}" for n, t in times) + " us" +
            ("" if ok else " " + " | ".join(l for l in con.splitlines() if "check" in l)))
     src = os.path.join(b, "noll.c")
     with open(src, "w") as f:
         f.write('#include <stdio.h>\n#include <stdlib.h>\nint main(void)\n{\n'
                 '    long x = atol("123456789");\n    printf("%ld %lu %d\\n", x * 3, '
                 '(unsigned long)x / 7, (int)sizeof x);\n    return 0;\n}\n')
-    rc, out = hcc(os.path.join(b, "NOLL.PRG"), [src], "cc816", ["--map"])
+    rc, out = hcc(os.path.join(b, "NOLL.PRG"), [src], model, ["--map"])
     mp = os.path.join(b, "NOLL.map")
     names = open(mp, encoding="latin-1").read() if os.path.exists(mp) else ""
     ll = [n for n in ("__mul64", "__udiv64", "__shl64", "___hz_fmtll", "___hz_scanll",
                       "__cc816_fmtll", "___lltof") if re.search(r"\b" + n + r"\b", names)]
     size = grab(out, r"[\d,]+ bytes on the card")
-    report("ll", "noll", rc == 0 and names != "" and not ll,
+    report("ll", "noll" if model == "cc816" else "nolll", rc == 0 and names != "" and not ll,
            f"a program without long long links none of its code ({size})" if not ll
            else f"links {ll}")
 
@@ -272,7 +283,7 @@ def run_model(model, horizon, only):
             report("float", model, ok, grab(con, r"float: \d+ checks, \d+ failures") +
                    f" (program {size})" +
                    ("" if ok else " " + " | ".join(l for l in con.splitlines() if "FAIL" in l)))
-        if model == "cc816":
+        if c816(model):
             prg = os.path.join(b, "IEEE.PRG")
             rc, out = hcc(prg, [T("float", "ieee.c")], model, ["--map"])
             if rc:
@@ -286,11 +297,11 @@ def run_model(model, horizon, only):
                        ("" if ok else " " + " | ".join(l for l in con.splitlines()
                                                          if "FAIL" in l)))
 
-    if want("fpu") and model == "cc816":
-        fpu_test(b, horizon)
+    if want("fpu") and c816(model):
+        fpu_test(b, horizon, model)
 
-    if want("ll") and model == "cc816":
-        ll_test(b, horizon)
+    if want("ll") and c816(model):
+        ll_test(b, horizon, model)
 
     if want("stack"):
         prg = os.path.join(b, "STACK.PRG")
@@ -300,7 +311,8 @@ def run_model(model, horizon, only):
             overflow = "stack overflow:" in con
             # 200 levels of ~70 bytes: more than the tiny model's 4 KB and cc816's 8 KB
             # software stack (the array is there), less than the large model's 32 KB
-            ok = overflow if model in ("tiny", "cc816") else (not overflow and "intact" in con)
+            ok = overflow if model in ("tiny", "cc816", "cc816l") else \
+                (not overflow and "intact" in con)
             report("stack", model, ok, "overflow reported" if overflow else "no overflow, guard intact")
         else:
             report("stack", model, False, "build: " + out.strip().splitlines()[-1])
@@ -310,7 +322,7 @@ def run_model(model, horizon, only):
             rc, con, _ = emu(prg, os.path.join(b, "run-stackd"), horizon, args="ok", seconds=3)
             m = re.search(r"stack: (\d+) of (\d+) bytes used", con)
             m2 = re.search(r"software stack: (\d+) of (\d+) bytes used", con)
-            ok = bool(m) and "overflow" not in con and (bool(m2) or model != "cc816")
+            ok = bool(m) and "overflow" not in con and (bool(m2) or not c816(model))
             report("stackdbg", model, ok, (m.group(0) if m else "no report") +
                    (", " + m2.group(0) if m2 else ""))
         else:
@@ -318,9 +330,9 @@ def run_model(model, horizon, only):
 
     if want("bench"):
         # vbcc: -O1 (its default) and -O3; cc816: its default (-O2) and -O1
-        for opt in (("-O2", "-O1") if model == "cc816" else ("-O1", "-O3")):
+        for opt in (("-O2", "-O1") if c816(model) else ("-O1", "-O3")):
             name = "bench" if opt in ("-O1", "-O2") and opt == (
-                "-O2" if model == "cc816" else "-O1") else "bench" + opt
+                "-O2" if c816(model) else "-O1") else "bench" + opt
             prg = os.path.join(b, "BENCH.PRG")
             rc, out = hcc(prg, [T("bench", "bench_hz.c"), T("bench", "bench.c")], model, [opt])
             if rc:
@@ -348,7 +360,8 @@ def run_model(model, horizon, only):
 
     rt = os.path.join(HERE, "rt", "run.py")
     if want("rt") and os.path.exists(rt):
-        rc, out = sh([sys.executable, rt, "--model", model, "--horizon", horizon])
+        rc, out = sh([sys.executable, rt, "--model", model, "--horizon", horizon] +
+                     (["--out", os.path.join(b, "rt")] if model == "cc816l" else []))
         # (rt/run.py takes the configurations too: cc816, large, tiny)
         lines = [l for l in out.splitlines() if l.strip()]
         summary = [l for l in lines if re.match(r"^rt \w+", l)]
@@ -426,6 +439,176 @@ def hcc_messages(only, models):
                and ok4 else (out + out3 + out4).strip()[-200:])
 
 
+def hcc_large(only, horizon):
+    """the large code model (hcc --code large) on its own: a program with about 180 KB of
+    code (tests/large/genbig.py: 1,600 functions calling each other directly, through
+    pointers and recursively across banks) refused by the small model with the advice and
+    built and run by the large one (its output checked line by line); the messages (data
+    too big even for --code large, objects of the two code models mixed); and the start's
+    failures: no .PRX, a .PRX of another build, no memory for the banks (tests/large/
+    memhog.c)"""
+    want = lambda n: not only or n in only  # noqa: E731
+    if not want("large"):
+        return
+    b = os.path.join(SDKC, "build", "tests", "large")
+    os.makedirs(b, exist_ok=True)
+    gen = os.path.join(b, "gen")
+    rc, out = sh([sys.executable, os.path.join(HERE, "large", "genbig.py"), gen])
+    if rc:
+        report("large", "big", False, "genbig: " + out.strip()[-200:])
+        return
+    srcs = [os.path.join(gen, f) for f in sorted(os.listdir(gen)) if f.endswith(".c")]
+    rc, out = sh([sys.executable, HCC, "-o", os.path.join(b, "BIGS.PRG")] + srcs)
+    ok = rc != 0 and "program too big by" in out and "build with --code large" in out
+    report("large", "small", ok, "the small model: " + (grab(out, r"program too big by [\d,]+ "
+                                                              r"bytes: build with --code large")
+                                                         if ok else out.strip()[-200:]))
+    prg = os.path.join(b, "BIGL.PRG")
+    rc, out = sh([sys.executable, HCC, "--code", "large", "--map", "-o", prg] + srcs)
+    if rc:
+        report("large", "big", False, "build: " + out.strip()[-300:])
+        return
+    banks = re.search(r"in (\d+) other bank", out)
+    prx = os.path.join(b, "BIGL.PRX")
+    rc, con, _ = emu(prg, os.path.join(b, "run-big"), horizon, seconds=20)
+    exp = open(os.path.join(gen, "expected.txt")).read().splitlines()
+    got = [ln.strip() for ln in con.splitlines()]
+    missing = [e for e in exp if e not in got]
+    ok = not missing and banks is not None and int(banks.group(1)) >= 2 and \
+        os.path.exists(prx) and "[kill]" not in con
+    report("large", "big", ok, (f"{len(exp)} lines as computed; "
+                                + grab(out, r"[\d,]+ bytes of movable code in the main bank, "
+                                            r"[\d,]+ in \d+ other bank\(s\)") + "; .PRX "
+                                + grab(out, r"PRX: [\d,]+ bytes") + ", PRG "
+                                + grab(out, r"[\d,]+ bytes on the card"))
+           if ok else "missing: " + " | ".join(missing[:4]) + " " + con.strip()[-200:])
+    # the start's failures
+    fails = os.path.join(b, "fail")
+    shutil.rmtree(fails, ignore_errors=True)
+    os.makedirs(fails)
+    alone = os.path.join(fails, "BIGL.PRG")
+    shutil.copy(prg, alone)
+    rc, con, _ = emu(alone, os.path.join(b, "run-noprx"), horizon, seconds=4)
+    ok = "BIGL.PRX: not found" in con and "big done" not in con and "[kill]" not in con
+    report("large", "noprx", ok, "no .PRX: " + (grab(con, r"BIGL.PRX: not found[^:]*")
+                                               if ok else con.strip()[-200:]))
+    old = os.path.join(fails, "OLD.PRX")
+    shutil.copy(prx, old)
+    # (another build: the same sources at -O1; the same build would have the same stamp)
+    rc, out = sh([sys.executable, HCC, "--code", "large", "-O1", "-o", alone] + srcs)
+    shutil.copy(old, os.path.join(fails, "BIGL.PRX"))
+    rc, con, _ = emu(alone, os.path.join(b, "run-oldprx"), horizon, seconds=4)
+    ok = "made by another build" in con and "big done" not in con and "[kill]" not in con
+    report("large", "oldprx", ok, "a .PRX of another build refused" if ok else con.strip()[-200:])
+    hog = os.path.join(b, "MEMHOG.PRG")
+    rc, out = sh([sys.executable, HCC, "-o", hog, os.path.join(HERE, "large", "memhog.c")])
+    if rc:
+        report("large", "nomem", False, "build: " + out.strip()[-200:])
+    else:
+        cmd = [sys.executable, RUN816, hog, "--horizon", horizon, "--mode", "shell",
+               "--seconds", "8", "--out", os.path.join(b, "run-nomem"), "--args",
+               "/APPS/BIGL.PRG", "--file", prg + ":/APPS/BIGL.PRG",
+               "--file", prx + ":/APPS/BIGL.PRX"]
+        sh(cmd)
+        p = os.path.join(b, "run-nomem", "console.txt")
+        con = open(p, encoding="latin-1").read() if os.path.exists(p) else ""
+        ok = "not enough memory" in con and "ended with code 1" in con and \
+            "big done" not in con and "[kill]" not in con
+        report("large", "nomem", ok, ("no memory: " + grab(con, r"memhog: \d+ banks taken, \d+ "
+                                                              r"free") + "; "
+                                      + grab(con, r"not enough memory[^\n]*"))
+               if ok else con.strip()[-300:])
+    # the messages
+    W = lambda n, t: (open(os.path.join(b, n), "w").write(t), os.path.join(b, n))[1]  # noqa: E731
+    # a file of 300 functions (more than cc816 gives segments of their own in one module:
+    # they share them, 3 a segment), compiled with -c into an ar65 library, every function
+    # in other banks: each function's address in the main bank must still be right
+    g2 = os.path.join(b, "gen300")
+    rc, out = sh([sys.executable, os.path.join(HERE, "large", "genbig.py"), g2, "--funcs",
+                  "300", "--files", "1", "--seed", "7"])
+    objs = []
+    for f in ("big0.c", "bigmain.c"):
+        o = os.path.join(b, "g300_" + f[:-2] + ".o")
+        rc2, out2 = sh([sys.executable, HCC, "--code", "large", "-c", "-o", o,
+                        os.path.join(g2, f)])
+        rc |= rc2
+        out += out2
+        objs.append(o)
+    lib = os.path.join(b, "g300.lib")
+    if os.path.exists(lib):
+        os.remove(lib)
+    rc2, out2 = sh([os.environ.get("AR65") or "ar65", "a", lib, objs[0]])
+    rc |= rc2
+    gprg = os.path.join(b, "G300.PRG")
+    rc2, out2 = sh([sys.executable, HCC, "--code", "large", "--main-room", "0", "--map", "-o",
+                    gprg, objs[1], lib])
+    if rc or rc2:
+        report("large", "grouped", False, "build: " + (out + out2).strip()[-300:])
+    else:
+        rc, con, _ = emu(gprg, os.path.join(b, "run-g300"), horizon, seconds=10)
+        exp = open(os.path.join(g2, "expected.txt")).read().splitlines()
+        missing = [e for e in exp if e not in [ln.strip() for ln in con.splitlines()]]
+        report("large", "grouped", not missing, "300 functions in one library module, "
+               + grab(out2, r"[\d,]+ in \d+ other bank\(s\)") + ", "
+               + grab(out2, r"\d+ thunks") if not missing else
+               "missing: " + " | ".join(missing[:3]) + " " + con.strip()[-200:])
+    # a 16-bit address of a function in another bank written in assembly (in the main bank)
+    # is refused (ld65's o65 output would cut it silently); __T_name is the right one
+    cf = W("trunc.c", "int sqx(int x) { return x * x; }\nextern int (*tab_x[1])(int);\n"
+                      "int main(void) { return tab_x[0](3) == 9 ? 0 : 1; }\n")
+    for name, sym in (("trunc", "_sqx"), ("truncok", "__T_sqx")):
+        sf = W(name + ".s", f"\t.p816\n\t.import {sym}\n\t.export _tab_x\n"
+                            f"\t.segment \"RODATA\"\n_tab_x:\t.addr {sym}\n")
+        rc, out = sh([sys.executable, HCC, "--code", "large", "--main-room", "0", "-o",
+                      os.path.join(b, name.upper() + ".PRG"), cf, sf])
+        if name == "trunc":
+            ok1 = rc != 0 and "a value that depends on where code is" in out and \
+                "__T_name" in out
+            o1 = out
+        else:
+            rc2, con, _ = emu(os.path.join(b, "TRUNCOK.PRG"), os.path.join(b, "run-tok"),
+                              horizon, seconds=3)
+            ok2 = rc == 0 and "[kill]" not in con
+            o2 = out + con
+    report("large", "truncate", ok1 and ok2, "a function's 16-bit address in assembly: "
+           "_name refused, __T_name works" if ok1 and ok2 else (o1 + o2).strip()[-300:])
+    # a program whose code all fits in the main bank: one file, no loader
+    one = W("one.c", "#include <stdio.h>\nstatic int sq(int x) { return x * x; }\n"
+                     "int (*fp)(int) = sq;\nint main(void)\n{\n"
+                     "    printf(\"one: %d\\n\", fp(12) + sq(3));\n    return 0;\n}\n")
+    oprg = os.path.join(b, "ONE.PRG")
+    if os.path.exists(os.path.join(b, "ONE.PRX")):
+        os.remove(os.path.join(b, "ONE.PRX"))
+    rc, out = sh([sys.executable, HCC, "--code", "large", "--map", "-o", oprg, one])
+    if rc:
+        report("large", "onefile", False, "build: " + out.strip()[-200:])
+    else:
+        rc, con, _ = emu(oprg, os.path.join(b, "run-one"), horizon, seconds=3)
+        ok = "one: 153" in con and not os.path.exists(os.path.join(b, "ONE.PRX")) and \
+            "no .PRX" in out
+        report("large", "onefile", ok, "everything in the main bank: one file, no loader ("
+               + grab(out, r"[\d,]+ bytes on the card") + ")" if ok else
+               (out + con).strip()[-300:])
+    big = W("bigdata.c", "char big[30000], big2[30000];\n"
+                         "int main(void) { big[1] = big2[2]; return 0; }\n")
+    rc, out = sh([sys.executable, HCC, "--code", "large", "-o", os.path.join(b, "BD.PRG"), big])
+    ok = rc != 0 and "does not fit in its code bank (the main bank)" in out
+    report("large", "bigdata", ok, "data too big for the main bank: said" if ok
+           else out.strip()[-200:])
+    small = W("small.c", "int main(void) { return 0; }\n")
+    rc, out = sh([sys.executable, HCC, "-o", os.path.join(b, "big.o"), "-c", small])
+    rc2, out2 = sh([sys.executable, HCC, "--code", "large", "-o", os.path.join(b, "MX.PRG"),
+                    os.path.join(b, "big.o")])
+    rc3, out3 = sh([sys.executable, HCC, "--code", "large", "-o", os.path.join(b, "bigl.o"),
+                    "-c", small])
+    rc4, out4 = sh([sys.executable, HCC, "-o", os.path.join(b, "MX.PRG"),
+                    os.path.join(b, "bigl.o")])
+    ok = rc == 0 and rc3 == 0 and rc2 != 0 and rc4 != 0 and \
+        "made for the small code model" in out2 and "made for the large code model" in out4
+    report("large", "mixed", ok, "objects of the other code model refused" if ok
+           else (out2 + out4).strip()[-300:])
+
+
 # pixels of uitest's screenshots (1280 x 720): (shot, x, y, RGB, what)
 UI_PIXELS = [
     (1, 112, 181, (200, 52, 44), "row 0's icon, drawn by the row function (C_RED)"),
@@ -468,7 +651,7 @@ def run_ui(horizon, only, m="large"):
         if rc:
             report("ui", m, False, "build: " + out.strip().splitlines()[-1])
         else:
-            if m == "cc816":            # no block: the program's own size
+            if c816(m):                 # no block: the program's own size
                 blk = "program " + grab(out, r"[\d,]+ bytes on the card")
             else:
                 blk = grab(out, r"block: [\d,]+ bytes") + " for " + \
@@ -505,7 +688,7 @@ def run_ui(horizon, only, m="large"):
                 rc, con, _ = emu(prg, os.path.join(b, "run-bad" + arg), horizon, args=arg,
                                  seconds=4)
                 i, j = con.find("BADHUI: start"), con.find(text)
-                if m == "cc816" and arg == "ptr":
+                if c816(m) and arg == "ptr":
                     # cc816: a local is in the code bank too (the software stack): allowed
                     ok = i >= 0 and "BADHUI: not stopped" in con and "hui:" not in con \
                         and "[kill]" not in con
@@ -563,8 +746,10 @@ def run_ui(horizon, only, m="large"):
         res = []
         for d in ("c-window-app", "window-app"):
             rc, out = sh(["make", "--no-print-directory", "-C", os.path.join(tpl, d), "test",
-                          "HORIZON=" + horizon] + (["HZ_CC=cc816" if m == "cc816" else "HZ_CC=vbcc"]
-                                                   if d == "c-window-app" else []))
+                          "HORIZON=" + horizon] + (["HZ_CC=cc816" if c816(m) else "HZ_CC=vbcc"]
+                                                   if d == "c-window-app" else []) +
+                         (["HZ_CODE=large", "HCCFLAGS=" + " ".join(LARGE_CODE[2:])]
+                          if m == "cc816l" and d == "c-window-app" else []))
             res.append((d, rc, out))
         bad = [f"{d}: make test failed: {out.strip()[-200:]}" for d, rc, out in res if rc]
         n = 0
@@ -579,6 +764,9 @@ def run_ui(horizon, only, m="large"):
                     # (Files' status line shows the time a file changed: not compared)
                     for im in (a, c):
                         im.paste((0, 0, 0), (0, 480, 680, 512))
+                        if m == "cc816l":
+                            # (the menu bar's free memory: the large program's code bank)
+                            im.paste((0, 0, 0), (900, 0, 1280, 24))
                     box = ImageChops.difference(a, c).getbbox()
                     n += 1
                     if box:
@@ -593,8 +781,9 @@ def run_ui(horizon, only, m="large"):
 def main():
     a = sys.argv[1:]
     horizon = os.environ.get("HORIZON") or os.path.join(SDK, "..", "horizon")
-    models = ["cc816", "large", "tiny"]
+    models = ["cc816", "cc816l", "large", "tiny"]
     ccs = None
+    code = None
     only = []
     i = 0
     while i < len(a):
@@ -606,6 +795,8 @@ def main():
             ccs = a[i + 1]; i += 2
         elif a[i] == "--only":
             only.append(a[i + 1]); i += 2
+        elif a[i] == "--code":
+            code = a[i + 1]; i += 2
         else:
             sys.exit(__doc__)
     horizon = os.path.abspath(horizon)
@@ -616,26 +807,32 @@ def main():
     try:
         hzc.vbcc_dir()
     except hzc.HccError:
-        if ccs != "cc816" and [m for m in models if m != "cc816"]:
+        if ccs != "cc816" and [m for m in models if not c816(m)]:
             print("run.py: the vbcc toolchain is not installed (tools/get-toolchain.sh): "
                   "its configurations (large, tiny) are skipped")
         ccs = "cc816"
     if ccs == "cc816":
-        models = ["cc816"]
+        models = [m for m in models if c816(m)] or ["cc816", "cc816l"]
     elif ccs == "vbcc":
-        models = [m for m in models if m != "cc816"] or ["large", "tiny"]
+        models = [m for m in models if not c816(m)] or ["large", "tiny"]
+    if code == "large":
+        models = ["cc816l"]
+    elif code == "small":
+        models = [m for m in models if m != "cc816l"]
     t0 = time.time()
     hcc_messages(only, models)
     # the configurations side by side (each has its own build folder; the libraries are
     # built first, one after another, so no two of them build the same one)
-    sh([sys.executable, HCC, "--build-lib"] + ["cc816"] * ("cc816" in models))
-    if [m for m in models if m != "cc816"]:
-        sh([sys.executable, HCC, "--build-lib"] + [m for m in models if m != "cc816"])
+    sh([sys.executable, HCC, "--build-lib"] + [m for m in models if c816(m)])
+    if [m for m in models if not c816(m)]:
+        sh([sys.executable, HCC, "--build-lib"] + [m for m in models if not c816(m)])
         sh([sys.executable, HCC, "--build-ui"])
+    if "cc816l" in models:
+        hcc_large(only, horizon)
     import concurrent.futures as cf
     with cf.ThreadPoolExecutor(len(models)) as ex:
         list(ex.map(lambda m: run_model(m, horizon, only), models))
-    for m in ("cc816", "large"):
+    for m in ("cc816", "cc816l", "large"):
         if m in models:
             run_ui(horizon, only, m)
     bad = [r for r in results if not r[2]]

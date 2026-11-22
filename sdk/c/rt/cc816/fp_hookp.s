@@ -10,6 +10,7 @@
 	.smart	-
 	.a16
 	.i16
+	.include "model.inc"
 	.import	___hz_fmtfp, ___hz_fmt_float
 	.export	__cc816_fmtf
 	.constructor fp_initp, 1
@@ -20,4 +21,4 @@ __cc816_fmtf:
 fp_initp:
 	lda	#___hz_fmtfp
 	sta	___hz_fmt_float
-	rts
+	RET

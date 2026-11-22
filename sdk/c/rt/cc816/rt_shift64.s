@@ -13,6 +13,7 @@
 	.smart	-
 	.a16
 	.i16
+	.include "model.inc"
 	.importzp __h0, __h1
 	.export	__shl64, __shr64, __sar64
 
@@ -54,7 +55,7 @@ __shl64:
 	rol	__h1+2
 	dex
 	bne	@l
-@r:	rts
+@r:	RET
 
 ; ---- right, unsigned
 __shr64:
@@ -92,7 +93,7 @@ __shr64:
 	ror	__h0
 	dex
 	bne	@l
-@r:	rts
+@r:	RET
 
 ; ---- right, signed: the words that come in are the sign's
 __sar64:
@@ -137,4 +138,4 @@ __sar64:
 	ror	__h0
 	dex
 	bne	@l
-@r:	rts
+@r:	RET

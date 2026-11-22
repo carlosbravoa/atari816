@@ -22,6 +22,7 @@
 	.smart	-
 	.a16
 	.i16
+	.include "model.inc"
 	.importzp __h0, __h1, __h2, __h3, __rv
 	.export	__umul1632, __smul1632
 
@@ -43,7 +44,7 @@ __umul1632:
 	sta	__h0+2
 	lda	__h2
 	sta	__h0
-	rts
+	RET
 
 ; signed: the unsigned product, minus b << 16 if a < 0, minus a << 16 if b < 0
 __smul1632:
@@ -51,7 +52,7 @@ __smul1632:
 	sta	__h3
 	lda	__h1
 	sta	__h3+2
-	jsr	__umul1632
+	CALL	__umul1632
 	lda	__h3
 	bpl	@a
 	lda	__h0+2
@@ -64,4 +65,4 @@ __smul1632:
 	sec
 	sbc	__h3
 	sta	__h0+2
-@b:	rts
+@b:	RET

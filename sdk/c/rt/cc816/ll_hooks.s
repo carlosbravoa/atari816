@@ -9,6 +9,7 @@
 	.smart	-
 	.a16
 	.i16
+	.include "model.inc"
 	.import	___hz_scanll, ___hz_scan_ll
 	.export	__cc816_scanll
 	.constructor ll_inits, 1
@@ -19,4 +20,4 @@ __cc816_scanll:
 ll_inits:
 	lda	#___hz_scanll
 	sta	___hz_scan_ll
-	rts
+	RET

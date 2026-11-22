@@ -22,6 +22,7 @@
 	.smart	-
 	.a16
 	.i16
+	.include "model.inc"
 	.importzp __h0, __h1, __h2, __h3, __rv
 	.export	__shl32, __shr32, __sar32
 
@@ -46,7 +47,7 @@ __shl32:
 	rol	__h0+2
 	dex
 	bne	@l
-@r:	rts
+@r:	RET
 
 __shr32:
 	txa
@@ -66,7 +67,7 @@ __shr32:
 	ror	__h0
 	dex
 	bne	@l
-@r:	rts
+@r:	RET
 
 __sar32:
 	txa
@@ -92,4 +93,4 @@ __sar32:
 	ror	__h0
 	dex
 	bne	@l
-@r:	rts
+@r:	RET

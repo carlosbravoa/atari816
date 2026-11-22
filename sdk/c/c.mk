@@ -16,6 +16,8 @@
 #   SRCS      the sources (default: every .c and .s in the folder)
 #   HZ_CC     the compiler: cc816 or vbcc (default: hcc's, cc816; docs/c/reference.md)
 #   MODEL     vbcc only: large (its default) or tiny (docs/c/reference.md, "Memory")
+#   HZ_CODE   cc816 only: the code model, small (the default) or large (hcc --code large:
+#             code in several banks, NAME.PRX next to NAME.PRG; docs/c/reference.md)
 #   HCCFLAGS  more hcc options (-O1, --stack N, --debug, -I dir, vbcc's --float, ...)
 #   RUNMODE   shell (default: a console program, typed at the shell's prompt) or desktop
 #             (a window program, chosen from the Desktop's Programs menu)
@@ -37,6 +39,8 @@ SRCS     ?= $(wildcard *.c *.s)
 MODEL    ?=
 HZ_CC    ?=
 export HZ_CC
+HZ_CODE  ?=
+export HZ_CODE
 HCCFLAGS ?=
 RUNMODE  ?= shell
 ARGS     ?=
@@ -51,7 +55,7 @@ RUN816   := $(PYTHON) $(SDK)/tools/run816.py --horizon $(HORIZON) --mode $(RUNMO
 CARD     := $(HORIZON)/build/sd/SYSTEM/HORIZON.SYS
 
 # the compiler (and model) the program was built with: another one rebuilds it
-CCSTAMP  := build/.cc-$(or $(HZ_CC),default)$(if $(MODEL),-$(MODEL))
+CCSTAMP  := build/.cc-$(or $(HZ_CC),default)$(if $(MODEL),-$(MODEL))$(if $(HZ_CODE),-$(HZ_CODE))
 
 all: $(PRG)
 
@@ -75,6 +79,6 @@ test: $(PRG) $(CARD)
 	$(if $(TESTCHECK),$(TESTCHECK))
 
 clean:
-	rm -rf build $(PRG)
+	rm -rf build $(PRG) $(PRG:.PRG=.PRX)
 
 .PHONY: all run test clean

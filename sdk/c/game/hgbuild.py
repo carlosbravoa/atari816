@@ -29,13 +29,14 @@ def outdir(model="large"):
 
 
 def lib_path(model="large"):
-    return os.path.join(outdir(model), "libhgame.lib" if model == "cc816" else "libhgame.a")
+    """model: cc816, cc816l (cc816's large code model, hcc --code large), large (vbcc)"""
+    return os.path.join(outdir(model), "libhgame.a" if model == "large" else "libhgame.lib")
 
 
 def sources(model="large"):
     """the C files, and the assembly for the compiler: cc816/*.s (ca65) or *.s (vasm)"""
     srcs = [os.path.join(HERE, f) for f in os.listdir(HERE) if f.endswith(".c")]
-    if model == "cc816":
+    if model in ("cc816", "cc816l"):
         d = os.path.join(HERE, "cc816")
         srcs += [os.path.join(d, f) for f in os.listdir(d) if f.endswith(".s")]
     else:
@@ -46,8 +47,8 @@ def sources(model="large"):
 def inputs(model="large"):
     files = sources(model) + [os.path.join(HERE, "hg_int.h"), os.path.abspath(__file__)]
     files += [os.path.join(SDKC, "include", h) for h in HEADERS + ("horizon.h", "hzsys.h")]
-    if model == "cc816":
-        files += hzc816.compiler_files()
+    if model in ("cc816", "cc816l"):
+        files += hzc816.compiler_files() + [os.path.join(hzc816.RT, "model.inc")]
     return [f for f in files if os.path.exists(f)]
 
 
@@ -60,7 +61,7 @@ def stale(model="large"):
 
 
 def build(model="large", quiet=False):
-    if model not in ("large", "cc816"):
+    if model not in ("large", "cc816", "cc816l"):
         raise hzc.HccError("hgame (hgame.h, conio.h, joystick.h) is for the large model")
     od = os.path.join(outdir(model), "obj")
     if os.path.exists(od):
@@ -72,18 +73,19 @@ def build(model="large", quiet=False):
     objs = []
     for src in sources(model):
         o = os.path.join(od, os.path.splitext(os.path.basename(src))[0] + ".o")
-        if model == "cc816":
+        if model in ("cc816", "cc816l"):
+            code = "large" if model == "cc816l" else "small"
             if src.endswith(".c"):
-                objs += hzc816.compile_split(src, od, "2", incs=[HERE])
+                objs += hzc816.compile_split(src, od, "2", incs=[HERE], code=code)
                 continue
             else:
-                hzc816.assemble(src, o, incs=[os.path.join(SDKC, "include")])
+                hzc816.assemble(src, o, incs=[os.path.join(SDKC, "include")], code=code)
         elif src.endswith(".c"):
             hzc.compile_c(src, o, model, opt="1", incs=[HERE])
         else:
             hzc.assemble(src, o, model, incs=[os.path.join(SDKC, "include")])
         objs.append(o)
-    if model == "cc816":
+    if model in ("cc816", "cc816l"):
         lib = lib_path(model)
         if os.path.exists(lib):
             os.remove(lib)
@@ -107,8 +109,8 @@ def uses_game(srcs):
 
 def lib_for(model="large"):
     """the library, (re)built if needed -> its path"""
-    if model == "cc816":
-        hzc816.ensure_lib()
+    if model in ("cc816", "cc816l"):
+        hzc816.ensure_lib("large" if model == "cc816l" else "small")
     else:
         hzc.ensure_lib(model)
     if stale(model):
@@ -120,13 +122,14 @@ def lib_for(model="large"):
 
 if __name__ == "__main__":
     a = sys.argv[1:]
-    ccs = ["cc816", "large"]
+    ccs = ["cc816", "cc816l", "large"]
     if "--cc" in a:
-        ccs = ["cc816" if a[a.index("--cc") + 1] == "cc816" else "large"]
+        ccs = ["cc816", "cc816l"] if a[a.index("--cc") + 1] == "cc816" else ["large"]
     try:
         for m in ccs:
             if "--force" in a or stale(m):
                 lib_for(m) if not ("--force" in a) else (
-                    hzc816.ensure_lib() if m == "cc816" else hzc.ensure_lib(m), build(m))
+                    hzc816.ensure_lib("large" if m == "cc816l" else "small")
+                    if m.startswith("cc816") else hzc.ensure_lib(m), build(m))
     except hzc.HccError as e:
         sys.exit(f"hgbuild: {e}")

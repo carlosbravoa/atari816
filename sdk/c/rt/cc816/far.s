@@ -13,28 +13,29 @@
 	.smart	-
 	.a16
 	.i16
+	.include "model.inc"
 	.importzp __h0, __h1, __h2
 	.export	_hz_far_copy, _hz_far_set, _hz_farptr
 
 	.segment "CODE"
 
 _hz_far_copy:			; 3,s dst, 7,s src, 11,s n
-	lda	11,s
+	lda	ARGS+8,s
 	beq	@done
 	dec	a
 	sta	__h0		; n - 1
-	lda	9,s		; MVN's source bank and the RTL (bytes 3 and 4)
+	lda	ARGS+6,s		; MVN's source bank and the RTL (bytes 3 and 4)
 	and	#$00FF
 	ora	#$6B00
 	pha
-	lda	7,s		; MVN (byte 1) and its destination bank (byte 2): 5,s + 2
+	lda	ARGS+4,s		; MVN (byte 1) and its destination bank (byte 2): 5,s + 2
 	xba
 	and	#$FF00
 	ora	#$0054
 	pha
-	lda	11,s		; the source offset: 7,s + 4
+	lda	ARGS+8,s		; the source offset: 7,s + 4
 	tax
-	lda	7,s		; the destination offset: 3,s + 4
+	lda	ARGS+4,s		; the destination offset: 3,s + 4
 	tay
 	tsc
 	inc	a
@@ -48,36 +49,36 @@ _hz_far_copy:			; 3,s dst, 7,s src, 11,s n
 @back:	plb
 	pla
 	pla
-@done:	rts
+@done:	RET
 
 _hz_far_set:			; 3,s dst, 7,s c, 9,s n
-	lda	9,s
+	lda	ARGS+6,s
 	beq	@done
-	lda	3,s
+	lda	ARGS,s
 	sta	__h2
-	lda	5,s
+	lda	ARGS+2,s
 	sta	__h2+2
 	sep	#$20
 	.a8
-	lda	7,s
+	lda	ARGS+4,s
 	sta	[__h2]		; the first byte
 	rep	#$20
 	.a16
-	lda	9,s
+	lda	ARGS+6,s
 	dec	a
 	beq	@done		; n = 1
 	dec	a
 	sta	__h0		; MVN's count - 1 = n - 2
-	lda	5,s		; MVN dst bank, dst bank; RTL
+	lda	ARGS+2,s		; MVN dst bank, dst bank; RTL
 	and	#$00FF
 	ora	#$6B00
 	pha
-	lda	7,s		; (5,s + 2)
+	lda	ARGS+4,s		; (5,s + 2)
 	xba
 	and	#$FF00
 	ora	#$0054
 	pha
-	lda	7,s		; from dst (3,s + 4) ...
+	lda	ARGS+4,s		; from dst (3,s + 4) ...
 	tax
 	tay
 	iny			; ... to dst + 1: the byte repeats along
@@ -93,12 +94,12 @@ _hz_far_set:			; 3,s dst, 7,s c, 9,s n
 @back:	plb
 	pla
 	pla
-@done:	rts
+@done:	RET
 
 ; a far pointer from a bank and an offset
 _hz_farptr:			; 3,s bank, 5,s offset
-	lda	3,s
+	lda	ARGS,s
 	and	#$00FF
 	tax
-	lda	5,s
-	rts
+	lda	ARGS+2,s
+	RET

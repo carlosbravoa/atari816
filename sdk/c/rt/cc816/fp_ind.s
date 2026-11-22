@@ -15,6 +15,7 @@
 	.smart	-
 	.a16
 	.i16
+	.include "model.inc"
 	.importzp __h0, __h1
 	.export	__fp_ld2, __fp_st, __fp_ldx
 
@@ -45,4 +46,4 @@ __fp_st:
 	sta	0,x
 	lda	__h0+2
 	sta	2,x
-	rts
+	RET

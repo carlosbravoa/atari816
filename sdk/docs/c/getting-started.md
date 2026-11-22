@@ -130,12 +130,31 @@ hcc: 1 file(s) did not compile
 A program too big for its memory is stopped with the sizes:
 
 ```
-$ sdk/c/bin/hcc -o BIG2.PRG big2.c
-hcc: BIG2.PRG does not fit in its code bank: code, constants, data and bss = 73,140 bytes;
-a code bank holds 65,264 bytes ($0100-$FFF0) and the software stack takes 8,192 of them (hcc
---stack N), so 57,072 are left. Put big arrays in a bank of their own (hz_far_alloc,
-docs/c/reference.md), make them smaller, or give the software stack less.
+$ sdk/c/bin/hcc -o GAME.PRG big*.c
+hcc: GAME.PRG: program too big by 133,096 bytes: build with --code large. It does not fit
+in its code bank: code and constants 189,260 + data 78 + bss 830 = 190,168 bytes; the
+biggest part: code and constants. A code bank holds 65,264 bytes ($0100-$FFF0) and the
+software stack takes 8,192 of them (hcc --stack N), so 57,072 are left. Build it with hcc
+--code large: its code then goes in several banks (docs/c/porting.md). ...
 ```
+
+When it is the code that does not fit, build with `--code large`: hcc puts the code in
+several banks and writes two files, `GAME.PRG` and `GAME.PRX` (the other code banks).
+Copy both to the card, into the same folder:
+
+```
+$ sdk/c/bin/hcc --code large --map -o GAME.PRG big*.c
+GAME.PRG: 45,049 bytes on the card, 409 relocations
+  code bank: code+constants 43,982 + data 78 + bss 1,678 = 45,738 of 57,072; heap 11,334; software stack 8,192
+  window:    stack about 32,000 (from $7F7F down to $0100); direct page 120 bytes
+  code model large: 23,882 bytes of movable code in the main bank, 155,650 in 3 other bank(s) (65,511, 65,495, 24,644); 1396 thunks
+  GAME.PRX: 164,790 bytes, 4527 bank bytes patched at the start
+```
+
+Data, constants and the stacks still share the first bank; when they are what does not
+fit, hcc says so, and big arrays go to banks of their own (`hz_far_alloc`). See
+[porting.md](porting.md), "When the program is too big", and
+[reference.md](reference.md), "The two code models".
 
 A name nothing defines is said in C's terms (`undefined: nosuch (used in main.s)`).
 A crash shows on the console as `[kill] task N NAME cause CC addr AAAAAA pc PPPPPP`
@@ -145,7 +164,8 @@ the function or the block in it), and you have the place.
 
 ## 7. On the real machine
 
-A `.PRG` is an ordinary Horizon program: copy it to the SD card (in `/BIN` it is a
+A `.PRG` is an ordinary Horizon program (one built with `--code large` may have a `.PRX`
+beside it: copy both, into the same folder): copy it to the SD card (in `/BIN` it is a
 command of the shell) or send it over the PC link with `sdk/tools/deploy816.py`, as for
 assembly programs (sdk/docs/getting-started.md, section 6). Programs built with this SDK
 were run in the emulator only so far (it models the board's timing within about 5 %).
@@ -201,8 +221,8 @@ point".
 - [apps.md](apps.md): window applications with Horizon's controls library (`hui.h`:
   buttons, fields, lists, menus, dialogs, the file dialog), a tutorial in five steps;
   the template `sdk/templates/c-window-app`, the example `sdk/c/examples/viewer`.
-- [porting.md](porting.md): what breaks when C from a PC or from cc65 comes over, and how
-  to find it.
+- [porting.md](porting.md): what breaks when C from a PC or from cc65 comes over, how
+  to find it, and what to do when the program is too big (`hcc --code large`).
 - `make -C sdk/c test`: the SDK's own tests in the emulator.
 
 ## 10. vbcc, the second compiler

@@ -2,6 +2,7 @@
 build/
 run-*/
 *.PRG
+*.PRX
 *.o
 # generated from art/*.txt by the Makefiles (tools/img2inc.py, tools/font2inc.py)
 art/*.inc

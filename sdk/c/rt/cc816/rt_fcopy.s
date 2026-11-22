@@ -7,6 +7,7 @@
 	.smart	-
 	.a16
 	.i16
+	.include "model.inc"
 	.importzp __h0, __h1, __h2, __h3
 	.export	__fcopy
 
@@ -37,4 +38,4 @@ __fcopy:
 @back:	plb
 	pla
 	pla
-	rts
+	RET

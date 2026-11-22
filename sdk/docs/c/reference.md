@@ -23,7 +23,7 @@ with the same compiler").
 
 | | cc816 (default) | vbcc (`--cc vbcc`) |
 | --- | --- | --- |
-| Memory | one model ("Memory", below) | the large and the tiny model (`--model`) |
+| Memory | one data model ("Memory", below), two code models (`--code small`, `--code large`: "The two code models") | the large and the tiny model (`--model`) |
 | Data pointer | 16 bits: an offset in the code bank; `__far` 32 bits | large: 32 bits; tiny: 16 bits (the window) |
 | Floating point | IEEE 754 single precision: `float`, `double` and `long double` are all 32 bits; math.h; linked only into programs that use it ("Floating point", below) | `float`, `double` (32 bits, MS BASIC's format), math.h: `--float` |
 | `long long` | yes, 64 bits ("long long (cc816)", below) | no (vbcc 65816 fails on it) |
@@ -38,12 +38,13 @@ with the same compiler").
 
 **What needs `--cc vbcc`:** only the tiny model. Floating point, `long long`,
 `setjmp`/`longjmp` and inline assembly are all in cc816 (below). Neither compiler has a
-64-bit `double`, variable-length arrays, or a program larger than its one code bank.
+64-bit `double` or variable-length arrays. A program with more code than one bank holds
+needs cc816's large code model (`hcc --code large`, "The two code models", below).
 
 ## Memory (cc816)
 
 ```
-cc816 (one model)
+cc816 (the small code model; the large one: "The two code models", below)
 
 code bank (the program's own 64 KB, DBR)
 $0100   code, then constants (strings, const)
@@ -80,8 +81,149 @@ through DBR. The other locals live in direct-page registers or on the hardware s
 | Direct page | $00-$77: 48 bytes of scratch registers, 48 callee-saved, the software stack pointer, the runtime helpers' words, the code bank's number |
 | DBR (the data bank) | the code bank |
 
-`hcc` checks the sizes after linking and says what does not fit, in bytes. The loader's
-own limits: the program file is less than 64 KB, and code + data + bss fit in $0100-$FFFF.
+`hcc` checks the sizes after linking and says what does not fit, in bytes ("program too
+big by N bytes: build with --code large" when the code is what does not fit). The
+loader's own limits: the program file is less than 64 KB, and code + data + bss fit in
+$0100-$FFFF. With `hcc --code large` the code may also fill other banks; the rest of this
+picture stays as it is (the code bank is then called the main bank).
+
+## The two code models (cc816)
+
+cc816 has two code models. Both have the same data: every data pointer is a 16-bit
+offset in the main bank, and DBR is always the main bank. They differ in where the code
+goes and in how functions are called.
+
+| | small (the default) | large (`hcc --code large`) |
+| --- | --- | --- |
+| Code | in the code bank, with everything else | in the main bank while it has room, then in other banks of 64 KB (up to 64 of them) |
+| Calls | JSR / RTS | JSL / RTL, wherever the function is |
+| The first argument | at `3,s` | at `4,s` (the return address has 3 bytes) |
+| A function pointer | 16 bits: the function | 16 bits: the function's entry in the main bank (the function itself, or a 4-byte thunk, a JML to it) |
+| Files | NAME.PRG | NAME.PRG, and NAME.PRX when code went to other banks |
+| Data, constants, bss, heap, software stack | the code bank | the main bank: the same |
+| `__CC816_LARGE__` | not defined | defined (1) in C and in assembly (`ca65 -D`) |
+
+`hcc --code large` (or `HZ_CODE=large` in the environment; `HZ_CODE := large` in a
+Makefile made with c.mk) builds a program in the large model. Nothing in the C changes.
+Every file of a program must be built for the same model, libraries included: hcc builds
+the C library, the game library and the controls library for both, and refuses an object
+made for the other model ("an object made for the small code model; this program is
+linked for the large one").
+
+### What goes where
+
+**The main bank** (the .PRG, loaded by Horizon as any program) holds the startup, the C
+library and every other library (hgame, the controls library, ulib), the `.s` files, the
+C functions that have inline assembly or are `naked`, the constructors and destructors
+(`_INIT_n_name`, `_EXIT_n_name`), the thunks, all the constants (string literals, `const`
+tables, floating-point constants), the initialised data, the bss, the heap and the
+software stack. These are limited to the main bank, as in the small model.
+
+**The other C functions can move.** cc816 puts each one in a segment of its own (in a
+file of more than 100 of them, runs of consecutive functions share one: ca65 and ar65
+take only so many segments a module), and hcc places them after it has linked the rest:
+first in the main bank, as long as it has room (it keeps `--heap N` bytes free for
+`malloc`, 4096 by default), then in other banks, each function in the first bank with
+room, in the order of the files and of the functions in them. A function must fit in one
+bank (65,535 bytes). When everything fits in the main bank there is no .PRX and no
+loading: the program is one file, as in the small model.
+
+`hcc --map` shows the result:
+
+```
+GAME.PRG: 45,049 bytes on the card, 409 relocations
+  code bank: code+constants 43,982 + data 78 + bss 1,678 = 45,738 of 57,072; heap 11,334; software stack 8,192
+  window:    stack about 32,000 (from $7F7F down to $0100); direct page 120 bytes
+  code model large: 23,882 bytes of movable code in the main bank, 155,650 in 3 other bank(s) (65,511, 65,495, 24,644); 1396 thunks
+  GAME.PRX: 164,790 bytes, 4527 bank bytes patched at the start
+```
+
+(a program of 1,600 functions, `sdk/c/tests/large/genbig.py`: about 180 KB of code).
+
+| Limit | |
+| --- | --- |
+| Code | the main bank's room, plus 64 banks of 64 KB (about 4 MB); an 8 MB machine has about 80 free banks when nothing else runs |
+| One function | 65,535 bytes |
+| The main bank | startup + libraries + `.s` files + functions with inline assembly + constructors + thunks (4 bytes for each function in another bank whose address is used) + constants + data + bss + 4 KB of heap (`--heap N`) + the software stack (`--stack N`) must fit in 65,264 bytes |
+| The .PRG file | below 64 KB (Horizon's loader) |
+
+### How the program is loaded
+
+Horizon loads NAME.PRG as it loads any program: an o65 file, below 64 KB. A large
+program's other code banks cannot be in the same file: Horizon's loader takes only files
+below 64 KB, and a program is not told the path it was started from. So they are in a
+second file, NAME.PRX, written by hcc next to the .PRG. **Copy both to the card, into the
+same folder.**
+
+Before the constructors run, the startup (`sdk/c/lib/cc816/xload.c`):
+
+1. opens NAME.PRX: in the current folder first (where Files starts programs, and where
+   the shell is after `cd`), then in `/APPS`, `/BIN`, `/SYSTEM`, `/SYSTEM/TESTS` and
+   `/GAMES`. `hcc --prx-path /GAMES/MINE:/APPS` gives other folders (after the current
+   one). A program started from the Desktop's Programs menu, or by its path from another
+   folder, finds its .PRX only in those folders: install a large program in one of them,
+   or build it with `--prx-path` naming its folder;
+2. checks it: its header, its number of banks and the stamp of its build (hcc writes the
+   same stamp into the .PRG): a .PRX of another build is refused;
+3. takes a bank for each image (`hz_bank_alloc`) and reads the image into it;
+4. patches the bank bytes: the bank of each JSL to a function in another bank (and of
+   the MVN of a structure copy), in the main bank and in the others: the banks are known
+   only now;
+5. closes the file. Then the constructors, `main` and the rest run as usual.
+
+In the emulator a program of 45 KB with a 165 KB .PRX starts in about 0.15 s (a small
+program in 0.01 s). Horizon gives the banks back when the program ends, as all of a
+program's banks.
+
+If something is wrong, the program prints one line on the console and ends with exit
+code 1 before any of its own code runs; when the window system runs, the line is also
+shown in a small window (a key or a click closes it):
+
+| | |
+| --- | --- |
+| `GAME.PRX: not found (the program's code banks): keep it next to the .PRG, in the current folder or in /APPS, /BIN, /SYSTEM, /SYSTEM/TESTS, /GAMES` | the .PRX is missing, or in a folder the program does not look in |
+| `GAME.PRX: made by another build of the program: copy the .PRG and the .PRX of the same build` | the two files are from different builds |
+| `GAME.PRX: not enough memory: no free 64 KB bank for the program's code` | the machine has not enough free banks (close a program) |
+| `GAME.PRX: not a .PRX file ...`, `cannot read the file ...` | a damaged file, a card error |
+
+### The .PRX file
+
+| | |
+| --- | --- |
+| Header, 12 bytes | `HZPX`, version 1, n (the number of banks), 0, 0, the stamp (u32) |
+| n x u32 | each bank's image size |
+| the images | bank 1, bank 2, ..., each from offset 0 of its bank |
+| u16 | the number of relocation groups |
+| the groups | each: u8 where (0 the main bank, k bank k), u8 to (the bank whose number is stored), u16 count, then count u16 offsets: the bytes that get that bank's number |
+
+hcc makes it with ld65 alone (`sdk/c/tools/hzlarge.py`, "Program files" below).
+
+### Costs
+
+Measured in the emulator (sdk/c/tests/run.py: the same programs in both models; the
+large model's runs put every function that can move in another bank: the worst case,
+though in the large model every call is a JSL anyway):
+
+| | small | large |
+| --- | --- | --- |
+| bench (-O2): sieve, sum16, mul32, fib22, strs, structs | 809, 296, 1,277, 388, 994, 670 ms | 808, 300, 1,290, 430, 1,000, 678 ms |
+| bench -O1 | 809, 476, 1,280, 400, 999, 659 ms | 808, 490, 1,287, 417, 996, 674 ms |
+| fbench: mandel, sincos, sqrt, expow, conv | 2,140, 1,640, 366, 1,947, 1,065 ms | 2,140, 1,640, 368, 1,939, 1,070 ms |
+| hello (code + constants) | 8,083 bytes (file 8,304) | 8,213 (file 8,598) |
+| window | 10,002 (file 10,227) | 10,153 (file 10,579) |
+| bench | 9,733 (file 9,958) | 9,903 (file 10,369) |
+| fbench | 25,802 (file 26,036) | 26,421 (file 27,799) |
+| viewer (controls library) | 25,792 (file 26,443) | 26,038 (file 27,066) |
+
+(The timer counts in steps of about 10 ms. The sizes are `hcc --map`'s with each model's
+default placement: in the large model all of these fit in the main bank.) A call costs 2 cycles more (JSL against JSR),
+a call through a pointer 6 more (`__icall`; 10 when the function is in another bank: its
+thunk's JML), and each call site 1 byte more; the arithmetic helpers are called
+with JSL too (a 16-bit division about 14 cycles more). Calls between banks cost no more
+than calls inside one: all are JSL. The .PRG grows a little more than the code: each JSL
+to a function in the main bank is a relocation for Horizon's loader (2 or 3 bytes of the
+file). A program whose code moves also has the loader in its main bank (about 2 KB of code, 0.5 KB
+of constants and 900 bytes of bss); one whose code all fits in the main bank has none.
 
 ## Memory models (vbcc)
 
@@ -196,6 +338,7 @@ the window) by itself.
 
 ### cc816
 
+- (The small code model, the default; the large one: "In the large code model", below.)
 - Functions are called with **JSR** and return with **RTS** (a program's code is all in
   its code bank). On entry and exit A, X and Y are **16-bit** (M = X = 0), D = 0, DBR =
   PBR = the code bank: keep D and DBR.
@@ -287,6 +430,50 @@ Horizon's assembly libraries (ulib, the controls library) are linked straight in
 cc816 program: they share the direct page (ld65 places their zero page after cc816's
 registers).
 
+#### In the large code model
+
+`hcc --code large` changes only this (the rest above stays as it is):
+
+- Functions are called with **JSL** and return with **RTL**: the first argument is at
+  `4,s` (above the 3-byte return address). A `.s` function called from C ends with `rtl`;
+  it calls a C function with `jsl _name` (any C function, wherever it is: hcc patches the
+  bank). PBR is the bank of the code that runs; DBR is the main bank, always: keep it.
+- hcc assembles `.s` files with `-D __CC816_LARGE__=1` and with `sdk/c/rt/cc816` on the
+  include path: `.include "model.inc"` gives `ARGS` (3 or 4: the first argument's offset),
+  `RET` (`rts` / `rtl`), `CALL name` (`jsr` / `jsl`) and `LARGE` (0 / 1), so one file
+  suits both models: `lda ARGS+2,s` is the second argument. The C library's assembly is
+  written so.
+- `.s` files stay in the main bank. Their labels are 16-bit addresses there as before.
+- A **function's 16-bit address** (a function pointer, what C's `&f` and `f` give) is its
+  entry in the main bank: `__T_name` (`__T` before the assembler name). It is the
+  function itself when the function is in the main bank, else a thunk (`jml _name`) that
+  hcc writes. Use `__T_name` where assembly needs a C function's 16-bit address
+  (`.addr __T_cb`, `lda #__T_cb`); `_name` alone is the function's code, which may be in
+  another bank (hcc refuses `.addr _name` and `lda #_name` for such a function: "a value
+  that depends on where code is ... its 16-bit address is __T_name").
+  For an assembly function, `__T_name` is made by hcc too.
+- A **call through a function pointer**: the pointer (16 bits) into `__fpt`, then `jsl
+  __icall` (X is changed): `__icall` (crt0.s) jumps to the entry, and the function
+  returns straight to the caller.
+- `setjmp`'s `jmp_buf` has 28 words (the return address's bank is kept too).
+
+```asm
+; add3.s - unsigned add3(unsigned a, unsigned b, unsigned c), for both code models
+        .p816
+        .a16
+        .i16
+        .include "model.inc"
+        .export _add3
+
+        .segment "CODE"
+_add3:  lda     ARGS,s
+        clc
+        adc     ARGS+2,s
+        clc
+        adc     ARGS+4,s
+        RET
+```
+
 ### Inline assembly (cc816)
 
 An `asm` statement puts ca65 text into the compiler's output as it is. `asm`, `__asm__`
@@ -342,6 +529,13 @@ pointer variable first (`p = buf;`) and use `(%[p]),y`. GNU's operand lists (`as
 
 **Labels.** Each asm statement in a function gets a label of its own before it, so ca65's
 cheap local labels (`@loop`) are local to the statement; `:` and `:+`/`:-` work too.
+
+**In the large code model** (`hcc --code large`) a function with an asm statement, and a
+naked function, stays in the main bank (its assembly may name main-bank addresses and
+banks as it likes). Its calls follow the large model: `jsl _name` to call a C function,
+a naked function's arguments from `4,s` and its own `rtl`. `%[name]` of a function is its
+code (for `jsl %[f]`); its 16-bit address is `__T` and the name (`__T%[f]`). `#ifdef
+__CC816_LARGE__` chooses the text for each model (`tests/lang/asm.c` does).
 
 A fill loop with 8-bit stores, the length and the pointer from C:
 
@@ -767,6 +961,31 @@ Horizon's: the loader always puts a program at $0100, so only the bank bytes nee
 it checks that the result loads the same at three banks). A hello world keeps 8
 relocations.
 
+**cc816, `--code large`** (`tools/hzlarge.py`): the objects' segments are read first
+(`tools/ca65obj.py`: cc816 gives every function that can move a segment of its own, and
+ld65's configuration must name every segment). A trial link with those segments in one
+big pool gives the main bank's fixed part and the functions whose 16-bit address is used;
+hcc places the functions (first fit: the main bank, then banks of 64 KB), writes a glue
+module (the thunks, `__T_name = _name` for the functions in the main bank, the loader's
+table: the number of banks, the stamp, the .PRX's name, the folders) and writes ld65's
+configuration: the main bank as an o65 file, each other bank as a raw image. Then it
+links **three times**, with bank k at the link-time banks k, k + $40 and $80 + 2(k - 1)
+(in the third link at offset 1). In the main bank a byte that differs between the links
+must name one bank in all three (the link's bank of k each time): it is a bank byte of
+bank k (a JSL to a function there, a thunk's JML) and becomes a relocation of the .PRX.
+The two bytes before such a bank byte may differ by one in the third link (a far
+address's offset). Anything else stops the build: a value "bank + 1" is odd in the third
+link, and a 16-bit address of a function in another bank written in the main bank (which
+ld65's o65 output would cut to 16 bits without a word: `.addr _name` in a `.s` file) is
+one more there, without a bank byte after it. The main bank's own bank bytes are o65 SEG
+relocations, done by Horizon's loader as in any program. In the other banks the compiler
+records the address of every bank byte it writes (segment XREL: each JSL's, JML's and
+MVN's), and hcc reads their bank from the first link (0: the main bank); a byte that
+differs between the links and was not recorded stops the build. The .PRG is the first
+link's o65 file (o65strip, as above), the .PRX its bank images and the relocations. A
+build's stamp is a hash of what was linked and where: the same build gives the same
+files.
+
 **vbcc**: vlink, vbcc's linker, cannot write a relocatable program Horizon's loader takes
 (its o65 output does not relocate bank bytes). So hcc links each program **three times**,
 as raw images at banks $00, $5A and $A5, and `tools/mko65.py` compares them: a byte that
@@ -927,6 +1146,12 @@ hcc passes these to cc816 (`cc816.py`, the compiler alone, takes the same):
 | `-Wno-NAME`, `-WNAME` | one warning off or on (the names above) |
 | `-fsigned-char` | plain `char` is signed (-128 to 127): `CHAR_MIN` is -128, `__CHAR_UNSIGNED__` is not defined. The SDK's library is built with unsigned `char` and takes characters as `int`, so it works with both |
 | `-E` (`cc816.py` only) | preprocess only |
+
+hcc's own: `--code small|large` (the code model, "The two code models"; `HZ_CODE` in the
+environment), with `--code large` also `--heap N` (the main bank's room kept for malloc),
+`--prx-path DIRS` (where the program looks for its .PRX) and, for tests, `--main-room N`,
+`--bank-room N` and `--spread N` (how much code the main bank and each other bank may
+take; the functions in turn in N banks).
 
 #### How it is tested
 
@@ -1108,6 +1333,8 @@ trials' benchmark (`tests/bench`, `make -C sdk/c test` runs it), in milliseconds
 | --- | --- | --- | --- | --- | --- | --- |
 | cc816, -O2 (the default) | 809 | 296 | 1277 | 388 | 994 | 670 |
 | cc816, -O1 | 809 | 476 | 1280 | 393 | 999 | 659 |
+| cc816 `--code large`, -O2 | 808 | 300 | 1290 | 430 | 1000 | 678 |
+| cc816 `--code large`, -O1 | 808 | 490 | 1287 | 417 | 996 | 674 |
 | vbcc large, -O1 (its default) | 900 | 886 | 1305 | 635 | 1310 | 1397 |
 | vbcc tiny, -O1 | 1640 | 556 | 1306 | 687 | 1077 | 1350 |
 | vbcc large, -O3 | 1300 | 490 | 1298 | 633 | 1310 | 1348 |
@@ -1126,6 +1353,7 @@ milliseconds, and the program's size on the card:
 | | mandel | sincos | sqrt | expow | conv | program |
 | --- | --- | --- | --- | --- | --- | --- |
 | cc816, -O2 | 2,140 | 1,650 | 365 | 1,950 | 1,070 | 25,929 bytes |
+| cc816 `--code large` | 2,140 | 1,640 | 368 | 1,939 | 1,070 | 27,799 bytes |
 | vbcc large, -O1 | 1,880 | 780 | 1,707 | 690 | 1,049 | 15,138 bytes |
 | vbcc tiny, -O1 | 1,908 | 780 | 1,710 | 680 | 1,037 | 13,249 bytes |
 

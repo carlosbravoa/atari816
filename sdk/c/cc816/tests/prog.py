@@ -16,7 +16,11 @@ from cc816.ctypes816 import CError, Unsupported       # noqa: E402
 
 RUN816 = os.path.join(SDK, 'tools', 'run816.py')
 HORIZON = os.path.abspath(os.environ.get('HORIZON') or os.path.join(SDK, '..', 'horizon'))
-BUILD = os.path.join(SDKC, 'build', 'cc816')
+# the code model ($HZ_CODE: check.py --code large sets it): the large one's results go to
+# build/cc816l (the random programs' sources stay in build/cc816, SRCBUILD)
+CODE = os.environ.get('HZ_CODE') or 'small'
+BUILD = os.path.join(SDKC, 'build', 'cc816l' if CODE == 'large' else 'cc816')
+SRCBUILD = os.path.join(SDKC, 'build', 'cc816')
 
 
 class LinkError(Exception):
@@ -60,6 +64,8 @@ def compile_obj(src, obj, level=2):
     """C -> object (raises CError / Unsupported from the compiler, LinkError from ca65);
     a '// FLAGS: ...' line in the source gives the compiler's options"""
     incs, defs, opts = flags_of(src)
+    if hzc816.CODE == 'large':
+        opts['large'] = True
     asm, _ = driver.compile_c(src, incs, defs, level, opts=opts)
     s = obj[:-2] + '.s'
     with open(s, 'w') as fh:

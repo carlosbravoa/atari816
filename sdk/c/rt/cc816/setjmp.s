@@ -5,6 +5,8 @@
 ;   +2   the return address
 ;   +4   __sp (the software stack pointer)
 ;   +6   __rg+48 .. __rg+95, the callee-saved registers (48 bytes)
+; In the large code model (hcc --code large) the return address has 3 bytes: its bank is
+; kept too, at +54 (the jmp_buf has 28 words there, setjmp.h).
 ; D is always 0 and DBR the code bank, so neither is kept. longjmp puts S, __sp and the
 ; registers back, writes the return address where it was, and returns from setjmp a
 ; second time with its value in A (1 if it is 0). The compiler knows that a function
@@ -14,19 +16,24 @@
 	.smart	-
 	.a16
 	.i16
+	.include "model.inc"
 	.importzp __rg, __sp, __rv
 	.export	_setjmp, _longjmp
 
 	.segment "CODE"
 
-; int setjmp(jmp_buf env): env at 3,s
+; int setjmp(jmp_buf env): env at 3,s (large: 4,s)
 _setjmp:
-	lda	3,s
+	lda	ARGS,s
 	tax
 	tsc
 	sta	a:0,x
 	lda	1,s
 	sta	a:2,x
+.if LARGE
+	lda	3,s			; the return address's bank (and env's low byte: unused)
+	sta	a:54,x
+.endif
 	lda	__sp
 	sta	a:4,x
 	.repeat	24, k
@@ -34,15 +41,15 @@ _setjmp:
 	sta	a:6+2*k,x
 	.endrep
 	lda	#0
-	rts
+	RET
 
-; void longjmp(jmp_buf env, int val): env at 3,s, val at 5,s
+; void longjmp(jmp_buf env, int val): env at 3,s, val at 5,s (large: 4,s and 6,s)
 _longjmp:
-	lda	5,s
+	lda	ARGS+2,s
 	bne	:+
 	inc	a
 :	sta	__rv
-	lda	3,s
+	lda	ARGS,s
 	tax
 	.repeat	24, k
 	lda	a:6+2*k,x
@@ -54,5 +61,13 @@ _longjmp:
 	tcs
 	lda	a:2,x
 	sta	1,s
+.if LARGE
+	sep	#$20
+	.a8
+	lda	a:54,x
+	sta	3,s
+	rep	#$20
+	.a16
+.endif
 	lda	__rv
-	rts
+	RET

@@ -17,6 +17,7 @@
 	.smart	-
 	.a16
 	.i16
+	.include "model.inc"
 	.importzp __h0, __h1, __h2, __h3, __rv
 	.import	__udiv32
 	.export	__udiv64, __umod64, __sdiv64, __smod64
@@ -69,7 +70,7 @@ __udiv64:
 	stz	__h2+2
 	stz	__h3
 	stz	__h3+2
-	rts
+	RET
 
 byzero:	ldx	#6
 @c:	lda	__h0,x
@@ -79,7 +80,7 @@ byzero:	ldx	#6
 	dex
 	dex
 	bpl	@c
-	rts
+	RET
 
 ; the frame (direct page offsets while D points at it)
 R0 = 0				; the remainder, 4 words
@@ -97,12 +98,12 @@ full:	lda	__h1			; both below 2^32: the 32-bit division
 	sta	__h1
 	lda	__h2+2
 	sta	__h1+2
-	jsr	__udiv32		; (quotient __h0, remainder __h2)
+	CALL	__udiv32		; (quotient __h0, remainder __h2)
 	stz	__h1
 	stz	__h1+2
 	stz	__h3
 	stz	__h3+2
-	rts
+	RET
 @big64:	pea	0			; T2, T1, T0
 	pea	0
 	pea	0
@@ -191,7 +192,7 @@ full:	lda	__h1			; both below 2^32: the 32-bit division
 	clc
 	adc	#FRAME
 	tcs
-	rts
+	RET
 @big:	lda	R0			; (the difference modulo 2^64 is the true one)
 	sec
 	sbc	V0
@@ -207,14 +208,14 @@ full:	lda	__h1			; both below 2^32: the 32-bit division
 	bra	@set
 
 __umod64:
-	jsr	__udiv64
+	CALL	__udiv64
 	ldx	#6
 @c:	lda	__h2,x
 	sta	__h0,x
 	dex
 	dex
 	bpl	@c
-	rts
+	RET
 
 neg_h0:	sec
 	.repeat	4, k
@@ -242,11 +243,11 @@ __sdiv64:
 @a:	lda	__h3+2
 	bpl	@b
 	jsr	neg_h2
-@b:	jsr	__udiv64
+@b:	CALL	__udiv64
 	lda	__rv+2
 	bpl	@r
 	jsr	neg_h0
-@r:	rts
+@r:	RET
 
 __smod64:
 	lda	__h1+2
@@ -256,8 +257,8 @@ __smod64:
 @a:	lda	__h3+2
 	bpl	@b
 	jsr	neg_h2
-@b:	jsr	__umod64
+@b:	CALL	__umod64
 	lda	__rv+2
 	bpl	@r
 	jsr	neg_h0
-@r:	rts
+@r:	RET

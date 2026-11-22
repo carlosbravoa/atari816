@@ -6,6 +6,10 @@
         .include "horizon.inc"
         .include "ui.inc"
         .include "hui816.inc"
+        .include "model.inc"
+.if LARGE
+        .import __fpt, __icall
+.endif
 
         .segment "BSS"
 cpfn:   .res    2
@@ -34,8 +38,14 @@ tramp:  ZSAVE
         pha
         lda     ui_cpname               ; const char *name
         pha
+.if LARGE                               ; (the large code model: JSL, the function's RTL)
+        lda     cpfn
+        sta     __fpt
+        jsl     __icall
+.else
         ldx     #0
         jsr     (cpfn,x)
+.endif
         sta     cres
         ply
         ply

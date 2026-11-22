@@ -40,6 +40,22 @@ Options:
   --stack N         cc816: bytes for the software stack (arrays, structures and locals
                     whose address is taken; default 8192, taken from the code bank);
                     vbcc tiny model: bytes for the stack (default 3968)
+  --code small|large
+                    cc816: the code model (default: $HZ_CODE, else small). small: the
+                    whole program in one 64 KB bank (JSR/RTS). large: code in several
+                    banks (JSL/RTL; data, constants and stacks stay in the main bank):
+                    hcc writes NAME.PRG and, when code goes to other banks, NAME.PRX,
+                    which must sit next to it (docs/c/reference.md, "The two code models")
+  --heap N          --code large: bytes of the main bank kept free for malloc when hcc
+                    fills it with code (default 4096)
+  --prx-path DIRS   --code large: where the program looks for its .PRX after the current
+                    folder, folders separated by ':' (default /APPS:/BIN:/SYSTEM:
+                    /SYSTEM/TESTS:/GAMES)
+  --bank-room N, --main-room N, --spread N
+                    --code large, for tests: at most N bytes of code in each other bank,
+                    and in the main bank (--main-room 0: every function that can move
+                    goes to another bank); --spread N: the functions in turn in N banks
+                    (also $HZ_BANK_ROOM, $HZ_MAIN_ROOM, $HZ_SPREAD)
   --float           vbcc: link the floating-point library (printf %f, math.h); hcc
                     also adds it by itself when the link needs it. cc816: nothing to do
                     (its floating point is in its library, linked when used)
@@ -87,9 +103,11 @@ def main(argv):
         return 0
     if argv[0] == "--build-lib":            # the SDK's Makefile: (re)build the library
         try:
-            for m in argv[1:] or ("cc816",) + hzc.MODELS:
+            for m in argv[1:] or ("cc816", "cc816l") + hzc.MODELS:
                 if m == "cc816":
-                    hzc816.build_lib()
+                    hzc816.build_lib(code="small")
+                elif m == "cc816l":             # cc816's large code model
+                    hzc816.build_lib(code="large")
                 else:
                     hzc.build_lib(m)
         except hzc.HccError as e:
@@ -105,6 +123,9 @@ def main(argv):
          "model": None, "compile_only": False, "asm_too": False, "want_map": False,
          "debug": False, "float": False, "ui": False, "game": False, "stack": None,
          "keep": None, "cc": os.environ.get("HZ_CC") or DEFAULT_CC,
+         "code": os.environ.get("HZ_CODE") or "small", "heap": None, "prx_path": None,
+         "bank_room": _env_int("HZ_BANK_ROOM"), "main_room": _env_int("HZ_MAIN_ROOM"),
+         "spread": _env_int("HZ_SPREAD"),
          "ccopts": {"w": False, "wall": False, "werror": False, "wflags": {},
                     "signed_char": False, "undefs": [], "includes": []}}
     i = 0
@@ -156,6 +177,21 @@ def main(argv):
                 o["stack"] = int(v, 0)
             except ValueError:
                 die(f"--stack needs a number of bytes, not {v}")
+        elif a == "--code" or a.startswith("--code="):
+            o["code"] = a.split("=", 1)[1] if "=" in a else val("--code")
+            o["code_given"] = True
+            if o["code"] not in hzc816.CODES:
+                die(f"--code is small or large, not {o['code']}")
+        elif a in ("--heap", "--bank-room", "--main-room", "--spread") or \
+                a.split("=", 1)[0] in ("--heap", "--bank-room", "--main-room", "--spread"):
+            k = a.split("=", 1)[0]
+            v = a.split("=", 1)[1] if "=" in a else val(k)
+            try:
+                o[k[2:].replace("-", "_")] = int(v, 0)
+            except ValueError:
+                die(f"{k} needs a number of bytes, not {v}")
+        elif a == "--prx-path" or a.startswith("--prx-path="):
+            o["prx_path"] = a.split("=", 1)[1] if "=" in a else val("--prx-path")
         elif a == "--float" or a == "-lm":
             o["float"] = True
         elif a == "--ui":
@@ -194,6 +230,14 @@ def main(argv):
     if o["cc"] == "cc816":
         return main_cc816(o)
     return main_vbcc(o)
+
+
+def _env_int(name):
+    v = os.environ.get(name)
+    try:
+        return int(v, 0) if v else None
+    except ValueError:
+        die(f"${name} is a number of bytes, not {v}")
 
 
 def compile_all(o, comp, asm):
@@ -242,26 +286,33 @@ def main_cc816(o):
         die("--stack: cc816's software stack is an even number of bytes, 512 to 32768")
     opt = o["opt"] or "2"
     incs = o["incs"]
+    code = o["code"]
+    if code != "large" and any(o[k] is not None for k in ("heap", "prx_path")):
+        die("--heap and --prx-path are for the large code model (hcc --code large)")
     tmp = None
     try:
-        hzc816.ensure_lib()
+        hzc816.ensure_lib(code)
         objs, tmp = compile_all(
             o, lambda s, obj, a: hzc816.compile_c(s, obj, opt, incs=incs, defs=o["defs"],
-                                                  asm_out=a, opts=o["ccopts"]),
+                                                  asm_out=a, opts=o["ccopts"], code=code),
             lambda s, obj: hzc816.assemble(s, obj, incs=incs + [os.path.join(hzc.SDKC,
-                                                                            "include")]))
+                                                                            "include")],
+                                           code=code))
         if o["compile_only"]:
             return 0
         libs = list(o["libs"])
         if o["game"] or hgbuild.uses_game(o["srcs"]):
-            libs.insert(0, hgbuild.lib_for("cc816"))
+            libs.insert(0, hgbuild.lib_for("cc816l" if code == "large" else "cc816"))
         out = o["out"] or os.path.basename(os.path.splitext(o["srcs"][0])[0]).upper() + ".PRG"
         mapfile = os.path.splitext(out)[0] + ".map" if o["want_map"] else None
         ui = o["ui"]
         while True:
             try:
                 sizes = hzc816.link(objs, out, sstack=stack, debug=o["debug"], mapfile=mapfile,
-                                    extra_libs=libs, keep=o["keep"], ui=ui)
+                                    extra_libs=libs, keep=o["keep"], ui=ui, code=code,
+                                    heap=o["heap"], bank_room=o["bank_room"],
+                                    main_room=o["main_room"], prx_dirs=o["prx_path"],
+                                    spread=o["spread"])
                 break
             except hzc.HccError as e:
                 undef = hzc.undefined_names(str(e))
@@ -280,6 +331,9 @@ def main_cc816(o):
 
 
 def main_vbcc(o):
+    if o.get("code_given") and o["code"] == "large":
+        die("--code large is cc816's (hcc --cc cc816); vbcc has its own --model large, whose "
+            "code is limited to one bank")
     out = o["out"]
     srcs, incs, libs = o["srcs"], o["incs"], list(o["libs"])
     defs = [d for d in o["defs"] if not d.startswith("-U")]     # (vbcc has no -U)

@@ -9,6 +9,7 @@
 	.smart	-
 	.a16
 	.i16
+	.include "model.inc"
 	.import	___hz_fmtll, ___hz_fmt_ll
 	.export	__cc816_fmtll
 	.constructor ll_initp, 1
@@ -19,4 +20,4 @@ __cc816_fmtll:
 ll_initp:
 	lda	#___hz_fmtll
 	sta	___hz_fmt_ll
-	rts
+	RET

@@ -82,6 +82,11 @@ class Gen:
         self.res = None          # a V whose value is only in __h0 (its store was skipped)
         self.h0v = None          # a V whose value __h0 holds now
         self.pend = None
+        # the large code model (hcc --code large): JSL/RTL, the return address 3 bytes, a
+        # function's 16-bit address (a pointer) its entry in the main bank, __T<name>
+        self.large = bool(opts.get('large'))
+        self.RA = 3 if self.large else 2       # the return address's size
+        self.funcnames = getattr(unit, 'funcnames', ()) if self.large else ()
 
     # ------------------------------------------------------------------ emit
     def I(self, m, o=''):
@@ -102,7 +107,11 @@ class Gen:
 
     def helper(self, name):
         self.helpers.add(name)
-        self.I('jsr', name)
+        self.I('jsl' if self.large else 'jsr', name)
+
+    def hname(self, name):
+        """a symbol as a value: in the large model a function's is its main-bank entry"""
+        return '__T' + name if name in self.funcnames else name
 
     # ------------------------------------------------------------------ operands
     def vaddr(self, v, part=0):
@@ -115,7 +124,7 @@ class Gen:
         if kind == 'sr':
             return f'{1 + self.push + off + 2 * part},s'
         if kind == 'home':
-            return f'{1 + self.push + self.F + self.C + 2 + off + 2 * part},s'
+            return f'{1 + self.push + self.F + self.C + self.RA + off + 2 * part},s'
         raise AssertionError(v.loc)
 
     def is_dp(self, o):
@@ -128,7 +137,7 @@ class Gen:
         if isinstance(o, Sym):
             if part:
                 return '#0'
-            return f'#{o.name}' + (f'+{o.off}' if o.off > 0 else (f'-{-o.off}' if o.off < 0 else ''))
+            return f'#{self.hname(o.name)}' + (f'+{o.off}' if o.off > 0 else (f'-{-o.off}' if o.off < 0 else ''))
         if isinstance(o, V):
             return self.vaddr(o, part)
         return None
@@ -224,9 +233,8 @@ class Gen:
             self.I('sbc', '#' + hexw(self.S))
             self.I('sta', '__sp')
         for p, loc in f.param_copies:
-            home = f'{1 + self.F + self.C + 2 + p.param},s'
             for part in range(p.size // 2):
-                self.I('lda', f'{1 + self.F + self.C + 2 + p.param + 2 * part},s')
+                self.I('lda', f'{1 + self.F + self.C + self.RA + p.param + 2 * part},s')
                 self.sta(p, part)
         self.exit_label = f'L{f.name[1:]}_exit'
         self.nret = sum(1 for b in f.blocks for i in b.ins if i.op == 'ret')
@@ -296,7 +304,7 @@ class Gen:
             self.I('sta', f'__rg+{k}')
         if clob:
             self.I('lda', '__rv')
-        self.I('rts')
+        self.I('rtl' if self.large else 'rts')
 
     # ------------------------------------------------------------------ instructions
     def g_mov(self, i):
@@ -1063,7 +1071,7 @@ class Gen:
         if isinstance(a, Imm):
             self.I('lda', f'#${a.val & 0xFF:02X}')
         elif isinstance(a, Sym):
-            self.I('lda', f'#<({self.symoff(a.name, a.off)})')
+            self.I('lda', f'#<({self.symoff(self.hname(a.name), a.off)})')
         elif isinstance(a, Frame):
             self.I('rep', '#$20')
             self.lda(a)
@@ -1084,7 +1092,7 @@ class Gen:
         self.I('ply')
         self.push -= 2
         self.I('lda', '#' + hexw(n - 1))
-        self.I('mvn', f'#^{self.f.name}, #^{self.f.name}')
+        self.I('mvn', self.mvn_banks())
 
     def g_fcopy(self, i):
         """n bytes between far addresses: __fcopy (MVN built with both banks)"""
@@ -1131,12 +1139,18 @@ class Gen:
         if n > 1:
             self.I('iny')
             self.I('lda', '#' + hexw(n - 2))
-            self.I('mvn', f'#^{self.f.name}, #^{self.f.name}')
+            self.I('mvn', self.mvn_banks())
+
+    def mvn_banks(self):
+        """MVN's banks: the data bank's (the main bank's: a symbol there in the large model,
+        where the function may sit in another bank)"""
+        b = '__fpt' if self.large else self.f.name
+        return f'#^{b}, #^{b}'
 
     def g_vastart(self, i):
         self.I('tsc')
         self.I('clc')
-        self.I('adc', '#' + hexw(1 + self.push + self.F + self.C + 2 + self.f.argsize))
+        self.I('adc', '#' + hexw(1 + self.push + self.F + self.C + self.RA + self.f.argsize))
         self.sta(i.d, 0)
         self.stz(i.d, 1)
 
@@ -1172,7 +1186,14 @@ class Gen:
                 n += 2
         tgt = i.x['tgt']
         if isinstance(tgt, Sym) and tgt.off == 0:
-            self.I('jsr', tgt.name)
+            self.I('jsl' if self.large else 'jsr', tgt.name)
+        elif self.large:
+            # through a pointer: __icall (crt0.s, main bank) jumps to it, JMP (__fpt,X)
+            self.lda(tgt)
+            self.I('sta', '__fpt')
+            self.I('jsl', '__icall')
+            self.helpers.add('__fpt')
+            self.helpers.add('__icall')
         else:
             self.lda(tgt)
             self.I('sta', '__fpt')
@@ -1208,7 +1229,7 @@ class Gen:
         if isinstance(a, Imm):
             self.I('pea', hexw(a.val >> (16 * p)))
         elif isinstance(a, Sym):
-            self.I('pea', self.symoff(a.name, a.off) if p == 0 else '0')
+            self.I('pea', self.symoff(self.hname(a.name), a.off) if p == 0 else '0')
         elif isinstance(a, V) and a.loc[0] == 'dp':
             if a.size == 2 and p == 1:
                 self.I('pea', '0')

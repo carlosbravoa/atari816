@@ -26,6 +26,7 @@
 	.smart	-
 	.a16
 	.i16
+	.include "model.inc"
 	.importzp __h0, __h1, __h2, __h3, __rv
 	.export	__fpack, __fp_rshift
 
@@ -73,7 +74,7 @@ __fpack:
 @zero:	lda	__rv		; (not reached by the helpers: they handle 0 first)
 	sta	__h0+2
 	stz	__h0
-	rts
+	RET
 
 	; now 2^30 <= m < 2^31. E < 1: a denormal (or 0): shift right by 1 - E, sticky
 @norm:	lda	__rv+2
@@ -134,12 +135,12 @@ __fpack:
 	sta	__h0+2
 	lda	__h2
 	sta	__h0
-	rts
+	RET
 @inf:	lda	__rv
 	ora	#$7F80
 	sta	__h0+2
 	stz	__h0
-	rts
+	RET
 
 ; __fp_rshift: __h2 (32 bits) >>= X (1-31), every bit shifted out ORed into bit 0
 ; (sticky). Changes A, X, __h3.

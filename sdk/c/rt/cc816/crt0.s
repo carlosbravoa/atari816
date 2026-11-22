@@ -23,11 +23,19 @@
 ;          exit.
 ; exit:    the atexit functions (newest first), the destructors (the C library's: every
 ;          FILE flushed and closed), the stack checks (lib/exitchk.c), SYS_EXIT.
+;
+; The large code model (hcc --code large, ca65 -D __CC816_LARGE__): C functions are called
+; with JSL and return with RTL (model.inc), wherever they are. Before the constructors,
+; __hz_xload (lib/cc816/xload.c) loads the program's other code banks from its .PRX file;
+; then the constructors, main and the exit functions are called as JSL calls. __icall is
+; the call through a function pointer: JSL __icall with the pointer in __fpt (a 16-bit
+; address in this bank: the function, or its thunk JML in the main bank).
 
 	.p816
 	.smart	-
 	.a16
 	.i16
+	.include "model.inc"
 
 	.exportzp __rg, __sp, __rv, __h0, __h1, __h2, __h3, __cbank, __hz_zpend
 	.export	__start, __fpt, __abs0
@@ -39,6 +47,14 @@
 	.import	__HZ_SSTACK__, __HZ_PAINT__
 	.import	__CONSTRUCTOR_TABLE__, __CONSTRUCTOR_COUNT__
 	.import	__DESTRUCTOR_TABLE__, __DESTRUCTOR_COUNT__
+.if LARGE
+	.export	__icall, __cc816_large
+	.import	___hz_xload
+__cc816_large = 1		; (every object cc816 makes for the large model imports it)
+.else
+	.export	__cc816_small
+__cc816_small = 1
+.endif
 
 __abs0	= 0			; *(T *)constant: an absolute address in the code bank
 SSTOP	= $FFF0			; the software stack's top (it grows down from here)
@@ -134,30 +150,40 @@ __start:
 	cpx	__h0
 	bcc	@sg
 	; the constructors (functions named _INIT_n_...: cc816 lists them for ld65)
+.if LARGE
+	jsl	___hz_xload	; the other code banks (lib/cc816/xload.c)
+.endif
 	ldx	#0
 @ct:	cpx	#__CONSTRUCTOR_COUNT__ * 2
 	bcs	@ctd
 	phx
+.if LARGE
+	phk			; a JSL's return address (constructors are in this bank)
+	pea	@ctr - 1
+	jmp	(__CONSTRUCTOR_TABLE__,x)
+@ctr:
+.else
 	jsr	(__CONSTRUCTOR_TABLE__,x)
+.endif
 	plx
 	inx
 	inx
 	bra	@ct
-@ctd:	jsr	___hz_mkargs	; lib/args.c: A = argc, ___hz_argv = argv
+@ctd:	CALL	___hz_mkargs	; lib/args.c: A = argc, ___hz_argv = argv
 	tax
 	lda	___hz_argv	; main(int argc, char **argv) (or main(void): the same call)
 	pha
 	phx
-	jsr	_main
+	CALL	_main
 	ply
 	ply
 	jmp	exitA
 
 ; void exit(int code)
-_exit:	lda	3,s
+_exit:	lda	ARGS,s
 exitA:	ldx	inexit		; exit() inside an atexit function or a destructor: ignored
 	beq	@go
-	rts
+	RET			; (after main: main's return was the program's end, exitA)
 @go:	sta	exitcode
 	inc	inexit
 @at:	ldx	nexit		; the atexit functions, newest first
@@ -165,11 +191,17 @@ exitA:	ldx	inexit		; exit() inside an atexit function or a destructor: ignored
 	dex
 	dex
 	stx	nexit
+.if LARGE
+	lda	exittab,x
+	sta	__fpt
+	jsl	__icall
+.else
 	jsr	(exittab,x)
+.endif
 	bra	@at
 
 ; void _Exit(int code): no atexit functions, but the destructors (the files are flushed)
-__Exit:	lda	3,s
+__Exit:	lda	ARGS,s
 	sta	exitcode
 	inc	inexit
 dtors:	ldx	#__DESTRUCTOR_COUNT__ * 2
@@ -178,10 +210,17 @@ dtors:	ldx	#__DESTRUCTOR_COUNT__ * 2
 	dex
 	dex
 	phx
+.if LARGE
+	phk
+	pea	@dtr - 1
+	jmp	(__DESTRUCTOR_TABLE__,x)
+@dtr:
+.else
 	jsr	(__DESTRUCTOR_TABLE__,x)
+.endif
 	plx
 	bra	@dt
-@dtd:	jsr	___hz_exitchk	; lib/exitchk.c: the guard zones (and --debug's report)
+@dtd:	CALL	___hz_exitchk	; lib/exitchk.c: the guard zones (and --debug's report)
 	lda	exitcode
 @end:	cop	#0		; SYS_EXIT, never returns
 	bra	@end
@@ -197,31 +236,39 @@ _atexit:
 	cmp	#MAXEXIT * 2
 	bcs	@full
 	tax
-	lda	3,s
+	lda	ARGS,s
 	sta	exittab,x
 	inx
 	inx
 	stx	nexit
 	lda	#0
-	rts
+	RET
 @full:	lda	#$FFFF
-	rts
+	RET
 
 ; unsigned hz_stack_free(void): bytes of the hardware stack below S now
 _hz_stack_free:
 	tsc
 	clc
-	adc	#2		; (S before the call)
+	adc	#ARGS - 1	; (S before the call)
 	sec
 	sbc	#HSLO
-	rts
+	RET
 
 ; unsigned hz_sstack_free(void): bytes of the software stack below __sp now
 _hz_sstack_free:
 	lda	__sp
 	sec
 	sbc	___hz_sslo
-	rts
+	RET
+
+.if LARGE
+; a call through a function pointer (the large code model): JSL __icall with the pointer
+; (an address in this bank) in __fpt; the function returns to the caller with its RTL
+__icall:
+	ldx	#0
+	jmp	(__fpt,x)
+.endif
 
 	.segment "RODATA"
 ; the heap: from the end of bss to the software stack's guard zone (lib/cc816/malloc.c)

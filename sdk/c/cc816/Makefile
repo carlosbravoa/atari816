@@ -1,6 +1,7 @@
 # cc816 - the Horizon C SDK's own C compiler (Python 3, emits ca65 assembly).
 #
-#   make check           the regression set (tests/check.py): the messages (tests/diag/*.c,
+#   make check           the regression set (tests/check.py), in both code models (CODES:
+#                        small large; hcc --code large): the messages (tests/diag/*.c,
 #                        tests/diag.py, no emulator), tests/regress/*.c, tests/lang/*.c,
 #                        the random programs (fuzz/genfuzz.py, seeds 1, 2 and 3: 200 x seed
 #                        programs; SEEDS=1,2 to change) and the random floating-point
@@ -20,16 +21,21 @@
 PYTHON ?= python3
 CTS    ?=
 SEEDS  ?= 1,2,3
+# the code models the set runs in, one after the other: small, and large (hcc --code
+# large: every program with its functions in turn in three other banks)
+CODES  ?= small large
 
 check:
-	$(PYTHON) tests/check.py --seeds $(SEEDS) $(if $(CTS),--cts $(CTS))
+	@set -e; for c in $(CODES); do echo "==== code model: $$c"; \
+	  $(PYTHON) tests/check.py --code $$c --seeds $(SEEDS) $(if $(CTS),--cts $(CTS)); done
 quick:
-	$(PYTHON) tests/check.py --quick $(if $(CTS),--cts $(CTS))
+	@set -e; for c in $(CODES); do echo "==== code model: $$c"; \
+	  $(PYTHON) tests/check.py --code $$c --quick $(if $(CTS),--cts $(CTS)); done
 diag:
 	$(PYTHON) tests/diag.py
 sdk:
 	$(PYTHON) tests/sdkcompile.py
 clean:
-	rm -rf ../build/cc816
+	rm -rf ../build/cc816 ../build/cc816l
 
 .PHONY: check quick diag sdk clean

@@ -75,7 +75,7 @@ def flags_needed(lines, i, which):
         m = l[1]
         if m in reads:
             return True
-        if m in sets or m in END or m == 'jsr':
+        if m in sets or m in END or m in ('jsr', 'jsl'):
             return False
     return False
 
@@ -193,7 +193,7 @@ def _walk(lines, lab_in, rec, xstates=None):
         prev_fa = fa
         if m in ('lda', 'and', 'ora', 'eor', 'adc', 'sbc', 'txa', 'tya', 'pla', 'tax', 'tay') and not m8:
             fa = True
-        elif m in SETS_NZ or m in ('jsr', 'cop', 'bit', 'tsb', 'trb', 'mvn', 'mvp') or m8:
+        elif m in SETS_NZ or m in ('jsr', 'jsl', 'cop', 'bit', 'tsb', 'trb', 'mvn', 'mvp') or m8:
             fa = False
         if m8 and m == 'lda' and o in A8 and (plain(o) or o.startswith('#')) and \
                 not flags_needed(lines, i - 1, 'nz'):
@@ -204,7 +204,7 @@ def _walk(lines, lab_in, rec, xstates=None):
             A8 = set()
             if m == 'lda' and (plain(o) or o.startswith('#')):
                 A8 = {o}
-        if m in ('pha', 'pla', 'phx', 'plx', 'phy', 'ply', 'pei', 'pea', 'tcs', 'jsr', 'phd', 'php',
+        if m in ('pha', 'pla', 'phx', 'plx', 'phy', 'ply', 'pei', 'pea', 'tcs', 'jsr', 'jsl', 'phd', 'php',
                  'plp', 'phb', 'plb', 'phk'):
             if m == 'pei' and not m8 and o[1:-1] in A:
                 l = ('I', 'pha', '')
@@ -245,7 +245,7 @@ def _walk(lines, lab_in, rec, xstates=None):
             Z.discard(o)
             if not plain(o):
                 Z.clear()
-        if m in ('jsr', 'cop', 'mvn', 'mvp'):
+        if m in ('jsr', 'jsl', 'cop', 'mvn', 'mvp'):
             Z.clear()
         if m in ('lda', 'ldx', 'ldy') and (m != 'lda' or not m8):
             R = {'lda': A, 'ldx': X, 'ldy': Y}[m]
@@ -324,9 +324,9 @@ def _walk(lines, lab_in, rec, xstates=None):
             X = set()
         if m in ('iny', 'dey', 'ply'):
             Y = set()
-        if m in ('jsr', 'cop', 'jmp', 'rts', 'brl', 'bra'):
+        if m in ('jsr', 'jsl', 'cop', 'jmp', 'rts', 'rtl', 'brl', 'bra'):
             A, X, Y = set(), set(), set()
-            if m == 'jsr':
+            if m in ('jsr', 'jsl'):
                 drop(absolute)
     return out, changed
 
@@ -588,7 +588,7 @@ def dead_dp(lines):
 
 
 READS_A = {'sta', 'adc', 'sbc', 'and', 'ora', 'eor', 'cmp', 'bit', 'tax', 'tay', 'pha',
-           'xba', 'tcs', 'tcd', 'mvn', 'mvp', 'jsr', 'rts', 'cop', 'rtl'}
+           'xba', 'tcs', 'tcd', 'mvn', 'mvp', 'jsr', 'jsl', 'rts', 'cop', 'rtl'}
 OVERWRITES_A = {'lda', 'pla', 'txa', 'tya', 'tsc', 'tdc'}
 
 
@@ -641,7 +641,7 @@ def simple(lines):
             if x[0] != 'I' or x[1] in BRANCH or x[1] in ('jmp', 'brl'):
                 break
             body.append(x)
-            if x[1] == 'rts':
+            if x[1] in ('rts', 'rtl'):
                 tails[l[1]] = body
                 break
             j += 1
@@ -727,7 +727,7 @@ def simple(lines):
             changed = True
             continue
         res.append(l)
-        if l[0] == 'I' and l[1] in ('jmp', 'bra', 'brl', 'rts'):
+        if l[0] == 'I' and l[1] in ('jmp', 'bra', 'brl', 'rts', 'rtl'):
             dead = True
     if changed:
         lines[:] = res

@@ -33,6 +33,8 @@ Options:
   --seconds N     how long to run after the start (default: the last event + 2 s)
   --out DIR       output folder (default: run-NAME)
   --file SRC[:DEST]  copy a file onto the card too (DEST default /SRC-NAME; repeatable)
+                  (PROG.PRX, a large program's code banks (hcc --code large), goes next
+                  to the program by itself)
   --rev N         hardware revision to emulate (default: emu816's, REV $0B: the blitter
                   with command lists, Lau, sprites, fine scrolling); 10 no sprites or
                   scrolling, 9 no Lau, 8 no command lists / raster / NV_FRAME, 7 no blitter
@@ -140,6 +142,13 @@ def main():
         os.makedirs(os.path.dirname(p), exist_ok=True)
         shutil.copy(src, p)
     put(prog, dest)
+    # a program built with hcc --code large may have its other code banks in NAME.PRX next
+    # to it: it goes into the same folder (under the name the program looks for)
+    for ext in ('.PRX', '.prx'):
+        x = os.path.splitext(prog)[0] + ext
+        if os.path.exists(x):
+            put(x, os.path.dirname(dest) + '/' + os.path.basename(x))
+            break
     for f in opt['files']:
         src, _, d = f.partition(':')
         put(src, d or '/' + os.path.basename(src).upper())

@@ -9,6 +9,7 @@
 	.smart	-
 	.a16
 	.i16
+	.include "model.inc"
 	.import	___hz_scanfp, ___hz_scan_float
 	.export	__cc816_scanf
 	.constructor fp_inits, 1
@@ -19,4 +20,4 @@ __cc816_scanf:
 fp_inits:
 	lda	#___hz_scanfp
 	sta	___hz_scan_float
-	rts
+	RET

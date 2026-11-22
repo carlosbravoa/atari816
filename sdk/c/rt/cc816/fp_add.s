@@ -9,6 +9,7 @@
 	.smart	-
 	.a16
 	.i16
+	.include "model.inc"
 	.importzp __h0, __h1, __h2, __h3, __rv
 	.import	__fpack, __fp_rshift, __fp_ld2, __fp_st, __fp_ldx
 	.export	__fadd, __fsub, __faddr, __fsubr, __faddi, __fsubi, __faddx, __faddrx, __fsubx, __fsubrx
@@ -17,12 +18,12 @@
 
 __faddi:	pha			; X = &a, Y = &b, A = &result (fp_ind.s)
 	jsr	__fp_ld2
-	jsr	__fadd
+	CALL	__fadd
 	pla
 	jmp	__fp_st
 __fsubi:	pha			; X = &a, Y = &b, A = &result (fp_ind.s)
 	jsr	__fp_ld2
-	jsr	__fsub
+	CALL	__fsub
 	pla
 	jmp	__fp_st
 __faddx:	jsr	__fp_ldx		; a in __h0, X = &b (fp_ind.s)
@@ -69,7 +70,7 @@ __fadd:	lda	__h0+2
 	lda	__h0+2		; +-0 + +-0: -0 only when both are -0
 	and	__h1+2
 	sta	__h0+2
-@reta:	rts
+@reta:	RET
 @bnz:	lda	__h0+2
 	asl	a
 	ora	__h0
@@ -78,7 +79,7 @@ __fadd:	lda	__h0+2
 	sta	__h0
 	lda	__h1+2
 	sta	__h0+2
-	rts
+	RET
 
 	; |a| >= |b|: swap if not
 @work:	lda	__h0+2
@@ -213,7 +214,7 @@ __fadd:	lda	__h0+2
 	bne	@sum
 	stz	__h0		; exactly 0: +0
 	stz	__h0+2
-	rts
+	RET
 
 	; a is infinite or NaN
 @aspec:	lda	__h0+2
@@ -234,11 +235,11 @@ __fadd:	lda	__h0+2
 	lda	#$FFC0		; inf - inf: the default NaN
 	sta	__h0+2
 	stz	__h0
-@reta2:	rts
+@reta2:	RET
 @anan:	lda	__h0+2		; a NaN: quiet
 	ora	#$0040
 	sta	__h0+2
-	rts
+	RET
 	; b is infinite or NaN, a finite: b (quiet)
 @bspec:	lda	__h1+2
 	and	#$007F
@@ -250,7 +251,7 @@ __fadd:	lda	__h0+2
 	lda	__h1+2
 	ora	#$0040
 	sta	__h0+2
-	rts
+	RET
 
 ; __h0 <-> __h1: the ...r entries (the compiler's operands the other way round)
 __fp_swap:

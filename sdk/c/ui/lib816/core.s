@@ -5,6 +5,7 @@
         .include "horizon.inc"
         .include "ui.inc"
         .include "hui816.inc"
+        .include "model.inc"
         .import ___hui_fatal, _hz_errno
 
         .segment "ZEROPAGE"
@@ -30,7 +31,7 @@ hui_incb: .res  2               ; nonzero while a callback into C runs
 hui_fail:
         phy
         pha
-        jsr     ___hui_fatal            ; (never returns)
+        CALL    ___hui_fatal            ; (never returns)
 
 ; A -> the C library's hz_errno (keeps A)
 hui_seterr:

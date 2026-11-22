@@ -4,11 +4,12 @@ then checked: its own PASS / FAIL lines (it reads the framebuffer back, compares
 expected console lines, the emulator's sound logs and WAV output, and its screenshots
 against the reference pictures in tests/ref/ (a few differing pixels allowed).
 
-    python3 sdk/c/game/tests/run.py [--horizon DIR] [--cc cc816|vbcc] [--only NAME ...]
+    python3 sdk/c/game/tests/run.py [--horizon DIR] [--cc cc816|cc816l|vbcc] [--only NAME ...]
                                     [--update-refs]
 
-Every test runs with both compilers (cc816, and vbcc's large model) against the SAME
-reference pictures; --cc chooses one. --update-refs writes the screenshots of this run as
+Every test runs with both compilers (cc816, and vbcc's large model), and with cc816's large
+code model (cc816l: hcc --code large, every function that can move in another bank),
+against the SAME reference pictures; --cc chooses one. --update-refs writes the screenshots of this run as
 the new references (look at them first: build/game-tests/CC/NAME/shotN.png). Output: one
 line per check, PASS or FAIL, and a summary; exit code 1 when anything failed. Runs go to
 sdk/c/build/game-tests/<cc816|vbcc>/.
@@ -128,7 +129,10 @@ def make_files(name, run):
             print(out)
 
 
-CCS = {"cc816": ["--cc", "cc816"], "vbcc": ["--cc", "vbcc"]}
+CCS = {"cc816": ["--cc", "cc816"], "vbcc": ["--cc", "vbcc"],
+       # cc816's large code model: every function that can move in another bank
+       "cc816l": ["--cc", "cc816", "--code", "large", "--main-room", "0", "--bank-room",
+                  "16384"]}
 
 
 def vbcc_fault(horizon):
@@ -220,7 +224,7 @@ def main():
     a = sys.argv[1:]
     horizon = os.environ.get("HORIZON") or os.path.join(os.path.dirname(SDK), "horizon")
     only, update = [], False
-    ccs = ["cc816", "vbcc"]
+    ccs = ["cc816", "cc816l", "vbcc"]
     i = 0
     while i < len(a):
         if a[i] == "--horizon":
@@ -244,7 +248,7 @@ def main():
                   "its tests are skipped")
         ccs = [c for c in ccs if c != "vbcc"]
     for cc in ccs:
-        hgbuild.lib_for("cc816" if cc == "cc816" else "large")
+        hgbuild.lib_for(cc if cc.startswith("cc816") else "large")
         run_tests(cc, horizon, only, update)
     if "vbcc" in ccs and (not only or "vbcc" in only):
         vbcc_fault(horizon)

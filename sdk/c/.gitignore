@@ -2,6 +2,7 @@
 toolchain/
 build/
 *.PRG
+*.PRX
 *.o
 __pycache__/
 *.map

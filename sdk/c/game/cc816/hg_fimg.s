@@ -6,6 +6,7 @@
 	.smart	-
 	.a16
 	.i16
+	.include "model.inc"
 	.importzp __rg
 	.import	_hg__kind, _hg__four, _hg__draw_c, _hg__draw_part_c
 	.import	hgf_reccore, hgf_sheetrec
@@ -40,7 +41,7 @@
 ; on in C (hg__draw_c, the same arguments, still on the stack).
 ; hg_image: w 0, h 2, n 4, stride 6, addr 8, key 12, sheet 14, bpp 15
 _hg_draw:
-	lda	3,s			; (r4): the image
+	lda	ARGS,s			; (r4): the image
 	beq	@slow
 	sta	r4
 	sep	#$20
@@ -59,14 +60,14 @@ _hg_draw:
 	bcs	@slow
 	and	#$00FF
 	sta	r29			; the sheet
-	lda	5,s			; frame < n?
+	lda	ARGS+2,s			; frame < n?
 	sta	r15
 	ldy	#4
 	cmp	(r4),y
 	bcs	@slow
-	lda	7,s
+	lda	ARGS+4,s
 	sta	r9
-	lda	9,s
+	lda	ARGS+6,s
 	sta	r10
 	lda	(r4)			; w
 	sta	r11
@@ -89,7 +90,7 @@ _hg_draw:
 	bcs	@out
 	lda	r8
 	jsr	hgf_sheetrec
-@out:	rts
+@out:	RET
 @slow:	jmp	_hg__draw_c		; (the same arguments on the stack)
 
 ; ------------------------------------------------------------------ void hg_draw_part
@@ -98,7 +99,7 @@ _hg_draw:
 ; in C (hg__draw_part_c, the same arguments).
 dp_slow:	jmp	_hg__draw_part_c	; (here: in reach of the branches)
 _hg_draw_part:
-	lda	3,s
+	lda	ARGS,s
 	beq	dp_slow
 	sta	r4
 	sep	#$20
@@ -126,31 +127,31 @@ _hg_draw_part:
 	jsr	fmul
 	lda	r30
 	sta	r2			; r2: rows
-	lda	5,s			; sx < w?
+	lda	ARGS+2,s			; sx < w?
 	sta	r1
 	cmp	(r4)
 	bcs	@out
-	lda	7,s			; sy < rows?
+	lda	ARGS+4,s			; sy < rows?
 	sta	r30
 	cmp	r2
 	bcs	@out
 	lda	(r4)			; w = min(w, img.w - sx)
 	sec
 	sbc	r1
-	cmp	9,s
+	cmp	ARGS+6,s
 	bcc	@w
-	lda	9,s
+	lda	ARGS+6,s
 @w:	sta	r11
 	lda	r2			; h = min(h, rows - sy)
 	sec
 	sbc	r30
-	cmp	11,s
+	cmp	ARGS+8,s
 	bcc	@h
-	lda	11,s
+	lda	ARGS+8,s
 @h:	sta	r12
-	lda	13,s
+	lda	ARGS+10,s
 	sta	r9
-	lda	15,s
+	lda	ARGS+12,s
 	sta	r10
 	ldy	#12
 	lda	(r4),y
@@ -171,7 +172,7 @@ _hg_draw_part:
 	sta	r13			; the source x: sx + the cut
 	lda	r8
 	jsr	hgf_sheetrec
-@out:	rts
+@out:	RET
 
 ; r30 = r15 * r30 (16 bits; frame * h). Uses A Y r31.
 fmul:	lda	r30
@@ -198,27 +199,27 @@ fmul:	lda	r30
 ; bytes at a time), else bytes equal to key are skipped. Rows may cross banks ([dp],y
 ; carries into the bank).
 _hg__blitmem:
-	lda	3,s			; [r0]: dst
+	lda	ARGS,s			; [r0]: dst
 	sta	r0
-	lda	5,s
+	lda	ARGS+2,s
 	sta	r1
-	lda	7,s
+	lda	ARGS+4,s
 	sta	r4			; dstride
-	lda	9,s			; [r2]: src
+	lda	ARGS+6,s			; [r2]: src
 	sta	r2
-	lda	11,s
+	lda	ARGS+8,s
 	sta	r3
-	lda	13,s
+	lda	ARGS+10,s
 	sta	r5			; sstride
-	lda	15,s
+	lda	ARGS+12,s
 	sta	r6			; w
 	beq	@done
 	lsr	a
 	sta	r9			; w / 2
-	lda	17,s
+	lda	ARGS+14,s
 	sta	r7			; h
 	beq	@done
-	lda	19,s
+	lda	ARGS+16,s
 	sta	r8			; key
 @row:	ldy	#0
 	lda	r8
@@ -267,27 +268,27 @@ _hg__blitmem:
 	inc	r3
 @n2:	dec	r7
 	bne	@row
-@done:	rts
+@done:	RET
 
 ; ------------------------------------------------------------------ void hg__fillmem
 ; (unsigned long dst, unsigned dstride, unsigned w, unsigned h, unsigned c): 3,s dst,
 ; 7,s dstride, 9,s w, 11,s h, 13,s c. h rows of w bytes of colour c.
 _hg__fillmem:
-	lda	3,s
+	lda	ARGS,s
 	sta	r0
-	lda	5,s
+	lda	ARGS+2,s
 	sta	r1
-	lda	7,s
+	lda	ARGS+4,s
 	sta	r4			; dstride
-	lda	9,s
+	lda	ARGS+6,s
 	sta	r6			; w
 	beq	@done
 	lsr	a
 	sta	r9
-	lda	11,s
+	lda	ARGS+8,s
 	sta	r7			; h
 	beq	@done
-	lda	13,s			; c | c << 8
+	lda	ARGS+10,s			; c | c << 8
 	and	#$00FF
 	sta	r8
 	xba
@@ -319,4 +320,4 @@ _hg__fillmem:
 	inc	r1
 @n1:	dec	r7
 	bne	@row
-@done:	rts
+@done:	RET

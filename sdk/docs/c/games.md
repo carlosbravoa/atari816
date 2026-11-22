@@ -507,6 +507,10 @@ where the game allows.
 
 ## Limits and known faults
 
+- A game whose code does not fit in one bank builds with `hcc --code large` (cc816: the
+  code fills several banks, GAME.PRG and GAME.PRX; hgame is built for it too and its tests
+  run in it): reference.md, "The two code models". The images, sounds and big tables
+  belong in files and far memory anyway, since constants and data stay in the main bank.
 - cc816 or vbcc's large model; at most 32 bobs, 16 hardware sprites, 128 records a send (more are sent
   in pieces), 460,800 pixels a send (the kernel's limit; hgame splits), 2 KB of text a frame
   before it is sent early.

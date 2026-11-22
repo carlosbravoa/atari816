@@ -13,6 +13,10 @@
         .include "horizon.inc"
         .include "ui.inc"
         .include "hui816.inc"
+        .include "model.inc"
+.if LARGE
+        .import __fpt, __icall
+.endif
         .export _hui_rowtramp
 
         .segment "BSS"
@@ -54,8 +58,14 @@ hui_rowtramp:
         pha
         lda     rlist                   ; ui_list *ls
         pha
+.if LARGE                               ; (the large code model: JSL, the function's RTL)
+        lda     rfn
+        sta     __fpt
+        jsl     __icall
+.else
         ldx     #0
         jsr     (rfn,x)
+.endif
         ply
         ply
         ply

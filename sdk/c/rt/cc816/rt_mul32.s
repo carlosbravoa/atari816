@@ -22,6 +22,7 @@
 	.smart	-
 	.a16
 	.i16
+	.include "model.inc"
 	.importzp __h0, __h1, __h2, __h3, __rv
 	.import	__mul16
 	.export	__mul32
@@ -37,11 +38,11 @@ __mul32:
 	beq	@short		; both high words 0: no cross terms
 	lda	__h0		; Mlo * Nhi
 	ldx	__h1+2
-	jsr	__mul16
+	CALL	__mul16
 	sta	__rv
 	lda	__h1		; + Nlo * Mhi
 	ldx	__h0+2
-	jsr	__mul16
+	CALL	__mul16
 	clc
 	adc	__rv
 	sta	__rv
@@ -63,4 +64,4 @@ __mul32:
 	sta	__h0+2
 	lda	__h2
 	sta	__h0
-	rts
+	RET

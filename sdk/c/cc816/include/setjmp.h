@@ -9,7 +9,11 @@
  * through a pointer. */
 #ifndef _SETJMP_H
 #define _SETJMP_H
+#ifdef __CC816_LARGE__
+typedef unsigned int jmp_buf[28];   /* hcc --code large: the return address's bank too */
+#else
 typedef unsigned int jmp_buf[27];
+#endif
 typedef jmp_buf sigjmp_buf;
 int setjmp(jmp_buf env);
 _Noreturn void longjmp(jmp_buf env, int val);

@@ -14,6 +14,7 @@
 	.smart	-
 	.a16
 	.i16
+	.include "model.inc"
 	.importzp __rg
 	.import	_hg__offx, _hg__offy, _hg__cly0, _hg__cly1, _hg__clx1
 	.import	_hg__qn, _hg__qpix, _hg__nruns, _hg__runs, _hg__runkind, _hg__four
@@ -161,7 +162,7 @@ hgf_reccore:
 	pei	(r13)
 	pei	(r14)
 	pea	1
-	jsr	_hg__submit
+	CALL	_hg__submit
 	pla
 	pla
 	sta	r14
@@ -317,15 +318,15 @@ hgf_sheetrec:
 ; ------------------------------------------------------------------ hz_drawrec *hg__rec
 ; (unsigned op, int x, int y, unsigned w, unsigned h): 3,s op, 5,s x, 7,s y, 9,s w, 11,s h
 _hg__rec:
-	lda	3,s
+	lda	ARGS,s
 	sta	r8
-	lda	5,s
+	lda	ARGS+2,s
 	sta	r9
-	lda	7,s
+	lda	ARGS+4,s
 	sta	r10
-	lda	9,s
+	lda	ARGS+6,s
 	sta	r11
-	lda	11,s
+	lda	ARGS+8,s
 	sta	r12
 	sep	#$20
 	.a8
@@ -344,27 +345,27 @@ _hg__rec:
 	txa				; &hg__dq[Y] (a near pointer)
 	clc
 	adc	#_hg__dq
-	rts
+	RET
 @none:	pea	s_msg
 	pea	s_fn
-	jsr	_hg__fail
+	CALL	_hg__fail
 	pla
 	pla
 @null:	lda	#0
-	rts
+	RET
 
 ; ------------------------------------------------------------------ void hg_fill
 ; (int x, int y, unsigned w, unsigned h, unsigned c): 3,s x, 5,s y, 7,s w, 9,s h, 11,s c
 _hg_fill:
-	lda	3,s
+	lda	ARGS,s
 	sta	r9
-	lda	5,s
+	lda	ARGS+2,s
 	sta	r10
-	lda	7,s
+	lda	ARGS+4,s
 	sta	r11
-	lda	9,s
+	lda	ARGS+6,s
 	sta	r12
-	lda	11,s
+	lda	ARGS+8,s
 	sta	r28			; the colour
 	stz	r8			; LS_FILL
 	sep	#$20
@@ -385,7 +386,7 @@ _hg_fill:
 	stz	r14
 	lda	#0			; SH_FILL
 	jsr	hgf_sheetrec
-@out:	rts
+@out:	RET
 @four:	stz	r3			; 16 colours: a draw_list fill, both nibbles
 	jsr	hgf_reccore
 	bcs	@out
@@ -403,19 +404,19 @@ _hg_fill:
 	sta	_hg__dq+2,x		; c1
 	rep	#$20
 	.a16
-	rts
+	RET
 @none:	pea	0
 	pea	0
 	pea	0
 	pea	0
 	pea	0
-	jsr	_hg__rec		; (says what is wrong)
+	CALL	_hg__rec		; (says what is wrong)
 	pla
 	pla
 	pla
 	pla
 	pla
-	rts
+	RET
 
 ; ------------------------------------------------------------------ void hg__strip
 ; (unsigned char *dst, const char *s, unsigned n): 3,s dst, 5,s s, 7,s n (near pointers:
@@ -423,14 +424,14 @@ _hg_fill:
 ; the built-in font (95 glyphs of 10 bytes from ' '). The row offsets (0, n, .. 9n) are
 ; made first, so a character is ten 8-bit loads and stores.
 _hg__strip:
-	lda	3,s			; (r6): dst + i
+	lda	ARGS,s			; (r6): dst + i
 	sta	r6
-	lda	5,s			; (r2): s
+	lda	ARGS+2,s			; (r2): s
 	sta	r2
-	lda	7,s
+	lda	ARGS+4,s
 	sta	r4			; n
 	bne	@go
-	rts
+	RET
 @go:	stz	r8			; the rows' offsets
 	sta	r9
 	clc
@@ -508,19 +509,19 @@ _hg__strip:
 	cmp	r4
 	bcs	@done
 	jmp	@char
-@done:	rts
+@done:	RET
 
 ; ------------------------------------------------------------------ unsigned long hg__umul
 ; (unsigned a, unsigned b): a * b, 32 bits (3,s a, 5,s b).
 _hg__umul:
-	lda	3,s
+	lda	ARGS,s
 	sta	r11
-	lda	5,s
+	lda	ARGS+2,s
 	sta	r12
 	jsr	mul32
 	lda	r6
 	ldx	r7
-	rts
+	RET
 
 	.segment "RODATA"
 s_fn:	.byte	"draw",0

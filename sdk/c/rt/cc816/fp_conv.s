@@ -14,6 +14,7 @@
 	.smart	-
 	.a16
 	.i16
+	.include "model.inc"
 	.importzp __h0, __h2, __h3, __rv
 	.import	__fpack
 	.export	__ltof, __ultof, __ftol, __ftoul
@@ -45,7 +46,7 @@ ltof_go:
 	lda	#157		; the leading 1 at bit 30 would be 2^30: E = 127 + 30
 	sta	__rv+2
 	jmp	__fpack
-@z:	rts
+@z:	RET
 
 __ftoul:
 	lda	__h0+2
@@ -60,7 +61,7 @@ __ftoul:
 	lda	#$FFFF		; 2^32 and above, NaN
 	sta	__h0
 	sta	__h0+2
-	rts
+	RET
 
 __ftol:	lda	__h0+2
 	asl	a
@@ -73,10 +74,10 @@ __ftol:	lda	__h0+2
 	stz	__h0		; |x| >= 2^31, NaN
 	lda	#$8000
 	sta	__h0+2
-	rts
+	RET
 zero:	stz	__h0
 	stz	__h0+2
-	rts
+	RET
 
 	; A = the exponent (127..158): the significand (24 bits) shifted by E - 150
 conv:	tax
@@ -134,4 +135,4 @@ conv:	tax
 	lda	#0
 	sbc	__h0+2
 	sta	__h0+2
-:	rts
+:	RET

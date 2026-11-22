@@ -7,6 +7,7 @@
 	.smart	-
 	.a16
 	.i16
+	.include "model.inc"
 	.importzp __h0, __h1, __h2, __h3, __rv
 	.import	__fpack, __fp_ld2, __fp_st, __fp_ldx
 	.export	__fmul, __fp_unpk, __fp_nan, __fp_inf, __fp_zero, __fp_qa, __fp_qb, __fmulr, __fmuli, __fmulx, __fmulrx
@@ -15,7 +16,7 @@
 
 __fmuli:	pha			; X = &a, Y = &b, A = &result (fp_ind.s)
 	jsr	__fp_ld2
-	jsr	__fmul
+	CALL	__fmul
 	pla
 	jmp	__fp_st
 __fmulx:	jsr	__fp_ldx		; a in __h0, X = &b (fp_ind.s)
@@ -130,30 +131,30 @@ __fp_zero:
 	lda	__rv
 	sta	__h0+2
 	stz	__h0
-	rts
+	RET
 __fp_inf:
 	lda	__rv
 	ora	#$7F80
 	sta	__h0+2
 	stz	__h0
-	rts
+	RET
 __fp_nan:			; the default NaN
 	lda	#$FFC0
 	sta	__h0+2
 	stz	__h0
-	rts
+	RET
 __fp_qa:			; a (a NaN), quiet
 	lda	__h0+2
 	ora	#$0040
 	sta	__h0+2
-	rts
+	RET
 __fp_qb:			; b (a NaN), quiet
 	lda	__h1
 	sta	__h0
 	lda	__h1+2
 	ora	#$0040
 	sta	__h0+2
-	rts
+	RET
 
 ; __fp_unpk: X = the direct-page address of a float (finite, not 0) -> its 24-bit
 ; significand there, the leading 1 at bit 23 (a denormal shifted up), and A = its biased

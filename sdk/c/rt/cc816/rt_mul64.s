@@ -10,6 +10,7 @@
 	.smart	-
 	.a16
 	.i16
+	.include "model.inc"
 	.importzp __h0, __h1, __h2, __h3, __rv
 	.export	__mul64
 
@@ -71,7 +72,7 @@ __mul64:
 	sta	__h1
 	pla
 	sta	__h1+2
-	rts
+	RET
 
 ; A (16 bits) * X (16 bits) -> A (the high word), __rv (the low word): 16 rounds of
 ; shift-add, the multiplier shifted out of __rv as the product's low word comes in
