@@ -243,7 +243,10 @@ wire signed [15:0] opl_snd;              // OPL2 FM synth (a816_opl)
 wire               hdmi_smp_tgl;         // HDMI audio sample clock (toggle, clk_pix)
 function automatic [15:0] mix_sat(input [15:0] cl, input signed [15:0] nv, input signed [15:0] fm);
     reg signed [18:0] t;
-    t = $signed({{3{cl[15]}}, cl}) + 19'sd16384 + {{3{nv[15]}}, nv} + {{3{fm[15]}}, fm};
+    // (the OPL2 times 3: one FM voice peaks at an eighth of full scale; MIDI songs were
+    // 6 to 15 dB below MODs)
+    t = $signed({{3{cl[15]}}, cl}) + 19'sd16384 + {{3{nv[15]}}, nv} + {{3{fm[15]}}, fm}
+        + {{2{fm[15]}}, fm, 1'b0};
     mix_sat = (t > 19'sd32767) ? 16'h7FFF : (t < -19'sd32768) ? 16'h8000 : t[15:0];
 endfunction
 // Build switch: the sample player (a816_snd) is in the default build (bring-up log, step 17).

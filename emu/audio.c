@@ -83,7 +83,8 @@ static void step(uint64_t at)
     A.n_samples++;
     if (A.wav || A.live) {
         int16_t fm = opl_sample(at);                     /* both channels, full scale */
-        int16_t l = sat16((int64_t)A.out_l + fm), r = sat16((int64_t)A.out_r + fm);
+        /* (times 3 in the mix, as tang_top.sv's mix_sat) */
+        int16_t l = sat16((int64_t)A.out_l + 3 * fm), r = sat16((int64_t)A.out_r + 3 * fm);
         if (A.wav) {
             uint8_t b[4] = { l & 0xFF, (uint16_t)l >> 8, r & 0xFF, (uint16_t)r >> 8 };
             fwrite(b, 1, 4, A.wav);
