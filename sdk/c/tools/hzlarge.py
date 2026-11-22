@@ -4,7 +4,8 @@ The program's data, constants, bss, heap and software stack stay in the main ban
 Horizon loads as it loads any program (an o65 file, NAME.PRG). Its code may fill several
 banks: cc816 puts each function that can move in a segment of its own (F_name, or
 FS<tag>_name for a static one); hcc places them, and writes the banks other than the
-main one into NAME.PRX, which the startup reads (lib/cc816/xload.c).
+main one after the o65 in the same file, where the startup reads them (lib/cc816/xload.c).
+Horizon 0.28 and later load such a file and ignore what follows the o65.
 
 The steps (ld65 runs four to six times; each is quick):
   1. the movable segments and their sizes: from the objects themselves (tools/ca65obj.py),
@@ -18,18 +19,20 @@ The steps (ld65 runs four to six times; each is quick):
   4. the glue module (tools: written here, assembled): for each __T_name a thunk
      (JML name, 4 bytes in the main bank) when the function is in another bank, else an
      alias of the function itself; the loader's table (the number of banks, the build's
-     stamp, the .PRX's name, the folders it is looked for in, the banks' numbers);
+     stamp, the program's name for its messages, the banks' numbers);
   5. three links, A, B and C, with the other banks at different link-time banks (FAKE,
      OFFSET below): the main bank's bytes that differ are bank bytes of other banks (a
-     JSL to a function there, a thunk's JML) and become the .PRX's relocations of the main
+     JSL to a function there, a thunk's JML) and become the relocations (after the o65) of the main
      bank (the offset of such a far address may differ by one in link C; a 16-bit address
      of a function in another bank, which would be cut to 16 bits, is refused); in the
      other banks every bank byte is one the compiler recorded (segment XREL: the address of
      each JSL's, JML's and MVN's bank bytes), whose value in link A says which bank it
      names (0 the main bank, k bank k). A byte that differs and was not recorded stops the
      link (hand-written assembly naming a bank in a movable function).
-  6. NAME.PRG is link A's o65 file (o65strip), NAME.PRX the other banks' images and the
-     relocations (lib/cc816/xload.c has the layout).
+  6. NAME.PRG is link A's o65 file (o65strip), then the block of the other banks' images and
+     their relocations, then an 8-byte trailer: the block's offset (u32) and "HZPX"
+     (lib/cc816/xload.c has the layout). The o65 must stay below 64 KB (Horizon's loader reads
+     only the first 65,535 bytes of a larger file); the whole file has no such limit.
 """
 import os
 import re
@@ -56,7 +59,6 @@ FAKE = {"A": lambda k: k, "B": lambda k: k + 0x40, "C": lambda k: 0x80 + 2 * (k 
 OFFSET = {"A": 0, "B": 0, "C": 1}
 MAX_BANKS = 64                  # (xload.c)
 HEAP = 4096                     # the main bank's room kept for malloc (hcc --heap N)
-PRX_DIRS = "/APPS/:/BIN/:/SYSTEM/:/SYSTEM/TESTS/:/GAMES/"
 MOVABLE = re.compile(r"^F(?:S[0-9a-f]{6})?_\w+$")
 # the main bank's segments, in their order (STARTUP first: Horizon enters at $0100)
 MAIN_RO = ("STARTUP", "CODE", "THUNK")
@@ -173,12 +175,12 @@ def map_exports(mp):
     return out
 
 
-def glue(tmp, thunks, aliases, nbanks, stamp, prxname, dirs, code, noload=False):
+def glue(tmp, thunks, aliases, nbanks, stamp, progname, code, noload=False):
     """the glue module -> its object. noload: every function is in the main bank: no
     loader (its own ___hz_xload returns at once)"""
     L = ["; made by hcc (tools/hzlarge.py): the large code model's glue", "\t.p816",
          "\t.smart -", "\t.a16", "\t.i16"]
-    ex = ["___hz_xbanks", "___hz_xstamp", "___hz_xname", "___hz_xdirs", "___hz_xbank"]
+    ex = ["___hz_xbanks", "___hz_xstamp", "___hz_xname", "___hz_xbank"]
     if noload:
         ex.append("___hz_xload")
         L += ['\t.segment "CODE"', "___hz_xload:", "\trtl"]
@@ -195,9 +197,7 @@ def glue(tmp, thunks, aliases, nbanks, stamp, prxname, dirs, code, noload=False)
             L += [f"__T{n}:", f"\tjml\t{n}"]
     L += ['\t.segment "RODATA"', f"___hz_xbanks:\t.word\t{nbanks}",
           f"___hz_xstamp:\t.dword\t${stamp:08X}",
-          "___hz_xname:\t.byte\t" + ", ".join(f"${ord(c):02X}" for c in prxname) + ", 0",
-          "___hz_xdirs:\t.byte\t" + ", ".join(f"${ord(c):02X}" for c in dirs) +
-          (", 0" if dirs else "0"),
+          "___hz_xname:\t.byte\t" + ", ".join(f"${ord(c):02X}" for c in progname) + ", 0",
           '\t.segment "BSS"', f"___hz_xbank:\t.res\t{nbanks + 1}", ""]
     s = os.path.join(tmp, "hzglue.s")
     with open(s, "w") as f:
@@ -217,17 +217,15 @@ def _undefined(msg):
 
 
 def link(objs, out, sstack, debug=False, mapfile=None, libs=(), keep=None, heap=HEAP,
-         bank_room=BANK, main_room=None, prx_dirs=None, spread=None):
-    """-> the sizes dict (as hzc816.link's, and 'banks', 'prx', 'moved', 'thunks')"""
+         bank_room=BANK, main_room=None, spread=None):
+    """-> the sizes dict (as hzc816.link's, and 'banks', 'xblock', 'o65', 'moved', 'thunks')"""
     d = hzc816.libdir("large")
     name = os.path.basename(out)
     base = os.path.splitext(out)[0]
+    # (before: the other banks were in a second file, NAME.PRX; one left from such a build
+    # is removed)
     prx = base + ".PRX" if out.endswith(".PRG") else base + ".prx"
-    prxname = os.path.basename(prx)
-    if len(prxname) > 64:
-        raise HccError(f"{name}: the program's name is too long for its .PRX")
-    dirs = PRX_DIRS if prx_dirs is None else prx_dirs
-    dirs = ":".join(x if x.endswith("/") else x + "/" for x in dirs.split(":") if x)
+    progname = name[:64]
     tmp = keep or __import__("tempfile").mkdtemp(prefix="hcc")
     os.makedirs(tmp, exist_ok=True)
     room = hzc816.CODE_ROOM - sstack
@@ -244,7 +242,7 @@ def link(objs, out, sstack, debug=False, mapfile=None, libs=(), keep=None, heap=
         tmp_map = os.path.join(tmp, "trial.map")
         need = set()
         for attempt in range(3):
-            g = glue(tmp, need, (), 0, 0, prxname, dirs, "large")
+            g = glue(tmp, need, (), 0, 0, progname, "large")
             rc, msg = run_ld65(config(pool, 0, tmp, 0xFF00, trial=True), tmp, "trial",
                                head + [g] + tail, defs, tmo, tmp_map)
             if rc == 0:
@@ -344,7 +342,7 @@ def link(objs, out, sstack, debug=False, mapfile=None, libs=(), keep=None, heap=
                 if os.path.exists(p):
                     hs.update(open(p, "rb").read())
             stamp = int.from_bytes(hs.digest()[:4], "little") | 1
-            g = glue(tmp, thunks, aliases, nb, stamp, prxname, dirs, "large", noload=nb == 0)
+            g = glue(tmp, thunks, aliases, nb, stamp, progname, "large", noload=nb == 0)
             # 5. links A and B
             res = {}
             for tag in ("A", "B", "C"):
@@ -381,27 +379,28 @@ def link(objs, out, sstack, debug=False, mapfile=None, libs=(), keep=None, heap=
             inmain = sum(sz for n, sz in moved if where[n] == "MAIN")
             fsize = os.path.getsize(out)
             if fsize > 0xFFFF and inmain:
-                # the .PRG's relocations (one for each JSL in the main bank) made it too
+                # the o65's relocations (one for each JSL in the main bank) made it too
                 # big for Horizon's loader: less code in the main bank, and again
                 cap = max(0, inmain - 2 * (fsize - 0xFFFF) - 1024)
                 continue
-            if nb:
-                write_prx(prx, res["A"][1], relocs, stamp)
-            elif os.path.exists(prx):
+            xblock = 0
+            if fsize <= 0xFFFF and nb:
+                xblock = append_banks(out, res["A"][1], relocs, stamp)
+            if os.path.exists(prx):
                 os.remove(prx)
             break
         mp = res["A"][3]
         s = hzc816.map_sizes(mp)
         s["file"] = os.path.getsize(out)
-        if s["file"] > 0xFFFF:
-            raise HccError(f"{name}: the program file is {s['file']:,} bytes; Horizon's "
-                           f"loader takes files below 64 KB")
+        s["o65"] = fsize
+        if fsize > 0xFFFF:
+            raise HccError(f"{name}: its main bank's o65 is {fsize:,} bytes; Horizon's "
+                           f"loader takes it only below 64 KB")
         s["sstack"] = sstack
         s["heap"] = max(0, hzc816.SSTOP - sstack - (0x100 + s["code"]))
         s["relocs"] = hzc816.o65_relocs(out)
         s["banks"] = [len(x) for x in res["A"][1]]
-        s["prx"] = os.path.getsize(prx) if nb else 0
-        s["prxname"] = prxname if nb else None
+        s["xblock"] = xblock
         s["moved"] = sum(sz for n, sz in moved if where[n] != "MAIN")
         s["text"] -= s["moved"]                 # (the main bank's own)
         s["code"] = s["text"] + s["data"] + s["bss"]
@@ -493,7 +492,9 @@ def relocations(res, nb, name):
     return rel
 
 
-def write_prx(path, imgs, rel, stamp):
+def append_banks(path, imgs, rel, stamp):
+    """the other banks' block and the trailer after the o65 at path -> the bytes added"""
+    at = os.path.getsize(path)
     out = bytearray(b"HZPX" + bytes([1, len(imgs), 0, 0]) + struct.pack("<I", stamp))
     for im in imgs:
         out += struct.pack("<I", len(im))
@@ -508,8 +509,10 @@ def write_prx(path, imgs, rel, stamp):
         out += struct.pack("<BBH", w, t, len(offs))
         for o in offs:
             out += struct.pack("<H", o)
-    with open(path, "wb") as f:
+    out += struct.pack("<I", at) + b"HZPX"
+    with open(path, "ab") as f:
         f.write(out)
+    return len(out)
 
 
 def link_error(msg, name, sstack, mp):

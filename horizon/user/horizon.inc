@@ -51,6 +51,8 @@ SYS_KILL      = $32   ; A = task id
 SYS_TINFO     = $33   ; A = slot 0-15, X, Y = 16-byte record (byte 13: TI_* flags, byte 14: windows)
 SYS_SINGLE    = $34   ; one instance of this program only: C set, A = ERUNNING, X = its id when one runs
                       ;   already (its windows were raised: exit); else later spawns of it raise this one
+SYS_TPATH     = $35   ; (0.28) X, Y = buffer, A = its size -> A = length: the absolute path of the
+                      ;   caller's program file (EINVAL if the buffer is too small; 128 bytes always do)
 TI_WINDOWS = 1        ; task_info byte 13: it has windows
 TI_MODAL   = 2        ;   a WF_MODAL window (a dialog, an alert) is open
 TI_IDLE    = 4        ;   waiting in win_event with nothing queued

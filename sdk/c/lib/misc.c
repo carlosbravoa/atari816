@@ -35,3 +35,14 @@ void hz_far_free(void __far *p)
 {
     hz_bank_free(HZ_BANK(p));
 }
+
+int hz_prog_dir(char *buf, unsigned size)
+{
+    int n = hz_task_path(buf, size), k;
+    if (n < 0)
+        return -1;
+    for (k = n; k > 0 && buf[k - 1] != '/'; k--)
+        ;
+    buf[k] = 0;
+    return k;
+}

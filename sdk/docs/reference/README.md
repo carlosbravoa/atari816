@@ -62,6 +62,7 @@ the kernel's syscall table, and assembles every example.
 | $32 | kill | SYS_KILL | [system](system.md) |
 | $33 | task_info | SYS_TINFO | [system](system.md) |
 | $34 | task_single | SYS_SINGLE | [system](system.md) |
+| $35 | task_path | SYS_TPATH | [system](system.md) |
 | $40 | port_create | SYS_PCREATE | [system](system.md) |
 | $41 | send | SYS_SEND | [system](system.md) |
 | $42 | recv | SYS_RECV | [system](system.md) |

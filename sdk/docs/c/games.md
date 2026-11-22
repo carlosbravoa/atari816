@@ -244,6 +244,8 @@ Every function is described in `hgame.h`. In short:
 | Screen | |
 | --- | --- |
 | `hg_screen(mode, title)` | full screen: `HG_320X180`, `HG_640X360`, `HG_640X360X4` (16 colours), `| HG_DOUBLE` (two pages), `| HG_POINTER` (the mouse pointer, 640 modes). The framebuffer's banks are found and taken (consecutive banks, as `examples/deepdive` does) |
+| `hg_screen_fb(mode, title, stride, rows)` | full screen on a framebuffer of another shape: taller than the screen (a 320 x 200 game at 320 x 180, 640 x 400 at 640 x 360), or with a stride of 512 / 1024 so that no row crosses a bank (drawing by the CPU) |
+| `hg_scroll(x, y)`, `hg_split(line, x2, y2)` | the view on such a framebuffer: from (x, y); from screen line `line` on from (x2, y2): a fixed panel above a part that scrolls (full screen, one page, not with `hg_map`) |
 | `hg_window(w, h, title)`, `hg_window_menu(menus)` | a game in a window on the desktop (centred); its menus (`hg_menu()` reports picks) |
 | `hg_close()` | back to the desktop, everything freed (also at exit) |
 | `hg_w`, `hg_h`, `hg_win`, `hg_fb_bank`, `hg_fb_stride`, `hg_fb_rows` | the screen's size, the window, the framebuffer |
@@ -293,12 +295,14 @@ Every function is described in `hgame.h`. In short:
 | --- | --- |
 | `hg_key(k)`, `hg_key_pressed(k)`, `hg_key_released(k)`, `hg_mods` | the key table (HID usages: `HG_KEY_ESC`, `HG_KEY_A` + n, arrows, ...) |
 | `hg_getchar()` | typed characters (ASCII, `KEY_*` for arrows) |
+| `hg_key_next()` | the keys pressed, in order (SDL_KEYDOWN's events): the HID usage in bits 0-7, the character in bits 8-15 |
 | `hg_joy(port)`, `hg_p1()`, `hg_p1_pressed()` | the joysticks; player 1: arrows + W A S D + joystick 1, fire Space / Enter / trigger |
 | `hg_mouse_x`, `hg_mouse_y`, `hg_mouse_b`, `hg_mouse_clicked()` | the mouse in screen pixels (halved in 320 x 180) |
 
 | Sound | |
 | --- | --- |
 | `hg_tone(v, pitch, vol, ticks)`, `hg_sfx(v, pitch, dpitch, vol, dvol, ticks, dist)`, `hg_pitch(hz)` | POKEY, voices 0-3, envelopes stepped every 20 ms (by the clock) |
+| `hg_note(v, hz, vol)` | POKEY's two 16-bit voices (channels joined in pairs at 1.79 MHz): a square tone at any pitch from 14 Hz, exact (music; a PC speaker's tones, hz = 1193182 / the PIT divisor), until changed |
 | `hg_has_lau()`, `hg_sound_make(wave, hz, ms, fade)`, `hg_sound_from(data, len, rate, bits)`, `hg_sound_load(path)` | samples: made here, from an array, from a `.WAV` (PCM 8/16-bit mono) or raw file |
 | `hg_play(s, vol)`, `hg_play_ex(s, vol, pan, semitones)`, `hg_stop(voice)`, `hg_sound_off()` | on Lau's free voices |
 | `hg_music_play(path, loop)`, `hg_music_stop`, `hg_music_pause`, `hg_music_volume`, `hg_music_state` | MOD, WAV or (REV $0C) MIDI files by Horizon's music engine; `hg_music_play` returns once it plays |
@@ -484,7 +488,7 @@ differences:
 | the main loop: `SDL_PollEvent` ... `SDL_RenderPresent` | `while (hg_frame()) { ... }`: events are read by `hg_frame`; the frame is shown at its end |
 | `SDL_QUIT` | `hg_frame()` returns 0 |
 | `SDL_GetKeyboardState`, `SDL_SCANCODE_*` | `hg_key(HG_KEY_*)` (the same HID usages as SDL's scancodes: `SDL_SCANCODE_A` = 4 = `HG_KEY_A`) |
-| `SDL_KEYDOWN` events | `hg_key_pressed(k)`, `hg_getchar()` |
+| `SDL_KEYDOWN` events | `hg_key_next()` (in order: usage and character), `hg_key_pressed(k)`, `hg_getchar()` |
 | `SDL_GetMouseState` | `hg_mouse_x`, `hg_mouse_y`, `hg_mouse_b`, `hg_mouse_clicked()` |
 | `SDL_JoystickGetAxis` / buttons | `hg_joy(1)`, `hg_p1()` (digital) |
 | `SDL_RenderClear` | `hg_clear(c)` (with `HG_DOUBLE`) |
@@ -498,6 +502,8 @@ differences:
 | `Mix_LoadMUS`, `Mix_PlayMusic` | `hg_music_play("X.MOD", loop)` (MOD, WAV, MIDI) |
 | `float` positions and speeds | 8.8 fixed point in an `int` (`HG_FIX8`) or 16.16 in a `long` |
 | a 640 x 480 game | 640 x 360 (`HG_640X360`), or a window up to 636 x 330; 320 x 180 for chunky games |
+| a 320 x 200 (or 640 x 400) game | `hg_screen_fb` with 200 (400) rows and `hg_split`: the score line fixed at the top, the rest of the picture scrolled to follow the player (20 / 40 rows out of sight at a time); Digger does so (`ports/digger`) |
+| a PC speaker (`outb` to the PIT) | `hg_note(v, 1193182 / divisor, vol)`: POKEY's square wave at the very same pitch |
 
 Typical work, in this order: make it build (16-bit `int`: sizes, products and times in
 `long`; porting.md), replace the platform layer with the table above, turn the art into
@@ -508,7 +514,7 @@ where the game allows.
 ## Limits and known faults
 
 - A game whose code does not fit in one bank builds with `hcc --code large` (cc816: the
-  code fills several banks, GAME.PRG and GAME.PRX; hgame is built for it too and its tests
+  code fills several banks, still one file GAME.PRG; hgame is built for it too and its tests
   run in it): reference.md, "The two code models". The images, sounds and big tables
   belong in files and far memory anyway, since constants and data stay in the main bank.
 - cc816 or vbcc's large model; at most 32 bobs, 16 hardware sprites, 128 records a send (more are sent
@@ -537,7 +543,8 @@ make -C sdk/c/game test
 
 runs `sdk/c/game/tests/run.py` once for each compiler (cc816, vbcc; `CCS=cc816` for one),
 then the scripted tests of Glimmer, Catch, the tutorial and Gem Run in C with each. run.py
-builds eight test programs (`tests/gt_*.c`: drawing, the screen modes and the pause,
+builds nine test programs (`tests/gt_*.c`: drawing, the screen modes and the pause,
+a framebuffer taller than the screen with a split view, the key queue and the 16-bit voices,
 a window with bobs and its menu, hardware sprites, scrolling maps, input, sound and music,
 the helpers and `.HGI` files with bad arguments) and runs each in the emulator with a script;
 it checks the program's own PASS / FAIL lines (each reads the framebuffer back), the

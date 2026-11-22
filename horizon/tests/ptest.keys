@@ -1,0 +1,18 @@
+# (0.28) PTEST on the text shell (NODESK; tests/mkptest.py put the files on the card): task_path
+# from the search path, a relative path, a lower-case one, "..", an absolute path from another
+# folder; program files of 64 KB or more with data after the o65; the two refused. The
+# console from the first "ptest" on must match tests/ptest.txt.
+1500 {esc}
++1500 mem\n
++1500 ptest\n
++1500 cd /BIG\n
++1000 PTESTBIG.PRG\n
++2000 ptestbig.prg\n
++2000 cd /SYSTEM\n
++1000 ../BIG/EDGE.PRG\n
++2000 /BIG/UNDER.PRG\n
++2000 /BIG/SMALLT.PRG\n
++2000 TESTS/PTEST.PRG\n
++2000 /BIG/JUNK.PRG\n
++2000 /BIG/FAR.PRG\n
++2000 mem\n

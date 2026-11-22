@@ -1,7 +1,7 @@
 /* memhog.c - the large code model's test of a failed start: takes banks until only three
  * are free (Horizon's loader needs a window, a code bank and a scratch bank, which it gives
  * back), starts the program given as the argument, and says how it ended. A large program
- * that needs two or more banks for its .PRX then finds one free bank: its loader
+ * that needs two or more other code banks then finds one free bank: its loader
  * (lib/cc816/xload.c) says "not enough memory" and the program ends with exit code 1. */
 #include <horizon.h>
 #include <stdio.h>

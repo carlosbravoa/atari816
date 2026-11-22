@@ -69,6 +69,10 @@ int main(void)
     check(!strcmp(buf, "/SYSTEM"), "getcwd after chdir");
     CALLED(hz_chdir("/NOSUCHDIR") == -1 && hz_errno >= HZ_EIO, "chdir to a missing folder");
     hz_chdir("/");
+    /* (Horizon 0.28) the program's own file: tests/run.py puts it at /APPS/SYS.PRG */
+    CALLED(hz_task_path(buf, sizeof(buf)) == 13 && !strcmp(buf, "/APPS/SYS.PRG"), "task_path");
+    CALLED(hz_task_path(buf, 13) == -1 && hz_errno == HZ_EINVAL, "task_path: buffer too small");
+    check(hz_prog_dir(buf, sizeof(buf)) == 6 && !strcmp(buf, "/APPS/"), "prog_dir");
     l = hz_time_get();
     CALLED(hz_errno == 0 && hz_y <= CLK_SET, "time_get");
     u = hz_mem_info();

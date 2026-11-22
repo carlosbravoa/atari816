@@ -139,16 +139,16 @@ software stack takes 8,192 of them (hcc --stack N), so 57,072 are left. Build it
 ```
 
 When it is the code that does not fit, build with `--code large`: hcc puts the code in
-several banks and writes two files, `GAME.PRG` and `GAME.PRX` (the other code banks).
-Copy both to the card, into the same folder:
+several banks. It still writes one file, `GAME.PRG`: the other code banks follow the main
+bank in it. Copy it to the card, into any folder (it needs Horizon 0.28 or later):
 
 ```
 $ sdk/c/bin/hcc --code large --map -o GAME.PRG big*.c
-GAME.PRG: 45,049 bytes on the card, 409 relocations
-  code bank: code+constants 43,982 + data 78 + bss 1,678 = 45,738 of 57,072; heap 11,334; software stack 8,192
+GAME.PRG: 210,710 bytes on the card, 415 relocations
+  code bank: code+constants 43,957 + data 78 + bss 1,754 = 45,789 of 57,072; heap 11,283; software stack 8,192
   window:    stack about 32,000 (from $7F7F down to $0100); direct page 120 bytes
-  code model large: 23,882 bytes of movable code in the main bank, 155,650 in 3 other bank(s) (65,511, 65,495, 24,644); 1396 thunks
-  GAME.PRX: 164,790 bytes, 4527 bank bytes patched at the start
+  code model large: 23,038 bytes of movable code in the main bank, 156,494 in 3 other bank(s) (65,475, 65,417, 25,602); 1403 thunks
+  one file: the o65 45,036 bytes, then the other banks 165,674 bytes; 4543 bank bytes patched at the start
 ```
 
 Data, constants and the stacks still share the first bank; when they are what does not
@@ -164,8 +164,8 @@ the function or the block in it), and you have the place.
 
 ## 7. On the real machine
 
-A `.PRG` is an ordinary Horizon program (one built with `--code large` may have a `.PRX`
-beside it: copy both, into the same folder): copy it to the SD card (in `/BIN` it is a
+A `.PRG` is an ordinary Horizon program (one built with `--code large` is one file too):
+copy it to the SD card (in `/BIN` it is a
 command of the shell) or send it over the PC link with `sdk/tools/deploy816.py`, as for
 assembly programs (sdk/docs/getting-started.md, section 6). Programs built with this SDK
 were run in the emulator only so far (it models the board's timing within about 5 %).

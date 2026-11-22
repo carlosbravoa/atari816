@@ -172,6 +172,14 @@ def check(mod, writes, mvol=64, sep=32, gap=3000, max_lag=3000, song=None):
             res.after_end += 1
             continue
         k = bisect.bisect_right(times, rel + EARLY) - 1
+        if k == len(times) - 1 and rel - times[k] > max_lag and \
+                all(a == 0xDB21 for (t, a, val) in b):
+            # (0.28) the engine's stop at the song's end (key-offs only), a tick after the
+            # last one: as early as the other ticks are, it may come just before
+            # end_rel - EARLY (the first tick's burst, t0, moves by a few hundred us with the
+            # kernel's timing)
+            res.after_end += 1
+            continue
         if k < 0:
             res.pre += 1
             for (t, a, val) in b:

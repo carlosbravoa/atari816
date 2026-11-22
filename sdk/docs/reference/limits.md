@@ -4,7 +4,7 @@ From horizon/README.md ("Current limits"), ABI.md and the sources.
 
 | | |
 | --- | --- |
-| Program file | under 64 KB; code + data + bss at most 65,280 bytes; zero page 256 bytes (ulib takes 38, ui.lib 38) |
+| Program file | the o65 under 64 KB (0.28: the program's own data may follow it in the file); code + data + bss at most 65,280 bytes; zero page 256 bytes (ulib takes 38, ui.lib 38) |
 | Memory | 64 KB banks only, no heap; 92 banks on 8 MB, 4 for the text screen, 88 for programs; the window system takes 6 contiguous banks, each window its bitmap (a power-of-two stride, contiguous banks) |
 | Tasks | 16 task slots, ids 1-62 |
 | Files | 4 open files in the whole system; paths at most 127 characters (absolute, after `.`/`..` are resolved) |

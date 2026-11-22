@@ -1,0 +1,12 @@
+ptest path: /BIG/PTESTBIG.PRG (17)
+ptest small: error 01
+ptest cwd: /
+ptest file: 64 KB or more
+ptest tail: PTESTEND
+ptest bss: clear
+ptest path: /BIG/PTESTBIG.PRG (17)
+ptest small: error 01
+ptest cwd: /BIG
+ptest file: 64 KB or more
+ptest tail: PTESTEND
+ptest bss: clear

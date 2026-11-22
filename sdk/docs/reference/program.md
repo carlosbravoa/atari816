@@ -38,14 +38,16 @@ everything is linked into the one file.
 
 | | |
 | --- | --- |
-| File size | under 64 KB |
+| File size | the o65 under 64 KB. (Horizon 0.28) The file may be larger and carry the program's own data after the o65: the loader reads only the o65 and never loads the rest. Before 0.28 the whole file had to be under 64 KB |
 | CODE + RODATA + DATA + BSS | at most 65,280 bytes ($0100-$FFFF of the code bank) |
 | ZEROPAGE | at most 256 bytes, shared with ulib (38 bytes) and ui.lib (38 bytes) |
 | Imports | none: ld65 must resolve every symbol |
 | Format | o65 "small" (16-bit sizes), byte-wise relocation; made by `prog.cfg` |
 
 Bigger data (pictures, levels, documents) goes in banks from `SYS_BALLOC` (64 KB each),
-filled from files with `SYS_READ`.
+filled from files with `SYS_READ`. To find data files next to the program, ask for its
+own path with `SYS_TPATH` (Horizon 0.28; [system](system.md)) and cut it after its last
+`/`.
 
 ## Memory model
 

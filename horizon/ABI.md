@@ -1,4 +1,4 @@
-# Horizon ABI (version 0.26)
+# Horizon ABI (version 0.28)
 
 This file describes the interface between Horizon and user programs. `user/horizon.inc`
 holds the same definitions for ca65.
@@ -62,6 +62,7 @@ PBR:PC-1.
 | $32 | kill | A = task id | - | Any live task, including the caller. The target exits with code $FF80 at its next return to user mode. A sleep, wait, recv or input_read in progress is cut short. A pending file operation finishes first. ECHILD (5) if no such task |
 | $33 | task_info | A = slot 0-15, X, Y = 16-byte record | - | Record: u8 id (0 = free slot), u8 state (1 ready, 2 running, 3 blocked, 4 zombie), u8 priority, u8 banks owned, u8 parent id (0 = none), 8 characters name (space padded), u8 flags (0.13: TI_WINDOWS 1 it has windows, TI_MODAL 2 a WF_MODAL window is open, TI_IDLE 4 it waits in win_event with nothing queued, TI_SINGLE 8 single instance), u8 its number of windows, 1 spare byte (0) |
 | $34 | task_single | - | - | (0.13) One instance of the caller's program (the same absolute path) only. If another live task runs it already, that task's windows are raised (the top one gets the focus) and the call returns C set, A = ERUNNING, X = its id: the caller should exit. Otherwise the caller is marked, and a later spawn of the same path raises its windows instead and returns ERUNNING. The Desktop, About and Settings call it first thing |
+| $35 | task_path | X, Y = buffer, A = its size | A = length | (0.28) The absolute path of the file the caller's program was loaded from, zero-terminated, as the loader opened it: "/GAMES/MINE/GAME.PRG" (the path given to spawn, made absolute with the parent's current directory; upper or lower case as it was given). At most 127 characters: a 128-byte buffer always fits. EINVAL if the buffer is too small (as getcwd), EFAULT a bad buffer. A program finds its own data files next to it this way. Before 0.28 the call does not exist (ENOSYS) |
 | $40 | port_create | - | A = port (0-15) | The caller owns the port. EAGAIN if all 16 are in use |
 | $41 | send | A = port, X, Y = 16-byte message | - | Any task may send. EAGAIN if the port's queue (8 messages) is full, EINVAL if the port is not open |
 | $42 | recv | A = port, X, Y = 16-byte buffer | - | Owner only (else EINVAL). Blocks while the queue is empty. Interruptible by kill. (0.26) A = port \| RV_POLL ($8000): EAGAIN at once when the queue is empty (a window program reads its port at each event without waiting) |
@@ -872,9 +873,11 @@ The config links text (CODE, RODATA), data and bss from $0100 in bank 0, and zp 
 
 The loader:
 
-1. STATs the file. It must be shorter than 64 KB.
+1. STATs the file. A file shorter than 64 KB must be at least 26 bytes long.
 2. Allocates the window bank and the code bank, owned by the new task, and a scratch bank.
-3. LOADs the file into the scratch bank.
+3. LOADs the file into the scratch bank. (0.28) A file of 64 KB or more is read only in
+   part: its first 65,535 bytes. The o65 must lie in them. Before 0.28 such a file was
+   refused with EINVAL.
 4. Checks the header:
    - Magic `01 00 'o' '6' '5' 00`.
    - No 32-bit sizes and no page-wise relocation.
@@ -888,6 +891,16 @@ The loader:
    A reference to zp gets the direct page offset and bank 0. The supported types are WORD,
    LOW, HIGH, SEG (bank byte) and SEGADR (24-bit).
 7. Frees the scratch bank.
+
+Bytes after the o65 (after the end of its relocation tables and exports) are allowed, in a
+file of any size. The loader never copies them into the program's memory. A program can keep
+its own data there and read it from its own file: task_path ($35) gives the file's path.
+The C SDK's large code model keeps its extra code banks there (sdk/docs/c/reference.md,
+"The two code models").
+
+(0.28) The loader keeps the program's absolute path for task_path in the window bank at
+$8000-$807F. That half of the window bank is not part of the window, so the program cannot
+see it or change it through bank 0.
 
 ## Task start conditions
 

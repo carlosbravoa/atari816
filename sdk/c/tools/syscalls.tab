@@ -55,6 +55,7 @@ wait          | int      | unsigned task:A | | Wait for a child to end -> its ex
 kill          | ok       | unsigned task:A | | End a task (it exits with $FF80).
 task_info     | ok       | unsigned slot:A, hz_taskinfo *rec:XY | | The task in slot 0-15 into rec (id 0 = a free slot).
 task_single   | ok       | | x | One instance of this program only: when one runs already, -1 with hz_errno ERUNNING and hz_x = its id (the program should exit).
+task_path     | int      | char *buf:XY, unsigned size:A | | The absolute path of the file the program was loaded from (zero-terminated) into buf -> its length. A 128-byte buffer always fits; EINVAL if buf is too small. Horizon 0.28 and later (before: ENOSYS). See hz_prog_dir.
 port_create   | int      | | | A message port owned by the caller -> its number (0-15).
 send          | ok       | unsigned port:A, const hz_msg *msg:XY | | Send a 16-byte message (EAGAIN: the queue is full).
 recv          | ok       | unsigned port:A, hz_msg *msg:XY | | Receive a 16-byte message; blocks unless port | RV_POLL (then EAGAIN when empty).

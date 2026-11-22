@@ -398,6 +398,20 @@ the blitter: the software drawing paths; both must pass):
    click, the volume raised with +; `tests/volbars.py` measures both bars in each of the
    seven pictures: filled from the left to value x width / 64, white for the rest (before
    0.27 every one of them failed: a lowered bar kept its length).
+33. **0.28 large program files and task_path** (`make test-28`): PTEST (`user/ptest.s`, not
+   on the card: `tests/mkptest.py` puts it on the test copy in `/BIG` and `/SYSTEM/TESTS`,
+   with copies that carry data after the o65: 4,000, 65,535, 65,536 and 100,000 bytes, and
+   two files the loader must refuse: 70,000 bytes that are no o65, and an o65 that does not
+   end in the first 65,535 bytes). In the text shell (`tests/ptest.keys`, compared with
+   `tests/ptest.txt`): `ptest` (the search path), `cd /BIG` and `PTESTBIG.PRG`,
+   `ptestbig.prg` (the path keeps the case it was typed in), `cd /SYSTEM` and
+   `../BIG/EDGE.PRG`, the absolute `/BIG/UNDER.PRG` and `/BIG/SMALLT.PRG`, the relative
+   `TESTS/PTEST.PRG`; each prints its task_path, EINVAL for a buffer with no room for the 0,
+   its current folder, its file's size class, the 8 bytes at the end of its own file (read
+   back through that path) and that its bss is clear; JUNK and FAR are refused ("not a
+   Horizon program"), and `mem` shows the same free banks before and after. On the Desktop
+   (`tests/ptestd.keys`, `tests/ptestd.txt`): `/BIG/PTESTBIG.PRG` from the Programs menu
+   (its folder `/`), then from Files (in `/BIG`: Enter on it).
 
 The Desktop sessions (`DESK=1` in `tests/shots.sh`) get `tests/desk.programs` as their
 Programs menu (the order of 0.12), so programs added to `sdfiles/PROGRAMS` do not change
@@ -1084,6 +1098,33 @@ bus time (see emu/README.md, "Memory timing"). Expect the same factor on the CPU
   source stride), SYS_WGEOM, SYS_TNAME, WE_DROP's modifiers, the date routines (ui_clk*,
   `user/uidate.s`), shortcuts (ui_lnkread, ui_mklink), program and file icons (ui_prog,
   ui_ficon). See ABI.md and ui.inc.
+
+## Version 0.28 (large program files, task_path)
+
+- **Program files of 64 KB or more.** The loader used to refuse them. Now it reads the first
+  65,535 bytes of such a file (OPEN, two READs, CLOSE) into its scratch bank, where the o65
+  must lie, and loads it as before. Whatever follows the o65 is never copied into the
+  program's memory, in a file of any size. A file below 64 KB is loaded exactly as before
+  (one LOAD). Every way of starting a program goes through this loader: the shell, the
+  Desktop's Programs menu, Files, `spawn` from any program, and INIT at boot. So a program
+  can carry its own data after its code, in one file. The C SDK's large code model
+  (`hcc --code large`) uses this: its other code banks now follow the main bank in the
+  same file, instead of a second file NAME.PRX.
+- **task_path** ($35, SYS_TPATH): the absolute path of the file the caller's program was
+  loaded from ("/GAMES/MINE/GAME.PRG"), as spawn made it absolute; at most 127 characters,
+  EINVAL for a buffer too small, as getcwd. A program finds its data files next to it this
+  way, wherever it was started from. The loader keeps the path in the upper half of the
+  task's window bank ($8000-$807F), which the window does not show, so the kernel needs no
+  more memory for it. Before 0.28 the call returns ENOSYS. C: `hz_task_path` and
+  `hz_prog_dir` (its folder).
+- **Kernel** (+307 bytes in bank $01; 570 left). A small fix on the way: the loader's walk
+  over the o65 header options now stops at the end of the bank instead of wrapping round.
+- **Compatibility**: old programs load and run as before; nothing in their start conditions
+  changed. A program that uses task_path, or a large C program with its banks after the o65,
+  needs 0.28. On 0.27 and before such a file of 64 KB or more is refused by the loader ("not
+  a Horizon program"); a smaller one starts and stops with "needs Horizon 0.28 or later".
+- **Tests**: item 33 of the list above (`make test-28`, run by `make test`). The pictures
+  that show About ("Horizon 0.28") were refreshed.
 
 ## Version 0.27 (the OPL2)
 

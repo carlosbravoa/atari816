@@ -497,6 +497,7 @@ test: all $(EMU)
 	@$(MAKE) --no-print-directory test-music
 	@$(MAKE) --no-print-directory test-26
 	@$(MAKE) --no-print-directory test-27
+	@$(MAKE) --no-print-directory test-28
 	@rm -rf build/run-sd; cp -r $(SD) build/run-sd; rm -rf build/run-sd/Music; touch build/run-sd/SYSTEM/NODESK; cp tests/basic.bas build/run-sd/BT.BAS
 	@$(EMU) $(EMUFLAGS) $(CARDDATE) --headless --sd build/run-sd --max-seconds $(BASSECS) \
 	    --keys "$$(python3 tests/keyscript.py tests/basic-t.keys)" \
@@ -989,6 +990,39 @@ pictures-27:
 	python3 -c "from PIL import Image; import glob; [Image.open(f).save('tests/pictures/' + f.split('/')[-1][:-4] + '.png') for f in sorted(glob.glob('$(B)/opl27[0-9]*.ppm'))]"
 
 .PHONY: test-27 pictures-27
+
+# (0.28) program files of 64 KB or more and task_path ($35). PTEST (user/ptest.s, build/ptest.prg)
+# is not on the card: tests/mkptest.py puts it on the test copy, with larger copies that carry
+# data after the o65 (4,000, 65,535, 65,536 and 100,000 bytes) and two files the loader must
+# refuse (70,000 bytes that are no o65; an o65 that does not end in the first 65,535 bytes).
+# The text shell (tests/ptest.keys): the path from the search path, a relative path, a
+# lower-case one, "..", an absolute one from another folder; the data at the end of the file
+# read back, the bss clear, both refusals, no bank lost (mem before and after); compared
+# with tests/ptest.txt. The Desktop (tests/ptestd.keys): /BIG/PTESTBIG.PRG from the Programs
+# menu, then from Files (Enter on it in /BIG); tests/ptestd.txt.
+$(B)/ptest.prg: user/ptest.s user/horizon.inc user/version.inc user/prog.cfg $(B)/ulib.o | $(B)
+	$(CA65) -I user -o $(B)/ptest.o $<
+	$(LD65) -C user/prog.cfg -o $@ $(B)/ptest.o $(B)/ulib.o
+test-28: all $(EMU) $(B)/ptest.prg
+	@rm -rf build/run-sd; cp -r $(SD) build/run-sd; rm -rf build/run-sd/Music; touch build/run-sd/SYSTEM/NODESK
+	@python3 tests/mkptest.py $(B)/ptest.prg build/run-sd
+	@$(EMU) $(EMUFLAGS) $(CARDDATE) --headless --sd build/run-sd --max-seconds 32 \
+	    --keys "$$(python3 tests/keyscript.py tests/ptest.keys)" \
+	    $(SD)/SYSTEM/HORIZON.SYS > $(B)/ptest.out 2> $(B)/ptest.err || true
+	@python3 -c "L = open('$(B)/ptest.out', encoding='latin-1').read().split('\n'); i = [k for k, l in enumerate(L) if '> mem' in l][0]; L = [L[i][L[i].index('> mem'):]] + L[i + 1:]; m = [l for l in L if 'banks free' in l]; open('$(B)/ptest.txt', 'w').write('\n'.join(L) + ('\n' if len(m) == 2 and m[0] == m[1] else '\nmem: not the same after\n'))"
+	@if python3 tests/compare.py tests/ptest.txt $(B)/ptest.txt; then echo "PASS  0.28 task_path from the shell (search path, relative, lower case, .., absolute from another folder); program files of 64 KB and more with data after the o65; two refused; no bank lost"; \
+	else echo "FAIL  0.28 PTEST in the shell ($(B)/ptest.out)"; exit 1; fi
+	@rm -rf build/run-pic; cp -r $(SD) build/run-pic; rm -rf build/run-pic/Music
+	@(echo "Ptest=/BIG/PTESTBIG.PRG"; cat tests/desk.programs) > build/run-pic/SYSTEM/PROGRAMS
+	@python3 tests/mkptest.py $(B)/ptest.prg build/run-pic
+	@$(EMU) $(EMUFLAGS) $(CARDDATE) --headless --sd build/run-pic --max-seconds 14 \
+	    --keys "$$(python3 tests/keyscript.py tests/ptestd.keys)" \
+	    $(SD)/SYSTEM/HORIZON.SYS > $(B)/ptestd.out 2> $(B)/ptestd.err || true
+	@grep -a '^ptest ' $(B)/ptestd.out > $(B)/ptestd.txt || true
+	@if python3 tests/compare.py tests/ptestd.txt $(B)/ptestd.txt; then echo "PASS  0.28 task_path from the Desktop: a 100,000-byte program from the Programs menu and from Files"; \
+	else echo "FAIL  0.28 PTEST on the Desktop ($(B)/ptestd.out)"; exit 1; fi
+
+.PHONY: test-28
 
 pictures-net:
 	cp $(B)/download.md5 tests/pictures/$(call REV7,download)

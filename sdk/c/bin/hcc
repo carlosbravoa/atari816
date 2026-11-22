@@ -44,13 +44,10 @@ Options:
                     cc816: the code model (default: $HZ_CODE, else small). small: the
                     whole program in one 64 KB bank (JSR/RTS). large: code in several
                     banks (JSL/RTL; data, constants and stacks stay in the main bank):
-                    hcc writes NAME.PRG and, when code goes to other banks, NAME.PRX,
-                    which must sit next to it (docs/c/reference.md, "The two code models")
+                    still one file, NAME.PRG: the other code banks follow its o65 (it needs
+                    Horizon 0.28 then; docs/c/reference.md, "The two code models")
   --heap N          --code large: bytes of the main bank kept free for malloc when hcc
                     fills it with code (default 4096)
-  --prx-path DIRS   --code large: where the program looks for its .PRX after the current
-                    folder, folders separated by ':' (default /APPS:/BIN:/SYSTEM:
-                    /SYSTEM/TESTS:/GAMES)
   --bank-room N, --main-room N, --spread N
                     --code large, for tests: at most N bytes of code in each other bank,
                     and in the main bank (--main-room 0: every function that can move
@@ -123,7 +120,7 @@ def main(argv):
          "model": None, "compile_only": False, "asm_too": False, "want_map": False,
          "debug": False, "float": False, "ui": False, "game": False, "stack": None,
          "keep": None, "cc": os.environ.get("HZ_CC") or DEFAULT_CC,
-         "code": os.environ.get("HZ_CODE") or "small", "heap": None, "prx_path": None,
+         "code": os.environ.get("HZ_CODE") or "small", "heap": None,
          "bank_room": _env_int("HZ_BANK_ROOM"), "main_room": _env_int("HZ_MAIN_ROOM"),
          "spread": _env_int("HZ_SPREAD"),
          "ccopts": {"w": False, "wall": False, "werror": False, "wflags": {},
@@ -190,8 +187,6 @@ def main(argv):
                 o[k[2:].replace("-", "_")] = int(v, 0)
             except ValueError:
                 die(f"{k} needs a number of bytes, not {v}")
-        elif a == "--prx-path" or a.startswith("--prx-path="):
-            o["prx_path"] = a.split("=", 1)[1] if "=" in a else val("--prx-path")
         elif a == "--float" or a == "-lm":
             o["float"] = True
         elif a == "--ui":
@@ -287,8 +282,8 @@ def main_cc816(o):
     opt = o["opt"] or "2"
     incs = o["incs"]
     code = o["code"]
-    if code != "large" and any(o[k] is not None for k in ("heap", "prx_path")):
-        die("--heap and --prx-path are for the large code model (hcc --code large)")
+    if code != "large" and o["heap"] is not None:
+        die("--heap is for the large code model (hcc --code large)")
     tmp = None
     try:
         hzc816.ensure_lib(code)
@@ -311,8 +306,7 @@ def main_cc816(o):
                 sizes = hzc816.link(objs, out, sstack=stack, debug=o["debug"], mapfile=mapfile,
                                     extra_libs=libs, keep=o["keep"], ui=ui, code=code,
                                     heap=o["heap"], bank_room=o["bank_room"],
-                                    main_room=o["main_room"], prx_dirs=o["prx_path"],
-                                    spread=o["spread"])
+                                    main_room=o["main_room"], spread=o["spread"])
                 break
             except hzc.HccError as e:
                 undef = hzc.undefined_names(str(e))

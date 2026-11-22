@@ -274,13 +274,12 @@ _OVER = re.compile(r"Segment [‘'](\w+)[’'] overflows memory area [‘'](\w+)
 
 
 def link(objs, out, sstack=SSTACK, debug=False, mapfile=None, extra_libs=(), keep=None,
-         ui=False, code=None, heap=None, bank_room=None, main_room=None, prx_dirs=None,
-         spread=None):
+         ui=False, code=None, heap=None, bank_room=None, main_room=None, spread=None):
     """ld65 -> out (an o65 program). Returns the sizes dict. ui: link Horizon's controls
     library (the hui.h binding: build/ui/cc816/). code: the code model; the large one
-    (tools/hzlarge.py) also writes NAME.PRX when code goes to other banks: heap (the main
-    bank's room kept for malloc), bank_room, main_room (the tests: how much code a bank,
-    and the main bank, may take), prx_dirs (where the program looks for its .PRX)"""
+    (tools/hzlarge.py) also writes the other code banks after the o65, in the same file, when
+    code goes to other banks: heap (the main bank's room kept for malloc), bank_room,
+    main_room (the tests: how much code a bank, and the main bank, may take)"""
     code = code or CODE
     ensure_lib(code)
     for o in objs:
@@ -297,7 +296,6 @@ def link(objs, out, sstack=SSTACK, debug=False, mapfile=None, extra_libs=(), kee
             return int(v, 0) if v else None
         main_room = env("HZ_MAIN_ROOM") if main_room is None else main_room
         bank_room = bank_room or env("HZ_BANK_ROOM")
-        prx_dirs = os.environ.get("HZ_PRX_PATH") if prx_dirs is None else prx_dirs
         spread = spread or env("HZ_SPREAD")
         libs = list(extra_libs)
         if ui:
@@ -307,7 +305,7 @@ def link(objs, out, sstack=SSTACK, debug=False, mapfile=None, extra_libs=(), kee
             return hzlarge.link(objs, out, sstack, debug=debug, mapfile=mapfile, libs=libs,
                                 keep=keep, heap=hzlarge.HEAP if heap is None else heap,
                                 bank_room=bank_room or hzlarge.BANK, main_room=main_room,
-                                prx_dirs=prx_dirs, spread=spread)
+                                spread=spread)
         except HccError as e:
             raise HccError(model_error(str(e), "large"))
     d = libdir()
@@ -496,5 +494,6 @@ def size_report(out, s):
         f"{s['moved']:,} in {len(s['banks'])} other bank(s)"
         + (f" ({', '.join(f'{b:,}' for b in s['banks'])})" if s["banks"] else "")
         + f"; {s['thunks']} thunks",
-        f"  {s['prxname']}: {s['prx']:,} bytes, {s['xrelocs']} bank bytes patched at the start"
-        if s["banks"] else "  (no .PRX: everything is in the main bank)"]))
+        f"  one file: the o65 {s['o65']:,} bytes, then the other banks {s['xblock']:,} bytes; "
+        f"{s['xrelocs']} bank bytes patched at the start"
+        if s["banks"] else "  one file: everything is in the main bank, no other banks to load"]))

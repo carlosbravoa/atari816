@@ -302,6 +302,11 @@ extern unsigned __hz_arglen, __hz_argoff;
 int hz_spawn_path(const char *path, const char *args, unsigned prio);
 /* stat path -> 0 and *st filled, or -1 */
 int hz_stat_path(const char *path, hz_fileinfo *st);
+/* (Horizon 0.28) the folder of the program's own file, ending in '/' ("/GAMES/MINE/"), into
+ * buf -> its length, or -1 (hz_errno: HZ_EINVAL buf too small, HZ_ENOSYS Horizon before
+ * 0.28). 128 bytes always fit. For data files next to the program: strcat(buf, "LEVELS.DAT").
+ * hz_task_path gives the whole path */
+int hz_prog_dir(char *buf, unsigned size);
 
 /* ---- memory in other banks (64 KB each). The large model's pointers reach them as
  * they are; in the tiny model use __far pointers. Objects must not cross a bank. */

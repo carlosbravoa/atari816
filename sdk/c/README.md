@@ -8,13 +8,13 @@ and inline assembly (`asm("...")` in ca65 syntax, C variables named `%[name]`):
 [docs/c/reference.md](../docs/c/reference.md).
 
 A program whose code does not fit in one 64 KB bank builds with `hcc --code large`: the
-code then fills several banks (NAME.PRG and NAME.PRX, copied together; data, constants
+code then fills several banks (still one file, NAME.PRG, for Horizon 0.28; data, constants
 and the stacks stay in the first bank): [docs/c/reference.md](../docs/c/reference.md),
 "The two code models".
 
 ```
 sdk/c/bin/hcc -o HELLO.PRG hello.c    # a Horizon program from C, in one command (cc816)
-sdk/c/bin/hcc --code large -o GAME.PRG *.c   # code in several banks: GAME.PRG + GAME.PRX
+sdk/c/bin/hcc --code large -o GAME.PRG *.c   # code in several banks, still one file
 make -C sdk/c test                    # the SDK's tests in the emulator
 sdk/c/tools/get-toolchain.sh          # only for vbcc: download and install it (Linux x86-64)
 ```
@@ -28,8 +28,8 @@ sdk/c/tools/get-toolchain.sh          # only for vbcc: download and install it (
 | [include/hui.h](include/hui.h) | Horizon's controls library for C: windows with buttons, fields, lists, scroll bars, dialogs ([huigen.h](include/huigen.h), generated); hcc links it when a program uses it ([docs/c/apps.md](../docs/c/apps.md)) |
 | [include/hgame.h](include/hgame.h), [game/](game) | hgame, the game library: full screen or a window, the blitter, images, sprites, scrolling maps, input, sound, music; `conio.h` and `joystick.h` (cc65's); hcc links it when a program includes one of them ([docs/c/games.md](../docs/c/games.md)); `make -C game test` |
 | [ui/](ui) | the controls library's binding: `hui.tab` (the signature table), `lib816/` (cc816's helpers), `lib/` (vbcc's block), built with the Horizon tree's sources into `build/ui/` |
-| [lib/](lib), [rt/](rt) | the C library on Horizon: `lib/` both compilers' (argv, the console, folders, errno, time, the stack checks), `lib/cc816/` and `rt/cc816/` cc816's library and runtime (stdio with files, printf, malloc, strings, math.h and strtod, the startup, the arithmetic helpers (32- and 64-bit), the soft float `fp_*.s`, `setjmp.s`, `hzprog.cfg`, `model.inc` (the code model, for assembly), `xload.c` (the large code model's loader of NAME.PRX)), built for both code models; `lib/vbcc/`, `rt/` and [fastrt/](fastrt) vbcc's (over its own binary library) |
-| [tools/](tools) | `hzc.py` (vbcc) and `hzc816.py` (cc816) behind hcc, `hzlarge.py` (the large code model's link: placing functions in banks, the .PRX) and `ca65obj.py`, `hui816.py`, `gensys.py` (hzsys.h and the syscall stubs from horizon.inc / ABI.md / `syscalls.tab`), `genhui.py` (huigen.h and the shims from ui.inc / `ui/hui.tab`), `o65strip.py`, `mko65.py`, `get-toolchain.sh` |
+| [lib/](lib), [rt/](rt) | the C library on Horizon: `lib/` both compilers' (argv, the console, folders, errno, time, the stack checks), `lib/cc816/` and `rt/cc816/` cc816's library and runtime (stdio with files, printf, malloc, strings, math.h and strtod, the startup, the arithmetic helpers (32- and 64-bit), the soft float `fp_*.s`, `setjmp.s`, `hzprog.cfg`, `model.inc` (the code model, for assembly), `xload.c` (the large code model's loader of the other code banks, from the program's own file)), built for both code models; `lib/vbcc/`, `rt/` and [fastrt/](fastrt) vbcc's (over its own binary library) |
+| [tools/](tools) | `hzc.py` (vbcc) and `hzc816.py` (cc816) behind hcc, `hzlarge.py` (the large code model's link: placing functions in banks, the banks after the o65) and `ca65obj.py`, `hui816.py`, `gensys.py` (hzsys.h and the syscall stubs from horizon.inc / ABI.md / `syscalls.tab`), `genhui.py` (huigen.h and the shims from ui.inc / `ui/hui.tab`), `o65strip.py`, `mko65.py`, `get-toolchain.sh` |
 | [examples/](examples) | `hello`, `window` (raw window calls), `wc` (a file tool), `guests` (the application tutorial's five steps), `viewer` (a text viewer with the controls library), `tutorial` (the games tutorial), `glimmer`, `catch`: `make`, `make run`, `make test` (`HZ_CC=vbcc` for the other compiler) |
 | [tests/](tests) | `run.py`: libc, syscalls, compiler faults, float (and cc816's `ieee` and `fpu`: its floating point bit for bit, `tests/fpu`), `long long` and `setjmp` (`ll`: times, and no 64-bit code in programs without it), stack, benchmarks (`bench`, `fbench`), runtime tables, the controls library (`ui`, `uibad`, `uitiny`, `uitwin`, `appsdoc`), for cc816 in both code models (`cc816`, `cc816l`) and vbcc's two models; `large` (`tests/large`): a program with 180 KB of code, the large model's messages and failed starts |
 | docs | [getting started](../docs/c/getting-started.md), [reference](../docs/c/reference.md), [applications](../docs/c/apps.md), [games](../docs/c/games.md), [porting](../docs/c/porting.md) |

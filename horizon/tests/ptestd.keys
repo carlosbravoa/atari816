@@ -1,0 +1,11 @@
+# (0.28) PTEST from the Desktop (DESK=1; the Programs menu starts with "Ptest", which is
+# /BIG/PTESTBIG.PRG, 100,000 bytes): F10, Right, Enter start it from the menu; then Files 1
+# (in /): "big", Enter opens /BIG, "ptestbig", Enter starts it from there. The console must
+# show both runs (tests/ptestd.txt).
+4000 {d43}{u43}
+4400 {right}
+4800 \n
+7000 big
++800 \n
++1500 ptestbig
++800 \n

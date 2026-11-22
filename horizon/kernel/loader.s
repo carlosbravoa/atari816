@@ -10,6 +10,13 @@
 ; (offset delta = load address - link address, bank byte = code bank), zp moves to the
 ; direct page (bank 0). Types WORD, LOW, HIGH, SEG (bank byte) and SEGADR (24-bit).
 ; Undefined references are refused.
+;
+; (0.28) A program file of 64 KB or more (the large code model's one file: the o65, then data
+; the program reads itself) is not LOADed whole: only its first 65,535 bytes are read into the
+; scratch bank (ld_big), and the o65 must lie in them. What follows the o65 is never copied
+; into the program's memory, as before for a smaller file. Files below 64 KB load as before.
+; The loader also keeps the program's absolute path in the window bank at $8000 (the upper
+; half, which the task's window does not show) for task_path ($35, sys_tpath).
 
         .a16
         .i16
@@ -59,11 +66,12 @@ exec_entry:
         jsr     io_err
         jmp     ld_fail
 :       jsr     rsp_of
-        lda     t_rsp+14,y              ; size < 64 KB
-        jne     ld_inval
+        lda     t_rsp+14,y              ; (0.28) 64 KB or more: read in part (ld_big)
+        bne     :+
         lda     t_rsp+12,y
         cmp     #26
         jcc     ld_inval
+:
         ; banks: window and code owned by the task, scratch owned by the kernel
         ldx     cur
         lda     t_id,x
@@ -76,16 +84,26 @@ exec_entry:
         a16
         lda     t_id,x
         jsr     bank_alloc
-        bcs     ld_nomem
+        jcs     ld_nomem
         ldx     cur
         sta     t_cbank,x
         lda     #BK_KERNEL
         jsr     bank_alloc
-        bcs     ld_nomem
+        jcs     ld_nomem
         ldx     cur
         sta     t_tbank,x
-        ; LOAD the whole file to scratch:0000
-        lda     #MBOP_LOAD
+        ; LOAD the whole file to scratch:0000 (t_rsp still holds STAT's answer)
+        jsr     rsp_of
+        lda     t_rsp+14,y
+        beq     @load
+        jsr     ld_big                  ; (0.28) 64 KB or more: its first 65,535 bytes
+        cmp     #0
+        beq     :+
+        jmp     ld_fail
+:       lda     #$FFFF
+        sta     ld_size
+        bra     ld_parse
+@load:  lda     #MBOP_LOAD
         jsr     msg_new
         jsr     msg_buf_iobuf
         ldx     cur
@@ -101,6 +119,7 @@ exec_entry:
         lda     t_rsp+12,y
         sta     ld_size
         ; ---- no more blocking from here: direct page state is safe ----
+ld_parse:
         ldx     cur
         stz     kp0
         lda     t_tbank,x
@@ -191,6 +210,7 @@ ld_hdr: ldy     #10
         tya
         clc
         adc     kt0
+        jcs     ld_inval                ; (0.28) never wraps round the bank
         tay
         bra     @opt
 @optend:
@@ -247,13 +267,13 @@ ld_hdr: ldy     #10
         lda     #$00FF
         sta     ld_pos
         jsr     reloc_seg
-        bcs     ld_inval2
+        jcs     ld_inval2
         lda     ld_tlen
         clc
         adc     #$00FF
         sta     ld_pos
         jsr     reloc_seg
-        bcs     ld_inval2
+        jcs     ld_inval2
         ; scratch bank no longer needed
         ldx     cur
         lda     t_tbank,x
@@ -288,6 +308,19 @@ ld_hdr: ldy     #10
         sta     kt1
         lda     t_arglen,x
         inc     a
+        jsr     kmemcpy
+        ; (0.28) the program's absolute path (the I/O buffer still holds it) -> window bank
+        ; $8000, for task_path
+        jsr     iobuf_of
+        sta     kt0
+        lda     #KBANK
+        sta     kt1
+        lda     #$8000
+        sta     kt2
+        ldx     cur
+        lda     t_wbank,x
+        sta     kt3
+        lda     #128
         jsr     kmemcpy
         ; user context: native, P = 0, D = 0, DBR = PBR = code bank, PC = $0100
         ldx     cur
@@ -333,6 +366,70 @@ ld_fail:
         lda     #TS_FREE
         sta     t_state,x
         jmp     k_pick_run
+
+; (0.28) a program file of 64 KB or more: OPEN it, READ its first 65,535 bytes to scratch:0000
+; (two pieces: $8000 bytes, then $7FFF), CLOSE it. The o65 must lie in those bytes; the rest
+; of the file is not read. Blocks. Returns A = 0, or an error code.
+ld_big: lda     #MBOP_OPEN
+        jsr     msg_new
+        jsr     msg_buf_iobuf           ; the path; FLAGS 0 = read
+        jsr     mb_call
+        beq     :+
+        jmp     io_err
+:       jsr     rsp_of
+        lda     t_rsp+12,y
+        cmp     #NFILE
+        bcc     :+
+        lda     #EIO_BASE
+        rts
+:       pha                             ; the handle (3,s in @rd)
+        asl     a
+        tax
+        lda     cur
+        inc     a
+        sta     fh_owner,x              ; (the task's own while it loads)
+        lda     #0
+        ldx     #$8000
+        jsr     @rd
+        bne     @close
+        lda     #$8000
+        ldx     #$7FFF
+        jsr     @rd
+@close: pha                             ; the result; the handle at 3,s
+        lda     3,s
+        jsr     fh_close                ; (its own result ignored: the file was only read)
+        pla
+        plx
+        cmp     #0
+        rts
+; A = offset in the scratch bank, X = length; the handle at 3,s. A = 0 (all of it read), or
+; an error (Z clear)
+@rd:    sta     kt0
+        stx     kt1
+        lda     #MBOP_READ
+        jsr     msg_new
+        lda     kt1
+        sta     t_msg+2,y               ; LEN
+        lda     kt0
+        sta     t_msg+4,y               ; BUF = scratch:offset
+        ldx     cur
+        lda     t_tbank,x
+        a8
+        sta     t_msg+6,y
+        a16
+        lda     3,s
+        sta     t_msg+8,y               ; ARG0 = handle
+        jsr     mb_call
+        beq     :+
+        jmp     io_err
+:       jsr     rsp_of
+        lda     t_rsp+12,y
+        cmp     t_msg+2,y               ; every byte asked for (the file is longer)
+        bne     :+
+        lda     #0
+        rts
+:       lda     #EINVAL
+        rts
 
 ; result A -> the parent blocked in spawn
 ld_post:

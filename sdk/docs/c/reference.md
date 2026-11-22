@@ -83,8 +83,9 @@ through DBR. The other locals live in direct-page registers or on the hardware s
 
 `hcc` checks the sizes after linking and says what does not fit, in bytes ("program too
 big by N bytes: build with --code large" when the code is what does not fit). The
-loader's own limits: the program file is less than 64 KB, and code + data + bss fit in
-$0100-$FFFF. With `hcc --code large` the code may also fill other banks; the rest of this
+loader's own limits: the program's o65 is less than 64 KB, and code + data + bss fit in
+$0100-$FFFF. (Before Horizon 0.28 the whole file had to be less than 64 KB. Since 0.28 a
+file may be larger: the loader reads only the o65 at its start.) With `hcc --code large` the code may also fill other banks; the rest of this
 picture stays as it is (the code bank is then called the main bank).
 
 ## The two code models (cc816)
@@ -99,7 +100,7 @@ goes and in how functions are called.
 | Calls | JSR / RTS | JSL / RTL, wherever the function is |
 | The first argument | at `3,s` | at `4,s` (the return address has 3 bytes) |
 | A function pointer | 16 bits: the function | 16 bits: the function's entry in the main bank (the function itself, or a 4-byte thunk, a JML to it) |
-| Files | NAME.PRG | NAME.PRG, and NAME.PRX when code went to other banks |
+| Files | NAME.PRG | NAME.PRG: one file. When code went to other banks, they follow the o65 in the same file (Horizon 0.28 and later) |
 | Data, constants, bss, heap, software stack | the code bank | the main bank: the same |
 | `__CC816_LARGE__` | not defined | defined (1) in C and in assembly (`ca65 -D`) |
 
@@ -125,17 +126,17 @@ take only so many segments a module), and hcc places them after it has linked th
 first in the main bank, as long as it has room (it keeps `--heap N` bytes free for
 `malloc`, 4096 by default), then in other banks, each function in the first bank with
 room, in the order of the files and of the functions in them. A function must fit in one
-bank (65,535 bytes). When everything fits in the main bank there is no .PRX and no
-loading: the program is one file, as in the small model.
+bank (65,535 bytes). When everything fits in the main bank, nothing follows the o65 and
+nothing is loaded at the start: the program runs on any Horizon, as in the small model.
 
 `hcc --map` shows the result:
 
 ```
-GAME.PRG: 45,049 bytes on the card, 409 relocations
-  code bank: code+constants 43,982 + data 78 + bss 1,678 = 45,738 of 57,072; heap 11,334; software stack 8,192
+GAME.PRG: 210,710 bytes on the card, 415 relocations
+  code bank: code+constants 43,957 + data 78 + bss 1,754 = 45,789 of 57,072; heap 11,283; software stack 8,192
   window:    stack about 32,000 (from $7F7F down to $0100); direct page 120 bytes
-  code model large: 23,882 bytes of movable code in the main bank, 155,650 in 3 other bank(s) (65,511, 65,495, 24,644); 1396 thunks
-  GAME.PRX: 164,790 bytes, 4527 bank bytes patched at the start
+  code model large: 23,038 bytes of movable code in the main bank, 156,494 in 3 other bank(s) (65,475, 65,417, 25,602); 1403 thunks
+  one file: the o65 45,036 bytes, then the other banks 165,674 bytes; 4543 bank bytes patched at the start
 ```
 
 (a program of 1,600 functions, `sdk/c/tests/large/genbig.py`: about 180 KB of code).
@@ -145,35 +146,42 @@ GAME.PRG: 45,049 bytes on the card, 409 relocations
 | Code | the main bank's room, plus 64 banks of 64 KB (about 4 MB); an 8 MB machine has about 80 free banks when nothing else runs |
 | One function | 65,535 bytes |
 | The main bank | startup + libraries + `.s` files + functions with inline assembly + constructors + thunks (4 bytes for each function in another bank whose address is used) + constants + data + bss + 4 KB of heap (`--heap N`) + the software stack (`--stack N`) must fit in 65,264 bytes |
-| The .PRG file | below 64 KB (Horizon's loader) |
+| The .PRG file | its o65 part (the main bank and its relocations) below 64 KB: Horizon's loader reads only the first 65,535 bytes of a larger file. The whole file has no limit |
+| Horizon | 0.28 or later when code went to other banks (it loads a file of 64 KB or more, and tells the program its own path) |
 
 ### How the program is loaded
 
-Horizon loads NAME.PRG as it loads any program: an o65 file, below 64 KB. A large
-program's other code banks cannot be in the same file: Horizon's loader takes only files
-below 64 KB, and a program is not told the path it was started from. So they are in a
-second file, NAME.PRX, written by hcc next to the .PRG. **Copy both to the card, into the
-same folder.**
+A large program is one file, NAME.PRG. It starts with the main bank, an ordinary o65
+file. The other code banks follow it in the same file. Copy the one file to the card, into
+any folder.
+
+Horizon loads NAME.PRG as it loads any program. Since Horizon 0.28 the loader takes a
+file of 64 KB or more: it reads only the first 65,535 bytes, where the o65 must lie, and
+never loads what follows the o65.
 
 Before the constructors run, the startup (`sdk/c/lib/cc816/xload.c`):
 
-1. opens NAME.PRX: in the current folder first (where Files starts programs, and where
-   the shell is after `cd`), then in `/APPS`, `/BIN`, `/SYSTEM`, `/SYSTEM/TESTS` and
-   `/GAMES`. `hcc --prx-path /GAMES/MINE:/APPS` gives other folders (after the current
-   one). A program started from the Desktop's Programs menu, or by its path from another
-   folder, finds its .PRX only in those folders: install a large program in one of them,
-   or build it with `--prx-path` naming its folder;
-2. checks it: its header, its number of banks and the stamp of its build (hcc writes the
-   same stamp into the .PRG): a .PRX of another build is refused;
-3. takes a bank for each image (`hz_bank_alloc`) and reads the image into it;
-4. patches the bank bytes: the bank of each JSL to a function in another bank (and of
+1. asks Horizon for the path of its own file (`task_path`, Horizon 0.28) and opens it.
+   This works however the program was started: from the shell by any path, from the
+   Desktop's Programs menu, or from Files;
+2. reads the file's last 8 bytes: where the other banks start, and `HZPX`;
+3. checks the header there: the number of banks and the stamp of the build (hcc writes the
+   same stamp into the main bank), so a file put together from two builds is refused;
+4. takes a bank for each image (`hz_bank_alloc`) and reads the image into it;
+5. patches the bank bytes: the bank of each JSL to a function in another bank (and of
    the MVN of a structure copy), in the main bank and in the others: the banks are known
    only now;
-5. closes the file. Then the constructors, `main` and the rest run as usual.
+6. checks that the data ends just before the last 8 bytes, and closes the file. Then the
+   constructors, `main` and the rest run as usual.
 
-In the emulator a program of 45 KB with a 165 KB .PRX starts in about 0.15 s (a small
-program in 0.01 s). Horizon gives the banks back when the program ends, as all of a
+In the emulator a program of 45 KB with 165 KB of other banks starts in about 0.15 s (a
+small program in 0.01 s). Horizon gives the banks back when the program ends, as all of a
 program's banks.
+
+On a Horizon before 0.28 a large program with other banks does not start: the file is
+64 KB or more, so the loader refuses it ("not a Horizon program"). If the whole file is
+below 64 KB, the old loader takes it, and the startup stops with "needs Horizon 0.28 or
+later".
 
 If something is wrong, the program prints one line on the console and ends with exit
 code 1 before any of its own code runs; when the window system runs, the line is also
@@ -181,22 +189,28 @@ shown in a small window (a key or a click closes it):
 
 | | |
 | --- | --- |
-| `GAME.PRX: not found (the program's code banks): keep it next to the .PRG, in the current folder or in /APPS, /BIN, /SYSTEM, /SYSTEM/TESTS, /GAMES` | the .PRX is missing, or in a folder the program does not look in |
-| `GAME.PRX: made by another build of the program: copy the .PRG and the .PRX of the same build` | the two files are from different builds |
-| `GAME.PRX: not enough memory: no free 64 KB bank for the program's code` | the machine has not enough free banks (close a program) |
-| `GAME.PRX: not a .PRX file ...`, `cannot read the file ...` | a damaged file, a card error |
+| `GAME.PRG: the program file is cut short or damaged (its code banks): copy it again` | the file was cut (a copy that did not finish) or changed |
+| `GAME.PRG: its code banks are of another build of the program: build it again` | the file was put together from two builds |
+| `GAME.PRG: not enough memory: no free 64 KB bank for the program's code` | the machine has not enough free banks (close a program) |
+| `GAME.PRG: needs Horizon 0.28 or later (a program with several code banks)` | an older Horizon (it has no `task_path`) |
+| `GAME.PRG: cannot find its own file ...`, `cannot open its own file ...`, `cannot read the program file (a card error)` | the file was removed while the program started, too many open files, a card error |
 
-### The .PRX file
+### The file's layout
 
 | | |
 | --- | --- |
+| the o65 | the main bank, as in any program; below 64 KB |
 | Header, 12 bytes | `HZPX`, version 1, n (the number of banks), 0, 0, the stamp (u32) |
 | n x u32 | each bank's image size |
 | the images | bank 1, bank 2, ..., each from offset 0 of its bank |
 | u16 | the number of relocation groups |
 | the groups | each: u8 where (0 the main bank, k bank k), u8 to (the bank whose number is stored), u16 count, then count u16 offsets: the bytes that get that bank's number |
+| the trailer, 8 bytes | u32 the offset of the header in the file (= the o65's length), then `HZPX` |
 
-hcc makes it with ld65 alone (`sdk/c/tools/hzlarge.py`, "Program files" below).
+hcc makes it with ld65 alone (`sdk/c/tools/hzlarge.py`, "Program files" below). Before
+the SDK of Horizon 0.28, the part after the o65 was a second file, NAME.PRX, which the
+program looked for in a list of folders. hcc no longer writes it, and the programs no
+longer read it: build such a program again.
 
 ### Costs
 
@@ -262,7 +276,7 @@ other banks (64 KB each): hz_far_alloc()       other banks: hz_far_alloc(), __fa
 | Speed | the default; byte loops a little slower | faster on pointer-heavy code (bench below) |
 
 `hcc` checks the sizes after linking and says what does not fit, in bytes. The loader's
-own limits: the program file is less than 64 KB, and code + data + bss fit in $0100-$FFFF.
+own limits: the program's o65 is less than 64 KB, and code + data + bss fit in $0100-$FFFF.
 
 The large model is the simplest for ported code: every pointer reaches globals, locals and
 other banks alike. The tiny model is faster where code works through pointers, and its
@@ -678,7 +692,7 @@ does not work in it:
 
 | | Status |
 | --- | --- |
-| `main(int argc, char **argv)` / `main(void)` | the argument string split at spaces; `"quoted words"` stay whole (a quote anywhere starts or ends quoting: `a"b c"d` is `ab cd`); `argv[0]` is the program's name as the menu bar shows it ("Greet"); at most 32 arguments. The return value is the exit code |
+| `main(int argc, char **argv)` / `main(void)` | the argument string split at spaces; `"quoted words"` stay whole (a quote anywhere starts or ends quoting: `a"b c"d` is `ab cd`); `argv[0]` is the program's name as the menu bar shows it ("Greet"), not its path (`hz_task_path` gives the path); at most 32 arguments. The return value is the exit code |
 | `exit`, `atexit`, `_Exit` | atexit functions newest first, then every open FILE is flushed and closed. `hz_exit()` ends at once without flushing |
 | `printf` family | `%d %i %u %x %X %o %c %s %p %%`, `l` and `h` sizes, widths, precision, `-+ 0#`, `*`; `%f %e %g` with the float library. Not: `%lld`, `%zu`, `%a`, `%n` in printf |
 | `scanf` family | `%d %u %x %s %c %[...]`, `%f` with the float library; `scanf` reads the keyboard (see stdin) |
@@ -922,7 +936,22 @@ hz_close(h);
   `HZ_ENOPATH`, `HZ_EDENIED`, `HZ_EEXIST`, `HZ_ENFILE`.
 - **Helpers**: `hz_spawn_path(path, args, prio)`, `hz_stat_path(path, &info)`,
   `hz_getline(buf, size)` (a line with editing), `hz_key_ascii(usage, mods)` (a key event
-  to ASCII, KEY_* for arrows).
+  to ASCII, KEY_* for arrows), `hz_prog_dir(buf, size)` (the program's own folder, below).
+- **The program's own file** (Horizon 0.28): `hz_task_path(buf, size)` gives the absolute
+  path of the file the program was loaded from, such as `/GAMES/MINE/GAME.PRG`, and returns
+  its length. `hz_prog_dir(buf, size)` gives its folder, `/GAMES/MINE/`, ending in `/`. A
+  128-byte buffer always fits. Both return -1 on an older Horizon (hz_errno `HZ_ENOSYS`).
+  A game uses them to find its data files next to it, however it was started (the shell,
+  the Desktop's Programs menu, Files):
+
+  ```c
+  char path[128];
+  FILE *f;
+  if (hz_prog_dir(path, sizeof path) < 0)
+      strcpy(path, "");               /* an older Horizon: the current folder */
+  strcat(path, "LEVELS.DAT");
+  f = fopen(path, "rb");
+  ```
 - **A syscall without a wrapper** (a newer kernel's): `hz_syscall(n, a, x, y)` returns A and
   sets hz_errno, hz_x, hz_y. A pointer is two arguments: `HZ_OFF(p)` and `HZ_BANK(p)`. Or
   write the stub in assembly as the generated ones are (cc816: `build/lib/cc816/stubs/*.s`;
@@ -967,12 +996,13 @@ ld65's configuration must name every segment). A trial link with those segments 
 big pool gives the main bank's fixed part and the functions whose 16-bit address is used;
 hcc places the functions (first fit: the main bank, then banks of 64 KB), writes a glue
 module (the thunks, `__T_name = _name` for the functions in the main bank, the loader's
-table: the number of banks, the stamp, the .PRX's name, the folders) and writes ld65's
+table: the number of banks, the stamp, the program's name) and writes ld65's
 configuration: the main bank as an o65 file, each other bank as a raw image. Then it
 links **three times**, with bank k at the link-time banks k, k + $40 and $80 + 2(k - 1)
 (in the third link at offset 1). In the main bank a byte that differs between the links
 must name one bank in all three (the link's bank of k each time): it is a bank byte of
-bank k (a JSL to a function there, a thunk's JML) and becomes a relocation of the .PRX.
+bank k (a JSL to a function there, a thunk's JML) and becomes one of the relocations
+after the o65.
 The two bytes before such a bank byte may differ by one in the third link (a far
 address's offset). Anything else stops the build: a value "bank + 1" is odd in the third
 link, and a 16-bit address of a function in another bank written in the main bank (which
@@ -982,7 +1012,8 @@ relocations, done by Horizon's loader as in any program. In the other banks the 
 records the address of every bank byte it writes (segment XREL: each JSL's, JML's and
 MVN's), and hcc reads their bank from the first link (0: the main bank); a byte that
 differs between the links and was not recorded stops the build. The .PRG is the first
-link's o65 file (o65strip, as above), the .PRX its bank images and the relocations. A
+link's o65 file (o65strip, as above), then the bank images, the relocations and the
+8-byte trailer ("The file's layout", above). A
 build's stamp is a hash of what was linked and where: the same build gives the same
 files.
 
@@ -1148,8 +1179,8 @@ hcc passes these to cc816 (`cc816.py`, the compiler alone, takes the same):
 | `-E` (`cc816.py` only) | preprocess only |
 
 hcc's own: `--code small|large` (the code model, "The two code models"; `HZ_CODE` in the
-environment), with `--code large` also `--heap N` (the main bank's room kept for malloc),
-`--prx-path DIRS` (where the program looks for its .PRX) and, for tests, `--main-room N`,
+environment), with `--code large` also `--heap N` (the main bank's room kept for malloc)
+and, for tests, `--main-room N`,
 `--bank-room N` and `--spread N` (how much code the main bank and each other bank may
 take; the functions in turn in N banks).
 

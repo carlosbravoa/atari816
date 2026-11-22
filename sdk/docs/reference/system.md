@@ -124,6 +124,26 @@ later spawns of the same path raise this one and fail with ERUNNING.
 :
 ```
 
+### $35 task_path (SYS_TPATH)
+(Horizon 0.28.) In: X, Y = buffer, A = its size. Out: A = length; the buffer holds the
+absolute path of the file the program was loaded from, such as `/GAMES/MINE/GAME.PRG`. It
+is the path given to spawn, made absolute with the starter's current folder. It is at most
+127 characters, so a 128-byte buffer always fits. EINVAL if the buffer is too small.
+
+A program uses it to find its own data files next to it, wherever it was started from: the
+shell, the Desktop's Programs menu, or Files. Cut the path after its last `/` to get the
+folder. On Horizon before 0.28 the call returns ENOSYS.
+```asm
+        ptr     path
+        lda     #128
+        sys     SYS_TPATH       ; "/GAMES/MINE/GAME.PRG"
+        bcs     @old            ; ENOSYS: Horizon before 0.28
+```
+
+A program file may also carry its own data after the o65 part: the loader reads only the
+o65 and ignores the rest, in a file of any size (before 0.28: files below 64 KB only). The
+program opens its own file with this path and reads the data from there.
+
 ## Time
 
 ### $04 uptime (SYS_UPTIME)

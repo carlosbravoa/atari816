@@ -900,3 +900,55 @@ sys_getcwd:
         a16
         lda     kt7
         jmp     set_ok
+
+; ---- $35 task_path(X, Y = buffer, A = its size) -> A = length (0.28) ----
+; The absolute path of the caller's program file, as the loader found it: kept in the window
+; bank at $8000 (loader.s), out of the window's sight. Zero-terminated; EINVAL if the buffer is
+; too small (as getcwd).
+sys_tpath:
+        ldx     cur
+        lda     t_wbank,x
+        sta     kp0+2
+        lda     #$8000
+        sta     kp0
+        ldy     #0                      ; the length (at most 127)
+:       lda     [kp0],y
+        and     #$00FF
+        beq     :+
+        iny
+        cpy     #127
+        bne     :-
+:       sty     kt7
+        iny                             ; with the terminator
+        tya
+        cmp     t_a,x
+        beq     :+
+        bcc     :+
+        jmp     err_inval
+:       sta     kt2
+        lda     t_x,x
+        sta     kt0
+        lda     t_y,x
+        sta     kt1
+        lda     #1
+        sta     kt3
+        jsr     uaccess
+        bcc     :+
+        jmp     err_fault
+:       lda     kphys
+        sta     kp1
+        lda     kphys+2
+        sta     kp1+2
+        ldy     #0                      ; (uaccess keeps kp0)
+        a8
+        bra     @test
+:       lda     [kp0],y
+        sta     [kp1],y
+        iny
+@test:  cpy     kt7
+        bne     :-
+        lda     #0
+        sta     [kp1],y
+        a16
+        lda     kt7
+        jmp     set_ok

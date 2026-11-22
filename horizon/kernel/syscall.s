@@ -18,7 +18,7 @@ sys_tab:
         .word   .loword(sys_nosys), .loword(sys_nosys), .loword(sys_nosys), .loword(sys_nosys), .loword(sys_nosys), .loword(sys_nosys)
         .assert (* - sys_tab) = $30 * 2, error, "syscall table: spawn must be $30"
         .word   .loword(sys_spawn), .loword(sys_wait), .loword(sys_kill), .loword(sys_tinfo)    ; $30
-        .word   .loword(sys_single), .loword(sys_nosys), .loword(sys_nosys), .loword(sys_nosys), .loword(sys_nosys), .loword(sys_nosys)
+        .word   .loword(sys_single), .loword(sys_tpath), .loword(sys_nosys), .loword(sys_nosys), .loword(sys_nosys), .loword(sys_nosys)
         .word   .loword(sys_nosys), .loword(sys_nosys), .loword(sys_nosys), .loword(sys_nosys), .loword(sys_nosys), .loword(sys_nosys)
         .word   .loword(sys_pcreate), .loword(sys_send), .loword(sys_recv), .loword(sys_pclose)    ; $40
         .word   .loword(sys_nosys), .loword(sys_nosys), .loword(sys_nosys), .loword(sys_nosys), .loword(sys_nosys), .loword(sys_nosys), .loword(sys_nosys)

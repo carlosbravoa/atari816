@@ -28,13 +28,14 @@ Options:
   --emu FILE      emu816 (default: $EMU, else DIR/../emu/emu816)
   --dest PATH     where the program goes on the card (default /APPS/NAME.PRG)
   --args TEXT     argument string (shell mode)
+  --cd DIR        (shell mode) type "cd DIR" first; the program's path is then typed
+                  relative to DIR when it lies in it (--dest /GAMES/MINE/X.PRG --cd /GAMES
+                  types "MINE/X.PRG")
   --script FILE   input script (see inputscript.py; 'T shot' lines add screenshots)
   --shot SECONDS  a screenshot at that time (repeatable; at most 16 in all)
   --seconds N     how long to run after the start (default: the last event + 2 s)
   --out DIR       output folder (default: run-NAME)
   --file SRC[:DEST]  copy a file onto the card too (DEST default /SRC-NAME; repeatable)
-                  (PROG.PRX, a large program's code banks (hcc --code large), goes next
-                  to the program by itself)
   --rev N         hardware revision to emulate (default: emu816's, REV $0B: the blitter
                   with command lists, Lau, sprites, fine scrolling); 10 no sprites or
                   scrolling, 9 no Lau, 8 no command lists / raster / NV_FRAME, 7 no blitter
@@ -95,7 +96,7 @@ def main():
                 die(f'{w} needs a value')
             return a[i + 1]
         if w in ('--horizon', '--emu', '--dest', '--args', '--script', '--seconds', '--out',
-                 '--rev', '--mode', '--net-root', '--wav'):
+                 '--rev', '--mode', '--net-root', '--wav', '--cd'):
             opt[w[2:]] = val(); i += 2
         elif w == '--shot':
             opt['shots'].append(float(val())); i += 2
@@ -142,13 +143,6 @@ def main():
         os.makedirs(os.path.dirname(p), exist_ok=True)
         shutil.copy(src, p)
     put(prog, dest)
-    # a program built with hcc --code large may have its other code banks in NAME.PRX next
-    # to it: it goes into the same folder (under the name the program looks for)
-    for ext in ('.PRX', '.prx'):
-        x = os.path.splitext(prog)[0] + ext
-        if os.path.exists(x):
-            put(x, os.path.dirname(dest) + '/' + os.path.basename(x))
-            break
     for f in opt['files']:
         src, _, d = f.partition(':')
         put(src, d or '/' + os.path.basename(src).upper())
@@ -165,11 +159,21 @@ def main():
         t0 = DESK_BOOT_MS + 1000
     else:
         open(os.path.join(card, 'SYSTEM', 'NODESK'), 'w').write('')
-        cmd = dest + (' ' + opt['args'] if opt['args'] else '')
-        if any(c in cmd for c in '{}^') or '\\' in cmd:
+        run, cd = dest, opt.get('cd')
+        if cd:
+            cd = '/' + cd.strip('/')
+            if dest.upper().startswith(cd.upper().rstrip('/') + '/'):
+                run = dest[len(cd.rstrip('/')) + 1:]
+        cmd = run + (' ' + opt['args'] if opt['args'] else '')
+        if any(c in cmd + (cd or '') for c in '{}^') or '\\' in cmd + (cd or ''):
             die('the command line may not contain { } ^ or backslashes')
-        boot = [f'{SHELL_ESC_MS} {{esc}}', f'{SHELL_TYPE_MS} {cmd}\\n']
-        t0 = SHELL_TYPE_MS + 50 * (len(inputscript.strokes(cmd)) + 1) + 100
+        boot = [f'{SHELL_ESC_MS} {{esc}}']
+        t = SHELL_TYPE_MS
+        if cd:
+            boot.append(f'{t} cd {cd}\\n')
+            t += 50 * (len(inputscript.strokes('cd ' + cd)) + 1) + 600
+        boot.append(f'{t} {cmd}\\n')
+        t0 = t + 50 * (len(inputscript.strokes(cmd)) + 1) + 100
 
     try:
         bk, bm, _ = inputscript.parse(boot)

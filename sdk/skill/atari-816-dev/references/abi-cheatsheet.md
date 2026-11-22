@@ -19,7 +19,8 @@ $40+n file (44 no file, 45 no path, 46 bad name, 47 denied, 48 exists, 52 too ma
 Start: A16/I16, PC = code bank:$0100 (first CODE byte), DBR = PBR = code bank, D = 0,
 A = argument length, X = argument address (bank 0). End: `exit n` (flushes ulib output).
 Segments CODE, RODATA, DATA, BSS (code bank, BSS cleared) + ZEROPAGE (direct page,
-cleared, 256 bytes minus ulib's 38 and ui.lib's 38). File < 64 KB.
+cleared, 256 bytes minus ulib's 38 and ui.lib's 38). The o65 < 64 KB (0.28: data may
+follow it in the file; it is not loaded; SYS_TPATH gives the file's path).
 Build: `ca65 -I HORIZON/user -o x.o x.s`; `ld65 -C HORIZON/user/prog.cfg -o X.PRG x.o
 HORIZON/build/ulib.o [HORIZON/build/ui.lib]`.
 
@@ -72,6 +73,7 @@ it yourself (`dec5` / `digit` in `SDK/templates/game/main.s`: A -> ASCII digits)
 | $32 | SYS_KILL | A id | |
 | $33 | SYS_TINFO | A slot, X,Y 16 bytes | |
 | $34 | SYS_SINGLE | | C set: already running (exit) |
+| $35 | SYS_TPATH | X,Y buf, A size (128 fits) | A length; the program file's absolute path (0.28) |
 | $40-$43 | SYS_PCREATE / SEND / RECV / PCLOSE | ports, 16-byte messages | |
 | $50 | SYS_ICLAIM | | |
 | $51 | SYS_IREAD | (blocks) | A usage, X mods\|down<<8 |

@@ -1,0 +1,60 @@
+> mem
+~ * banks free *)
+> ptest
+ptest path: /SYSTEM/TESTS/PTEST.PRG (23)
+ptest small: error 01
+ptest cwd: /
+ptest file: below 64 KB
+ptest tail: none
+ptest bss: clear
+> cd /BIG
+> PTESTBIG.PRG
+ptest path: /BIG/PTESTBIG.PRG (17)
+ptest small: error 01
+ptest cwd: /BIG
+ptest file: 64 KB or more
+ptest tail: PTESTEND
+ptest bss: clear
+> ptestbig.prg
+ptest path: /BIG/ptestbig.prg (17)
+ptest small: error 01
+ptest cwd: /BIG
+ptest file: 64 KB or more
+ptest tail: PTESTEND
+ptest bss: clear
+> cd /SYSTEM
+> ../BIG/EDGE.PRG
+ptest path: /BIG/EDGE.PRG (13)
+ptest small: error 01
+ptest cwd: /SYSTEM
+ptest file: 64 KB or more
+ptest tail: PTESTEND
+ptest bss: clear
+> /BIG/UNDER.PRG
+ptest path: /BIG/UNDER.PRG (14)
+ptest small: error 01
+ptest cwd: /SYSTEM
+ptest file: below 64 KB
+ptest tail: PTESTEND
+ptest bss: clear
+> /BIG/SMALLT.PRG
+ptest path: /BIG/SMALLT.PRG (15)
+ptest small: error 01
+ptest cwd: /SYSTEM
+ptest file: below 64 KB
+ptest tail: PTESTEND
+ptest bss: clear
+> TESTS/PTEST.PRG
+ptest path: /SYSTEM/TESTS/PTEST.PRG (23)
+ptest small: error 01
+ptest cwd: /SYSTEM
+ptest file: below 64 KB
+ptest tail: none
+ptest bss: clear
+> /BIG/JUNK.PRG
+sh: /BIG/JUNK.PRG: not a Horizon program (or a damaged file)
+> /BIG/FAR.PRG
+sh: /BIG/FAR.PRG: not a Horizon program (or a damaged file)
+> mem
+~ * banks free *)
+> 

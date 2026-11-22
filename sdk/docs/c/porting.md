@@ -20,6 +20,7 @@ in [reference.md](reference.md).
 | recursion, big locals | megabytes of stack | cc816: local arrays, structures and `&x` locals on an 8 KB software stack (`hcc --stack N`), the rest on a 32 KB hardware stack; vbcc: 32 KB (large), 4 KB (tiny) | arrays of more than a few hundred bytes as `static` or from `malloc`, not as locals. `hcc --debug` reports the stacks a run used; an overflow is reported at exit |
 | files | as many as you like | **4 file handles for the whole system** (every program together) | close files as soon as you can; `fopen` returns NULL with `errno == ENFILE` when none is left. Do not keep a log file open across the program's life |
 | paths | `/home/x/file.txt`, `C:\x` | FAT, case-insensitive, `/` separators, long names; relative to the current folder | no `\`; no drive letters |
+| the program's own folder | `argv[0]`, the executable's path | `argv[0]` is only the program's name, and the current folder may be any folder (the Desktop starts programs in `/`) | data files next to the program: `hz_prog_dir(buf, 128)` gives its folder, `/GAMES/MINE/` (Horizon 0.28; `hz_task_path` the whole path) |
 | `printf("%lld")`, `%a` | yes | cc816: yes (`%a` in programs with floating point); vbcc: no | nothing with cc816 (`%zu` works too) |
 | `fopen(..., "rb")` | binary vs text | the same (no line-end conversion) | nothing |
 | `system()`, `getenv()`, signals, `time` zones | yes | not there (they return failure); `time()` counts from Horizon's clock | `hz_spawn_path` to start another program |
@@ -114,8 +115,9 @@ biggest part: code and constants. ...
 ```
 
 **Build it with `hcc --code large`.** Nothing in the C changes. The code may then fill
-several banks; hcc writes `GAME.PRG` and `GAME.PRX` (the other code banks). Copy both to
-the card, into the same folder. In a Makefile made with c.mk: `HZ_CODE := large` (or
+several banks; hcc still writes one file, `GAME.PRG`: the other code banks follow the main
+bank in it. Copy it to the card, into any folder. It needs Horizon 0.28 or later. In a
+Makefile made with c.mk: `HZ_CODE := large` (or
 `make HZ_CODE=large`). The whole of it is in reference.md, "The two code models (cc816)".
 
 **What still must fit in the main bank** (the PRG's bank): the startup, the C library and

@@ -101,9 +101,8 @@ def main():
     if code == 'large':
         # every program in the large code model, every function that can move in another
         # bank, in turn in three banks: calls, pointers, helpers, switch tables and setjmp
-        # cross banks even in small programs; the runner's /T looked in for .PRX
-        os.environ.update(HZ_CODE='large', HZ_MAIN_ROOM='0', HZ_SPREAD='3',
-                          HZ_PRX_PATH='/T:/APPS')
+        # cross banks even in small programs (each one file: its other banks after the o65)
+        os.environ.update(HZ_CODE='large', HZ_MAIN_ROOM='0', HZ_SPREAD='3')
         prog.CODE = prog.hzc816.CODE = 'large'
         prog.BUILD = os.path.join(prog.SDKC, 'build', 'cc816l')
         print('(the large code model: hcc --code large --main-room 0 --spread 3)')

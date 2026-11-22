@@ -26,7 +26,7 @@
 ;
 ; The large code model (hcc --code large, ca65 -D __CC816_LARGE__): C functions are called
 ; with JSL and return with RTL (model.inc), wherever they are. Before the constructors,
-; __hz_xload (lib/cc816/xload.c) loads the program's other code banks from its .PRX file;
+; __hz_xload (lib/cc816/xload.c) loads the program's other code banks from its own file;
 ; then the constructors, main and the exit functions are called as JSL calls. __icall is
 ; the call through a function pointer: JSL __icall with the pointer in __fpt (a 16-bit
 ; address in this bank: the function, or its thunk JML in the main bank).

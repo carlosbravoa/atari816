@@ -1,40 +1,41 @@
 /* xload.c - the large code model's loader (hcc --code large; sdk/docs/c/reference.md, "The
  * two code models").
  *
- * Horizon loads a program's main bank (the .PRG: an ordinary o65 file, below 64 KB). A
- * large program's other code banks are in a second file next to it, NAME.PRX, which hcc
- * writes with the .PRG. crt0.s calls __hz_xload before the constructors; it
- *   1. opens NAME.PRX: in the current folder, then in each folder hcc wrote into the program
- *      (hcc --prx-path; by default /APPS, /BIN, /SYSTEM, /SYSTEM/TESTS, /GAMES): Horizon
- *      does not tell a program where its file is;
- *   2. checks it: "HZPX", version 1, the number of banks and the stamp of this very link
- *      (a .PRX left from another build is refused);
+ * A large program is one file, NAME.PRG: the main bank as an ordinary o65 file, which Horizon
+ * loads, then the other code banks (hcc writes them after the o65; Horizon 0.28 and later
+ * load such a file and never look at what follows the o65). crt0.s calls __hz_xload before
+ * the constructors; it
+ *   1. asks Horizon for the program's own path (task_path, Horizon 0.28) and opens that file;
+ *   2. reads the trailer, the file's last 8 bytes {u32 the block's offset, "HZPX"}, and
+ *      the block's header there: "HZPX", version 1, the number of banks and the stamp of this
+ *      very link (a block from another build is refused);
  *   3. takes a bank for each image (hz_bank_alloc) and reads the image into it;
  *   4. patches the bank bytes (JSL operands, MVN banks): the relocations, in groups of
- *      {u8 where, u8 to which bank, u16 count, count x u16 offset}; bank 0 is the main bank.
+ *      {u8 where, u8 to which bank, u16 count, count x u16 offset}; bank 0 is the main bank;
+ *   5. checks that the block ends just before the trailer.
  * Then the program runs as one. Horizon frees the banks when the program ends.
  *
- * The .PRX file: a 12-byte header {"HZPX", u8 1, u8 n, u16 0, u32 stamp}, n x u32 the
- * images' sizes, the images, u16 the number of relocation groups, the groups.
+ * The block: a 12-byte header {"HZPX", u8 1, u8 n, u16 0, u32 stamp}, n x u32 the images'
+ * sizes, the images, u16 the number of relocation groups, the groups. Then the trailer.
  *
- * Any failure (no file, a wrong file, no memory, a read error) prints one line on the
- * console (and shows it in a small window when the window system runs) and ends the
- * program with exit code 1 (nothing else of it has run yet).
+ * Any failure (an old Horizon, a cut or damaged file, no memory, a read error) prints one
+ * line on the console (and shows it in a small window when the window system runs) and ends
+ * the program with exit code 1 (nothing else of it has run yet).
  *
  * hcc writes the symbols this reads (its glue module): __hz_xbanks (n; 0 = everything is
- * in the main bank, nothing to load), __hz_xstamp, __hz_xname (the .PRX's name),
- * __hz_xdirs (the folders, each ending in '/', separated by ':'), __hz_xbank[n + 1] (the
- * banks: [0] the main bank).
+ * in the main bank, nothing to load), __hz_xstamp, __hz_xname (the program's file name, for
+ * the messages), __hz_xbank[n + 1] (the banks: [0] the main bank).
  */
 #include <horizon.h>
 
 extern const unsigned __hz_xbanks;
 extern const unsigned long __hz_xstamp;
 extern const char __hz_xname[];
-extern const char __hz_xdirs[];
 extern unsigned char __hz_xbank[];
 
 static int xh;
+static unsigned long left;          /* bytes of the block not read yet */
+static char path[128];
 static unsigned char buf[256];
 static unsigned long sizes[64];
 
@@ -117,20 +118,6 @@ static void fail(const char *why, const char *b, const char *c)
     add(__hz_xname);
     add(": ");
     add(why);
-    if (b == __hz_xdirs) {                  /* the folders: "/APPS, /BIN, ..." */
-        const char *d;
-        for (d = b; *d && mlen < sizeof msg - 3; d++) {
-            if (*d == '/' && (d[1] == ':' || !d[1]) && d != b)
-                continue;
-            if (*d == ':') {
-                add(", ");
-                continue;
-            }
-            msg[mlen++] = *d;
-            msg[mlen] = 0;
-        }
-        b = 0;
-    }
     add(b);
     add(c);
     hz_puts(msg);
@@ -141,15 +128,20 @@ static void fail(const char *why, const char *b, const char *c)
     hz_exit(1);
 }
 
-/* n bytes of the file into bank:off (n <= 32768) */
+#define CUT "the program file is cut short or damaged (its code banks): copy it again"
+
+/* n bytes of the file into bank:off (n <= 32768), within the block */
 static void rd(unsigned bank, unsigned off, unsigned n)
 {
     hz_io io;
+    if (n > left)
+        fail(CUT, 0, 0);
     io.handle = (unsigned char)xh;
     HZ_U24B(io.buf, bank, off);
     io.len = n;
     if (hz_read(&io) != (int)n)
-        fail("cannot read the file (cut short, or a card error)", 0, 0);
+        fail("cannot read the program file (a card error)", 0, 0);
+    left -= n;
 }
 
 static unsigned mainbank(void)
@@ -162,42 +154,40 @@ static void rdbuf(unsigned n)
     rd(mainbank(), (unsigned)buf, n);
 }
 
-static int try_open(const char *dir, unsigned dl)
-{
-    static char path[128];
-    unsigned i = 0, k;
-    for (k = 0; k < dl && i < 100; k++)
-        path[i++] = dir[k];
-    for (k = 0; __hz_xname[k] && i < 126; k++)
-        path[i++] = __hz_xname[k];
-    path[i] = 0;
-    return hz_open(path, HZ_O_READ);
-}
-
 void __hz_xload(void)
 {
     unsigned n = __hz_xbanks, i, g, k;
-    const char *d, *e;
+    hz_fileinfo st;
+    unsigned long at;
     xh = -1;
     if (n == 0)
         return;
     if (n > 64)
         fail("more than 64 code banks", 0, 0);
-    xh = try_open("", 0);                   /* the current folder first */
-    for (d = __hz_xdirs; xh < 0 && *d; d = *e ? e + 1 : e) {
-        for (e = d; *e && *e != ':'; e++)
-            ;
-        xh = try_open(d, (unsigned)(e - d));
-    }
+    if (hz_task_path(path, sizeof path) < 0)
+        fail("needs Horizon 0.28 or later (a program with several code banks)", 0, 0);
+    if (hz_stat_path(path, &st) < 0 || st.size < 20)
+        fail("cannot find its own file ", path, 0);
+    xh = hz_open(path, HZ_O_READ);
     if (xh < 0)
-        fail("not found (the program's code banks): keep it next to the .PRG, in the "
-             "current folder or in ", __hz_xdirs, 0);
+        fail("cannot open its own file ", path, 0);
+    /* the trailer: the block's offset, "HZPX" */
+    left = 8;
+    if (hz_seek((unsigned)xh, st.size - 8) < 0)
+        fail(CUT, 0, 0);
+    rdbuf(8);
+    at = *(unsigned long *)buf;
+    if (buf[4] != 'H' || buf[5] != 'Z' || buf[6] != 'P' || buf[7] != 'X' || at < 26 ||
+        at > st.size - 8 - 14)
+        fail(CUT, 0, 0);
+    left = st.size - 8 - at;
+    if (hz_seek((unsigned)xh, at) < 0)
+        fail(CUT, 0, 0);
     rdbuf(12);
     if (buf[0] != 'H' || buf[1] != 'Z' || buf[2] != 'P' || buf[3] != 'X' || buf[4] != 1)
-        fail("not a .PRX file (the code banks of a program hcc --code large built)", 0, 0);
+        fail(CUT, 0, 0);
     if (buf[5] != n || *(unsigned long *)(buf + 8) != __hz_xstamp)
-        fail("made by another build of the program: copy the .PRG and the .PRX of the same "
-             "build", 0, 0);
+        fail("its code banks are of another build of the program: build it again", 0, 0);
     __hz_xbank[0] = (unsigned char)mainbank();
     for (i = 1; i <= n; i++) {
         unsigned b = hz_bank_alloc();
@@ -208,13 +198,15 @@ void __hz_xload(void)
     rd(mainbank(), (unsigned)sizes, 4 * n);
     /* the images: each straight into its bank, in pieces of at most 32 KB */
     for (i = 1; i <= n; i++) {
-        unsigned long left = sizes[i - 1];
+        unsigned long size = sizes[i - 1];
         unsigned off = 0;
-        while (left) {
-            unsigned piece = left > 0x8000 ? 0x8000 : (unsigned)left;
+        if (size > 0x10000UL)
+            fail(CUT, 0, 0);
+        while (size) {
+            unsigned piece = size > 0x8000 ? 0x8000 : (unsigned)size;
             rd(__hz_xbank[i], off, piece);
             off += piece;
-            left -= piece;
+            size -= piece;
         }
     }
     /* the relocations */
@@ -225,6 +217,8 @@ void __hz_xload(void)
         unsigned char to;
         rdbuf(4);
         where = buf[0];
+        if (where > n || buf[1] > n)
+            fail(CUT, 0, 0);
         to = __hz_xbank[buf[1]];
         cnt = *(unsigned *)(buf + 2);
         while (cnt) {
@@ -242,6 +236,8 @@ void __hz_xload(void)
             cnt -= m;
         }
     }
+    if (left)                               /* the block must end at the trailer */
+        fail(CUT, 0, 0);
     hz_close(xh);
     xh = -1;
 }

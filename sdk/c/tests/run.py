@@ -445,8 +445,10 @@ def hcc_large(only, horizon):
     pointers and recursively across banks) refused by the small model with the advice and
     built and run by the large one (its output checked line by line); the messages (data
     too big even for --code large, objects of the two code models mixed); and the start's
-    failures: no .PRX, a .PRX of another build, no memory for the banks (tests/large/
-    memhog.c)"""
+    failures: the file cut short, its trailer damaged or wrong, the other banks of another
+    build, no memory for the banks (tests/large/memhog.c); and its start by path from
+    another folder (absolute and relative) and from the Desktop: one file, found by
+    task_path wherever it is"""
     want = lambda n: not only or n in only  # noqa: E731
     if not want("large"):
         return
@@ -469,37 +471,66 @@ def hcc_large(only, horizon):
         report("large", "big", False, "build: " + out.strip()[-300:])
         return
     banks = re.search(r"in (\d+) other bank", out)
-    prx = os.path.join(b, "BIGL.PRX")
-    rc, con, _ = emu(prg, os.path.join(b, "run-big"), horizon, seconds=20)
     exp = open(os.path.join(gen, "expected.txt")).read().splitlines()
-    got = [ln.strip() for ln in con.splitlines()]
-    missing = [e for e in exp if e not in got]
-    ok = not missing and banks is not None and int(banks.group(1)) >= 2 and \
-        os.path.exists(prx) and "[kill]" not in con
+
+    def ran(con):
+        got = [ln.strip() for ln in con.splitlines()]
+        return [e for e in exp if e not in got]
+    rc, con, _ = emu(prg, os.path.join(b, "run-big"), horizon, seconds=20)
+    missing = ran(con)
+    one = not os.path.exists(os.path.join(b, "BIGL.PRX")) and os.path.getsize(prg) > 0xFFFF
+    ok = not missing and banks is not None and int(banks.group(1)) >= 2 and one and \
+        "[kill]" not in con
     report("large", "big", ok, (f"{len(exp)} lines as computed; "
                                 + grab(out, r"[\d,]+ bytes of movable code in the main bank, "
-                                            r"[\d,]+ in \d+ other bank\(s\)") + "; .PRX "
-                                + grab(out, r"PRX: [\d,]+ bytes") + ", PRG "
-                                + grab(out, r"[\d,]+ bytes on the card"))
+                                            r"[\d,]+ in \d+ other bank\(s\)") + "; one file of "
+                                + f"{os.path.getsize(prg):,} bytes ("
+                                + grab(out, r"the o65 [\d,]+ bytes") + ")")
            if ok else "missing: " + " | ".join(missing[:4]) + " " + con.strip()[-200:])
-    # the start's failures
+    # started by its path from elsewhere: it finds its own file (task_path, Horizon 0.28)
+    # wherever it is; before, its .PRX was looked for in the current folder and a fixed list
+    for tag, mode, cd, what in (("bypath", "shell", None, "by its absolute path from /"),
+                                ("relpath", "shell", "/GAMES", "by a relative path from /GAMES"),
+                                ("desktop", "desktop", None, "from the Desktop's Programs menu")):
+        cmd = [sys.executable, RUN816, prg, "--horizon", horizon, "--mode", mode,
+               "--seconds", "20", "--out", os.path.join(b, "run-" + tag),
+               "--dest", "/GAMES/MINE/BIGL.PRG"]
+        if cd:
+            cmd += ["--cd", cd]
+        sh(cmd)
+        p = os.path.join(b, "run-" + tag, "console.txt")
+        con = open(p, encoding="latin-1").read() if os.path.exists(p) else ""
+        missing = ran(con)
+        report("large", tag, not missing and "[kill]" not in con,
+               f"/GAMES/MINE/BIGL.PRG {what}: {len(exp)} lines as computed" if not missing
+               else "missing: " + " | ".join(missing[:4]) + " " + con.strip()[-200:])
+    # the start's failures: the file cut short, its trailer damaged, the banks of another build
     fails = os.path.join(b, "fail")
     shutil.rmtree(fails, ignore_errors=True)
     os.makedirs(fails)
+    whole = open(prg, "rb").read()
+    at = int.from_bytes(whole[-8:-4], "little")
     alone = os.path.join(fails, "BIGL.PRG")
-    shutil.copy(prg, alone)
-    rc, con, _ = emu(alone, os.path.join(b, "run-noprx"), horizon, seconds=4)
-    ok = "BIGL.PRX: not found" in con and "big done" not in con and "[kill]" not in con
-    report("large", "noprx", ok, "no .PRX: " + (grab(con, r"BIGL.PRX: not found[^:]*")
-                                               if ok else con.strip()[-200:]))
-    old = os.path.join(fails, "OLD.PRX")
-    shutil.copy(prx, old)
-    # (another build: the same sources at -O1; the same build would have the same stamp)
-    rc, out = sh([sys.executable, HCC, "--code", "large", "-O1", "-o", alone] + srcs)
-    shutil.copy(old, os.path.join(fails, "BIGL.PRX"))
-    rc, con, _ = emu(alone, os.path.join(b, "run-oldprx"), horizon, seconds=4)
-    ok = "made by another build" in con and "big done" not in con and "[kill]" not in con
-    report("large", "oldprx", ok, "a .PRX of another build refused" if ok else con.strip()[-200:])
+    for tag, data, what in (("cut", whole[:-1000], "the file cut short"),
+                            ("damaged", whole[:-2] + b"XX", "its trailer damaged"),
+                            ("tail", whole[:-8] + (at + 2).to_bytes(4, "little") + b"HZPX",
+                             "the trailer pointing to the wrong place")):
+        open(alone, "wb").write(data)
+        rc, con, _ = emu(alone, os.path.join(b, "run-" + tag), horizon, seconds=4)
+        ok = "cut short or damaged" in con and "big done" not in con and "[kill]" not in con
+        report("large", tag, ok, what + ": " + (grab(con, r"cut short or damaged[^\n]*")
+                                                 if ok else con.strip()[-200:]))
+    # (another build: the same sources at -O1; the same build would have the same stamp):
+    # its o65 with the other banks of the first build
+    other = os.path.join(fails, "OTHER.PRG")
+    rc, out = sh([sys.executable, HCC, "--code", "large", "-O1", "-o", other] + srcs)
+    o2 = open(other, "rb").read()
+    at2 = int.from_bytes(o2[-8:-4], "little")
+    open(alone, "wb").write(o2[:at2] + whole[at:-8] + at2.to_bytes(4, "little") + b"HZPX")
+    rc, con, _ = emu(alone, os.path.join(b, "run-otherbuild"), horizon, seconds=4)
+    ok = "of another build" in con and "big done" not in con and "[kill]" not in con
+    report("large", "otherbld", ok, "the other banks of another build refused" if ok
+           else (out + con).strip()[-200:])
     hog = os.path.join(b, "MEMHOG.PRG")
     rc, out = sh([sys.executable, HCC, "-o", hog, os.path.join(HERE, "large", "memhog.c")])
     if rc:
@@ -507,8 +538,7 @@ def hcc_large(only, horizon):
     else:
         cmd = [sys.executable, RUN816, hog, "--horizon", horizon, "--mode", "shell",
                "--seconds", "8", "--out", os.path.join(b, "run-nomem"), "--args",
-               "/APPS/BIGL.PRG", "--file", prg + ":/APPS/BIGL.PRG",
-               "--file", prx + ":/APPS/BIGL.PRX"]
+               "/APPS/BIGL.PRG", "--file", prg + ":/APPS/BIGL.PRG"]
         sh(cmd)
         p = os.path.join(b, "run-nomem", "console.txt")
         con = open(p, encoding="latin-1").read() if os.path.exists(p) else ""
@@ -577,15 +607,13 @@ def hcc_large(only, horizon):
                      "int (*fp)(int) = sq;\nint main(void)\n{\n"
                      "    printf(\"one: %d\\n\", fp(12) + sq(3));\n    return 0;\n}\n")
     oprg = os.path.join(b, "ONE.PRG")
-    if os.path.exists(os.path.join(b, "ONE.PRX")):
-        os.remove(os.path.join(b, "ONE.PRX"))
     rc, out = sh([sys.executable, HCC, "--code", "large", "--map", "-o", oprg, one])
     if rc:
         report("large", "onefile", False, "build: " + out.strip()[-200:])
     else:
         rc, con, _ = emu(oprg, os.path.join(b, "run-one"), horizon, seconds=3)
-        ok = "one: 153" in con and not os.path.exists(os.path.join(b, "ONE.PRX")) and \
-            "no .PRX" in out
+        ok = "one: 153" in con and "no other banks to load" in out and \
+            open(oprg, "rb").read()[-4:] != b"HZPX"
         report("large", "onefile", ok, "everything in the main bank: one file, no loader ("
                + grab(out, r"[\d,]+ bytes on the card") + ")" if ok else
                (out + con).strip()[-300:])
