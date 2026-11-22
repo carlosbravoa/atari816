@@ -98,6 +98,39 @@ unsigned hg_pitch(unsigned hz)
     return (unsigned)(31960UL / hz) - 1;
 }
 
+/* the two 16-bit voices: POKEY's channels joined in pairs (1 + 2, 3 + 4), clocked at
+ * 1.79 MHz: f = 1789790 / (2 x (AUDF16 + 7)), any pitch from 14 Hz, exactly */
+static unsigned char audctl, notes;
+
+void hg_note(unsigned v, unsigned hz, unsigned vol)
+{
+    unsigned long d;
+    unsigned lo = v ? 4 : 0;            /* AUDF of the low channel (3 or 1) */
+    unsigned char bits = v ? 0x28 : 0x50;   /* join 4 + 3, 3 at 1.79 MHz; 2 + 1, 1 */
+    if (v > 1) {
+        hg__fail("hg_note", "voices 0 (channels 1 + 2) and 1 (3 + 4)");
+        return;
+    }
+    hooks();
+    if ((audctl & bits) != bits) {
+        audctl |= bits;
+        hz_sound_write(8, audctl);
+        hz_sound_write(lo + 1, 0);      /* the low channel silent: the pair sounds */
+    }
+    notes |= (unsigned char)(1 << v);
+    if (hz < 14 || vol == 0) {
+        hz_sound_write(lo + 3, 0);
+        return;
+    }
+    d = 894895UL / hz;
+    d = d > 7 ? d - 7 : 0;
+    if (d > 0xFFFF)
+        d = 0xFFFF;
+    hz_sound_write(lo, (unsigned)d & 0xFF);
+    hz_sound_write(lo + 2, (unsigned)(d >> 8));
+    hz_sound_write(lo + 3, HG_TONE | (vol > 15 ? 15 : vol));
+}
+
 void hg_sound_off(void)
 {
     unsigned i;
@@ -105,6 +138,15 @@ void hg_sound_off(void)
         vo[i].n = 0;
         if (used & (1 << i))
             hz_sound_write(i * 2 + 1, 0);
+    }
+    if (notes) {
+        hz_sound_write(3, 0);
+        hz_sound_write(7, 0);
+        notes = 0;
+    }
+    if (audctl) {
+        audctl = 0;
+        hz_sound_write(8, 0);
     }
     if (hg_has_lau())
         hz_sample_stop(0xFFFF);

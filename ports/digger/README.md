@@ -1,0 +1,152 @@
+# Digger for the Atari816
+
+Windmill Software's **Digger** (1983, IBM PC), from **Digger Remastered** by Andrew Jenner
+(as kept by Maksym Sobolev: <https://github.com/sobomax/digger>, commit `53bf330`,
+2026-03-26), on Horizon with the C SDK (cc816 and hgame). The game's own C files are
+upstream's, with the few changes listed in `PORTING-NOTES.md` (all of them in
+`upstream.patch`); `horizon/` is the new platform layer, the counterpart of upstream's SDL
+back end.
+
+Everything plays: the title screen and its parade, one or two players (alternating or
+simultaneous), the gauntlet modes, levels and their backgrounds, digging, emeralds and
+the eight-in-a-row bonus, gold bags wobbling, falling, breaking into gold, nobbins and
+hobbins, the bonus mode (the cherry, the flashing palette, the William Tell music),
+firing and recharging, lives, the score, the high scores with initials (kept in
+`DIGGER.SCO`), the music (Popcorn, the bonus music, the dirge) and every sound effect on
+POKEY, recording and playing back games (`.DRF`), pause, the speed keys.
+
+## Build and run
+
+```
+make            # DIGGER.PRG (hcc --code large) and DIGGER.DAT (the pictures)
+make run        # in the emulator, a scripted game (tests/play.script): build/run/shot*.png
+make test       # the checks below
+```
+
+The pictures are made from upstream's C files (`src/data/vgagrafx.c`, `alpha.c`,
+`title_gz.c`) by `tools/mkdata.py` into `DIGGER.DAT`. Copy **DIGGER.PRG and DIGGER.DAT**
+into the same folder on the card and start DIGGER.PRG from the Desktop (Programs, or
+Files). It needs **Horizon 0.28** or later (a program with more than one bank of code in
+one file). The high scores (`DIGGER.SCO`), `DIGGER.INI` and saved
+recordings go into the program's folder.
+
+Upstream's options work from the shell: `DIGGER.PRG /Q` (no sound), `/M` (no music), `/S:N`
+(a frame of N x 2 ms: the default is 40, 80 ms; `/S:0` as fast as it goes), `/L:file` (a
+level file), `/P:file` / `/E:file` (play a recording back, then go on / exit), `/R:file`
+(record), `/G[:secs]` (gauntlet), `/2` (two players at once), `/U` (unlimited lives),
+`/I:level`.
+
+## Keys
+
+| | Player 1 | Player 2 |
+| --- | --- | --- |
+| Move | arrow keys, or joystick 1 | W A Z S (up, left, down, right), or joystick 2 |
+| Fire | F1, or the trigger | Tab, or the trigger |
+
+Space or P: pause. N (on the title): one player / two players / simultaneous / gauntlet.
+F7 music on/off, F9 sound on/off, keypad + / - faster / slower, F8 save the last game's
+recording (named after the initials and the score), T: the cheat (no recording). F10 or
+Esc: back to the title; on the title, leave. Any other key on the title starts a game.
+Alt+Tab, Alt+Esc or F12 pause the game and show the Desktop (as every full-screen
+program); Alt+F4 closes it.
+
+## The screen
+
+Upstream's VGA graphics are 640 x 400 in 16 colours: the 320 x 200 game drawn at twice
+the resolution. Horizon's modes are 320 x 180 and 640 x 360 (shown 4 x 4 or 2 x 2 on the
+720-line HDMI picture), so 40 of the 400 rows do not fit. Chosen:
+
+- **640 x 360 in 16 colours** (`HG_640X360X4`): the VGA art at its full resolution, its
+  own 16-colour palettes (and the bonus mode's palette flashing, by palette writes), each
+  pixel exactly 2 x 2 on the monitor. Not the CGA set at 320 x 180: it has 4 colours.
+- **No squashing.** Dropping 40 rows evenly would distort a picture whose pixels were
+  already 1.2 times taller than wide on the original 4:3 monitor (on this square-pixel
+  screen the game is already a little flatter than on the PC).
+- **The score line stays, the playfield follows the digger.** The framebuffer has the
+  whole 640 x 400 picture (hgame's `hg_screen_fb`); a split in the display (`hg_split`)
+  keeps rows 0-27 (the score and lives line) fixed at the top, and below it shows 332 of
+  the playfield's 372 rows, scrolling smoothly (3 rows a sixtieth) to keep the digger in
+  the middle: the 10 rows of the maze are all reachable, 2 rows' worth (40 lines) are out
+  of sight at a time. With two diggers it follows the middle between them.
+- **The title screen** shows its top 360 rows for 6 seconds, then glides down to show the
+  bottom line (the Windmill Software copyright) for 3, and back up.
+
+The game draws into a buffer of its own; what it changed goes to the screen just after
+each vertical blank, so no sprite is seen half drawn.
+
+## Sound
+
+The original used the PC speaker: square waves from the PC's timer chip, one at a time,
+effects through timer 2 and the music through timer 0 (its loudness a pulse width).
+Here each timer is one of POKEY's two 16-bit voices (two channels joined, clocked at
+1.79 MHz; hgame's `hg_note`): a square wave like the speaker's at exactly the speaker's
+pitch. The music's loudness envelope is the voice's volume. As on the PC one of the two sounds
+at a time (upstream's speaker switching is kept: an effect silences the music while it
+plays). The level-end jingle's beating is played as its plain notes. (The emulator does not play POKEY: it logs the writes,
+`--log-sound`; the board plays them.)
+
+## Speed
+
+The game runs at the original's 12.5 frames a second (upstream's default frame time,
+80 ms; frames come 5, 5, 5, 5, 4 vertical blanks apart). Measured in the emulator (which
+models the board's timing within a few per cent):
+
+- the scripted game (`make test`): 792 game frames, 21 of them later than their time (the
+  level start, the deaths), 12 ms of CPU a frame of 80 on average;
+- upstream's recorded `thevoids.drf` played back at the game's pace (9 levels, 41,561
+  frames): 3,365 s against 3,325 s at exactly 80 ms a frame (1.2 % slower in all, level
+  drawing included); 1 % of the frames late, in short runs where many sprites overlap
+  (upstream's software sprites redraw every overlapping one: up to about 100 ms a frame
+  here, so for a few seconds the game runs up to a fifth slower than on a PC);
+- at full speed (`/S:0`) a frame takes 30-45 ms on average, level drawing included.
+
+## What differs from the original
+
+- The view scrolls (above): 40 of the 400 lines are out of sight at a time.
+- POKEY instead of the PC speaker (above): the same pitches; a cleaner square wave than
+  the speaker's cone.
+- Joysticks work (upstream's SDL version has none); Esc also leaves (upstream: F10).
+- Recordings hold about 9 hours of play (upstream: 36): a buffer is one 64 KB bank.
+- The redefine-keys option (`/K`, from the shell) is upstream's and was not tried; its
+  INI file holds HID usages, which are SDL's scancodes.
+
+## Tests
+
+`make test` (`HORIZON=DIR` for another Horizon tree):
+
+1. the scripted game, `tests/play.script`: title, a game, two emeralds, a shot, three
+   lives lost, game over, initials HZD, the title with the new high score, F8, Esc;
+   the console's frame statistics are expected;
+2. `tests/check.sh`: `DIGGER.SCO` has HZD 50; POKEY's 16-bit voices were set up and
+   played (the logged writes); the game's own recording (F8) plays back to the same
+   score; the seven screenshots equal `tests/ref/` pixel for pixel (`make refs` writes
+   them again after a change meant to show: look at them first);
+3. `tests/drf.sh`: seven of upstream's recorded games (`tests/drf/`, from upstream's
+   `tests/data`) played back at full speed; each must end with upstream's own result
+   (score, level, frame count: `tests/drf/*.out`, from upstream's CI). The game logic
+   looks at the screen's pixels, so this checks the drawing too.
+
+## Files
+
+| | |
+| --- | --- |
+| `src/` | upstream's game (GPL; see below), `src/data/` its pictures as C arrays (unchanged) |
+| `horizon/` | the platform layer: `hz_vid.c` + `hz_blit.s` (video), `hz_data.c` (DIGGER.DAT), `hz_timer.c` (frames, the view), `hz_snd.c` (sound), `hz_kbd.c` (keys, joysticks), `hz_main.c` (start, files) |
+| `tools/mkdata.py` | upstream's pictures to DIGGER.DAT |
+| `tests/` | the scripted game, the checks, upstream's recordings, the reference pictures |
+| `upstream.patch` | every change to upstream's files |
+| `PORTING-NOTES.md` | what the port needed, the SDK problems met, timings |
+| `COPYING` | the GNU GPL version 2 (upstream's `pkg/windows/LICENSE`) |
+
+## Licence
+
+Digger Remastered is Andrew Jenner's, who was granted the rights to the remake by
+Digger's author and licensed it under the **GNU GPL** (upstream `digger.txt`, "Is this
+legal?"); upstream's tree as a whole is "Public Domain, Beer-Ware, 2-clause BSD and GNU
+General Public License version 2" by file (upstream `README.md`), with the GPL version 2
+text as its licence file (`pkg/windows/LICENSE`, here `COPYING`). The files taken here
+are Andrew Jenner's (GPL) and Maksym Sobolev's `digger_types.h`, `*_obj.[ch]` (2-clause
+BSD, in their headers); the palettes in `horizon/hz_vid.c` come from upstream's
+`sdl_vid.c` (Beer-Ware, Maksym Sobolev). The port (`horizon/`, `tools/`, `tests/`) is
+under the GPL version 2 like the game it is part of. The original game is © 1983
+Windmill Software.

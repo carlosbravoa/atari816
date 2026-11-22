@@ -101,6 +101,8 @@ TESTS = [
                                "--file", "{run}/BEEP.WAV:/BEEP.WAV",
                                "--file", "{run}/BEEP16.WAV:/BEEP16.WAV"],
      ["gt_sound: 0 failed"], ["pokey", "lau", "wav"]),
+    ("view", ["gt_view.c"], ["--script", "gt_view.script", "--seconds", "6", "--log-sound"],
+     ["gt_view: 0 failed"], ["audctl"]),
     ("util", ["gt_util.c"], ["--seconds", "4", "--file", "{run}/TEST.HGI:/TEST.HGI"],
      ["gt_util: 0 failed"], []),
 ]
@@ -206,6 +208,10 @@ def run_tests(cc, horizon, only, update):
         if "pokey" in checks:
             n = len(re.findall(r"^sound \$DB0[0-7]", err, re.M))
             report(f"{cc}/{name}/pokey", n > 0, f"{n} POKEY writes logged")
+        if "audctl" in checks:
+            ok = re.search(r"^sound \$DB08 = \$(50|78)", err, re.M) is not None
+            report(f"{cc}/{name}/audctl", ok, "hg_note joined POKEY's channels (AUDCTL)"
+                   if ok else "no AUDCTL write logged")
         if "lau" in checks:
             n = len(re.findall(r"^lau ", err, re.M))
             report(f"{cc}/{name}/lau", n > 0, f"{n} Lau writes logged")

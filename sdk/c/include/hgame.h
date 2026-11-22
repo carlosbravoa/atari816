@@ -56,6 +56,13 @@
  * own memory (banks are taken for it), cleared to colour 0. The palette starts as the system
  * palette. -1 if refused (no window system, memory, another full-screen program). */
 int hg_screen(unsigned mode, const char *title);
+/* hg_screen with a framebuffer of another shape: stride bytes a row (a multiple of 16, a
+ * line's worth (640 / 320 bytes) to 4096; 0 = the line's; a power of two such as 512 or
+ * 1024 keeps every row inside one bank for drawing by the CPU) and rows rows (the
+ * screen's 360 / 180 to 1024; 0 = the screen's). For a game taller than the screen (a
+ * 320 x 200 one at 320 x 180 or 640 x 400 at 640 x 360): hg_scroll / hg_split choose
+ * what is shown. Not with HG_DOUBLE. */
+int hg_screen_fb(unsigned mode, const char *title, unsigned stride, unsigned rows);
 /* A game in a window on the desktop: w x h content, centred, with that title. Drawing goes
  * into the window; hardware sprites show while it has the focus and is not covered. */
 int hg_window(unsigned w, unsigned h, const char *title);
@@ -78,6 +85,14 @@ void hg_color(unsigned index, unsigned r, unsigned g, unsigned b);
 void hg_palette_black(void);
 /* raster table (full screen): count changes {line, entry, r, g, b}; 0 = off (hz_fs_raster) */
 int hg_raster(unsigned count, const hz_raster *changes);
+
+/* The view (full screen, one page, not with hg_map; REV $0B): the screen shows the
+ * framebuffer from pixel (x, y) (in 4 bpp x even); hg_split(line, x2, y2): from that
+ * screen line on (1 .. 359, or 179 in 320 x 180) from (x2, y2) instead: a fixed panel
+ * above a part of the framebuffer that scrolls (line 0: no split). Both views must stay
+ * inside the framebuffer; set at hg_end, in the vertical blank. */
+void hg_scroll(int x, int y);
+void hg_split(unsigned line, int x2, int y2);
 
 /* n consecutive 64 KB banks (for a buffer larger than a bank) -> the first, or 0 */
 unsigned hg_banks(unsigned n);
@@ -256,6 +271,9 @@ int hg_key_pressed(unsigned k);
 int hg_key_released(unsigned k);
 /* the next character typed (ASCII; HG_KEY_ arrows as hz_key_ascii gives them), 0 if none */
 unsigned hg_getchar(void);
+/* the next key pressed, in order (SDL_KEYDOWN's events): its HID usage in bits 0-7 and
+ * its character (as hg_getchar gives it, 0 for none) in bits 8-15; 0 if none (16 kept) */
+unsigned hg_key_next(void);
 #define HG_KEY_A      0x04      /* .. HG_KEY_A + 25 = Z */
 #define HG_KEY_1      0x1E      /* .. HG_KEY_1 + 8 = 9, then 0 */
 #define HG_KEY_0      0x27
@@ -312,6 +330,11 @@ void hg_tone(unsigned v, unsigned pitch, unsigned vol, unsigned ticks);
 void hg_sfx(unsigned v, unsigned pitch, int dpitch, unsigned vol, unsigned dvol,
             unsigned ticks, unsigned dist);
 unsigned hg_pitch(unsigned hz);         /* AUDF for a frequency (125-15980 Hz) */
+/* the two 16-bit voices: POKEY's channels joined in pairs, at 1.79 MHz: voice 0 is
+ * channels 1 + 2 (hg_tone's voices 0 and 1), voice 1 channels 3 + 4 (voices 2, 3). A pure
+ * tone at hz (14 Hz and up, the pitch exact: music, a PC speaker's tones: hz = 1193182 /
+ * the PIT divisor), volume 0-15 (0: silent), until changed or hg_sound_off */
+void hg_note(unsigned v, unsigned hz, unsigned vol);
 void hg_sound_off(void);                /* every POKEY voice and every sample off */
 
 /* Lau, the sample player (REV $0A and later): 8 voices of signed 8- or 16-bit samples

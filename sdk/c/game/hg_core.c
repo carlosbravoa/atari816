@@ -221,12 +221,39 @@ static unsigned fsflags;
 
 int hg_screen(unsigned mode, const char *title)
 {
+    return hg_screen_fb(mode, title, 0, 0);
+}
+
+int hg_screen_fb(unsigned mode, const char *title, unsigned fbstride, unsigned fbrows)
+{
     static char line[48];
     unsigned m = mode & 0xFF, stride, rows, nb, b, i;
 
     if (m > 2 || (mode & ~0x3FFu)) {
         hg__fail("hg_screen", "mode: HG_320X180, HG_640X360 or HG_640X360X4 (| HG_DOUBLE)");
         return -1;
+    }
+    if ((fbstride || fbrows) && (mode & HG_DOUBLE)) {
+        hg__fail("hg_screen_fb", "a framebuffer of its own size is one page (no HG_DOUBLE)");
+        return -1;
+    }
+    hg_w = m == FS_320X8 ? 320 : 640;
+    hg_h = m == FS_320X8 ? 180 : 360;
+    stride = m == FS_640X8 ? 640 : 320;
+    rows = (mode & HG_DOUBLE) ? hg_h * 2 : hg_h;
+    if (fbstride || fbrows) {
+        if (fbstride && (fbstride < stride || fbstride > 4096 || (fbstride & 15))) {
+            hg__fail("hg_screen_fb", "stride: a multiple of 16, a line (640 / 320) to 4096");
+            return -1;
+        }
+        if (fbrows && (fbrows < hg_h || fbrows > 1024)) {
+            hg__fail("hg_screen_fb", "rows: the screen's (360 / 180) to 1024");
+            return -1;
+        }
+        if (fbstride)
+            stride = fbstride;
+        if (fbrows)
+            rows = fbrows;
     }
     if (ws_and_window(280, 44, 180, 150, title, 0))
         return -1;
@@ -236,10 +263,6 @@ int hg_screen(unsigned mode, const char *title)
     hg__mode = (unsigned char)m;
     hg__double = (unsigned char)((mode & HG_DOUBLE) != 0);
     fsflags = (mode & HG_POINTER) ? FS_PTR : 0;
-    hg_w = m == FS_320X8 ? 320 : 640;
-    hg_h = m == FS_320X8 ? 180 : 360;
-    stride = m == FS_640X8 ? 640 : 320;
-    rows = hg__double ? hg_h * 2 : hg_h;
     nb = (unsigned)(((unsigned long)stride * rows + 65535UL) >> 16);
     b = hg_banks(nb);
     if (!b) {
@@ -279,8 +302,8 @@ int hg_screen(unsigned mode, const char *title)
     {
         unsigned char d = hg__double;
         hg__double = 0;                         /* (clip to the whole framebuffer) */
-        hg_origin(0, 0);
-        hg_fill(0, 0, hg_w, rows, 0);
+        hg_origin(0, 0);                        /* (every byte of every row) */
+        hg_fill(0, 0, m == FS_640X4 ? stride * 2 : stride, rows, 0);
         hg__double = d;
     }
     hg_flush(1);
@@ -420,6 +443,75 @@ int hg_raster(unsigned count, const hz_raster *changes)
         return -1;
     }
     return hz_fs_raster(count, changes);
+}
+
+/* ---------------------------------------------------------------- the view */
+
+static int view_ok(const char *fn)
+{
+    if (hg__kind != HG__FULL || hg__double || hg__scroll) {
+        hg__fail(fn, "full screen, one page, no hg_map");
+        return 0;
+    }
+    return 1;
+}
+
+/* does a set that starts at (x, y) and shows n rows fit the framebuffer? */
+static int view_fits(int x, int y, unsigned n)
+{
+    unsigned line = hg__mode == FS_640X8 ? 640 : 320;     /* bytes a line shows */
+    unsigned bx = hg__mode == FS_640X4 ? (unsigned)x >> 1 : (unsigned)x;
+    return x >= 0 && y >= 0 && (unsigned long)(unsigned)y + n <= hg_fb_rows &&
+           bx + line <= hg_fb_stride;
+}
+
+void hg_scroll(int x, int y)
+{
+    unsigned n;
+    if (!view_ok("hg_scroll"))
+        return;
+    n = (hg__scr.ctrl & FSC_SPLIT) ? hg__scr.split : 360;
+    if (hg__mode == FS_320X8)
+        n /= 2;
+    if (!view_fits(x, y, n)) {
+        hg__fail("hg_scroll", "the view must stay inside the framebuffer");
+        return;
+    }
+    hg__scr.x = (unsigned)x;
+    hg__scr.y = (unsigned)y;
+    hg__scr_dirty = 1;
+}
+
+void hg_split(unsigned line, int x2, int y2)
+{
+    unsigned n;
+    if (!view_ok("hg_split"))
+        return;
+    if (line == 0) {
+        hg__scr.ctrl &= (unsigned char)~FSC_SPLIT;
+        hg__scr.split = 0;
+        hg__scr_dirty = 1;
+        return;
+    }
+    if (hg__mode == FS_320X8)
+        line *= 2;                              /* (Marga counts 360 lines) */
+    if (line > 359) {
+        hg__fail("hg_split", "line: 1 to the screen's last");
+        return;
+    }
+    n = 360 - line;
+    if (hg__mode == FS_320X8)
+        n /= 2;
+    if (!view_fits(x2, y2, n) ||
+        !view_fits((int)hg__scr.x, (int)hg__scr.y, hg__mode == FS_320X8 ? line / 2 : line)) {
+        hg__fail("hg_split", "both views must stay inside the framebuffer");
+        return;
+    }
+    hg__scr.split = line;
+    hg__scr.x2 = (unsigned)x2;
+    hg__scr.y2 = (unsigned)y2;
+    hg__scr.ctrl |= FSC_SPLIT;
+    hg__scr_dirty = 1;
 }
 
 /* ---------------------------------------------------------------- the frame */
@@ -562,6 +654,8 @@ unsigned long hg_ms(void)
 
 static unsigned char kdown[32], kpress[32], krel[32];
 static unsigned char chq[16], chn;
+static unsigned kq[16];
+static unsigned char kqn;
 static unsigned mclick, mlast;
 static int menupick = -1;
 unsigned hg_mods;
@@ -629,10 +723,12 @@ static void events(void)
                 if (!(kdown[k >> 3] & (1 << (k & 7))))
                     kpress[k >> 3] |= (unsigned char)(1 << (k & 7));
                 kdown[k >> 3] |= (unsigned char)(1 << (k & 7));
-                if (chn < sizeof chq) {
+                {
                     unsigned c = hz_key_ascii(ev.a, ev.b);
-                    if (c)
+                    if (c && chn < sizeof chq)
                         chq[chn++] = (unsigned char)c;
+                    if (k && kqn < sizeof kq / sizeof kq[0])
+                        kq[kqn++] = k | (c & 0xFF) << 8;
                 }
             } else {
                 kdown[k >> 3] &= (unsigned char)~(1 << (k & 7));
@@ -703,6 +799,17 @@ unsigned hg_getchar(void)
     --chn;
     memmove(chq, chq + 1, chn);
     return c;
+}
+
+unsigned hg_key_next(void)
+{
+    unsigned k;
+    if (!kqn)
+        return 0;
+    k = kq[0];
+    --kqn;
+    memmove(kq, kq + 1, kqn * sizeof kq[0]);
+    return k;
 }
 
 unsigned hg_mouse_clicked(void)

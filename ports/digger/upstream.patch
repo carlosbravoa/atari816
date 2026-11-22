@@ -1,0 +1,333 @@
+--- upstream/drawing.c
++++ src/drawing.c
+@@ -21,8 +21,19 @@
+ static int16_t field1[MSIZE],field2[MSIZE];
+ int16_t field[MSIZE];
+ 
++#if defined(_HORIZON)
++/* (Horizon port: the sprites' save-unders, 8.8 KB, are in far memory, as huge data:
++   the main bank is full) */
++#include "hz_bufs.h"
++#define monbufs (hz_savebufs->mon)
++#define bagbufs (hz_savebufs->bag)
++#define bonusbufs (hz_savebufs->bonus)
++#define diggerbufs (hz_savebufs->dig)
++#define firebufs (hz_savebufs->fire)
++#else
+ static uint8_t monbufs[MONSTERS][480],bagbufs[BAGS][480],bonusbufs[BONUSES][480],
+       diggerbufs[DIGGERS][480],firebufs[FIREBALLS][128];
++#endif
+ 
+ static uint16_t bitmasks[12]={0xfffe,0xfffd,0xfffb,0xfff7,0xffef,0xffdf,0xffbf,0xff7f,
+                     0xfeff,0xfdff,0xfbff,0xf7ff};
+--- upstream/ini.c
++++ src/ini.c
+@@ -156,7 +156,7 @@
+ int32_t GetINIInt(const char *section,const char*key,int32_t def,const char*filename)
+ {
+   char buf[80];
+-  sprintf(buf,"%i",def);
++  sprintf(buf,"%li",(long)def);  /* (Horizon port: int is 16 bits) */
+   GetINIString(section,key,buf,buf,80,filename);
+   return atol(buf);
+ }
+@@ -165,7 +165,7 @@
+                             char *filename)
+ {
+   char buf[80];
+-  sprintf(buf,"%i",value);
++  sprintf(buf,"%li",(long)value);  /* (Horizon port: int is 16 bits) */
+   WriteINIString(section,key,buf,filename);
+ }
+ 
+--- upstream/input.c
++++ src/input.c
+@@ -13,6 +13,8 @@
+ #include "sdl_kbd.h" 
+ #elif defined(_VGL)
+ #include "fbsd_kbd.h"
++#elif defined(_HORIZON)
++#include "hz_kbd.h"
+ #endif
+ 
+ /* global variables first */
+--- upstream/main.c
++++ src/main.c
+@@ -72,8 +72,9 @@
+ game_dbg_info_emit(void)
+ {
+ 
+-  printf("score=%d level=%d frames=%u\n", gettscore(0), levno(),
+-   (unsigned int)getframe());
++  /* (Horizon port: int is 16 bits, the score and the frame count are 32) */
++  printf("score=%ld level=%d frames=%lu\n", (long)gettscore(0), levno(),
++   (unsigned long)getframe());
+ }
+ 
+ void game(void)
+@@ -704,7 +705,11 @@
+       }
+       if (argch == 'E') {
+         finish();
++#if defined(_HORIZON)
++	if (1) {	/* (no environment here: always) */
++#else
+ 	if (getenv("DIGGER_CI_RUN") != NULL) {
++#endif
+           game_dbg_info_emit();
+ 	  exit(0);
+ 	}
+@@ -728,7 +733,13 @@
+         gs=true;
+       }
+       if (argch == 'I')
++#if defined(_HORIZON)
++        /* (Horizon port: sscanf brings the whole of scanf, floating point too, into the
++           main bank: 7.6 KB; strtol reads %hi's numbers the same) */
++        dgstate.startlev=(int16_t)strtol(word+i,NULL,0);
++#else
+         sscanf(word+i,"%hi",&dgstate.startlev);
++#endif
+       if (argch == 'U')
+         dgstate.unlimlives=true;
+       if (argch == '?' || argch == 'H' || argch == -1) {
+@@ -878,7 +889,7 @@
+   int i,j,p;
+   bool cgaflag;
+ 
+-#if defined(UNIX) || defined(DIGGER_DEBUG)
++#if defined(UNIX) || defined(DIGGER_DEBUG) || defined(_HORIZON)
+   digger_log = stderr;
+ #else
+   digger_log = fopen("DIGGER.log", "w+");
+@@ -923,7 +934,7 @@
+   sound_rate=(int)GetINIInt(INI_SOUND_SETTINGS,"Rate",44100,ININAME);
+   sound_length=(int)GetINIInt(INI_SOUND_SETTINGS,"BufferSize",DEFAULT_BUFFER,ININAME);
+ 
+-#if !defined(UNIX) && !defined(_SDL)
++#if !defined(UNIX) && !defined(_SDL) && !defined(_HORIZON)
+   if (sound_device==1) {
+ #else
+   if (!quiet) {
+--- upstream/record.c
++++ src/record.c
+@@ -16,7 +16,11 @@
+ #include "sprite.h"
+ #include "game.h"
+ 
+-static char huge *recb,huge *plb,huge *plp;
++/* (Horizon port: one declarator each: huge is __far here, a qualifier that may not
++   stand before a declarator's '*' in C as Borland's huge could) */
++static char huge *recb;
++static char huge *plb;
++static char huge *plp;
+ 
+ bool playing=false,savedrf=false,gotname=false,gotgame=false,drfvalid=true,
+      kludge=false;
+@@ -375,16 +379,17 @@
+           init[j]='_';
+       }
+       init[3]=0;
++      /* (Horizon port: %li, scoret is 32 bits and int 16) */
+       if (scoret<100000l)
+-        sprintf(nambuf,"%s%i",init,scoret);
++        sprintf(nambuf,"%s%li",init,(long)scoret);
+       else
+         if (init[2]=='_')
+-          sprintf(nambuf,"%c%c%i",init[0],init[1],scoret);
++          sprintf(nambuf,"%c%c%li",init[0],init[1],(long)scoret);
+         else
+           if (init[0]=='_')
+-            sprintf(nambuf,"%c%c%i",init[1],init[2],scoret);
++            sprintf(nambuf,"%c%c%li",init[1],init[2],(long)scoret);
+           else
+-            sprintf(nambuf,"%c%c%i",init[0],init[2],scoret);
++            sprintf(nambuf,"%c%c%li",init[0],init[2],(long)scoret);
+       strcat(nambuf,".drf");
+       recf=fopen(nambuf,"wt");
+     }
+--- upstream/sound.c
++++ src/sound.c
+@@ -14,6 +14,10 @@
+ #include "sdl_snd.h"
+ #endif
+ 
++#if defined _HORIZON
++extern bool wave_device_available;
++#endif
++
+ #if defined _VGL && !defined _SDL_SOUND
+ #include "fbsd_snd.h"
+ #endif
+@@ -156,11 +160,11 @@
+   nljnoteduration=20;
+   soundlevdoneflag=soundpausedflag=true;
+   while (soundlevdoneflag && !escape) {
+-#if defined _SDL || defined _VGL
++#if defined _SDL || defined _VGL || defined _HORIZON
+ 	if (!wave_device_available)
+ 		soundlevdoneflag=false;
+ #endif
+-#if defined _SDL || defined _SDL_SOUND
++#if defined _SDL || defined _SDL_SOUND || defined _HORIZON
+     gethrt(true, 1);	/* Let some CPU time go away */
+ #endif
+     if (timerclock==timer)
+@@ -665,7 +669,7 @@
+   musicplaying=true;
+   if (tune==2) {
+     soundddieoff();
+-#if defined _SDL || defined _VGL
++#if defined _SDL || defined _VGL || defined _HORIZON
+     if (!wave_device_available)
+       return;
+ #endif
+@@ -811,7 +815,7 @@
+ void soundpause(void)
+ {
+   soundpausedflag=true;
+-#if defined _SDL || defined _SDL_SOUND
++#if defined _SDL || defined _SDL_SOUND || defined _HORIZON
+   pausesounddevice(true);
+ #endif
+ }
+@@ -819,7 +823,7 @@
+ void soundpauseoff(void)
+ {
+   soundpausedflag=false;
+-#if defined _SDL || defined _SDL_SOUND
++#if defined _SDL || defined _SDL_SOUND || defined _HORIZON
+   pausesounddevice(false);
+ #endif
+ }
+--- upstream/sprite.c
++++ src/sprite.c
+@@ -15,7 +15,7 @@
+ static bool sprrecf[SPRITES+1];
+ static bool sprenf[SPRITES];
+ static int16_t sprch[SPRITES+1];
+-static uint8_t *sprmov[SPRITES];
++static uint8_t huge *sprmov[SPRITES];
+ static int16_t sprx[SPRITES+1];
+ static int16_t spry[SPRITES+1];
+ static int16_t sprwid[SPRITES+1];
+@@ -66,7 +66,7 @@
+   retrflag=f;
+ }
+ 
+-void createspr(int16_t n,int16_t ch,uint8_t *mov,int16_t wid,int16_t hei,int16_t bwid,
++void createspr(int16_t n,int16_t ch,uint8_t huge *mov,int16_t wid,int16_t hei,int16_t bwid,
+                int16_t bhei)
+ {
+   sprnch[n]=sprch[n]=ch;
+--- upstream/def.h
++++ src/def.h
+@@ -52,8 +52,13 @@
+ #define MHEIGHT 10
+ #define MSIZE MWIDTH*MHEIGHT
+ 
++#if defined(_HORIZON)
++/* (Horizon port: a buffer is one 64 KB bank, far memory; about 9 hours of play) */
++#define MAX_REC_BUFFER 65536l
++#else
+ #define MAX_REC_BUFFER 262144l
+            /* I reckon this is enough for about 36 hours of continuous play. */
++#endif
+ 
+ #define INI_GAME_SETTINGS "Game"
+ #define INI_GRAPHICS_SETTINGS "Graphics"
+@@ -67,9 +72,18 @@
+ 
+ #define near
+ #define far
++#if defined(_HORIZON)
++/* (Horizon port: the recordings' buffers are in far memory: a bank each) */
++#define huge __far
++void __far *hz_farmalloc(unsigned long n);
++void hz_farfree(void __far *p);
++#define farmalloc hz_farmalloc
++#define farfree hz_farfree
++#else
+ #define huge
+ #define farmalloc malloc
+ #define farfree free
++#endif
+ #define farcoreleft coreleft
+ 
+ #if defined(__FreeBSD__) && defined _VGL
+@@ -93,6 +107,13 @@
+ #include "fbsd_sup.h"
+ #endif
+ 
++#if defined(_HORIZON)
++/* Horizon (the Atari816): the platform layer is in ../horizon */
++#define stricmp(x, y) strcasecmp(x, y)
++#define strnicmp(x, y, z) strncasecmp(x, y, z)
++void strupr(char *);
++#endif
++
+ #ifdef UNIX
+ #define stricmp(x, y) strcasecmp(x, y)
+ #define strnicmp(x, y, z) strncasecmp(x, y, z)
+--- upstream/draw_api.h
++++ src/draw_api.h
+@@ -1,3 +1,4 @@
++#include "def.h"  /* (Horizon port: huge, below) */
+ #define MAX_W 320
+ #define MAX_H 200
+ #define CHR_W 12
+@@ -8,8 +9,8 @@
+   void (*gclear)(void);
+   void (*gpal)(int16_t pal);
+   void (*ginten)(int16_t inten);
+-  void (*gputi)(int16_t x,int16_t y,uint8_t *p,int16_t w,int16_t h);
+-  void (*ggeti)(int16_t x,int16_t y,uint8_t *p,int16_t w,int16_t h);
++  void (*gputi)(int16_t x,int16_t y,uint8_t huge *p,int16_t w,int16_t h);
++  void (*ggeti)(int16_t x,int16_t y,uint8_t huge *p,int16_t w,int16_t h);
+   void (*gputim)(int16_t x,int16_t y,int16_t ch,int16_t w,int16_t h);
+   int16_t (*ggetpix)(int16_t x,int16_t y);
+   void (*gtitle)(void);
+--- upstream/hardware.h
++++ src/hardware.h
+@@ -24,8 +24,8 @@
+ void cgaclear(void);
+ void cgapal(int16_t pal);
+ void cgainten(int16_t inten);
+-void cgaputi(int16_t x,int16_t y,uint8_t *p,int16_t w,int16_t h);
+-void cgageti(int16_t x,int16_t y,uint8_t *p,int16_t w,int16_t h);
++void cgaputi(int16_t x,int16_t y,uint8_t huge *p,int16_t w,int16_t h);
++void cgageti(int16_t x,int16_t y,uint8_t huge *p,int16_t w,int16_t h);
+ void cgaputim(int16_t x,int16_t y,int16_t ch,int16_t w,int16_t h);
+ int16_t cgagetpix(int16_t x,int16_t y);
+ void cgawrite(int16_t x,int16_t y,int16_t ch,int16_t c);
+@@ -35,8 +35,8 @@
+ void vgaclear(void);
+ void vgapal(int16_t pal);
+ void vgainten(int16_t inten);
+-void vgaputi(int16_t x,int16_t y,uint8_t *p,int16_t w,int16_t h);
+-void vgageti(int16_t x,int16_t y,uint8_t *p,int16_t w,int16_t h);
++void vgaputi(int16_t x,int16_t y,uint8_t huge *p,int16_t w,int16_t h);
++void vgageti(int16_t x,int16_t y,uint8_t huge *p,int16_t w,int16_t h);
+ void vgaputim(int16_t x,int16_t y,int16_t ch,int16_t w,int16_t h);
+ int16_t vgagetpix(int16_t x,int16_t y);
+ void vgawrite(int16_t x,int16_t y,int16_t ch,int16_t c);
+--- upstream/sprite.h
++++ src/sprite.h
+@@ -4,7 +4,7 @@
+ void setretr(bool f);
+ void movedrawspr(int16_t n,int16_t x,int16_t y);
+ void erasespr(int16_t n);
+-void createspr(int16_t n,int16_t ch,uint8_t *mov,int16_t wid,int16_t hei,int16_t bwid,
++void createspr(int16_t n,int16_t ch,uint8_t huge *mov,int16_t wid,int16_t hei,int16_t bwid,
+                int16_t bhei);
+ void initspr(int16_t n,int16_t ch,int16_t wid,int16_t hei,int16_t bwid,int16_t bhei);
+ void drawspr(int16_t n,int16_t x,int16_t y);
+@@ -17,7 +17,7 @@
+ extern const struct digger_draw_api *ddap;
+ #endif
+ 
+-#if defined(_SDL) || defined(_VGL)
++#if defined(_SDL) || defined(_VGL) || defined(_HORIZON)
+ extern void doscreenupdate(void);
+ #endif
+ 

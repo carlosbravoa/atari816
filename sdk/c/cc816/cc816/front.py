@@ -238,7 +238,26 @@ class Front:
             self.unsup('_BitInt', node)
         self.unsup(f'the type {type(node).__name__}', node)
 
+    def _tag_seen(self, node):
+        """the type a definition node already gave: `struct s {...} a, b;` shares one
+        node among its declarators, which must not define it twice"""
+        memo = self.__dict__.setdefault('_tag_nodes', {})
+        hit = memo.get(id(node))
+        return hit[1] if hit is not None and hit[0] is node else None
+
+    def _tag_keep(self, node, t):
+        self.__dict__.setdefault('_tag_nodes', {})[id(node)] = (node, t)
+        return t
+
     def struct_type(self, node):
+        if node.decls is not None:
+            seen = self._tag_seen(node)
+            if seen is not None:
+                return seen
+            return self._tag_keep(node, self._struct_type(node))
+        return self._struct_type(node)
+
+    def _struct_type(self, node):
         union = isinstance(node, c_ast.Union)
         st = None
         if node.name:
@@ -357,6 +376,14 @@ class Front:
         return t, None
 
     def enum_type(self, node):
+        if node.values:
+            seen = self._tag_seen(node)
+            if seen is not None:
+                return seen
+            return self._tag_keep(node, self._enum_type(node))
+        return self._enum_type(node)
+
+    def _enum_type(self, node):
         if node.values:
             if node.name and ('enum ' + node.name) in self.tags[-1]:
                 self.err(f"redefinition of 'enum {node.name}'", node)

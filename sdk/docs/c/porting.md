@@ -165,6 +165,31 @@ __CC816_LARGE__` tells the two models apart in C and in inline assembly.
 | one object of 64 KB or more | a bank of its own (`hz_far_alloc`) |
 | one function of 64 KB or more | split it (with `--code large` a function must fit in one bank) |
 
+## Lessons from a real port (Digger)
+
+`ports/digger` is Digger Remastered (6,600 lines of PC C, SDL) on Horizon; its
+`PORTING-NOTES.md` lists every change and every SDK problem met. In short:
+
+- **Test against the PC first.** If the game can replay recorded input (Digger's `.DRF`
+  files), build it on a PC, keep its results, and compare them with the port's replays in
+  the emulator: the strongest check of the compiler and of 16-bit `int` there is.
+- **Format strings are where 16-bit `int` bites first**: `printf("%d", an_int32_t)`.
+  Build with `-Wall` and fix every `-Wformat` (cast to `long`, `%ld`).
+- **With `--code large` the main bank is the limit**, not the code: the libraries stay
+  there (the C library with printf and floating point about 30 KB, hgame about 16 KB with
+  its buffers), with the constants, data and bss. Move big buffers to far memory
+  (`__far`; DOS's `far` / `huge` keywords map to it naturally), and avoid `sscanf` in a
+  program that uses any `double` (it brings float scanning: 7.6 KB).
+- **Each `fopen` takes 1 KB of heap**; with `--code large` the heap is what `--heap N`
+  keeps (default 4096): smaller, and `fopen` fails with ENOMEM.
+- **A 320 x 200 or 640 x 400 game**: `hg_screen_fb` with the taller framebuffer and
+  `hg_split` (a fixed score line, the rest following the player); do not squash.
+- **A game that draws by the CPU into the framebuffer** flickers when its drawing takes
+  milliseconds: draw into a buffer of your own and copy the changed rectangles just after
+  `hg_frame()` (Digger's `horizon/hz_vid.c`).
+- **The PC speaker** maps to `hg_note(v, 1193182 / divisor, vol)`; `SDL_KEYDOWN` to
+  `hg_key_next()` (SDL's scancodes are HID usages: key tables port as they are).
+
 ## A ported program, step by step
 
 The `wc` example (`sdk/c/examples/wc`) is a small file tool as it would be written for a
