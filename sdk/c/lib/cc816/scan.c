@@ -1,9 +1,11 @@
 /* scan.c - scanf's reading for cc816 (scanf.c and sscanf.c call it).
  *
  * %d %i %u %o %x %X %p %c %s %[set] %[^set] %n %%; the sizes hh h l (j: long, z t: int);
- * * (no assignment) and widths. White space in the format skips any white space. No
- * floating point (cc816 has none). The result: the number of assignments, or EOF when
- * the input ended before the first conversion.
+ * * (no assignment) and widths. White space in the format skips any white space.
+ * %f %F %e %E %g %G %a %A (float *, and with l or L double * and long double *: the same
+ * 32-bit format) go to __hz_scan_float (scanfp.c), which a program that uses floating
+ * point has installed (rt/cc816/fp_hooks.s); without it they fail. The result: the number
+ * of assignments, or EOF when the input ended before the first conversion.
  */
 #include <stdio.h>
 #include <stdarg.h>
@@ -11,6 +13,11 @@
 
 typedef int (*hz_getfn)(void *ctx);
 typedef void (*hz_ungetfn)(int c, void *ctx);
+
+/* the float conversion: (get, unget, ctx, width, where the float's bits go, the count of
+ * characters read) -> 1, or 0 (no number there) */
+int (*__hz_scan_float)(hz_getfn get, hz_ungetfn unget, void *ctx, unsigned width,
+                       unsigned long *bits, unsigned *nread);
 
 static int digit(int c, unsigned base)
 {
@@ -74,7 +81,7 @@ int __hz_vscan(hz_getfn get, hz_ungetfn unget, void *ctx, const char *fmt, va_li
         for (;;) {
             if (*fmt == 'h')
                 size = size == 2 ? 1 : 2;
-            else if (*fmt == 'l' || *fmt == 'j')
+            else if (*fmt == 'l' || *fmt == 'j' || *fmt == 'L')
                 size = 4;
             else if (*fmt != 'z' && *fmt != 't')
                 break;
@@ -173,6 +180,17 @@ int __hz_vscan(hz_getfn get, hz_ungetfn unget, void *ctx, const char *fmt, va_li
                 return assigned;
             if (out) {
                 *out = 0;
+                ++assigned;
+            }
+            continue;
+        }
+        case 'f': case 'F': case 'e': case 'E': case 'g': case 'G': case 'a': case 'A': {
+            unsigned long bits;
+            if (!__hz_scan_float ||
+                !__hz_scan_float(get, unget, ctx, width ? width : 0xFFFF, &bits, &nread))
+                return assigned;
+            if (!skip) {
+                *va_arg(ap, unsigned long *) = bits;
                 ++assigned;
             }
             continue;

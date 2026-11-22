@@ -15,7 +15,8 @@ SCR = 48       # bytes of scratch registers
 # 32-bit ops whose code reads each word of an operand before it writes that word of the
 # result (two-word ripple: add, sub, logic; helpers through __h0/__h1; shifts)
 SAME_OK = {'add', 'sub', 'and', 'or', 'xor', 'mul', 'udiv', 'sdiv', 'umod', 'smod', 'shl',
-           'ushr', 'sshr', 'neg', 'com'}
+           'ushr', 'sshr', 'neg', 'com', 'fadd', 'fsub', 'fmul', 'fdiv', 'ltof', 'ultof',
+           'ftol', 'ftoul'}
 CS = 48        # bytes of callee-saved registers
 
 

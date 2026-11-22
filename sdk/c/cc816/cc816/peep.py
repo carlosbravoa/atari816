@@ -492,7 +492,9 @@ def _rg_all(o):
     for mm in re.finditer(r'__rg\+(\d+)', o or ''):
         k = int(mm.group(1))
         r.append(k - (k & 1))
-        if o.startswith('['):
+        if o.startswith('[') or o.startswith('#'):
+            # [__rg+k],y reads a 24-bit pointer; #__rg+k is the address of a 32-bit float
+            # given to a helper in X, Y or A (gen.py's ...i and ...x entries): both words
             r.append(k - (k & 1) + 2)
     return r
 

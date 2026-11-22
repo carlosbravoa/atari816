@@ -19,11 +19,19 @@ same type, no structure layout in the checksums.
     ptr       ++/-- of every width through pointers, pointer differences and compares,
               ?: with side effects, comma, recursion, big locals, static locals
     globals   initialised globals of every type, arrays of structures with pointers
+    float     (not in "all": --features basic,float) float and double (dbl: double on the
+              target, float in the host build: cc816's double is a float) arithmetic,
+              compares, conversions both ways (guarded: no out-of-range conversion),
+              ++/--, compound assignments, float arrays, structures, globals with
+              initialisers, pointers, parameters and results, variadic doubles,
+              sprintf %f %e %g; checked bit for bit (NaNs as one) against gcc's SSE
+              single precision
 """
 from genfuzz import TYPES, OPS, CMPS, Gen
 
 FEATURES = ['basic', 'struct', 'bitfield', 'fptr', 'vararg', 'far', 'switch', 'spill', 'ptr',
             'globals']
+EXTRA_FEATURES = ['float']          # chosen by name only (all keeps its old programs)
 AVOID_KNOWN = False     # True: leave out the shapes of the compiler bugs in regress/ (while they are open)
 LOWOPS = ['add', 'sub', 'mul', 'and', 'or', 'xor']      # low bits independent of the width
 CSYM = {'add': '+', 'sub': '-', 'mul': '*', 'and': '&', 'or': '|', 'xor': '^'}
@@ -1071,7 +1079,9 @@ class FGen(Gen):
         F = []
         extra = [f for f in feats if f != 'basic']
         pick = []
-        if extra:
+        if extra == ['float']:
+            pick = ['float'] * r.randint(2, 3)
+        elif extra:
             pick = r.sample(extra, min(len(extra), r.randint(2, 4)))
         nb = (r.randint(1, 2) if extra else r.randint(3, 6)) if 'basic' in feats else 0
         idx = 0
@@ -1084,6 +1094,207 @@ class FGen(Gen):
                 F.append(getattr(self, 'feat_' + f)(idx))
             idx += 1
         return '\n'.join(G + self.G), F, pick
+
+
+# ---------------------------------------------------------------------- float
+FCMPS = ['<', '<=', '>', '>=', '==', '!=']
+
+
+def flit(v):
+    t = f'{v:.9g}'
+    if not any(c in t for c in '.en'):
+        t += '.0'
+    return t + 'f'
+
+
+def fconst(r):
+    """a float constant (f suffix: single precision on the host too)"""
+    k = r.random()
+    if k < 0.3:
+        return r.choice(['0.0f', '-0.0f', '1.0f', '-1.0f', '0.5f', '2.0f', '3.0f', '10.0f',
+                         '0.1f', '100.0f', '1e10f', '-1e-10f', '1.5e-40f', '3.4e38f',
+                         '0x1.8p-3f', '0x1p-126f', '255.0f', '65535.0f', '-32768.0f', '7.0f'])
+    if k < 0.6:
+        return flit(r.randint(-1000, 1000) / r.choice([1, 2, 4, 8, 10, 3]))
+    if k < 0.9:
+        return flit(r.uniform(-1, 1) * 10 ** r.uniform(-6, 6))
+    import struct
+    b = r.getrandbits(32) & 0xBFFFFFFF          # no inf/NaN patterns from here
+    return flit(struct.unpack('<f', struct.pack('<I', b))[0])
+
+
+class FloatMixin:
+    def float_helpers(self):
+        if getattr(self, 'fhelpers', False):
+            return
+        self.fhelpers = True
+        G = self.G
+        G.append('static uint32_t FZ_fb(float x) { union { float f; uint32_t u; } v; v.f = x; '
+                 'if ((v.u & 0x7FFFFFFFu) > 0x7F800000u) v.u = 0x7FC00000u; return v.u; }')
+        G.append('static int32_t FZ_i32(float x) { return x > -2147483520.0f && x < 2147483520.0f ? (int32_t)x : (int32_t)12345; }')
+        G.append('static uint32_t FZ_u32(float x) { return x > -1.0f && x < 4294967040.0f ? (uint32_t)x : (uint32_t)77; }')
+        G.append('static int16_t FZ_i16(float x) { return x > -32769.0f && x < 32768.0f ? (int16_t)x : (int16_t)99; }')
+        G.append('static uint16_t FZ_u16(float x) { return x > -1.0f && x < 65536.0f ? (uint16_t)x : (uint16_t)98; }')
+        G.append('static int8_t FZ_i8(float x) { return x > -129.0f && x < 128.0f ? (int8_t)x : (int8_t)97; }')
+        G.append('static uint8_t FZ_u8(float x) { return x > -1.0f && x < 256.0f ? (uint8_t)x : (uint8_t)96; }')
+        G.append('static float FZ_cn(float x) { union { float f; uint32_t u; } v; v.f = x; '
+                 'if ((v.u & 0x7FFFFFFFu) > 0x7F800000u) v.u = 0x7FC00000u; return v.f; }')
+        G.append('#define FZ_OK16(x) ((x) > -32769.0f && (x) < 32768.0f)')
+        G.append('#define FZ_OK32(x) ((x) > -2147483520.0f && (x) < 2147483520.0f)')
+        G.append('static float FZ_vsum(int16_t n, ...) { va_list ap; float s = 0.0f; va_start(ap, n); '
+                 'while (n-- > 0) s = s * 0.5f + (float)va_arg(ap, double); va_end(ap); return s; }')
+
+    def fexpr(self, fv, iv, d):
+        """a float expression over float variables fv and integer variables iv (no side
+        effects)"""
+        r = self.r
+        if d <= 0 or r.random() < 0.15:
+            k = r.random()
+            if k < 0.45 and fv:
+                return r.choice(fv)
+            if k < 0.7 or not iv:
+                return fconst(r)
+            n, t = r.choice(iv)
+            return f'(float)({tn(t)}){n}'
+        k = r.random()
+        if k < 0.5:
+            op = r.choice('+-*/' if r.random() < 0.8 else '**+-')
+            return f'({self.fexpr(fv, iv, d - 1)} {op} {self.fexpr(fv, iv, d - 1)})'
+        if k < 0.58:
+            return f'(- {self.fexpr(fv, iv, d - 1)})'
+        if k < 0.68:
+            return f'({self.fcond(fv, iv, d - 1)} ? {self.fexpr(fv, iv, d - 1)} : {self.fexpr(fv, iv, d - 1)})'
+        if k < 0.78 and iv:
+            t = r.choice(list(TYPES))
+            return f'(float){self.expr(t, iv, d - 1)}'
+        if k < 0.85:
+            return f'(dbl)({self.fexpr(fv, iv, d - 1)})'
+        if k < 0.92 and hasattr(self, 'fcalls'):
+            f, ar = r.choice(self.fcalls)
+            args = [self.fexpr(fv, iv, d - 2) if a == 'f' else self.expr('i16', iv, 1) for a in ar]
+            return f'{f}({", ".join(args)})'
+        return f'({self.fexpr(fv, iv, d - 1)} * {fconst(r)})'
+
+    def fcond(self, fv, iv, d):
+        r = self.r
+        k = r.random()
+        if k < 0.6:
+            c = f'({self.fexpr(fv, iv, d)} {r.choice(FCMPS)} {self.fexpr(fv, iv, d)})'
+        elif k < 0.75:
+            c = f'({self.fexpr(fv, iv, d)})'           # nonzero (NaN is true, -0 false)
+        elif k < 0.85:
+            c = f'!({self.fexpr(fv, iv, d)})'
+        else:
+            c = self.cond(iv, max(d - 1, 0)) if iv else '1'
+        if r.random() < 0.2 and d > 0:
+            c = f'({c} {r.choice(["&&", "||"])} {self.fcond(fv, iv, d - 1)})'
+        return c
+
+    def fconv(self, n, t, fe):
+        return f'    {n} = ({tn(t)})FZ_{t}({fe});'
+
+    def feat_float(self, idx):
+        r = self.r
+        P = f'F{idx}_'
+        G = self.G
+        self.float_helpers()
+        nfa = r.randint(4, 9)
+        G.append(f'static float {P}ga[{nfa}] = {{ {", ".join(fconst(r) for _ in range(r.randint(1, nfa)))} }};')
+        G.append(f'static dbl {P}gd = {fconst(r)};')
+        G.append(f'static const float {P}kc = {fconst(r)};')
+        G.append(f'struct {P}S {{ float x; int16_t k; dbl y; uint8_t c; float z[2]; }};')
+        G.append(f'static struct {P}S {P}gs[2] = {{ {{ {fconst(r)}, {r.randint(-99, 99)}, {fconst(r)}, 7, {{ {fconst(r)}, {fconst(r)} }} }}, '
+                 f'{{ {fconst(r)}, 3 }} }};')
+        # helpers with float parameters and results
+        G.append(f'static float {P}h1(float a, dbl b, int16_t c) {{ return a * b - (float)c * {fconst(r)}; }}')
+        G.append(f'static dbl {P}h2(dbl a) {{ return a > {fconst(r)} ? a / {fconst(r)} : a + {fconst(r)}; }}')
+        G.append(f'static float {P}rec(int16_t n, float x) {{ n &= 15; return n == 0 ? x : {P}rec(n - 1, x * {fconst(r)} + (float)n); }}')
+        G.append(f'static struct {P}S {P}mk(float a, int16_t k) {{ struct {P}S s; s.x = a; s.k = k; s.y = a * 0.5f; s.c = (uint8_t)k; '
+                 f's.z[0] = -a; s.z[1] = (float)k; return s; }}')
+        G.append(f'static float {P}sx(struct {P}S s) {{ return s.x + s.y - s.z[1] + (float)s.c; }}')
+        G.append(f'static float (*{P}fp)(float, dbl, int16_t) = {P}h1;')
+        self.fcalls = [(f'{P}h1', 'ffi'), (f'{P}h2', 'f'), (f'{P}rec', 'if'), (f'(*{P}fp)', 'ffi'),
+                       ('FZ_vsum', None)]
+        self.fcalls = [(f, a) for f, a in self.fcalls if a]
+        L = self.head(idx)
+        ivars = self.scalars(L, r.randint(2, 4))
+        nf = r.randint(3, 6)
+        fvars = []
+        for k in range(nf):
+            L.append(f'    {"float" if k == 0 or r.random() < 0.7 else "dbl"} f{k} = {self.fexpr(fvars, ivars, 2)};')
+            fvars.append(f'f{k}')
+        L.append('    float fa[6], *pf = &f0;')
+        L.append(f'    struct {P}S st = {P}gs[0], *ps = &{P}gs[1];')
+        L.append('    char buf[200];')
+        L.append('    const char *s;')
+        L.append('    H = 0;')
+        L.append(f'    for (i = 0; i < 6; i++) fa[i] = {self.fexpr(fvars, ivars + [("i", "i16")], 2)};')
+        allf = fvars + ['fa[3]', '*pf', 'st.x', 'ps->y', f'{P}ga[1]', f'{P}gd', f'{P}kc', 'st.z[1]']
+        wr = fvars + ['fa[2]', '*pf', 'st.x', 'ps->y', f'{P}ga[0]', f'{P}gd', 'st.z[0]', 'pf[0]']
+        for _ in range(r.randint(7, 14)):
+            k = r.random()
+            if k < 0.25:
+                L.append(f'    {r.choice(wr)} = {self.fexpr(allf, ivars, 3)};')
+            elif k < 0.37:
+                L.append(f'    {r.choice(wr)} {r.choice(["+=", "-=", "*=", "/="])} {self.fexpr(allf, ivars, 2)};')
+            elif k < 0.43:
+                v = r.choice(fvars + ['fa[1]', 'st.x'])
+                L.append(f'    {r.choice(["++" + v, v + "++", "--" + v, v + "--"])};')
+                L.append(f'    mix(FZ_fb({v}++)); mix(FZ_fb(--{v}));')
+            elif k < 0.55:
+                n, t = r.choice(ivars)
+                L.append(self.fconv(n, t, self.fexpr(allf, ivars, 2)))
+            elif k < 0.6:
+                v = r.choice(fvars)
+                n, t = r.choice(ivars)
+                L.append(f'    if (FZ_OK16({v})) {n} = ({tn(t)})(int16_t){v}; else {n} = ({tn(t)})FZ_OK32({v});')
+            elif k < 0.67:
+                L.append(f'    if ({self.fcond(allf, ivars, 2)}) {r.choice(wr)} = {self.fexpr(allf, ivars, 2)}; '
+                         f'else mix(FZ_fb({self.fexpr(allf, ivars, 2)}));')
+            elif k < 0.72:
+                a, b = self.fexpr(allf, ivars, 2), self.fexpr(allf, ivars, 2)
+                L.append(f'    {{ float x = {a}, y = {b}; mix((uint32_t)((x < y) | (x <= y) << 1 | (x > y) << 2 | '
+                         f'(x >= y) << 3 | (x == y) << 4 | (x != y) << 5 | (!x) << 6 | ((_Bool)y) << 7)); }}')
+            elif k < 0.77:
+                c = fconst(r)
+                L.append(f'    {{ float t; int16_t n = 0; for (t = {self.fexpr(allf, ivars, 1)}; t < {c} && n < 9; t += 1.25f, n++) '
+                         f'fa[n % 6] = fa[(n + 1) % 6] * t + {c}; mix((uint32_t)n); mix(FZ_fb(t)); }}')
+            elif k < 0.82:
+                g = r.choice(list(TYPES))
+                n, t = r.choice(ivars)
+                L.append(f'    {r.choice(wr)} = (float)ga_{g}[{r.randint(0, 30)}] + (dbl){n};')
+            elif k < 0.86:
+                L.append(f'    st = {P}mk({self.fexpr(allf, ivars, 2)}, {self.expr("i16", ivars, 1)}); mix(FZ_fb({P}sx(st)));')
+                L.append(f'    {P}gs[1] = st; mix(FZ_fb({P}gs[1].z[0]));')
+            elif k < 0.9:
+                args = [self.fexpr(allf, ivars, 1) for _ in range(r.randint(0, 5))]
+                L.append(f'    mix(FZ_fb(FZ_vsum({len(args)}{"".join(", " + a for a in args)})));')
+            elif k < 0.95:
+                fmt, args = self.ffmt(allf, ivars)
+                L.append(f'    mix((uint32_t)sprintf(buf, "{fmt}"{"".join(", " + a for a in args)}));')
+                L.append('    for (s = buf; *s; s++) mix((uint8_t)*s);')
+            else:
+                L.append(f'    {{ int16_t t = (int16_t)({self.expr("i16", ivars, 1)} & 0xFF); t += (float)(int16_t)({self.expr("i16", ivars, 1)} & 0xFF) * 0.5f; '
+                         f't *= 1.5f; mix((uint32_t)t); }}')
+        for v in fvars + ['fa[0]', 'fa[5]', 'st.x', 'st.y', 'st.z[1]', f'{P}ga[0]', f'{P}gd',
+                          f'{P}gs[1].y']:
+            L.append(f'    mix(FZ_fb({v}));')
+        return self.tail(L, ivars)
+
+    def ffmt(self, allf, ivars):
+        r = self.r
+        fmt, args = [], []
+        for _ in range(r.randint(1, 3)):
+            flags = ''.join(c for c in '-+ #0' if r.random() < 0.15)
+            w = str(r.randint(1, 20)) if r.random() < 0.3 else ''
+            p = '.' + str(r.randint(0, 12)) if r.random() < 0.6 else ''
+            fmt.append(f'%{flags}{w}{p}{r.choice("feEgG")}|')
+            # (a NaN printed as one NaN: gcc folds 0/0 to +NaN, its SSE code gives -NaN)
+            args.append(f'(double)FZ_cn({self.fexpr(allf, ivars, 2)})')
+        return ''.join(fmt), args
+
+
+FGen.__bases__ = FGen.__bases__ + (FloatMixin,)
 
 
 def OPS_UP(r):

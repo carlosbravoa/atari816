@@ -43,8 +43,9 @@ the Horizon tree, copy `horizon/` and `emu/` somewhere private, build there, and
      cheat sheet's "The internet" and `SDK/docs/reference/internet.md`.
    **In C** (the C SDK, `SDK/c`: `SDK/c/bin/hcc -o X.PRG x.c` builds a program with
    cc816, the SDK's compiler: 16-bit `int`, unsigned `char`, 16-bit pointers into the
-   code bank, `__far` pointers for other banks (`hz_far_alloc`), no float; `hcc --cc
-   vbcc` (or `make HZ_CC=vbcc`) for floating point; docs in `SDK/docs/c/`):
+   code bank, `__far` pointers for other banks (`hz_far_alloc`), IEEE `float` with
+   `double` the same 32 bits, math.h; `hcc --cc vbcc` (or `make HZ_CC=vbcc`) for setjmp
+   and the tiny model; docs in `SDK/docs/c/`):
    - `SDK/templates/c-console` - the console template in C (`horizon.h`: every syscall).
    - `SDK/templates/c-window-app` - the window-app template in C with the controls
      library (`hui.h`: same names as ui.inc, `ui_event`/`ui_getev` loop, `UI_BUTTON` ...

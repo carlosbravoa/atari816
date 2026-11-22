@@ -2,7 +2,8 @@
 
 char 8 (unsigned by default, as the SDK), short/int 16, long 32, near data pointers 16
 (an offset in the code bank = DBR), far pointers 32 (offset, bank, 0), function pointers
-16 (code bank). Structures are packed (no padding), as the SDK's parameter blocks need.
+16 (code bank), float, double and long double 32 (IEEE 754 single precision, all three).
+Structures are packed (no padding), as the SDK's parameter blocks need.
 """
 import re
 
@@ -77,9 +78,11 @@ class T:
     @property
     def is_void(self): return self.kind == 'void'
     @property
-    def is_scalar(self): return self.kind in ('int', 'ptr')
+    def is_float(self): return self.kind == 'float'
     @property
-    def is_arith(self): return self.kind == 'int'
+    def is_scalar(self): return self.kind in ('int', 'ptr', 'float')
+    @property
+    def is_arith(self): return self.kind in ('int', 'float')
 
 
 class VoidT(T):
@@ -102,6 +105,21 @@ class IntT(T):
 
     @property
     def rank(self): return self.size
+
+
+class FloatT(T):
+    """float, double, long double: one format (IEEE 754 single, 32 bits); the name only
+    tells them apart (_Generic)"""
+    kind = 'float'
+    size = 4
+
+    def __init__(self, name):
+        self.name = name
+
+    def __repr__(self): return self.name
+
+    @property
+    def rank(self): return {'float': 1, 'double': 2}.get(self.name, 3)
 
 
 class PtrT(T):
@@ -189,6 +207,9 @@ INT = IntT(2, True, 'int')
 UINT = IntT(2, False, 'unsigned')
 LONG = IntT(4, True, 'long')
 ULONG = IntT(4, False, 'unsigned long')
+FLOAT = FloatT('float')
+DOUBLE = FloatT('double')
+LDOUBLE = FloatT('long double')
 
 
 def same(a, b):
@@ -197,6 +218,8 @@ def same(a, b):
         return False
     if a.is_int:
         return a.size == b.size and a.signed == b.signed
+    if a.is_float:
+        return True
     if a.is_ptr:
         return a.to.is_void or b.to.is_void or same(a.to, b.to)
     if a.is_struct:
@@ -212,7 +235,11 @@ def promote(t):
 
 
 def arith_conv(a, b):
-    """usual arithmetic conversions (int 16, long 32)"""
+    """usual arithmetic conversions (int 16, long 32; a floating operand wins: double over
+    float, all one format)"""
+    if a.is_float or b.is_float:
+        r = max((t for t in (a, b) if t.is_float), key=lambda t: t.rank)
+        return r.unqual()
     a, b = promote(a), promote(b)
     if a.size == 4 or b.size == 4:
         if (a.size == 4 and not a.signed) or (b.size == 4 and not b.signed):

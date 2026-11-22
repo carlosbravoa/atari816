@@ -5,3 +5,6 @@
 00168.c  expects a 32-bit int (8! and up printed with %d)
 00206.c  #pragma push_macro / pop_macro: a compiler extension the preprocessor (pcpp) has not
 00212.c  expects one of the __LP64__ / __ILP32__ style macros: cc816 is none of them
+00174.c  expects a 64-bit double (12.34 + 56.78 printed with %f: 69.120000; cc816's double is 32 bits: 69.119995)
+00178.c  expects a 32-bit int and a 64-bit double (sizeof)
+00195.c  expects a 64-bit double (12.34 and 56.78 printed with %f)

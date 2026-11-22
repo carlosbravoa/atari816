@@ -1,7 +1,8 @@
 /* stdio.h - cc816 (Horizon C SDK; lib/cc816/stdio.c, printf.c, scanf.c).
  * stdout and stderr: the console, line-buffered; stdin: a line typed at the keyboard;
  * files on the card, buffered (1 KB a file). Horizon has 4 file handles for the whole
- * system (fopen fails with errno ENFILE when none is left). No floating point. */
+ * system (fopen fails with errno ENFILE when none is left). printf's %f %e %g %a and
+ * scanf's %f are there in programs that use floating point (docs/c/reference.md). */
 #ifndef _STDIO_H
 #define _STDIO_H
 #include <stddef.h>

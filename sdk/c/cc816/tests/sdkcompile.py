@@ -13,13 +13,15 @@ import prog                                           # noqa: E402
 from prog import driver, CError, Unsupported          # noqa: E402
 
 SDK = prog.SDKC
+HOST_ONLY = {'tests/fpu/mathacc.c'}         # programs for the host (gcc), not for Horizon
 
 
 def main():
     files = []
     for d in ('lib', 'ui', 'game', 'tests', 'examples'):
         for root, _, names in os.walk(os.path.join(SDK, d)):
-            files += [os.path.join(root, n) for n in names if n.endswith('.c')]
+            files += [os.path.join(root, n) for n in names if n.endswith('.c') and
+                      os.path.relpath(os.path.join(root, n), SDK) not in HOST_ONLY]
     files.sort()
     out = os.path.join(prog.BUILD, 'sdkcompile')
     os.makedirs(out, exist_ok=True)

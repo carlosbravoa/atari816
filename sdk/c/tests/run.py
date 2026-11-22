@@ -14,10 +14,19 @@ Tests (in tests/):
            errno, argv, keyboard input (scanf, fgets on stdin), atexit
   sys      every syscall stub linked, the safe ones called, the blocks' sizes
   codegen  the compiler's known trouble spots (32-bit loads from tables)
-  float    floating point with --float (vbcc); cc816 has none: its one-line refusal
+  float    floating point (tests/float/float.c): arithmetic, conversions, math.h, printf
+           %f %e %g, strtod, sscanf and scanf %f; with cc816 also IEEE 754's edges
+           (tests/float/ieee.c: rounding ties, overflow, underflow, NaN compares, -0.0,
+           conversions at the limits, printf's digits, strtod, math.h's special values)
+  fpu      cc816 only: its floating point bit for bit (tests/fpu: genfp.py's table of
+           + - * / compares conversions, genfmt.py's printf and strtod against glibc,
+           math.h against the same C built for the host), and that a program without
+           floating point links none of it
   stack    the stack guard (cc816's software stack and vbcc's tiny model: an overflow is
            reported; --debug's report)
   bench    the compiler trials' benchmark, its six check values (-O1 and -O3)
+  fbench   a floating-point benchmark (tests/bench/fbench.c: a Mandelbrot row, sin and
+           cos, sqrt, exp log pow, conversions): its times and the program's size
   rt       the tuned runtime against host-made tables (tests/rt/run.py), when present
   hcc      the driver's messages: a compile error with file:line, a program too big for
            its bank, data too big for the tiny model's window (no emulator)
@@ -94,6 +103,67 @@ def grab(con, pattern):
     return m.group(0) if m else ""
 
 
+def fpu_test(b, horizon):
+    """cc816's floating point bit for bit: the runtime, the conversions, printf, strtod and
+    math.h against tables (tests/fpu); a program without float links none of it"""
+    fpu = os.path.join(HERE, "fpu")
+    tab, txt, mtab = (os.path.join(b, n) for n in ("FPTAB.BIN", "FMTTAB.TXT", "MATHTAB.BIN"))
+    for cmd in ([sys.executable, os.path.join(fpu, "genfp.py"), tab, "--cases", "2500"],
+                [sys.executable, os.path.join(fpu, "genfmt.py"), txt, "--cases", "1500"],
+                ["sh", os.path.join(fpu, "mathhost.sh"), "100000", mtab]):
+        rc, out = sh(cmd)
+        if rc:
+            report("fpu", "cc816", False, f"{os.path.basename(cmd[1])}: " +
+                   out.strip()[-200:])
+            return
+        if "mathhost" in cmd[1]:
+            acc = out
+    prg = os.path.join(b, "FPTEST.PRG")
+    rc, out = hcc(prg, [os.path.join(fpu, "fptest.c")], "cc816")
+    if rc:
+        report("fpu", "cc816", False, "build: " + out.strip().splitlines()[-1])
+        return
+    cmd = [sys.executable, RUN816, prg, "--horizon", horizon, "--mode", "shell", "--seconds",
+           "600", "--out", os.path.join(b, "run-fpu"), "--file", tab + ":/FPTAB.BIN",
+           "--file", txt + ":/FMTTAB.TXT", "--file", mtab + ":/MATHTAB.BIN"]
+    sh(cmd)
+    con = open(os.path.join(b, "run-fpu", "console.txt"), encoding="latin-1").read()
+    ok = "FPU PASS" in con and "[kill]" not in con
+    worst = max((int(w) for w in re.findall(r"worst\s+(\d+) ulp", acc)), default=-1)
+    report("fpu", "cc816", ok, grab(con, r"fpu: \d+ cases, \d+ failures") +
+           f"; math.h within {worst} ulp of glibc (100,000 arguments a function)" +
+           ("" if ok else " | " + " | ".join(l.strip() for l in con.splitlines()
+                                             if l.startswith("  ") or "failures" in l
+                                             and " 0 failures" not in l)[:400]))
+    # a program without floating point: no float runtime, no float printf
+    src = os.path.join(b, "nofloat.c")
+    with open(src, "w") as f:
+        f.write('#include <stdio.h>\n#include <stdlib.h>\nint main(void)\n{\n'
+                '    printf("%d %s\\n", atoi("42"), "x");\n    return 0;\n}\n')
+    rc, out = hcc(os.path.join(b, "NOFLOAT.PRG"), [src], "cc816", ["--map"])
+    mp = os.path.join(b, "NOFLOAT.map")
+    names = open(mp, encoding="latin-1").read() if os.path.exists(mp) else ""
+    fl = [n for n in ("__fadd", "__fmul", "___hz_fmtfp", "__fpack", "__cc816_fmtf", "__cc816_scanf")
+          if re.search(r"\b" + n + r"\b", names)]
+    size = grab(out, r"[\d,]+ bytes on the card")
+    # a program with float arithmetic but no printf or scanf: no float formatting
+    src2 = os.path.join(b, "noprintf.c")
+    with open(src2, "w") as f:
+        f.write('#include <horizon.h>\n#include <math.h>\nvolatile float x = 2.0f;\n'
+                'int main(void)\n{\n    hz_puts(sqrt(x) * 3.0f > 4.0f ? "big" : "small");\n'
+                '    return 0;\n}\n')
+    rc2, out2 = hcc(os.path.join(b, "NOPRINTF.PRG"), [src2], "cc816", ["--map"])
+    mp2 = os.path.join(b, "NOPRINTF.map")
+    names2 = open(mp2, encoding="latin-1").read() if os.path.exists(mp2) else ""
+    fl2 = [n for n in ("___hz_fmtfp", "___hz_scanfp", "_strtod", "__cc816_fmtf")
+           if re.search(r"\b" + n + r"\b", names2)]
+    ok = rc == 0 and not fl and names != "" and rc2 == 0 and not fl2 and "__fmul" in names2
+    report("fpu", "nofloat", ok,
+           f"a program without float links no float code ({size}); one with float but no "
+           f"printf no float printf ({grab(out2, r'[\d,]+ bytes on the card')})"
+           if ok else f"links {fl} {fl2} {(out + out2).strip()[-120:]}")
+
+
 def allsys(path):
     names = []
     for ln in open(os.path.join(SDKC, "include", "hzsys.h")):
@@ -155,26 +225,33 @@ def run_model(model, horizon, only):
 
     if want("float"):
         prg = os.path.join(b, "FLOAT.PRG")
-        if model == "cc816":
-            # no floating point yet: one plain error line with the file and the line
-            rc, out = hcc(prg, [T("float", "float.c")], model)
-            line = next((l for l in out.splitlines() if "float.c:" in l), "")
-            ok = rc != 0 and re.search(r"float\.c:\d+: error: .*--cc vbcc", line) is not None
-            rc2, out2 = hcc(prg, [T("float", "float.c")], model, ["--float"])
-            ok = ok and rc2 != 0 and "--cc vbcc" in out2
-            report("float", model, ok, ("refused: " + line.split("/")[-1][:110]) if ok
-                   else out.strip()[-200:])
+        rc, out = hcc(prg, [T("float", "float.c")], model, ["--float", "--map"])
+        if rc:
+            report("float", model, False, "build: " + out.strip().splitlines()[-1])
         else:
-            rc, out = hcc(prg, [T("float", "float.c")], model, ["--float", "--map"])
+            size = grab(out, r"[\d,]+ bytes on the card")
+            rc, con, _ = emu(prg, os.path.join(b, "run-float"), horizon, args="2.5 -1e3",
+                             script=T("float", "input.script"), seconds=8)
+            ok = "FLOAT PASS" in con and "[kill]" not in con
+            report("float", model, ok, grab(con, r"float: \d+ checks, \d+ failures") +
+                   f" (program {size})" +
+                   ("" if ok else " " + " | ".join(l for l in con.splitlines() if "FAIL" in l)))
+        if model == "cc816":
+            prg = os.path.join(b, "IEEE.PRG")
+            rc, out = hcc(prg, [T("float", "ieee.c")], model, ["--map"])
             if rc:
-                report("float", model, False, "build: " + out.strip().splitlines()[-1])
+                report("ieee", model, False, "build: " + out.strip().splitlines()[-1])
             else:
                 size = grab(out, r"[\d,]+ bytes on the card")
-                rc, con, _ = emu(prg, os.path.join(b, "run-float"), horizon, seconds=4)
-                ok = "FLOAT PASS" in con
-                report("float", model, ok, grab(con, r"float: \d+ checks, \d+ failures") +
+                rc, con, _ = emu(prg, os.path.join(b, "run-ieee"), horizon, seconds=8)
+                ok = "IEEE PASS" in con and "[kill]" not in con
+                report("ieee", model, ok, grab(con, r"ieee: \d+ checks, \d+ failures") +
                        f" (program {size})" +
-                       ("" if ok else " " + " | ".join(l for l in con.splitlines() if "FAIL" in l)))
+                       ("" if ok else " " + " | ".join(l for l in con.splitlines()
+                                                         if "FAIL" in l)))
+
+    if want("fpu") and model == "cc816":
+        fpu_test(b, horizon)
 
     if want("stack"):
         prg = os.path.join(b, "STACK.PRG")
@@ -216,6 +293,19 @@ def run_model(model, horizon, only):
             ok = "bench done" in con and not missing
             report(name, model, ok, " ".join(f"{n} {t}" for n, t in times) + " ms" +
                    ("" if ok else f" missing checks {missing}"))
+
+    if want("fbench"):
+        prg = os.path.join(b, "FBENCH.PRG")
+        rc, out = hcc(prg, [T("bench", "fbench.c")], model, ["--float", "--map"])
+        if rc:
+            report("fbench", model, False, "build: " + out.strip().splitlines()[-1])
+        else:
+            size = grab(out, r"[\d,]+ bytes on the card")
+            rc, con, _ = emu(prg, os.path.join(b, "run-fbench"), horizon, seconds=60)
+            times = re.findall(r"^(\w+)\s+(\d+) ms", con, re.M)
+            ok = "fbench done" in con and len(times) == 5
+            report("fbench", model, ok, " ".join(f"{n} {t}" for n, t in times) + " ms" +
+                   f" (program {size})")
 
     rt = os.path.join(HERE, "rt", "run.py")
     if want("rt") and os.path.exists(rt):
@@ -271,17 +361,23 @@ def hcc_messages(only, models):
         report("hcc", "mixed", ok, "objects of the other compiler refused" if ok
                else (out2 + out3).strip()[-200:])
     if "cc816" in models:
-        # cc816: one model, no float, no long long: one plain line each
+        # cc816: one model, no long long: one plain line each; float is built (--float too)
         rc, out = hcc(os.path.join(b, "BAD.PRG"), [undef], "cc816", ["--model", "tiny"])
         ok1 = rc != 0 and "--model tiny is for vbcc" in out
         ll = W("ll.c", "int main(void)\n{\n    long long x = 1;\n    return (int)x;\n}\n")
         rc, out = hcc(os.path.join(b, "LL.PRG"), [ll], "cc816")
         ok2 = rc != 0 and re.search(r"ll\.c:3: error: long long is not supported", out) is not None
         fl = W("fl.c", "int main(void)\n{\n    float f = 2;\n    return (int)f;\n}\n")
-        rc, out = hcc(os.path.join(b, "FL.PRG"), [fl], "cc816")
-        ok3 = rc != 0 and re.search(r"fl\.c:3: error: floating point .*--cc vbcc", out) is not None
-        report("hcc", "cc816", ok1 and ok2 and ok3, "--model, long long and float refused "
-               "with file:line" if ok1 and ok2 and ok3 else out.strip()[-200:])
+        rc, out3 = hcc(os.path.join(b, "FL.PRG"), [fl], "cc816", ["--float"])
+        ok3 = rc == 0
+        fs = W("fs.c", "int main(void)\n{\n    float f = 2;\n    switch (f) { default: ; }\n"
+               "    return 0;\n}\n")
+        rc, out4 = hcc(os.path.join(b, "FS.PRG"), [fs], "cc816")
+        ok4 = rc != 0 and re.search(r"fs\.c:4: error: switch on a value that is not an integer",
+                                    out4) is not None
+        report("hcc", "cc816", ok1 and ok2 and ok3 and ok4, "--model and long long refused "
+               "with file:line, float built, a float switch refused" if ok1 and ok2 and ok3
+               and ok4 else (out + out3 + out4).strip()[-200:])
 
 
 # pixels of uitest's screenshots (1280 x 720): (shot, x, y, RGB, what)

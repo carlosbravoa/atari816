@@ -1,14 +1,21 @@
 /* fmt.c - printf's formatting for cc816 (printf.c and sprintf.c call it).
  *
  * %d %i %u %o %x %X %c %s %p %n %%; the sizes hh h l (and j z t: long, int, int; ll is
- * read as l); flags - + space # 0; width and precision, * for either. No floating point
- * (cc816 has none): %f %e %g %a print as they are written.
+ * read as l); flags - + space # 0; width and precision, * for either.
+ * %f %F %e %E %g %G %a %A (a float, double or long double: one 32-bit format) go to
+ * __hz_fmt_float (fmtfp.c), which a program that uses floating point has installed
+ * (rt/cc816/fp_hookp.s); without it they print as they are written.
  */
 #include <stdio.h>
 #include <stdarg.h>
 #include <string.h>
 
 typedef void (*hz_outfn)(int c, void *ctx);
+
+/* the float conversion: (out, ctx, conversion letter, flags, width, precision or -1, the
+ * float's bits) -> characters written */
+int (*__hz_fmt_float)(hz_outfn out, void *ctx, unsigned c, unsigned flags, unsigned width,
+                      int prec, unsigned long bits);
 
 static const char lower[] = "0123456789abcdef";
 static const char upper[] = "0123456789ABCDEF";
@@ -76,7 +83,7 @@ int __hz_vformat(hz_outfn out, void *ctx, const char *fmt, va_list ap)
         for (;;) {
             c = (unsigned char)*fmt;
             if (c == 'h') size = size == 2 ? 1 : 2;
-            else if (c == 'l' || c == 'j') size = 4;
+            else if (c == 'l' || c == 'j' || c == 'L') size = 4;
             else if (c == 'z' || c == 't') size = 0;
             else break;
             ++fmt;
@@ -213,7 +220,17 @@ int __hz_vformat(hz_outfn out, void *ctx, const char *fmt, va_list ap)
             out('%', ctx);
             ++total;
             break;
-        default:                        /* not known (floating point): as written */
+        default:
+            /* f F e E g G a A (tested here, not as cases: the switch's jump table stays
+             * as small as it was): the float conversion, if the program has it */
+            i = c | 32;
+            if (__hz_fmt_float && (i == 'f' || i == 'e' || i == 'g' || i == 'a')) {
+                unsigned long bits = va_arg(ap, unsigned long);
+                total += __hz_fmt_float(out, ctx, c, flags, width, hasprec ? (int)prec : -1,
+                                        bits);
+                break;
+            }
+            /* not known (or no floating point in this program): as written */
             out('%', ctx);
             out(c, ctx);
             total += 2;

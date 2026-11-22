@@ -3,6 +3,7 @@ algebraic simplification, strength reduction of multiplies/divides by constants 
 induction-variable multiplies in loops (array indexing), dead-code removal."""
 from .ir import V, Imm, Sym, Frame, Ins, Block
 from .front import fold
+from . import fp
 
 COMMUT = {'add', 'mul', 'and', 'or', 'xor'}
 SWAPCC = {'eq': 'eq', 'ne': 'ne', 'ult': 'ugt', 'ugt': 'ult', 'ule': 'uge', 'uge': 'ule',
@@ -142,6 +143,24 @@ def simplify(ins):
             return Ins('mov', ins.d, Imm(0, size))
         if op in ('and', 'or') and a is b:
             return Ins('mov', ins.d, a)
+    if op in fp.OPS and isinstance(ins.a, Imm) and isinstance(ins.b, Imm):
+        return Ins('mov', ins.d, Imm(fp.OPS[op](ins.a.val, ins.b.val), 4))
+    if op == 'fmul' and (ins.b == Imm(0x40000000, 4) or ins.a == Imm(0x40000000, 4)):
+        # x * 2.0 = x + x, exactly (NaN, infinities, zeros, denormals alike): an add is
+        # three times quicker than a multiply
+        x = ins.a if ins.b == Imm(0x40000000, 4) else ins.b
+        return Ins('fadd', ins.d, x, x)
+    if op in ('ltof', 'ultof', 'ftol', 'ftoul') and isinstance(ins.a, Imm):
+        v = ins.a.val
+        if op == 'ltof':
+            r = fp.from_int(v - (1 << 32) if v >> 31 else v)
+        elif op == 'ultof':
+            r = fp.from_int(v)
+        else:
+            r = fp.to_int(v, signed=op == 'ftol')
+        return Ins('mov', ins.d, Imm(r, 4))
+    if op == 'fcmp' and isinstance(ins.a, Imm) and isinstance(ins.b, Imm):
+        return Ins('mov', ins.d, Imm(fp.cmp(ins.a.val, ins.b.val)))
     if op in ('zx', 'sx', 'tr', 'x8u', 'x8s', 'neg', 'com') and isinstance(ins.a, Imm):
         v = ins.a.val
         if op == 'sx' and v & 0x8000:

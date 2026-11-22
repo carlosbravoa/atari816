@@ -3,7 +3,8 @@
 From nothing to a C program running in the emulator and on the Atari816. The SDK's C
 compiler is **cc816**, the SDK's own (`sdk/c/cc816`, in Python); `hcc`, the SDK's driver,
 turns `.c` files into a Horizon program in one command. A second compiler, vbcc 65816, is
-there for what cc816 does not do yet (floating point): section 9. Every command below was
+there for what cc816 does not do yet (`setjmp`, a tiny memory model): section 10.
+Floating point is section 8. Every command below was
 run on Linux (x86-64) for this guide; the output is what you should see, apart from paths,
 timings and sizes.
 
@@ -49,7 +50,7 @@ int main(int argc, char **argv)
 $ sdk/c/bin/hcc -o HELLO.PRG hello.c
 hcc: building the C library for cc816 (/.../sdk/c/build/lib/cc816)
 $ ls -l HELLO.PRG
--rw-rw-r-- 1 carlos carlos 8050 Nov 21 20:51 HELLO.PRG
+-rw-rw-r-- 1 carlos carlos 8282 Nov 22 13:10 HELLO.PRG
 ```
 
 The first build also builds the SDK's C library (a few seconds); after that `hcc`
@@ -57,8 +58,8 @@ compiles, links and writes the program at once. `--map` adds the sizes:
 
 ```
 $ sdk/c/bin/hcc --map -o HELLO.PRG hello.c
-HELLO.PRG: 8,050 bytes on the card, 8 relocations
-  code bank: code+constants 7,830 + data 78 + bss 826 = 8,734 of 57,072; heap 48,338; software stack 8,192
+HELLO.PRG: 8,282 bytes on the card, 8 relocations
+  code bank: code+constants 8,062 + data 78 + bss 828 = 8,968 of 57,072; heap 48,104; software stack 8,192
   window:    stack about 32,000 (from $7F7F down to $0100); direct page 120 bytes
 ```
 
@@ -149,14 +150,54 @@ command of the shell) or send it over the PC link with `sdk/tools/deploy816.py`,
 assembly programs (sdk/docs/getting-started.md, section 6). Programs built with this SDK
 were run in the emulator only so far (it models the board's timing within about 5 %).
 
-## 8. Next
+## 8. Floating point
+
+`float` and `double` work with cc816. Both are IEEE 754 single precision: 32 bits, about
+7 decimal digits (`double` is not 64 bits, as on a PC). `math.h` has the usual functions,
+and printf prints floats with `%f`, `%e` and `%g`:
+
+```c
+/* circle.c - floating point with cc816 */
+#include <stdio.h>
+#include <math.h>
+
+int main(void)
+{
+    double r = 2.5;
+    printf("area %.4f, circumference %.4f\n", M_PI * r * r, 2 * M_PI * r);
+    printf("sqrt(2) = %.7f, sin(1) = %g\n", sqrt(2.0), sin(1.0));
+    printf("1/3 = %.10f\n", 1.0 / 3);
+    return 0;
+}
+```
+
+```
+$ sdk/c/bin/hcc -o CIRCLE.PRG circle.c
+$ python3 sdk/tools/run816.py CIRCLE.PRG --horizon horizon --mode shell
+run816: CIRCLE at /APPS/CIRCLE.PRG, started at 3.45 s, ran to 6.45 s (emu816 exit 3; 3 = time limit, the normal end)
+  /.../run-circle/console.txt
+$ tail -4 run-circle/console.txt
+area 19.6350, circumference 15.7080
+sqrt(2) = 1.4142135, sin(1) = 0.841471
+1/3 = 0.3333333433
+>
+```
+
+The last line shows the 7 digits: a 64-bit `double` would give 0.3333333333. Nothing has
+to be added to the command: hcc links the floating-point code only into programs that use
+it. It costs room and time: CIRCLE.PRG is 18 KB (the hello world 8 KB), and an operation
+takes from 20 to 300 microseconds, `sin` about 4 milliseconds. Keep floats out of
+anything that runs every frame. The details: [reference.md](reference.md), "Floating
+point".
+
+## 9. Next
 
 - `sdk/c/examples/`: `hello`, `window` (a window with text, shapes, mouse clicks and the
   close box, on the raw window calls), `wc` (a file tool). Each has `make`, `make run`,
   `make test`.
 - [reference.md](reference.md): the two compilers, memory (where code, data, heap and the
   stacks live, the limits), int and pointer sizes, far memory, the calling convention for
-  assembly, the C library on Horizon, syscalls from C, speed.
+  assembly, the C library on Horizon, floating point, syscalls from C, speed.
 - [apps.md](apps.md): window applications with Horizon's controls library (`hui.h`:
   buttons, fields, lists, menus, dialogs, the file dialog), a tutorial in five steps;
   the template `sdk/templates/c-window-app`, the example `sdk/c/examples/viewer`.
@@ -164,10 +205,10 @@ were run in the emulator only so far (it models the board's timing within about 
   to find it.
 - `make -C sdk/c test`: the SDK's own tests in the emulator.
 
-## 9. vbcc, the second compiler
+## 10. vbcc, the second compiler
 
-vbcc 65816 (Volker Barthelmann's) has what cc816 has not yet: floating point (`float`,
-`double`, `math.h`; `hcc --float`), `setjmp`, and a tiny memory model. It is free for
+vbcc 65816 (Volker Barthelmann's) has what cc816 has not yet: `setjmp` and a tiny memory
+model. It has floating point too (`hcc --float`, in its own 32-bit format). It is free for
 non-commercial use and may be redistributed only unmodified, so a script downloads the
 official archive:
 
@@ -181,11 +222,11 @@ get-toolchain: hcc (sdk/c/bin/hcc) finds it there; nothing to add to PATH
 
 It needs Linux on x86-64 (or WSL), sh, curl or wget, unzip and sha256sum. Then `hcc --cc
 vbcc ...` (or `HZ_CC=vbcc` in the environment, `make HZ_CC=vbcc` for a project) builds
-with it; every file of a program must come from the same compiler. A program with a
-`float` tells you so with cc816:
+with it; every file of a program must come from the same compiler. A program that
+includes `setjmp.h` tells you so with cc816:
 
 ```
-$ sdk/c/bin/hcc -o F.PRG f.c
-f.c:5: error: floating point (float, double) is not supported by cc816 yet: build with hcc --cc vbcc
+$ sdk/c/bin/hcc -o J.PRG j.c
+.../sdk/c/cc816/include/setjmp.h:3: error: #error "setjmp.h: setjmp and longjmp are not supported by cc816 yet: build with hcc --cc vbcc"
 hcc: 1 file(s) did not compile
 ```

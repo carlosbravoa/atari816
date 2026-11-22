@@ -231,8 +231,8 @@ def main():
     import genfeat
     feats = genfeat.FEATURES if feats == 'all' else feats.split(',')
     for f in feats:
-        if f not in genfeat.FEATURES:
-            sys.exit(f'unknown feature {f}: {", ".join(genfeat.FEATURES)}')
+        if f not in genfeat.FEATURES + genfeat.EXTRA_FEATURES:
+            sys.exit(f'unknown feature {f}: {", ".join(genfeat.FEATURES + genfeat.EXTRA_FEATURES)}')
     out, count = args[0], int(args[1])
     seed = int(args[2]) if len(args) > 2 else 1
     os.makedirs(out, exist_ok=True)
@@ -256,15 +256,18 @@ def main():
         hpre = '#include <stdarg.h>\n#include <string.h>\n#include <stddef.h>\n#define __far\n' \
             'static unsigned char hz_fbuf[65536];\nstatic void *hz_far_alloc(void) { return hz_fbuf; }\n' \
             'static void hz_far_free(void *p) { (void)p; }\n' \
-            '#define PACKED __attribute__((packed))\n'
-        tpre = '#include <stdarg.h>\n#include <string.h>\n' + ('#include <horizon.h>\n' if far else '') + '#define PACKED\n'
+            '#define PACKED __attribute__((packed))\n' \
+            'typedef float dbl;\n'
+        tpre = '#include <stdarg.h>\n#include <string.h>\n' + ('#include <horizon.h>\n' if far else '') + \
+            '#define PACKED\ntypedef double dbl;\n'
         tag = f'/* genfuzz seed {seed} program {n}: {",".join(pick) or "basic"} */\n'
         hsrc = tag + hpre + header(True) + '\n' + body + '\nint main(void) {\n' + \
             ''.join(f'    printf("%lu\\n", (unsigned long)f{k}());\n' for k in range(nf)) + '    return 0;\n}\n'
         hc = os.path.join(host_dir, f'h{n:04d}.c')
         open(hc, 'w').write(hsrc)
         exe = os.path.join(host_dir, f'h{n:04d}')
-        r = subprocess.run(['gcc', '-O1', '-fwrapv', '-fno-strict-aliasing', '-w', '-o', exe, hc],
+        r = subprocess.run(['gcc', '-O1', '-fwrapv', '-fno-strict-aliasing', '-w', '-msse2',
+                            '-mfpmath=sse', '-ffp-contract=off', '-o', exe, hc],
                            capture_output=True, text=True)
         if r.returncode:
             print(f'host compile failed for {n}: {r.stderr[:300]}', file=sys.stderr)

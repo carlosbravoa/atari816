@@ -315,8 +315,8 @@ def link_error(msg, name, sstack, objs, libs, tmp):
         lines = sorted(set(undef))
         names = {u.split()[1] for u in lines}
         if any(hzc.is_float_name(n) for n in names):
-            lines.append("(floating point and math.h: cc816 has none yet; build with "
-                         "hcc --cc vbcc)")
+            lines.append("(cc816's math.h has the functions docs/c/reference.md lists, "
+                         "\"Floating point\"; not this one)")
         return "\n".join(lines)
     over = [int(m.group(3)) for m in _OVER.finditer(msg) if m.group(2) == "MAIN"]
     if over:

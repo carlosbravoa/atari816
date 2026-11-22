@@ -2,8 +2,8 @@
 
 What usually breaks when C written for a PC (or for cc65 on the 8-bit Ataris and C64)
 comes to Horizon, and how to find it. The SDK's compiler is cc816 (vbcc 65816 with `hcc
---cc vbcc` for floating point); where they differ the table says which. The details are in
-[reference.md](reference.md).
+--cc vbcc` for `setjmp` and the tiny model); where they differ the table says which. The
+details are in [reference.md](reference.md).
 
 ## The usual suspects
 
@@ -16,7 +16,7 @@ comes to Horizon, and how to find it. The SDK's compiler is cc816 (vbcc 65816 wi
 | big arrays | anything | one object must stay inside one 64 KB bank; a program's code, constants, globals, heap and (cc816) software stack share one bank (65,264 bytes); vbcc's tiny model's data, heap and stack share 32 KB | `hcc` says what does not fit, with the sizes. Move big tables to a bank of their own: `hz_far_alloc()` and `__far` pointers |
 | `malloc` | gigabytes | the rest of the code bank (cc816: below the software stack, about 48 KB for a small program; vbcc large: about 56 KB), or of the window (vbcc tiny: about 27 KB) | check every `malloc` for NULL; big buffers from `hz_far_alloc` (64 KB each; `hz_mem_info()` says how many banks are free) |
 | `long long` | 64 bits | **not supported** (neither compiler) | 32-bit arithmetic, or pairs of `long` |
-| `double` | 64 bits | cc816: **none yet** (an error with the file and line); vbcc (`hcc --cc vbcc`): **32 bits**, as `float` (about 7 digits), MS BASIC's format | build with `--cc vbcc`, or use fixed point (`hgame.h` has `hg_fix8`, `hg_fix16`). vbcc adds its float library when the program needs it: about 5 KB for arithmetic and `printf("%f")`, more with math.h functions |
+| `double` | 64 bits (about 16 digits) | **32 bits, the same as `float`** (about 7 digits). cc816: IEEE 754 single precision, so results round as a PC's `float` does; vbcc: MS BASIC's format | code that needs more than 7 digits (whole numbers above 16,777,216, which a float cannot all hold; sums of many small values; seconds since 1970 in a double) gives other answers: use `long` (or fixed point: `hgame.h` has `hg_fix8`, `hg_fix16`) there. Compare with a tolerance, not `==`. Constants such as `0.1` and `M_PI` are rounded to 32 bits too. Floating point costs code: with cc816 about 1.8 KB for the arithmetic, 3.7 KB more for printf's `%f`, 0.5 to 5 KB a math.h function (reference.md, "Floating point") |
 | recursion, big locals | megabytes of stack | cc816: local arrays, structures and `&x` locals on an 8 KB software stack (`hcc --stack N`), the rest on a 32 KB hardware stack; vbcc: 32 KB (large), 4 KB (tiny) | arrays of more than a few hundred bytes as `static` or from `malloc`, not as locals. `hcc --debug` reports the stacks a run used; an overflow is reported at exit |
 | files | as many as you like | **4 file handles for the whole system** (every program together) | close files as soon as you can; `fopen` returns NULL with `errno == ENFILE` when none is left. Do not keep a log file open across the program's life |
 | paths | `/home/x/file.txt`, `C:\x` | FAT, case-insensitive, `/` separators, long names; relative to the current folder | no `\`; no drive letters |
@@ -89,3 +89,9 @@ pointer is an offset in the code bank, so:
 
 `hgame` itself went through this (its far memory is `unsigned char __far *`; so is
 `hg_image_pixels`' result).
+
+Floating point needs vbcc no more: cc816 has it (IEEE 754, 32 bits for `float` and
+`double` alike, as vbcc). A program that used `--cc vbcc --float` for it builds with cc816
+as it is. The numbers can differ in the last digit, because vbcc's format rounds
+differently (cc816's results are those of a PC's `float`). What still needs vbcc:
+`setjmp`/`longjmp` and the tiny model.

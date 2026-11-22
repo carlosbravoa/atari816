@@ -14,6 +14,14 @@ from .regalloc import SCR, CS
 DP_NAMES = ('__rg', '__sp', '__rv', '__h0', '__h1', '__h2', '__h3', '__cbank')
 INV = {'beq': 'bne', 'bne': 'beq', 'bcc': 'bcs', 'bcs': 'bcc', 'bmi': 'bpl', 'bpl': 'bmi',
        'bvc': 'bvs', 'bvs': 'bvc'}
+# floating point (rt/cc816/fp_*.s): operands in __h0 (and __h1), the result in __h0 (__fcmp:
+# A). The ...r entries take the operands the other way round (__h0 = b, __h1 = a).
+FBIN = {'fadd': '__fadd', 'fsub': '__fsub', 'fmul': '__fmul', 'fdiv': '__fdiv',
+        'fcmp': '__fcmp'}
+FUN = {'ltof': '__ltof', 'ultof': '__ultof', 'ftol': '__ftol', 'ftoul': '__ftoul'}
+# instructions whose code reads their operands before it changes __h0: a float result the
+# next one of these uses (and nothing after it) is read from __h0, never stored
+H0_READERS = {'st', 'ret', 'mov', 'call', 'and', 'or', 'xor'}
 
 
 def hexw(v):
@@ -30,6 +38,9 @@ class Gen:
         self.nlab = 0
         self.helpers = set()
         self.bnum = {}
+        self.res = None          # a V whose value is only in __h0 (its store was skipped)
+        self.h0v = None          # a V whose value __h0 holds now
+        self.pend = None
 
     # ------------------------------------------------------------------ emit
     def I(self, m, o=''):
@@ -55,6 +66,8 @@ class Gen:
     # ------------------------------------------------------------------ operands
     def vaddr(self, v, part=0):
         """operand text for word `part` of a V"""
+        if v is self.res:
+            return f'__h0+{2 * part}'
         kind, off = v.loc
         if kind == 'dp':
             return f'__rg+{off + 2 * part}'
@@ -183,7 +196,19 @@ class Gen:
             self.next = blocks[bi + 1] if bi + 1 < len(blocks) else None
             if bi > 0:
                 self.L(self.blab(b))
-            for ins in b.ins:
+            # what is live after each instruction (for keeping float results in __h0)
+            live = set(self.lout[b])
+            self.live_after = [None] * len(b.ins)
+            for k in range(len(b.ins) - 1, -1, -1):
+                self.live_after[k] = frozenset(live)
+                for d in b.ins[k].defs():
+                    live.discard(d)
+                for u in b.ins[k].uses():
+                    live.add(u)
+            self.h0v = None
+            for k, ins in enumerate(b.ins):
+                self.cur_k, self.cur_b = k, b
+                self.res, self.pend = self.pend, None
                 if ins.is_term:
                     live = set()
                     for v in self.lout[b] | set(ins.uses()):
@@ -193,6 +218,9 @@ class Gen:
                     self.out.append(('LIVE', live))
                 getattr(self, 'g_' + ins.op)(ins)
                 assert self.push == 0 or ins.op != 'call', 'push imbalance'
+                if ins.op not in FBIN and ins.op not in FUN:
+                    self.h0v = None
+                self.res = None
         if self.need_exit:
             self.L(self.exit_label)
             self.epilogue()
@@ -555,8 +583,121 @@ class Gen:
             return self.divmod16(i, '__smod16')
         self.call32('__smod32', i)
 
+    # --- floating point (rt/cc816/fp_*.s): the operands in __h0 (and __h1), the result
+    # in __h0 (__fcmp: A), as the 32-bit helpers. A chain of float operations keeps its
+    # value in __h0: an operand __h0 already holds is not loaded again (the previous
+    # result as the second operand: the ...r entry), and a result only the next
+    # instruction uses is not stored (that instruction reads __h0)
+    def g_fadd(self, i):
+        self.fop(i)
+
+    g_fsub = g_fmul = g_fdiv = g_fcmp = g_ltof = g_ultof = g_ftol = g_ftoul = g_fadd
+
+    def fload(self, reg, o):
+        for p in (0, 1):
+            if isinstance(o, Imm) and (o.val >> (16 * p)) & 0xFFFF == 0 or \
+                    isinstance(o, (V, Sym)) and o.size == 2 and p == 1:
+                self.I('stz', f'{reg}+{2 * p}')
+                continue
+            self.lda(o, p)
+            self.I('sta', f'{reg}+{2 * p}')
+
+    def dpv(self, o):
+        """o is a V in a direct-page register (not one living in __h0 only)"""
+        return isinstance(o, V) and o is not self.res and o.loc[0] == 'dp'
+
+    def fop(self, i):
+        a, b, op = i.a, i.b, i.op
+        h0 = self.h0v if isinstance(self.h0v, V) else None
+        helper = FBIN.get(op) or FUN[op]
+        if b is not None and a is not h0 and b is not h0 and (self.dpv(a) or self.dpv(b)):
+            # the ...i entry: X and Y the operands' direct-page addresses, A the result's
+            # (fp_ind.s): 12 bytes for a + b in registers, against 27
+            if self.dpv(a):
+                self.I('ldx', '#' + self.vaddr(a))
+            else:
+                self.fload('__h0', a)
+                self.I('ldx', '#__h0')
+            if self.dpv(b):
+                self.I('ldy', '#' + self.vaddr(b))
+            else:
+                self.fload('__h1', b)
+                self.I('ldy', '#__h1')
+            d = i.d
+            if op == 'fcmp':
+                self.helper(helper + 'i')
+                self.sta(d)
+                self.h0v = None
+                return
+            keep = self.keep_h0(d)
+            store = not keep and not self.dpv(d)
+            self.I('lda', '#__h0' if keep or store else '#' + self.vaddr(d))
+            self.helper(helper + 'i')
+            if keep:
+                self.pend = d
+            elif store:
+                self.I('lda', '__h0')
+                self.sta(d, 0)
+                self.I('lda', '__h0+2')
+                self.sta(d, 1)
+            self.h0v = d
+            return
+        if b is not None and h0 is not None and b is h0 and a is not h0:
+            helper += 'r'                       # (a, b) = (__h1, __h0): the ...r entry
+            if self.dpv(a):
+                self.I('ldx', '#' + self.vaddr(a))
+                helper += 'x'                   # a from its register (fp_ind.s)
+            else:
+                self.fload('__h1', a)
+        else:
+            if a is not h0 or h0 is None:
+                self.fload('__h0', a)
+            if b is not None:
+                if a is h0 and h0 is not None and self.dpv(b):
+                    self.I('ldx', '#' + self.vaddr(b))
+                    helper += 'x'               # b from its register (fp_ind.s)
+                else:
+                    self.fload('__h1', b)       # (b may be __h0 itself: x * x)
+        self.helper(helper)
+        self.h0v = None
+        d = i.d
+        if op == 'fcmp':
+            self.sta(d)
+            return
+        if self.keep_h0(d):
+            self.pend = d                       # the next instruction reads __h0
+        else:
+            self.I('lda', '__h0')
+            self.sta(d, 0)
+            self.I('lda', '__h0+2')
+            self.sta(d, 1)
+        self.h0v = d
+
+    def keep_h0(self, d):
+        """may the float result d stay in __h0 only: the next instruction of the block
+        takes it from there and nothing after uses it"""
+        b, k = self.cur_b, self.cur_k
+        if k + 1 >= len(b.ins):
+            return False
+        nx = b.ins[k + 1]
+        if d in self.live_after[k + 1] or d not in nx.uses():
+            return False
+        if nx.op in FBIN:
+            return nx.a is d or nx.b is d
+        if nx.op in FUN:
+            return nx.a is d
+        if nx.op in ('st', 'ret', 'mov'):
+            return nx.a is d and nx.x.get('base') is not d and nx.x.get('idx') is not d
+        if nx.op in ('and', 'or', 'xor'):
+            return nx.d is not None and nx.d.size == 4
+        if nx.op == 'call':
+            return nx.x['tgt'] is not d
+        return False
+
     def call32(self, h, i):
         for r, o in (('__h0', i.a), ('__h1', i.b)):
+            if o is None:
+                continue
             for p in (0, 1):
                 if isinstance(o, Imm) and (o.val >> (16 * p)) & 0xFFFF == 0 or \
                         isinstance(o, (V, Sym)) and o.size == 2 and p == 1:

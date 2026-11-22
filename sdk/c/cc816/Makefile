@@ -1,10 +1,11 @@
 # cc816 - the Horizon C SDK's own C compiler (Python 3, emits ca65 assembly).
 #
-#   make check           the regression set (tests/check.py): tests/regress/*.c and the
+#   make check           the regression set (tests/check.py): tests/regress/*.c, the
 #                        random programs (fuzz/genfuzz.py, seeds 1, 2 and 3: 200 x seed
-#                        programs; SEEDS=1,2 to change) in emu816, and the
-#                        c-testsuite when CTS=<checkout> is given
-#   make quick           the same with 50 random programs a seed
+#                        programs; SEEDS=1,2 to change) and the random floating-point
+#                        programs (100 x seed) in emu816, and the c-testsuite when
+#                        CTS=<checkout> is given
+#   make quick           the same with 50 random programs a seed (25 float ones)
 #   make sdk             compile (not run) every C file of the SDK (tests/sdkcompile.py)
 #   make clean
 #

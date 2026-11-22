@@ -194,6 +194,14 @@ def emit(unit, funcs, helpers):
         out.append('\t.import ' + ', '.join(imports))
     if exports:
         out.append('\t.export ' + ', '.join(sorted(exports)))
+    # a unit with floating point that calls a printf (or gives a float to any variadic
+    # function: a printf wrapper) links printf's float conversions, one that calls a scanf
+    # scanf's (rt/cc816/fp_hookp.s, fp_hooks.s: a constructor installs them); the
+    # library's own units (split) do not
+    if getattr(unit, 'float_printf', False):
+        out.append('\t.forceimport __cc816_fmtf')
+    if getattr(unit, 'float_scanf', False):
+        out.append('\t.forceimport __cc816_scanf')
     return '\n'.join(out) + '\n' + text_all + '\n'
 
 

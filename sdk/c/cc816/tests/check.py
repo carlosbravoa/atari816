@@ -9,6 +9,9 @@
   fuzz      random programs from fuzz/genfuzz.py checked against the host's gcc (seeds 1
             and 2, 200 and 400 programs; --fuzz N programs a seed, --seeds to choose;
             --features: genfuzz.py's shapes, all by default, basic for the original ones)
+  fuzzfp    random floating-point programs (genfuzz.py --features basic,float: 100 x seed
+            programs a seed, --fuzz N too) checked bit for bit against gcc's SSE single
+            precision; --no-float leaves them out
   cts       the c-testsuite (git clone https://github.com/c-testsuite/c-testsuite), when
             --cts DIR (or $CTS) points at a checkout: its single-exec tests
 
@@ -44,6 +47,7 @@ def main():
     a = sys.argv[1:]
     cts = os.environ.get('CTS')
     count, seeds, feats = None, [1, 2], 'all'
+    flt = True
     i = 0
     while i < len(a):
         if a[i] == '--cts':
@@ -56,6 +60,8 @@ def main():
             feats = a[i + 1]; i += 2
         elif a[i] == '--quick':
             count = 50; i += 1
+        elif a[i] == '--no-float':
+            flt = False; i += 1
         else:
             sys.exit(__doc__)
     bad = 0
@@ -76,6 +82,19 @@ def main():
                             str(seed), '--features', feats], check=True, capture_output=True)
         res = conform(sorted(glob.glob(os.path.join(src, 'fz*.c'))),
                       os.path.join(prog.BUILD, f'fuzz{seed}'), 2)
+        bad += sum(1 for r in res.values() if r['status'] != 'pass')
+    for seed in seeds if flt else ():
+        n = (count // 2 if count else 100 * seed)
+        print(f'== fuzz float, seed {seed}: {n} programs')
+        src = os.path.join(prog.BUILD, f'fuzzfpsrc{seed}-{n}')
+        if len(glob.glob(os.path.join(src, 'fz*.c'))) < n * 9 // 10:
+            import shutil
+            shutil.rmtree(src, ignore_errors=True)
+            subprocess.run([sys.executable, os.path.join(HERE, 'fuzz', 'genfuzz.py'), src, str(n),
+                            str(seed), '--features', 'basic,float'], check=True,
+                           capture_output=True)
+        res = conform(sorted(glob.glob(os.path.join(src, 'fz*.c'))),
+                      os.path.join(prog.BUILD, f'fuzzfp{seed}'), 4)
         bad += sum(1 for r in res.values() if r['status'] != 'pass')
     if cts:
         print('== c-testsuite')

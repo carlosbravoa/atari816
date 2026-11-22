@@ -3,7 +3,8 @@
 in batches (one emulator run per batch: runner.c spawns each test and reports its exit
 code).
 
-    conform.py [--batch N] [--out DIR] [--jobs J] [--seconds-per-test S] FILE.c ...
+    conform.py [--batch N] [--out DIR] [--jobs J] [--seconds-per-test S] [-O0|-O1|-O2]
+               FILE.c ...
 
 A test passes when it exits with 0 and, if FILE.c.expected exists, its console output
 equals that file. Results: OUT/results.json and a summary on stdout.
@@ -26,10 +27,10 @@ from prog import CError, Unsupported, LinkError, RUN816, HORIZON   # noqa: E402
 
 
 def compile_one(args):
-    k, src, out = args
+    k, src, out, level = args
     base = os.path.join(out, f'T{k:03d}')
     try:
-        prog.compile_obj(src, base + '.o')
+        prog.compile_obj(src, base + '.o', level)
     except Unsupported as e:
         return k, 'unsupported', str(e.msg)
     except CError as e:
@@ -76,10 +77,13 @@ def main():
     batch, jobs, spt = 40, os.cpu_count() or 4, 1.0
     out = os.path.join(prog.BUILD, 'conform')
     files = []
+    level = 2
     i = 0
     while i < len(argv):
         a = argv[i]
-        if a == '--batch':
+        if a in ('-O0', '-O1', '-O2'):
+            level = int(a[2])
+        elif a == '--batch':
             batch = int(argv[i + 1]); i += 1
         elif a == '--out':
             out = argv[i + 1]; i += 1
@@ -98,7 +102,7 @@ def main():
 
     results = {}
     with cf.ProcessPoolExecutor(jobs) as ex:
-        for k, st, msg in ex.map(compile_one, [(k, f, out) for k, f in enumerate(files)]):
+        for k, st, msg in ex.map(compile_one, [(k, f, out, level) for k, f in enumerate(files)]):
             results[k] = {'test': files[k], 'status': st, 'msg': msg}
     todo = [k for k in results if results[k]['status'] == 'built']
     while todo:

@@ -2,8 +2,8 @@
 
 The C SDK for Horizon: its two compilers, how a C program is laid out in memory, its
 types, far memory, the calling convention (for assembly), the C library on Horizon,
-syscalls from C, the stacks, the compilers' faults and what the SDK does about them, and
-speed. Getting started: [getting-started.md](getting-started.md); window applications (the
+floating point, syscalls from C, the stacks, the compilers' faults and what the SDK does
+about them, and speed. Getting started: [getting-started.md](getting-started.md); window applications (the
 controls library, `hui.h`): [apps.md](apps.md); games: [games.md](games.md); porting:
 [porting.md](porting.md).
 
@@ -11,7 +11,7 @@ controls library, `hui.h`): [apps.md](apps.md); games: [games.md](games.md); por
 | --- | --- |
 | Compilers | **cc816**, the SDK's own (`sdk/c/cc816`, Python 3, writes ca65 assembly): the default. **vbcc 65816** Release 2 (Volker Barthelmann): `hcc --cc vbcc`, installed by `sdk/c/tools/get-toolchain.sh` |
 | Driver | `sdk/c/bin/hcc` (`hcc -h` lists the options); `--cc cc816` or `--cc vbcc`, or `HZ_CC` in the environment (`make HZ_CC=vbcc` for a program built with c.mk) |
-| Headers | `horizon.h` (syscalls, blocks, helpers), `hui.h` (the controls library: [apps.md](apps.md)), `hgame.h`, `conio.h`, `joystick.h` ([games.md](games.md)), `dirent.h`; the C library's: cc816's own (`sdk/c/cc816/include`: `stdio.h`, `stdlib.h`, `string.h`, `ctype.h`, `time.h`, `errno.h`, `stdint.h`, `stdarg.h`, `limits.h`, ...), vbcc's (with `math.h`, `setjmp.h`) |
+| Headers | `horizon.h` (syscalls, blocks, helpers), `hui.h` (the controls library: [apps.md](apps.md)), `hgame.h`, `conio.h`, `joystick.h` ([games.md](games.md)), `dirent.h`; the C library's: cc816's own (`sdk/c/cc816/include`: `stdio.h`, `stdlib.h`, `string.h`, `math.h`, `float.h`, `ctype.h`, `time.h`, `errno.h`, `stdint.h`, `stdarg.h`, `limits.h`, ...), vbcc's (with `setjmp.h`) |
 | Library | `sdk/c/lib` (both compilers), `sdk/c/lib/cc816` and `sdk/c/rt/cc816` (cc816: the whole C library and its runtime), `sdk/c/lib/vbcc`, `sdk/c/rt`, `sdk/c/fastrt` (vbcc: over vbcc's own binary library); hcc builds them into `sdk/c/build/lib/<cc816, large, tiny>/` |
 | Make | `sdk/c/c.mk` (a program's Makefile is three lines) |
 
@@ -25,7 +25,7 @@ with the same compiler").
 | --- | --- | --- |
 | Memory | one model ("Memory", below) | the large and the tiny model (`--model`) |
 | Data pointer | 16 bits: an offset in the code bank; `__far` 32 bits | large: 32 bits; tiny: 16 bits (the window) |
-| Floating point | **none yet**: a `float` or `double` is an error naming the file and the line | `float`, `double` (32 bits), math.h: `--float` |
+| Floating point | IEEE 754 single precision: `float`, `double` and `long double` are all 32 bits; math.h; linked only into programs that use it ("Floating point", below) | `float`, `double` (32 bits, MS BASIC's format), math.h: `--float` |
 | `long long` | no | no (vbcc 65816 fails on it) |
 | `setjmp` / `longjmp` | no (`setjmp.h` is an `#error`) | in its library, not tested |
 | Assembly files (`.s`) | ca65 syntax ("Calling convention", below) | vasm oldstyle syntax |
@@ -35,9 +35,9 @@ with the same compiler").
 | Needs | Python 3, cc65's ca65, ld65 and ar65 | its toolchain (x86-64 Linux binaries, downloaded), and cc65 for `hui.h` |
 | Licence | the SDK's (pycparser and pcpp inside are BSD) | free for non-commercial use, may be redistributed only unmodified |
 
-**What needs `--cc vbcc`:** floating point (`float`, `double`, `math.h`, `printf("%f")`),
-`setjmp`/`longjmp`, the tiny model. Neither compiler has `long long`, variable-length
-arrays, inline assembly, or a program larger than its one code bank.
+**What needs `--cc vbcc`:** `setjmp`/`longjmp` and the tiny model. Floating point no longer
+does: cc816 has it (below). Neither compiler has `long long`, a 64-bit `double`,
+variable-length arrays, inline assembly, or a program larger than its one code bank.
 
 ## Memory (cc816)
 
@@ -133,7 +133,7 @@ programs are smaller (16-bit pointers), but all data must fit in 28 KB.
 | `short`, `int` | 16 bits | -32,768-32,767 (`unsigned`: 0-65,535) |
 | `long` | 32 bits | |
 | `long long` | - | not supported (neither compiler) |
-| `float`, `double` | cc816: none; vbcc: 32 bits | vbcc: MS BASIC's format, about 7 digits (`hcc --cc vbcc --float`) |
+| `float`, `double`, `long double` | 32 bits (all three, both compilers) | cc816: IEEE 754 single precision (24-bit significand: about 7 decimal digits, 1.2e-38 to 3.4e38, denormals down to 1.4e-45); vbcc: MS BASIC's format, about 7 digits (`hcc --cc vbcc --float`) |
 | data pointer | cc816: 16 bits; vbcc: 32 bits large, 16 bits tiny | `__far` (32 bits: offset, bank, 0) with both |
 | function pointer | cc816: 16 bits (JSR); vbcc: 32 bits (JSL) | |
 | `size_t`, `ptrdiff_t` | 16 bits | `unsigned int`, `int`: one object at most 65,535 bytes |
@@ -200,12 +200,13 @@ the window) by itself.
   PBR = the code bank: keep D and DBR.
 - **Every argument is on the hardware stack**, pushed last first: at entry the first is at
   `3,s` (above the 2-byte return address), the next ones after it. Each takes 2 bytes
-  (`char`, `short`, `int`, pointers, function pointers) or 4 (`long`, `__far` pointers:
-  offset, bank, 0). The caller removes them. A structure argument is passed as the address
+  (`char`, `short`, `int`, pointers, function pointers) or 4 (`long`, `float`, `double`,
+  `__far` pointers: offset, bank, 0). The caller removes them. A structure argument is passed as the address
   of a copy the caller made (2 bytes); a structure result is written through a hidden
   first argument (the address of the caller's space), which is also returned in A.
   Variable arguments are the same (`va_list` is a far pointer into the stack).
-- The **result** is in A (16-bit and smaller) or A/X (32-bit: A the low word).
+- The **result** is in A (16-bit and smaller) or A/X (32-bit: A the low word; a `float`
+  or `double` too: its IEEE bits, the sign in bit 15 of X).
 - **Registers** (direct page, `.importzp` them): `__rg` is 96 bytes: `__rg+0` to
   `__rg+47` may be changed by any function, `__rg+48` to `__rg+95` must be kept (save and
   restore what you use). `__h0`, `__h1`, `__h2`, `__h3` (4 bytes each) and `__rv` (4)
@@ -350,12 +351,14 @@ Where it differs from the table below:
 
 | | cc816 |
 | --- | --- |
-| `printf` family | `%d %i %u %x %X %o %c %s %p %n %%`, the sizes `hh h l` (and `j z t`), widths, precision, `-+ 0#`, `*`. No floating point (`%f` is printed as written) |
-| `scanf` family | `%d %i %u %o %x %c %s %[...] %p %n`, `*`, widths, the sizes `hh h l` |
+| `printf` family | `%d %i %u %x %X %o %c %s %p %n %%`, the sizes `hh h l` (and `j z t`), widths, precision, `-+ 0#`, `*`; `%f %F %e %E %g %G %a %A` (also with `l`, `L`) in programs that use floating point ("Floating point", below) |
+| `scanf` family | `%d %i %u %o %x %c %s %[...] %p %n`, `*`, widths, the sizes `hh h l`; `%f %e %g %a` (`float *`; with `l` or `L` `double *`, `long double *`: the same 32 bits) in programs that use floating point |
 | `fgetpos`, `fsetpos` | 32-bit positions |
 | `malloc` | first fit over the heap; NULL when it is full (the libc test: 25 blocks of 1 KB) |
 | `clock()` | CLOCKS_PER_SEC 50, as vbcc's |
-| `setjmp`, floating point, `math.h` | not there (`--cc vbcc`) |
+| `strtod`, `strtof`, `strtold`, `atof` | exact (rounded to nearest, ties to even, from any number of digits), hexadecimal (`0x1.8p3`), `inf`, `infinity`, `nan`, `nan(...)`; ERANGE on overflow and when a nonzero number becomes 0 |
+| `math.h` | the list under "Floating point", below |
+| `setjmp` | not there (`--cc vbcc`) |
 | `assert` | prints the expression, the file and the line on stderr, then exit code 3 |
 
 **vbcc**: its C library (binary only, its 65816 "simulator" target) does the formatting,
@@ -396,6 +399,110 @@ reasons: the simulator target has no files; its `ftell` keeps 16 bits; its `__ma
 does not flush the console; its `strerror` returns a pointer with a wrong bank (a compiler
 fault, below); its `sscanf`/`fscanf`/`scanf` are integer-only variants; the float
 library's `strtod` reads nothing.
+
+## Floating point (cc816)
+
+**One format.** cc816's `float`, `double` and `long double` are all IEEE 754 single
+precision: 32 bits, a 24-bit significand (about 7 decimal digits), from 1.2e-38 to 3.4e38,
+and denormals down to 1.4e-45. `sizeof(double)` is 4. Compilers for small machines often
+do this: a 64-bit `double` would take twice the memory and much more time.
+The three types still have their names (`_Generic` tells them apart), but they hold the
+same values. `float.h` says so: `DBL_DIG` is 6 and `DBL_EPSILON` is `FLT_EPSILON`
+(1.19e-7). C written for a 64-bit `double` compiles and runs, with 7 digits instead of
+16 ([porting.md](porting.md)).
+
+**Arithmetic.** It follows IEEE 754 for single precision:
+
+- `+ - * /` and the conversions to float are rounded once, to nearest, ties to even.
+  `1.0f + 0x1p-24f` is 1 (a tie: to even).
+- Gradual underflow: denormals come in and go out, rounded once. Overflow gives infinity.
+- Compares are exact. A NaN is unordered: every compare with it is false but `!=`. In a
+  condition (`if (x)`, `!x`, `&&`), a NaN is true and -0.0 is false.
+- -0.0 is kept as IEEE says (`-0.0 == 0.0`, `1 / -0.0` is -infinity).
+- A NaN operand gives that NaN back, made quiet (the first when both are). An invalid
+  operation (0/0, inf - inf, 0 * inf, inf / inf, `sqrt(-1)`) gives the default NaN,
+  $FFC00000 (the sign bit set, as on x86: printf shows `-nan`). `NAN` in math.h is the
+  positive quiet NaN, $7FC00000.
+- A conversion to an integer truncates toward zero. Out of range (C leaves it undefined):
+  `long` gets -2147483648 for |x| >= 2^31 and for NaN; `unsigned long` gets 4294967295 for
+  x >= 2^32 and NaN; `int`, `unsigned` and the char types take the low bits of the `long`
+  conversion.
+- No exception flags, no other rounding modes, no `fenv.h`.
+- Constants: decimal and hexadecimal (`0x1.8p-3`), with or without the suffixes `f`, `F`,
+  `l`, `L`; each is rounded exactly once. The compiler folds constant expressions (`1.0 /
+  3`, initialisers, `x * 2` becomes `x + x`) with the same rounding as the run time: the
+  same bits.
+
+**Where it is.** The arithmetic is in 65816 assembly, `sdk/c/rt/cc816/fp_*.s`: `__fadd`,
+`__fsub`, `__fmul`, `__fdiv`, `__fcmp`, `__ltof`, `__ultof`, `__ftol`, `__ftoul` (operands in
+`__h0`/`__h1`, as the 32-bit helpers; the contract is at the top of `fp_pack.s`). They take
+1,792 bytes when all are linked. A float is passed and returned as a `long` is (4 bytes on
+the stack; A/X). For assembly: the bits of a float are its IEEE pattern, low word first.
+cc816 has two builtins to see them without a union: `__builtin_fbits(x)` (the 32 bits as
+an `unsigned long`) and `__builtin_bitsf(u)` (back).
+
+**Only for programs that use it.** The arithmetic helpers are linked as any helper is:
+when the code calls them. printf's float conversions (`lib/cc816/fmtfp.c`, 3,677 bytes)
+and scanf's (`scanfp.c`, 1,699 bytes, with `strtod`, 4,848 bytes) are linked in two cases.
+A file that uses floating point (it defines a float object, has a float constant, converts
+to or from a float, or calls a function with a float argument or result; a prototype
+alone, as in `stdlib.h`, does not count) and that calls a printf function (`printf`,
+`sprintf`, `vsnprintf`, ...) or gives a float to any variadic function (a wrapper of
+printf) links `rt/cc816/fp_hookp.s`, whose constructor gives printf its float
+conversions. The same with a scanf function, or a float pointer given to a variadic
+function, links `fp_hooks.s` for scanf. So a program without floating point has no float
+code in its printf, and a program that computes with floats but prints none has no float
+printf (`tests/run.py`'s fpu test checks both). The rule misses only odd code: a printf
+whose float argument was never a float in any file (`printf("%f", some_long)`).
+
+**math.h.** Every name has its plain form (`sin`); the `f` and `l` forms (`sinf`, `sinl`)
+are macros for it. No function sets errno: a domain error gives NaN, an overflow
+`HUGE_VAL` (infinity); `math_errhandling` is 0. Accuracy, measured against glibc on a
+million arguments a function (`tests/fpu/mathhost.sh`; "ulp" is a unit in the last place):
+
+| Functions | Accuracy | Bytes linked (about, with what they use) |
+| --- | --- | --- |
+| `sqrt`, `fabs`, `floor`, `ceil`, `trunc`, `round`, `rint`, `nearbyint`, `lround`, `lrint`, `fmod`, `remainder`, `modf`, `frexp`, `ldexp`, `scalbn`, `ilogb`, `logb`, `copysign`, `nextafter`, `fmin`, `fmax`, `fdim`, `fpclassify`, `signbit`, `isnan`, `isinf`, `isfinite`, `isnormal` | exact (correctly rounded) | `sqrt` 560, `floor` 280, `fmod` 1,100 |
+| `sin`, `cos`, `tan` (any argument: 1e30 too, reduced exactly), `atan`, `atan2`, `exp`, `exp2`, `log`, `pow`, `cbrt` | within 1 ulp | `sin` and `cos` 4,300 together, `tan` 1,300 more, `atan2` 1,900, `exp` 1,000, `log` 1,300, `pow` 4,800 |
+| `asin`, `acos`, `log10`, `log2`, `log1p`, `hypot`, `cosh` | within 2 ulp | |
+| `expm1`, `sinh`, `tanh` | within 3 ulp | |
+| `fma` | x * y rounded, then + z (not fused) | |
+
+Not there: `lgamma`, `tgamma`, `erf`, `erfc`, the Bessel functions, `nan()`, `fenv.h`.
+The algorithms are fdlibm's (Sun Microsystems; its notice is in
+`sdk/c/lib/cc816/mathint.h`) in their single-precision form, with two changes to `pow`
+(`math_pow.c`, "Compiler notes"); the reduction of large trigonometric arguments is
+cc816's own.
+
+**printf, scanf, strtod.** `%f %F %e %E %g %G %a %A` print a float's exact decimal value,
+rounded to the precision with ties to even, as glibc does: `printf("%.1f", 0.25)` gives
+`0.2`, and `printf("%.20f", 0.1f)` gives `0.10000000149011611938`. The flags, the width and
+the precision work as for integers; `inf`, `nan` (`INF`, `NAN`), with a sign when the sign
+bit is set. scanf's `%f` (and `%e %g %a`, with `l` or `L` for `double *` and `long double
+*`) reads the longest beginning of a number, as C says (`1e+x` fails), and converts it with
+`strtod`. `strtod`, `strtof`, `strtold` and `atof` round exactly (any number of digits;
+hexadecimal, `inf`, `infinity`, `nan`, `nan(n)`), and set ERANGE on overflow and when a
+nonzero number becomes 0.
+
+**Speed.** In microseconds, one operation on volatile operands, the loop taken out (the
+emulator, whose timings are the board's within about 5 %):
+
+| `+` | `-` | `*` | `/` | `<` | `(float)long` | `(float)int` | `(long)float` | `sqrt` | `sin` | `exp` | `log` |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 77 | 87 | 207 | 282 | 17 | 47 | 62 | 37 | 587 | 4,147 | 3,560 | 3,402 |
+
+That is about 250 to 4,000 cycles of the 14.3 MHz clock for one arithmetic operation:
+keep floating point out of anything that runs every frame (`hgame.h`'s fixed point is much
+faster). The benchmark against vbcc is under
+"Speed".
+
+**How it is tested.** `tests/fpu` (in `make -C sdk/c test`), 47,159 cases, bit for bit:
+28,450 operations (+ - * / compares conversions: specials against specials, ties,
+denormal and overflow results, random patterns) whose expected bits are also checked
+against the host's SSE hardware; 3,000 printf and strtod results against glibc; 15,709
+math.h results against the same C built for the host. `tests/float/float.c` (both compilers) and `ieee.c` (the edges,
+readable). The compiler's random programs (`make -C sdk/c/cc816 check`) include float
+programs checked bit for bit against gcc.
 
 ## Syscalls from C
 
@@ -504,8 +611,12 @@ one small program for each fault found so far (`cc816/tests/regress/`), random p
 checked against gcc's results (`cc816/tests/fuzz/genfuzz.py`: arithmetic of every width,
 casts, compares, shifts, division, arrays, structures and their copies, structures by
 value, bit-fields, function pointers, variable arguments, far pointers, switches, loops
-that spill registers), and the c-testsuite when `CTS=` points at a checkout. The faults
-found while it became the SDK's compiler, all fixed in the compiler:
+that spill registers; and floating-point programs, `--features basic,float`: float and
+double arithmetic, compares, conversions both ways, `++`, compound assignments, float
+arrays, structures, globals, pointers, parameters, results, variadic doubles, sprintf
+`%f %e %g`, checked bit for bit against gcc's SSE single precision), and the c-testsuite
+when `CTS=` points at a checkout. The faults found while it became the SDK's compiler,
+all fixed in the compiler:
 
 1. **Branch relaxation stopped after 20 branches**: a switch with about 30 cases made code
    ca65 refused (a branch out of range). Every branch out of reach is now relaxed, pass
@@ -524,17 +635,37 @@ found while it became the SDK's compiler, all fixed in the compiler:
    or returned by value) moved the bytes inside the code bank: the block move now takes
    both pointers' banks (`r007_far_struct_copy.c`).
 
+7. **A 16-bit value given to a 32-bit variable without a cast** (`long x = -1;`, `long y
+   = i;`, `y = i;`) was not sign-extended: -1 became 65,535. The random programs always
+   cast, so they never met it; adding floating point did (`float x = 3;` took the same
+   path). It now widens by the value's type (`r008_widen_init.c`).
+8. **`a - b` with b a NaN** gave the NaN with its sign flipped (the runtime negated b
+   first); IEEE keeps it. Found by `tests/fpu` (`r009_float_sub_nan.c`).
+9. **`int e = 97.0;`** gave 0: a mistake of the fix for bug 7 (the float's bits were cut to
+   16 bits before the conversion). Found by the c-testsuite (00175.c;
+   `r010_float_init_conv.c`).
+
 Bugs 4-6 were found by the random programs once they learnt structures, bit-fields and
 far pointers. `r003_nearfar.c` and `r004_coalesce32.c` guard two changes made on the way
 (near pointers widened to far ones; 32-bit results sharing their operand's registers).
+While floating point was added, its own tests found more, fixed before they reached a
+program. In math.h: `pow` as ported from fdlibm's single-precision code lost up to 100 ulp
+near x = 1 (the 13-bit head of 2/(3 ln 2) made a product inexact; it has 12 bits now) and
+gave infinity or 0 for every |y| > 2^27 when x was more than 8 ulp from 1 (now only when
+the result overflows); `floor`, `ceil`, `trunc`, `round`, `rint` and `frexp` of infinity
+gave NaN; `cbrt(FLT_MAX)` and `log1p(FLT_MAX)` overflowed inside; `cosh` of a tiny argument
+and `sinh`'s overflow were wrong. In the code generator: the peephole pass dropped the
+high word of a register whose address goes to a float helper, and address 0 (`__rg+0`)
+was taken for "no destination".
 
-The c-testsuite (single-exec, 220 programs): 190 pass. Of the others, 18 need floating
-point, `long long`, a variable-length array or a GNU statement expression; 7 meet gaps of
-the front end (pycparser and pcpp: a structure and a label of the same name, empty macro
-arguments, `#line`, `wchar.h`, one more parse) or `int64_t`; 5 are listed in
-`cc816/tests/cts-known.txt` (two expect a 32-bit `int`, two compiler extensions, and an
-8-queens search too slow for the test's time, with vbcc too). The random programs: seeds
-1, 2 and 3 (1,200 programs) all agree with gcc.
+The c-testsuite (single-exec, 220 programs): 195 pass. Of the others, 10 need `long
+long`, a variable-length array or a GNU statement expression; 7 meet gaps of the front
+end (pycparser and pcpp: a structure and a label of the same name, empty macro
+arguments, `#line`, `wchar.h`, one more parse) or `int64_t`; 8 are listed in
+`cc816/tests/cts-known.txt` (two expect a 32-bit `int`, three a 64-bit `double`, two
+compiler extensions, and an 8-queens search too slow for the test's time, with vbcc too).
+The random programs: seeds 1, 2 and 3 (1,200 programs, and 600 floating-point ones) all
+agree with gcc.
 
 ### vbcc
 
@@ -602,6 +733,25 @@ What they measure: sieve (byte arrays, 16-bit indexes), sum16 (16-bit arrays), m
 (32-bit multiply and divide), fib22 (calls), strs (pointers and bytes), structs (structure
 fields, signed, shifts).
 
+Floating point (`tests/bench/fbench.c`, `make -C sdk/c test` runs it as `fbench`), in
+milliseconds, and the program's size on the card:
+
+| | mandel | sincos | sqrt | expow | conv | program |
+| --- | --- | --- | --- | --- | --- | --- |
+| cc816, -O2 | 2,140 | 1,650 | 365 | 1,950 | 1,070 | 25,929 bytes |
+| vbcc large, -O1 | 1,880 | 780 | 1,707 | 690 | 1,049 | 15,138 bytes |
+| vbcc tiny, -O1 | 1,908 | 780 | 1,710 | 680 | 1,037 | 13,249 bytes |
+
+mandel is one 64-point row of the Mandelbrot set (+ - * and compares), sincos `sin` and
+`cos` of 200 values, sqrt 500 square roots, expow `exp`, `log` and `pow` of 100 values,
+conv 2,000 conversions and divisions. cc816 rounds every operation exactly (IEEE 754) and
+its math.h is within an ulp or two of the exact result; vbcc uses its own format and its
+own library (not measured here for accuracy). vbcc is quicker at multiplying (about 12 %
+on mandel) and at `sin`, `exp`, `log` and `pow` (2 to 3 times); cc816 is much quicker at
+`sqrt` (exact, bit by bit: 4.7 times); the two are alike on conversions and division. cc816's
+float code is larger: about 1.8 KB of arithmetic, 3.7 KB for printf's `%f`, and its math
+functions are longer (a call to a float helper is 12 to 27 bytes of code).
+
 The runtimes: cc816's (`sdk/c/rt/cc816`) and vbcc's tuned one (`sdk/c/fastrt`, linked
 into every vbcc program in place of its library's routines) against vbcc's library's own,
 in milliseconds for the loop shown (loop overhead included; `tests/rt/rtbench.c`; vbcc's
@@ -642,7 +792,9 @@ Advice, from these numbers and the generated code:
   65816's own size. Signed division and right shifts of `int` need extra code.
 - Avoid **`long`** in inner loops: every 32-bit operation is two 16-bit ones, and a
   multiply or divide is a call (a 32-bit multiply about 0.1 ms with its loop, table above).
-- Avoid **float** (vbcc) in anything that runs every frame.
+- Avoid **float** in anything that runs every frame (both compilers: 20 to 300
+  microseconds an operation, milliseconds for `sin` or `pow`); fixed point (`hgame.h`'s
+  `hg_fix8`, `hg_fix16`) is much faster.
 - `memcpy`, `memmove`, `memset` move blocks with MVN/MVP (about 7 cycles a byte, 1000
   bytes in under 1 ms); `hz_far_copy` too.
 - cc816: `-O2` (the default) is the fast one; `-O1` drops the loop optimisations (sum16

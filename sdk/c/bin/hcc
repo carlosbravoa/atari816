@@ -6,10 +6,11 @@
 Compiles every .c, assembles every .s, links them with the Horizon C library and writes
 GAME.PRG, ready for the SD card or the emulator (sdk/tools/run816.py). Two compilers:
 
-  cc816 (the SDK's own, sdk/c/cc816): one memory model, ca65 assembly (.s files in ca65
-        syntax), linked with ld65. Needs Python 3 and cc65's ca65/ld65/ar65.
+  cc816 (the SDK's own, sdk/c/cc816): one memory model, IEEE floating point (float =
+        double = 32 bits), ca65 assembly (.s files in ca65 syntax), linked with ld65.
+        Needs Python 3 and cc65's ca65/ld65/ar65.
   vbcc  (vbcc 65816, tools/get-toolchain.sh): the large and tiny models, floating point
-        (--float), vasm assembly (.s files in vasm oldstyle syntax).
+        (--float), setjmp, vasm assembly (.s files in vasm oldstyle syntax).
 
 Options:
   --cc cc816|vbcc   the compiler (default: $HZ_CC, else cc816); every file of
@@ -32,8 +33,9 @@ Options:
   --stack N         cc816: bytes for the software stack (arrays, structures and locals
                     whose address is taken; default 8192, taken from the code bank);
                     vbcc tiny model: bytes for the stack (default 3968)
-  --float           vbcc only: link the floating-point library (printf %f, math.h);
-                    hcc also adds it by itself when the link needs it
+  --float           vbcc: link the floating-point library (printf %f, math.h); hcc
+                    also adds it by itself when the link needs it. cc816: nothing to do
+                    (its floating point is in its library, linked when used)
   --ui              link Horizon's controls library (hui.h: windows with buttons,
                     fields, lists, dialogs; large model only); hcc also adds it by
                     itself when the program uses a name of hui.h (docs/c/apps.md)
@@ -212,8 +214,7 @@ def main_cc816(o):
     if o["model"]:
         die(f"--model {o['model']} is for vbcc (hcc --cc vbcc): cc816 has one memory model "
             f"(docs/c/reference.md, \"Memory\")")
-    if o["float"]:
-        die("--float: cc816 has no floating point yet; build with hcc --cc vbcc")
+    # (--float: nothing to do; cc816's floating point is linked from its library when used)
     stack = o["stack"]
     if stack is None:
         stack = hzc816.SSTACK

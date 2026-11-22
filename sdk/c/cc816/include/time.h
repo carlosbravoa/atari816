@@ -17,7 +17,7 @@ struct tm {
 };
 time_t time(time_t *t);
 clock_t clock(void);
-long difftime(time_t a, time_t b);     /* (a long: no floating point) */
+long difftime(time_t a, time_t b);     /* (a long, not C's double: no float code for it) */
 time_t mktime(struct tm *tm);
 struct tm *gmtime(const time_t *t);
 struct tm *localtime(const time_t *t);

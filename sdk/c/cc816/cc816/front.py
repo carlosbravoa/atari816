@@ -12,8 +12,10 @@ from pycparser import c_ast
 
 from .ctypes816 import (CError, Unsupported, where, T, VoidT, IntT, PtrT, ArrT, StructT, FuncT,
                         Field, VOID, BOOL, CHAR, SCHAR, UCHAR, SHORT, USHORT, INT, UINT,
-                        LONG, ULONG, promote, arith_conv, same)
+                        LONG, ULONG, FLOAT, DOUBLE, LDOUBLE, promote, arith_conv, same)
 from .ir import V, Imm, Sym, Frame, FrameSlot, Ins, Block, Func
+from . import fp
+from .fp import FV
 
 FAR_QUAL = '_Atomic'      # the preprocessor maps __far to _Atomic (pycparser knows it)
 
@@ -47,7 +49,7 @@ class LV:
 
 class Sy:
     """a name in scope"""
-    __slots__ = ('kind', 't', 'v', 'asm', 'slot', 'base')
+    __slots__ = ('kind', 't', 'v', 'asm', 'slot', 'base', 'cval')
 
     def __init__(self, kind, t, v=None, asm=None, slot=None, base=None):
         self.kind = kind     # 'global' 'reg' 'mem' 'enum' 'typedef'
@@ -56,6 +58,7 @@ class Sy:
         self.asm = asm       # assembler name (global)
         self.slot = slot     # FrameSlot (mem)
         self.base = base     # address operand of a memory object (Frame / V for a struct param)
+        self.cval = None     # a const scalar's value (its initialiser), read as a constant
 
 
 class DataObj:
@@ -93,6 +96,9 @@ class Front:
         self.global_types = {}
         self.in_params = False
         self.nlit = 0
+        self.uses_float = False      # the unit uses floating point
+        self.calls_printf = False    # ... and calls a printf (links printf's %f) ...
+        self.calls_scanf = False     # ... or a scanf (scanf's %f)
 
     # ------------------------------------------------------------------ errors
     def err(self, msg, node=None):
@@ -139,7 +145,11 @@ class Front:
             s = set(n)
             longs = n.count('long')
             if 'float' in s or 'double' in s:
-                self.unsup('floating point (float, double) is not supported by cc816 yet: build with hcc --cc vbcc', node)
+                if '_Complex' in s or '_Imaginary' in s:
+                    self.unsup('complex numbers (_Complex)', node)
+                if 'float' in s:
+                    return FLOAT
+                return LDOUBLE if longs else DOUBLE
             if longs >= 2:
                 return LLONG_U if 'unsigned' in s else LLONG
             if 'void' in s:
@@ -272,6 +282,8 @@ class Front:
                 if isinstance(node.dim, c_ast.ID) and node.dim.name == '*':
                     return ArrT(el, None)
                 n = self.const_eval(node.dim)
+                if isinstance(n, FV):
+                    self.err('the size of an array is not an integer', node)
                 if n is None:
                     if self.in_params:
                         return ArrT(el, None)
@@ -340,6 +352,13 @@ class Front:
             if v is None:
                 return None
             t = self.expr_type(e)
+            if isinstance(v, FV) or t.is_float:
+                if e.op == '!':
+                    return int(not v)
+                if not t.is_float or e.op not in ('-', '+'):
+                    return None
+                v = self.wrap(v, t)
+                return FV(v.bits ^ fp.SIGN) if e.op == '-' else v
             r = {'-': lambda: -v, '+': lambda: v, '~': lambda: ~v, '!': lambda: int(not v)}.get(e.op)
             return self.wrap(r(), t) if r else None
         if isinstance(e, c_ast.BinaryOp):
@@ -353,7 +372,19 @@ class Front:
                 return None
             t = self.expr_type(e)
             lt = promote(self.expr_type(e.left))
-            ct = arith_conv(self.expr_type(e.left), self.expr_type(e.right))
+            ct = arith_conv(self.expr_type(e.left), self.expr_type(e.right)) \
+                if not (decay(self.expr_type(e.left)).is_ptr or decay(self.expr_type(e.right)).is_ptr) \
+                else UINT
+            if (ct.is_float or isinstance(a, FV) or isinstance(b, FV)) and e.op not in ('&&', '||'):
+                if not ct.is_float:
+                    return None
+                fa, fb = self.wrap(a, ct).bits, self.wrap(b, ct).bits
+                if e.op in ('<', '>', '<=', '>=', '==', '!='):
+                    c = fp.cmp(fa, fb)
+                    return int({'<': c == -1, '>': c == 1, '<=': c in (-1, 0), '>=': c in (0, 1),
+                                '==': c == 0, '!=': c != 0}[e.op])
+                f = {'+': fp.add, '-': fp.sub, '*': fp.mul, '/': fp.div}.get(e.op)
+                return self.wrap(FV(f(fa, fb)), t) if f else None
             if e.op in ('<', '>', '<=', '>=', '==', '!='):
                 a, b = self.wrap(a, ct), self.wrap(b, ct)
             elif e.op in ('/', '%', '>>'):
@@ -374,16 +405,33 @@ class Front:
             c = self.const_eval(e.cond)
             if c is None:
                 return None
-            return self.const_eval(e.iftrue if c else e.iffalse)
+            v = self.const_eval(e.iftrue if c else e.iffalse)
+            if v is None:
+                return None
+            t = decay(self.expr_type(e))
+            if t.is_float or isinstance(v, FV):
+                return self.wrap(v, t) if t.is_arith else None
+            return v
         if isinstance(e, c_ast.Cast):
             v = self.const_eval(e.expr)
             t = self.decl_type(e.to_type)
-            if v is None or not (t.is_int or t.is_ptr):
+            if v is None or not (t.is_int or t.is_ptr or t.is_float):
+                return None
+            if isinstance(v, FV) and t.is_ptr:
                 return None
             return self.wrap(v, t)
         return None
 
     def wrap(self, v, t):
+        if t.is_float:
+            return v if isinstance(v, FV) else FV(fp.from_int(v))
+        if isinstance(v, FV):
+            if t.is_int and t.is_bool:
+                return int(bool(v))
+            if not t.is_int:
+                return v
+            # as the runtime converts: __ftoul for unsigned long, __ftol for the rest
+            v = fp.to_int(v.bits, signed=not (t.size == 4 and not t.signed))
         if t.is_ptr:
             return v & ((1 << (8 * t.size)) - 1)
         if not t.is_int:
@@ -407,9 +455,20 @@ class Front:
             return (v - 256 if v > 127 and len(b) == 1 and False else v), INT
         if e.type == 'string':
             return None, None
-        if e.type in ('float', 'double') or ('.' in s and not s.lower().startswith('0x')) or \
-                (('e' in s.lower()) and not s.lower().startswith('0x')):
-            self.unsup('a floating-point constant: floating point (float, double) is not supported by cc816 yet: build with hcc --cc vbcc', e)
+        hexa = s.lower().startswith('0x')
+        if e.type in ('float', 'double', 'long double') or (not hexa and ('.' in s or 'e' in s.lower())) \
+                or (hexa and ('.' in s or 'p' in s.lower())):
+            self.uses_float = True
+            t = s
+            typ = DOUBLE
+            if t[-1] in 'fF':
+                typ, t = FLOAT, t[:-1]
+            elif t[-1] in 'lL':
+                typ, t = LDOUBLE, t[:-1]
+            try:
+                return FV(fp.parse(t)), typ
+            except (ValueError, ZeroDivisionError):
+                self.err(f'bad floating constant {s}', e)
         t = s.lower()
         suf = ''
         while t and t[-1] in 'ul':
@@ -506,7 +565,7 @@ class Front:
         if isinstance(e, c_ast.TernaryOp):
             a = decay(self.expr_type(e.iftrue))
             b = decay(self.expr_type(e.iffalse))
-            if a.is_int and b.is_int:
+            if a.is_arith and b.is_arith:
                 return arith_conv(a, b)
             if a.is_ptr and (b.is_int):
                 return a
@@ -607,7 +666,16 @@ class Front:
                 self.unsup(f'top-level {type(ext).__name__}', ext)
         u = self.unit
         u.externs -= u.defined
+        u.uses_float = self.uses_float
+        u.float_printf = self.uses_float and self.calls_printf
+        u.float_scanf = self.uses_float and self.calls_scanf
         return u
+
+    def note_float(self, t):
+        """the unit uses floating point when it defines a float object or computes with
+        one (a prototype alone, as in stdlib.h, does not count)"""
+        if not self.uses_float and _has_float(t):
+            self.uses_float = True
 
     def typedef(self, d):
         t = self.decl_type(d.type)
@@ -637,6 +705,7 @@ class Front:
             t = prev.t
         sy = Sy('global', t, asm=asm)
         self.bind(d.name, sy)
+        self.const_value(sy, t, d.init)
         if 'extern' in st and d.init is None:
             self.unit.externs.add(asm)
             return
@@ -644,6 +713,23 @@ class Front:
             return
         export = 'static' not in st
         self.define_data(asm, t, d.init, export, d)
+
+    def const_value(self, sy, t, init):
+        """a const (not volatile) integer or float object with a constant initialiser:
+        reads of it are that constant (the object is still defined, for &x)"""
+        if init is None or not t.const or t.volatile or not (t.is_int or t.is_float):
+            return
+        if isinstance(init, c_ast.InitList):
+            if len(init.exprs) != 1:
+                return
+            init = init.exprs[0]
+        try:
+            v = self.const_eval(init)
+        except CError:
+            return
+        if v is None or not isinstance(v, (int, FV)) or (t.is_int and t.is_bool):
+            return
+        sy.cval = self.wrap(v, t)
 
     def define_data(self, asm, t, init, export, node):
         if asm in self.unit.defined:
@@ -654,6 +740,7 @@ class Front:
         self.unit.defined.add(asm)
         if export:
             self.unit.exports.add(asm)
+        self.note_float(t)
         if t.is_arr and t.n is None:
             t = ArrT(t.elem, 1)
         if init is None:
@@ -711,6 +798,18 @@ class Front:
 
     def static_scalar(self, img, off, t, e):
         v = self.const_eval(e)
+        if t.is_float:
+            self.note_float(t)
+            if v is None:
+                self.err('initialiser is not a constant', e)
+            if not isinstance(v, (int, FV)):
+                self.err('initialiser of a float is not a number', e)
+            v = self.wrap(v, t).bits
+            for i in range(4):
+                img.byte(off + i, (v >> (8 * i)) & 0xFF)
+            return
+        if isinstance(v, FV) and t.is_ptr:
+            self.err('a floating-point value as a pointer', e)
         if v is not None:
             if t.is_ptr and t.isfar:
                 img.word(off, v & 0xFFFF)
@@ -763,7 +862,7 @@ class Front:
             a = self.addr_const(e.left)
             if a is not None:
                 k = self.const_eval(e.right)
-                if k is None:
+                if not isinstance(k, int):
                     return None
                 t = decay(self.expr_type(e.left))
                 sz = t.to.size if t.is_ptr and not t.to.is_void else 1
@@ -771,7 +870,7 @@ class Front:
             if e.op == '+':
                 a = self.addr_const(e.right)
                 k = self.const_eval(e.left)
-                if a is not None and k is not None:
+                if a is not None and isinstance(k, int):
                     t = decay(self.expr_type(e.right))
                     return a[0], a[1] + k * (t.to.size if t.is_ptr else 1)
         return None
@@ -787,7 +886,7 @@ class Front:
             a = self.lval_const(e.name) if not decay(self.expr_type(e.name)).is_ptr or \
                 self.expr_type(e.name).is_arr else self.addr_const(e.name)
             k = self.const_eval(e.subscript)
-            if a is None or k is None:
+            if a is None or not isinstance(k, int):
                 return None
             return a[0], a[1] + k * self.expr_type(e).size
         if isinstance(e, c_ast.StructRef):
@@ -893,6 +992,7 @@ class Front:
             v = self.const_eval(e)
             if v is None:
                 self.err('bit-field initialiser is not a constant', e)
+            v = self.wrap(v, f.type)
             img.bits(off + f.offset, f.type.size, f.bitpos, f.bits, v)
         else:
             img(off, None, e, f)
@@ -961,8 +1061,10 @@ class Front:
         else:
             self.sret = None
         _check_ll(ft.ret, fd, self)
+        self.note_float(ft.ret)
         for pname, pt in ft.params:
             _check_ll(pt, fd, self)
+            self.note_float(pt)
             if pt.is_struct:
                 v = f.newv(2, (pname or 'p'))
                 v.param = argoff
@@ -1110,11 +1212,14 @@ class Front:
         if 'static' in st:
             self.nstatic += 1
             asm = f'{self.fn.name}__{d.name}_{self.nstatic}'
-            self.bind(d.name, Sy('global', t, asm=asm))
+            sy = Sy('global', t, asm=asm)
+            self.bind(d.name, sy)
+            self.const_value(sy, t, d.init)
             self.define_data(asm, t, d.init, False, d)
             return
         if t.is_struct and not t.complete:
             self.err(f'variable of incomplete type {t!r}', d)
+        self.note_float(t)
         if t.is_arr or t.is_struct or d.name in self.addr_taken or t.volatile:
             slot = self.new_slot(d.name, t.size)
             sy = Sy('mem', t, slot=slot, base=Frame(slot))
@@ -1166,7 +1271,9 @@ class Front:
                     return
                 lv = LV('mem', et, base=base, off=off)
                 v = self.const_eval(e)
-                if v is not None and v == 0 and et.is_scalar:
+                if v is not None and et.is_scalar and (
+                        self.wrap(v, et).bits == 0 if et.is_float else
+                        (isinstance(v, int) and v == 0)):
                     return
                 self.assign_to(lv, e)
             self.list_init(init.exprs, 0, store, 0, t, static=False)
@@ -1293,6 +1400,8 @@ class Front:
         self.jump(b)
 
     def st_Switch(self, s):
+        if not self.expr_type(s.cond).is_int:
+            self.err('switch on a value that is not an integer', s)
         v = self.convert(self.rv(s.cond), promote(self.expr_type(s.cond)))
         t = v.t
         val = v.op
@@ -1392,16 +1501,52 @@ class Front:
 
     def to_dst(self, r, dst):
         if dst is not None and r.op is not dst:
+            if dst.size != r.op.size and r.t.is_float:
+                return r                # (int e = 97.0;) the conversion that follows moves it
+            if dst.size != r.op.size and r.op.size in (2, 4) and not r.t.is_struct:
+                # a 16-bit value into a 32-bit register (long x = i; long y = -1;): widened
+                # by its own type, as convert() would; a 32-bit one into 16 bits: its low word
+                self.widen_into(r, dst)
+                return RV(dst, r.t)
             self.emit(Ins('mov', dst, r.op))
             return RV(dst, r.t)
         return r
+
+    def widen_into(self, r, dst):
+        op, t = r.op, r.t
+        if dst.size == 2:
+            self.emit(Ins('tr', dst, op))
+            return
+        near = (t.is_ptr and not t.isfar) or t.is_arr or t.is_func
+        if isinstance(op, Imm):
+            v = op.val
+            if t.is_int and t.signed and v & 0x8000:
+                v |= 0xFFFF0000
+            if near and v:
+                self.emit(Ins('mkfar', dst, op))
+                return
+            self.emit(Ins('mov', dst, Imm(v, 4)))
+            return
+        if near or isinstance(op, (Sym, Frame)):
+            self.emit(Ins('mkfar', dst, op))
+            return
+        self.emit(Ins('sx' if t.is_int and t.signed else 'zx', dst, op))
 
     def ex_Constant(self, e, dst):
         if e.type == 'string':
             sym = self.string_sym(e)
             return RV(Sym(sym), ArrT(CHAR, len(self.strbytes(e)) + 1))
         v, t = self.constant(e)
-        return self.to_dst(RV(Imm(v, t.size), t), dst)
+        return self.to_dst(RV(self.cimm(v, t), t), dst)
+
+    def cimm(self, c, t):
+        """a constant value of type t (an int, or an FV for a float type) -> Imm"""
+        if t.is_float:
+            self.uses_float = True
+            return Imm(self.wrap(c, t).bits, 4)
+        if isinstance(c, FV):
+            c = self.wrap(c, t)
+        return Imm(c, t.size if t.size in (1, 2, 4) else 2)
 
     def ex_ID(self, e, dst):
         s = self.lookup(e.name)
@@ -1412,6 +1557,8 @@ class Front:
         if s.kind == 'enum':
             return self.to_dst(RV(Imm(s.v), INT), dst)
         if s.kind == 'global':
+            if s.cval is not None:
+                return self.to_dst(RV(self.cimm(s.cval, s.t.unqual()), s.t.unqual()), dst)
             self.unit.externs.add(s.asm)
             if s.t.is_func or s.t.is_arr:
                 return RV(Sym(s.asm), s.t)
@@ -1521,6 +1668,8 @@ class Front:
             at = it
         if not at.is_ptr:
             self.err('subscript of a non-array', e)
+        if not decay(self.expr_type(idx)).is_int:
+            self.err('an array subscript is not an integer', e)
         el = at.to
         size = el.size if not el.is_void else 1
         # constant part of the index: a[i + 3] -> base + i*size, offset 3*size
@@ -1741,6 +1890,8 @@ class Front:
         rhs = self.rv(e.rvalue)
         target = lv.op if lv.kind == 'reg' and not (lv.t.is_int and lv.t.size == 1) else None
         if lv.t.is_ptr and op in ('+', '-'):
+            if not rhs.t.is_int:
+                self.err(f'invalid operands to {e.op} ({lv.t!r}, {rhs.t!r})', e)
             res = self.ptr_arith(op, cur, rhs, dst=target)
         else:
             at = arith_conv(cur.t, rhs.t) if op not in ('<<', '>>') else promote(cur.t)
@@ -1762,6 +1913,8 @@ class Front:
     def incdec(self, e, want, dst=None):
         lv = self.lval(e.expr)
         t = lv.t
+        if t.is_float:
+            return self.incdec_float(e, lv, want, dst)
         step = t.to.size if t.is_ptr else 1
         if t.is_ptr and t.to.is_void:
             step = 1
@@ -1797,6 +1950,25 @@ class Front:
         if t.is_int and t.size == 1:
             r = self.convert(RV(nv, INT), t)
         return self.to_dst(r, dst)
+
+    def incdec_float(self, e, lv, want, dst):
+        """++ and -- of a float: x + 1.0 / x - 1.0"""
+        t = lv.t.unqual()
+        post = e.op.startswith('p')
+        irop = 'fadd' if '+' in e.op else 'fsub'
+        cur = self.load(lv, final=False)
+        old = cur.op
+        if lv.kind == 'reg' and want and post:
+            old = self.newv(4)
+            self.emit(Ins('mov', old, cur.op))
+        nv = lv.op if lv.kind == 'reg' else self.newv(4)
+        self.emit(Ins(irop, nv, cur.op, Imm(0x3F800000, 4)))
+        if lv.kind != 'reg':
+            self.store(lv.base, lv.idx, lv.off, t, nv, lv.vol)
+            self.finish(lv)
+        if not want:
+            return None
+        return self.to_dst(RV(old if post else nv, t), dst)
 
     def ex_UnaryOp(self, e, dst):
         op = e.op
@@ -1837,10 +2009,15 @@ class Front:
             c = self.const_eval(e)
             t = self.expr_type(e)
             if c is not None:
-                return self.to_dst(RV(Imm(c, t.size), t), dst)
+                return self.to_dst(RV(self.cimm(c, t), t), dst)
+            if not t.is_arith or (op == '~' and not t.is_int):
+                self.err(f'invalid operand to unary {op} ({t!r})', e)
             r = self.convert(self.rv(e.expr), t)
             d = dst if dst is not None and dst.size == r.op.size else self.newv(r.op.size)
-            self.emit(Ins('neg' if op == '-' else 'com', d, r.op))
+            if t.is_float:              # -x: the sign bit flipped (also of 0 and NaN)
+                self.emit(Ins('xor', d, r.op, Imm(fp.SIGN, 4)))
+            else:
+                self.emit(Ins('neg' if op == '-' else 'com', d, r.op))
             return self.to_dst(RV(d, t), dst)
         self.unsup(f'unary operator {op}', e)
 
@@ -1851,8 +2028,8 @@ class Front:
             self.expr_stmt(e.expr)
             return RV(Imm(0), VOID)
         c = self.const_eval(e)
-        if c is not None and (t.is_int or t.is_ptr):
-            return self.to_dst(RV(Imm(c, t.size if t.size in (1, 2, 4) else 2), t), dst)
+        if c is not None and (t.is_int or t.is_ptr or t.is_float):
+            return self.to_dst(RV(self.cimm(c, t), t), dst)
         r = self.rv(e.expr)
         return self.convert(r, t, dst=dst)
 
@@ -1867,6 +2044,8 @@ class Front:
             self.err(f'cannot convert {st!r} to {t!r}')
         if t.is_arr:
             t = PtrT(t.elem)
+        if t.is_float or st.is_float:
+            return self.convert_float(r, t, dst)
         op = r.op
         tsize = t.size
         if t.is_int and t.is_bool:
@@ -1933,17 +2112,62 @@ class Front:
             return self.to_dst(RV(d, t), dst)
         return self.to_dst(RV(op, t), dst)
 
+    def convert_float(self, r, t, dst=None):
+        """conversions to and from float: helpers __ltof __ultof __ftol __ftoul (C's
+        truncation toward zero); to _Bool: x != 0 (a NaN is true, -0.0 false)"""
+        self.uses_float = True
+        st = r.t
+        op = r.op
+        if t.is_float and st.is_float:
+            return self.to_dst(RV(op, t), dst)
+        if not (t.is_arith and st.is_arith):
+            self.err(f'cannot convert {st!r} to {t!r}')
+        if isinstance(op, Imm):
+            if t.is_float:
+                v = op.val
+                if st.signed:
+                    v = self.wrap(v, IntT(op.size, True))
+                return self.to_dst(RV(Imm(fp.from_int(v), 4), t), dst)
+            v = self.wrap(FV(op.val), t)
+            return self.to_dst(RV(Imm(v, 4 if t.size == 4 else 2), t), dst)
+        if t.is_float:
+            # an integer -> float: through a 32-bit value
+            if op.size == 4:
+                src = op
+                h = 'ultof' if not st.signed else 'ltof'
+            else:
+                src = self.newv(4)
+                self.emit(Ins('sx' if st.signed else 'zx', src, op))
+                h = 'ltof'
+            d = dst if dst is not None and dst.size == 4 else self.newv(4)
+            self.emit(Ins(h, d, src))
+            return self.to_dst(RV(d, t), dst)
+        # float -> an integer
+        if t.is_bool:
+            m = self.newv(4)
+            self.emit(Ins('and', m, op, Imm(0x7FFFFFFF, 4)))
+            return self.convert(RV(m, ULONG), t, dst)
+        if t.size == 4:
+            d = dst if dst is not None and dst.size == 4 else self.newv(4)
+            self.emit(Ins('ftol' if t.signed else 'ftoul', d, op))
+            return self.to_dst(RV(d, t), dst)
+        l = self.newv(4)
+        self.emit(Ins('ftol', l, op))
+        return self.convert(RV(l, LONG), t, dst)
+
     def ex_BinaryOp(self, e, dst):
         op = e.op
         c = self.const_eval(e)
         if c is not None:
             t = self.expr_type(e)
-            return self.to_dst(RV(Imm(c, t.size), t), dst)
+            return self.to_dst(RV(self.cimm(c, t), t), dst)
         if op in ('&&', '||', '<', '>', '<=', '>=', '==', '!='):
             return self.bool_value(e, dst)
         lt = decay(self.expr_type(e.left))
         rt = decay(self.expr_type(e.right))
         if op in ('+', '-') and (lt.is_ptr or rt.is_ptr):
+            if lt.is_float or rt.is_float:
+                self.err(f'invalid operands to {op} ({lt!r}, {rt!r})', e)
             a = self.rv(e.left)
             b = self.rv(e.right)
             return self.ptr_arith(op, a, b, dst)
@@ -1952,7 +2176,21 @@ class Front:
         return self.arith(op, a, b, e, dst)
 
     def arith(self, op, a, b, node, dst=None):
+        if a.t.is_float or b.t.is_float:
+            if op not in ('+', '-', '*', '/') or not (a.t.is_arith and b.t.is_arith):
+                self.err(f'invalid operands to {op} ({a.t!r}, {b.t!r})', node)
+            t = arith_conv(a.t, b.t)
+            a = self.convert(a, t)
+            b = self.convert(b, t)
+            irop = {'+': 'fadd', '-': 'fsub', '*': 'fmul', '/': 'fdiv'}[op]
+            if isinstance(a.op, Imm) and isinstance(b.op, Imm):
+                return self.to_dst(RV(Imm(fp.OPS[irop](a.op.val, b.op.val), 4), t), dst)
+            d = dst if dst is not None and dst.size == 4 else self.newv(4)
+            self.emit(Ins(irop, d, a.op, b.op))
+            return self.to_dst(RV(d, t), dst)
         if op in ('<<', '>>'):
+            if not a.t.is_int or not b.t.is_int:
+                self.err(f'invalid operands to {op} ({a.t!r}, {b.t!r})', node)
             t = promote(a.t)
             a = self.convert(a, t)
             b = self.convert(b, UINT)
@@ -2104,6 +2342,11 @@ class Front:
         ft = f.t.to if f.t.is_ptr else f.t
         if not ft.is_func:
             self.err('calling a non-function', e)
+        self.note_float(ft.ret)
+        if name in PRINTF_NAMES:
+            self.calls_printf = True
+        elif name in SCANF_NAMES:
+            self.calls_scanf = True
         ops = []
         sret = None
         if ft.ret.is_struct:
@@ -2117,6 +2360,14 @@ class Front:
             self.err(f'too few arguments to {name or "function"}', e)
         for i, a in enumerate(args):
             r = self.rv(a)
+            self.note_float(r.t)
+            if ft.variadic and i >= len(params):
+                # a float among a variadic function's arguments: most likely for a printf
+                # (a wrapper), a float pointer for a scanf
+                if r.t.is_float:
+                    self.calls_printf = True
+                elif r.t.is_ptr and r.t.to.is_float:
+                    self.calls_scanf = True
             if i < len(params) and ft.proto:
                 pt = params[i][1]
             else:
@@ -2165,6 +2416,17 @@ class Front:
             d = dst if dst is not None and dst.size == 2 else self.newv(2)
             self.emit(Ins('cop', d, n=n, ra=ops[0], rx=ops[1], ry=ops[2]))
             return self.to_dst(RV(d, UINT), dst)
+        if name in ('__builtin_fbits', '__builtin_bitsf'):
+            # a float's bits as an unsigned long, and back: the same 32 bits, no code
+            if len(args) != 1:
+                self.err(f'{name} takes one argument', e)
+            r = self.rv(args[0])
+            want = FLOAT if name == '__builtin_fbits' else ULONG
+            if not (r.t.is_arith or r.t.is_ptr) or (r.t.is_ptr and r.t.size != 4):
+                self.err(f'{name} of {r.t!r}', e)
+            r = self.convert(r, want)
+            self.uses_float = True
+            return self.to_dst(RV(r.op, BUILTINS[name]), dst)
         if name == '__cbank':
             d = self.newv(2)
             self.emit(Ins('ld', d, base=Sym('__cbank'), idx=None, off=0, sz=2, sgn=False, vol=False))
@@ -2200,6 +2462,14 @@ class Front:
                 rt_ = decay(self.expr_type(e.right))
                 a = self.rv(e.left)
                 b = self.rv(e.right)
+                if lt_.is_float or rt_.is_float:
+                    if not (lt_.is_arith and rt_.is_arith):
+                        self.err(f'comparison of {lt_!r} and {rt_!r}', e)
+                    t = arith_conv(lt_, rt_)
+                    ao = self.convert(a, t).op
+                    bo = self.convert(b, t).op
+                    self.float_branch(op, ao, bo, lt, lf)
+                    return
                 if lt_.is_ptr or rt_.is_ptr:
                     signed = False
                     size = max(a.op.size, b.op.size)
@@ -2221,7 +2491,31 @@ class Front:
         if r.t.is_struct:
             self.err('a structure used as a condition', e)
         op = r.op
+        if r.t.is_float:                # x != 0: any bit but the sign (-0.0 is false)
+            if isinstance(op, Imm):
+                self.jump(lt if op.val & 0x7FFFFFFF else lf)
+                return
+            m = self.newv(4)
+            self.emit(Ins('and', m, op, Imm(0x7FFFFFFF, 4)))
+            op = m
         self.emit(Ins('br', a=op, b=Imm(0, op.size), cc='ne', t=lt, f=lf))
+
+
+    def float_branch(self, op, a, b, lt, lf):
+        """a float compare: __fcmp gives -1 (a < b), 0 (equal), 1 (a > b) or 2 (unordered,
+        a NaN: every relation false but !=)"""
+        self.uses_float = True
+        if isinstance(a, Imm) and isinstance(b, Imm):
+            c = fp.cmp(a.val, b.val)
+            r = {'<': c == -1, '>': c == 1, '<=': c in (-1, 0), '>=': c in (0, 1),
+                 '==': c == 0, '!=': c != 0}[op]
+            self.jump(lt if r else lf)
+            return
+        d = self.newv(2)
+        self.emit(Ins('fcmp', d, a, b))
+        cc, k = {'<': ('slt', 0), '>': ('eq', 1), '<=': ('slt', 1), '>=': ('ult', 2),
+                 '==': ('eq', 0), '!=': ('ne', 0)}[op]
+        self.emit(Ins('br', a=d, b=Imm(k), cc=cc, t=lt, f=lf))
 
 
 def type_eq(a, b):
@@ -2229,6 +2523,8 @@ def type_eq(a, b):
         return False
     if a.is_int:
         return a.size == b.size and a.signed == b.signed and a.name == b.name
+    if a.is_float:
+        return a.name == b.name
     if a.is_ptr:
         return a.to.const == b.to.const and a.to.volatile == b.to.volatile and type_eq(a.to, b.to)
     if a.is_struct:
@@ -2253,7 +2549,28 @@ def _check_ll(t, node, f):
         f.unsup('long long is not supported (by cc816 or by vbcc 65816)', node)
 
 
-BUILTINS = {'__builtin_va_start': VOID, '__va_start': VOID, '__cop': UINT, '__cbank': UINT}
+BUILTINS = {'__builtin_va_start': VOID, '__va_start': VOID, '__cop': UINT, '__cbank': UINT,
+            '__builtin_fbits': ULONG, '__builtin_bitsf': FLOAT}
+
+
+def _has_float(t):
+    """a float anywhere in t (an array's elements, a structure's members)"""
+    seen = set()
+    while True:
+        if t.is_float:
+            return True
+        if t.is_arr:
+            t = t.elem
+            continue
+        if t.is_struct and t.complete and id(t) not in seen:
+            seen.add(id(t))
+            return any(_has_float(f.type) for f in t.fields)
+        return False
+
+
+PRINTF_NAMES = {'printf', 'fprintf', 'sprintf', 'snprintf', 'vprintf', 'vfprintf', 'vsprintf',
+                'vsnprintf'}
+SCANF_NAMES = {'scanf', 'fscanf', 'sscanf', 'vscanf', 'vfscanf', 'vsscanf'}
 
 
 def decay(t):
