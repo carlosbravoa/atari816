@@ -111,6 +111,10 @@ class CParser:
         """
         self._scope_stack = [{}]
         self._typedef_checked_token = None
+        # (cc816) the functions defined without a return type ('main() {...}'): their
+        # coordinates, for the compiler's message
+        self.implicit_int = []
+        self.compound_end = {}
         self.clex.input(text, filename)
         self._tokens = _TokenStream(self.clex.token)
 
@@ -824,8 +828,10 @@ class CParser:
             #
             # These get an implicit 'int' return type.
             decl = self._parse_id_declarator()
-            if self._peek_type() != "LBRACE":
+            # (cc816: an old-style definition without a return type, 'f(a) int a; {')
+            if self._peek_type() != "LBRACE" and not self._starts_declaration():
                 self._parse_error("Invalid function definition", decl.coord)
+            self.implicit_int.append(decl.coord)
             spec: _DeclSpec = {
                 "qual": [],
                 "alignment": [],
@@ -853,6 +859,7 @@ class CParser:
 
         if self._peek_type() == "LBRACE" or self._starts_declaration():
             if not spec["type"]:
+                self.implicit_int.append(decl.coord)
                 spec["type"] = [c_ast.IdentifierType(["int"], coord=spec_coord)]
             return [self._parse_function_definition(spec, decl)]
 
@@ -1749,7 +1756,7 @@ class CParser:
         match tok_type:
             case "CASE" | "DEFAULT":
                 return self._parse_labeled_statement()
-            case "ID" if self._peek_type(2) == "COLON":
+            case "ID" | "TYPEID" if self._peek_type(2) == "COLON":
                 return self._parse_labeled_statement()
             case "LBRACE":
                 return self._parse_compound_statement()
@@ -1785,6 +1792,8 @@ class CParser:
             return self._attribute_statement(self._parse_statement(), attributes)
         if self._peek_type() == "_STATIC_ASSERT":
             return self._parse_static_assert()
+        if self._peek_type() == "TYPEID" and self._peek_type(2) == "COLON":
+            return self._parse_statement()      # (cc816) a label named as a typedef
         if self._starts_declaration():
             return self._parse_declaration()
         return self._parse_statement()
@@ -1806,14 +1815,17 @@ class CParser:
         if new_scope:
             self._push_scope()
         block_items = None
-        if not self._accept("RBRACE"):
+        rb = self._accept("RBRACE")
+        if not rb:
             block_items = self._parse_block_item_list()
-            self._expect("RBRACE")
+            rb = self._expect("RBRACE")
         if new_scope:
             self._pop_scope()
-        return c_ast.Compound(
-            block_items=block_items, coord=self._tok_coord(lbrace_tok)
-        )
+        coord = self._tok_coord(lbrace_tok)
+        if rb is not None and rb is not True:
+            # (cc816) where the block ends, for 'control reaches the end' messages
+            self.compound_end[(coord.file, coord.line, coord.column)] = self._tok_coord(rb)
+        return c_ast.Compound(block_items=block_items, coord=coord)
 
     # BNF: labeled_statement : ID ':' statement
     #                        | CASE constant_expression ':' statement
@@ -1821,7 +1833,7 @@ class CParser:
     def _parse_labeled_statement(self) -> c_ast.Node:
         tok_type = self._peek_type()
         match tok_type:
-            case "ID":
+            case "ID" | "TYPEID":
                 name_tok = self._advance()
                 self._expect("COLON")
                 if self._starts_statement():
@@ -1925,7 +1937,10 @@ class CParser:
         tok = self._advance()
         match tok.type:
             case "GOTO":
-                name_tok = self._expect("ID")
+                if self._peek_type() == "TYPEID":
+                    name_tok = self._advance()
+                else:
+                    name_tok = self._expect("ID")
                 self._expect("SEMI")
                 return c_ast.Goto(name_tok.value, self._tok_coord(tok))
             case "BREAK":

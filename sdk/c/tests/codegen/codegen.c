@@ -80,7 +80,7 @@ int main(void)
     check(through(ltbl, three) == 0x7FFFFFFFL, "long through a pointer");
     check(chain(&n1) == 0x22222222L, "long through a chain of pointers");
     check(deref(pv, one) == 6, "pointer table dereferenced");
-    check(sum() == (0x11112222L + 0x33334444L - 2L + 0x7FFFFFFFL), "sum over a long table");
+    check(sum() == (long)(0x11112222UL + 0x33334444UL - 2UL + 0x7FFFFFFFUL), "sum over a long table");
     posa[3] = 100000L;
     sizea[3] = 100050L;
     check(grow(three, 40) == 0 && grow(three, 40) == 1 && sizea[3] == 100080L && posa[3] == 100080L,

@@ -10,23 +10,29 @@ import re
 
 
 def where(coord):
-    """'file:line' of a pycparser Coord (or '')"""
+    """'file:line:col' of a pycparser Coord (or '')"""
     if coord is None:
         return ''
+    if isinstance(coord, str):
+        return coord
     f = getattr(coord, 'file', None)
     ln = getattr(coord, 'line', None)
+    col = getattr(coord, 'column', None)
     if f is None:
         return str(coord)
-    return f'{f}:{ln}' if ln else f
+    if not ln:
+        return f
+    return f'{f}:{ln}:{col}' if col else f'{f}:{ln}'
 
 
 class CError(Exception):
-    """a compile error: 'file:line: error: message' (or 'error: message' without a place)"""
+    """a compile error: 'file:line:col: error: message' (or 'error: message' without a
+    place). Several errors of one file: the lines joined by newlines."""
     def __init__(self, msg, coord=None):
         self.msg = msg
         self.coord = coord
         w = where(coord)
-        if not w and re.match(r'^\S+:\d+: error: ', msg):
+        if not w and re.match(r'^\S+:\d+(:\d+)?: error: ', msg):
             super().__init__(msg)       # already placed ('file:line: error: ...')
             self.msg = msg.split(': error: ', 1)[1]
         else:
@@ -34,7 +40,17 @@ class CError(Exception):
 
 
 class Unsupported(CError):
+    """what cc816 does not have (long long, variable-length arrays, ...)"""
     pass
+
+
+class ICE(CError):
+    """an internal compiler error (a fault of cc816, not of the program); msg is the
+    whole line"""
+    def __init__(self, msg):
+        Exception.__init__(self, msg)
+        self.msg = msg
+        self.coord = None
 
 
 class T:
@@ -161,7 +177,11 @@ class Field:
 class StructT(T):
     kind = 'struct'
 
+    _n = 0
+
     def __init__(self, tag, union):
+        StructT._n += 1
+        self.uid = StructT._n    # the same structure (copies made by qualifiers keep it)
         self.tag = tag
         self.union = union
         self.fields = None       # None = incomplete
@@ -223,7 +243,7 @@ def same(a, b):
     if a.is_ptr:
         return a.to.is_void or b.to.is_void or same(a.to, b.to)
     if a.is_struct:
-        return a is b or (a.tag == b.tag and a.tag is not None)
+        return a.uid == b.uid or (a.tag == b.tag and a.tag is not None)
     return True
 
 
@@ -237,6 +257,8 @@ def promote(t):
 def arith_conv(a, b):
     """usual arithmetic conversions (int 16, long 32; a floating operand wins: double over
     float, all one format)"""
+    if not (a.is_arith and b.is_arith):
+        raise CError(f'invalid operands ({cname(a)} and {cname(b)}): numbers are needed here')
     if a.is_float or b.is_float:
         r = max((t for t in (a, b) if t.is_float), key=lambda t: t.rank)
         return r.unqual()
@@ -251,3 +273,69 @@ def arith_conv(a, b):
     if not a.signed or not b.signed:
         return UINT
     return INT
+
+
+def cname(t):
+    """a type as C writes it, for messages: 'unsigned char', 'char *', 'struct s',
+    'int (*)(int)', 'long [4]'"""
+    q = ('const ' if t.const else '') + ('volatile ' if t.volatile else '')
+    if t.is_ptr:
+        far = ' __far' if t.isfar else ''
+        to = t.to
+        tail = ' const' if t.const else ''
+        if to.is_func:
+            return f'{cname(to.ret)} (*{far.strip()}{tail})({_params(to)})'
+        if to.is_arr:
+            return f'{cname(to.elem)} (*{far.strip()})[{to.n if to.n is not None else ""}]'
+        return f'{cname(to)}{far} *{tail.strip()}'.rstrip()
+    if t.is_arr:
+        return f'{cname(t.elem)} [{t.n if t.n is not None else ""}]'
+    if t.is_func:
+        return f'{cname(t.ret)} ({_params(t)})'
+    if t.is_struct:
+        kind = 'union' if t.union else 'struct'
+        return q + (f'{kind} {t.tag}' if t.tag else f'{kind} (anonymous)')
+    if t.is_void:
+        return q + 'void'
+    name = getattr(t, 'name', repr(t))
+    return q + {'unsigned': 'unsigned int'}.get(name, name)
+
+
+def _params(f):
+    if not f.proto:
+        return ''
+    ps = [cname(p) for _, p in f.params] + (['...'] if f.variadic else [])
+    return ', '.join(ps) or 'void'
+
+
+def compatible(a, b, strict_sign=False):
+    """a and b are compatible enough for a prototype and its definition, or for pointer
+    targets: the same kind and size (signedness only when strict_sign), the same
+    structure, compatible targets / elements / parameters"""
+    if a.kind != b.kind:
+        return False
+    if a.is_int:
+        return a.size == b.size and (not strict_sign or a.signed == b.signed)
+    if a.is_float or a.is_void:
+        return True
+    if a.is_ptr:
+        if a.isfar != b.isfar:
+            return False
+        if a.to.is_void or b.to.is_void:
+            return True
+        return compatible(a.to, b.to, strict_sign)
+    if a.is_struct:
+        return a.uid == b.uid or (a.tag is not None and a.tag == b.tag and a.union == b.union)
+    if a.is_arr:
+        return (a.n is None or b.n is None or a.n == b.n) and compatible(a.elem, b.elem,
+                                                                         strict_sign)
+    if a.is_func:
+        if not compatible(a.ret, b.ret, strict_sign):
+            return False
+        if a.proto and b.proto:
+            if len(a.params) != len(b.params) or a.variadic != b.variadic:
+                return False
+            return all(compatible(x.unqual(), y.unqual(), strict_sign)
+                       for (_, x), (_, y) in zip(a.params, b.params))
+        return True
+    return True

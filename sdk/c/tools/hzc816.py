@@ -37,6 +37,7 @@ CA65_MAGIC = b"\x55\x7a\x6e\x61"    # ca65's object files
 VOBJ_MAGIC = b"VOBJ"                # vasm's (vbcc's)
 
 _cc = None
+ASM_OF = {}                     # an assembly file's name -> the C file it was made from
 
 
 def cc():
@@ -61,24 +62,24 @@ def includes(incs=()):
     return list(incs) + [os.path.join(CC816, "include"), os.path.join(SDKC, "include")]
 
 
-def compile_c(src, obj, opt="2", incs=(), defs=(), asm_out=None):
+def compile_c(src, obj, opt="2", incs=(), defs=(), asm_out=None, opts=None):
     """C -> ca65 assembly -> object. Warnings are printed; errors raise HccError
-    ('file:line: error: ...')."""
+    ('file:line:col: error: ...', a line each). opts: cc816's options (driver.default_opts:
+    -w, -Wall, -Werror, -fsigned-char, -U, -include)."""
     from cc816.ctypes816 import CError
     level = {"0": 0, "1": 1}.get(opt, 2)
     if hzc.VERBOSE:
         print(f"  cc816 -O{level} {src}", file=sys.stderr)
     try:
         asm, warns = cc().compile_c(src, list(incs) + [os.path.join(SDKC, "include")], defs,
-                                    level)
+                                    level, opts=opts)
     except CError as e:
         raise HccError(_where(str(e), src))
-    except RecursionError:
-        raise HccError(f"{src}: error: the expression is nested too deeply for cc816")
     for w in warns:
         print(w, file=sys.stderr)
     with tempfile.TemporaryDirectory(prefix="hcc") as tmp:
-        path = asm_out or os.path.join(tmp, "out.s")
+        path = asm_out or os.path.join(tmp, os.path.splitext(os.path.basename(src))[0] + ".s")
+        ASM_OF[os.path.basename(path)] = src     # (the link's messages name the C file)
         with open(path, "w") as f:
             f.write(asm)
         if obj:
@@ -111,7 +112,7 @@ def compile_split(src, outdir, opt="2", incs=(), defs=()):
 
 def _where(msg, src):
     """a message without a place gets the source's name"""
-    return msg if re.match(r"^\S+:\d+: ", msg) else f"{src}: {msg}"
+    return msg if re.match(r"^\S+:\d+", msg) or msg.startswith(src + ":") else f"{src}: {msg}"
 
 
 def assemble(src, obj, incs=(), defs=(), src_name=None):
@@ -278,7 +279,7 @@ def link(objs, out, sstack=SSTACK, debug=False, mapfile=None, extra_libs=(), kee
         r = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
         msg = r.stdout.decode("utf-8", "replace")
         if r.returncode:
-            raise HccError(link_error(msg, name, sstack, objs, libs, tmp))
+            raise HccError(link_error(msg, name, sstack, objs, libs, tmp, mp))
         import o65strip
         try:
             o65strip.strip(out)         # the relocations that add 0 (the loader's $0100)
@@ -301,7 +302,7 @@ def link(objs, out, sstack=SSTACK, debug=False, mapfile=None, extra_libs=(), kee
             shutil.rmtree(tmp, ignore_errors=True)
 
 
-def link_error(msg, name, sstack, objs, libs, tmp):
+def link_error(msg, name, sstack, objs, libs, tmp, mapfile=None):
     """ld65's complaint in plain words"""
     undef = []
     for ln in msg.splitlines():
@@ -310,6 +311,7 @@ def link_error(msg, name, sstack, objs, libs, tmp):
             sym = m.group(4)
             c = sym[1:] if sym.startswith("_") else sym
             where = os.path.basename(m.group(1))
+            where = os.path.basename(ASM_OF.get(where, where))
             undef.append(f"undefined: {c} (used in {where})")
     if undef:
         lines = sorted(set(undef))
@@ -317,15 +319,33 @@ def link_error(msg, name, sstack, objs, libs, tmp):
         if any(hzc.is_float_name(n) for n in names):
             lines.append("(cc816's math.h has the functions docs/c/reference.md lists, "
                          "\"Floating point\"; not this one)")
+        lines.append("(no file of the program defines " + ("these" if len(names) > 1 else "it")
+                     + ": a .c or .s file missing from the hcc command, a library (-l), a "
+                       "misspelt name, or a function declared but never written)")
         return "\n".join(lines)
     over = [int(m.group(3)) for m in _OVER.finditer(msg) if m.group(2) == "MAIN"]
     if over:
         room = CODE_ROOM - sstack
         total = room + max(over)
-        return (f"{name} does not fit in its code bank: code, constants, data and bss = "
-                f"{total:,} bytes; a code bank holds {CODE_ROOM:,} bytes ($0100-$FFF0) and the "
-                f"software stack takes {sstack:,} of them (hcc --stack N), so {room:,} are "
-                f"left. Put big arrays in a bank of their own (hz_far_alloc, "
+        sizes = None
+        try:
+            sizes = map_sizes(mapfile) if mapfile and os.path.exists(mapfile) else None
+        except (OSError, ValueError):
+            sizes = None
+        if sizes and sizes["code"] > room:
+            total = sizes["code"]
+            seg = (f"code and constants {sizes['text']:,} + data {sizes['data']:,} + bss "
+                   f"{sizes['bss']:,} = {total:,} bytes")
+            big = max((("code and constants", sizes["text"]), ("initialised data (data)",
+                       sizes["data"]), ("zeroed globals and statics (bss)", sizes["bss"])),
+                      key=lambda x: x[1])[0]
+            seg += f"; the biggest part: {big}"
+        else:
+            seg = f"code, constants, data and bss = {total:,} bytes"
+        return (f"{name} does not fit in its code bank, by {total - room:,} bytes: {seg}. "
+                f"A code bank holds {CODE_ROOM:,} bytes ($0100-$FFF0) and the software stack "
+                f"takes {sstack:,} of them (hcc --stack N), so {room:,} are left. Put big "
+                f"arrays in a bank of their own (hz_far_alloc and a __far pointer, "
                 f"docs/c/reference.md), make them smaller, or give the software stack less.")
     return msg.strip() or "the link failed (ld65)"
 

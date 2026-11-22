@@ -8,14 +8,18 @@ Horizon memory model:
   * arrays, structures and address-taken locals live in the function's frame on the
     software stack (code bank, pointer __sp in the direct page): &local is a near pointer.
 """
+import re
+
 from pycparser import c_ast
 
-from .ctypes816 import (CError, Unsupported, where, T, VoidT, IntT, PtrT, ArrT, StructT, FuncT,
+from .ctypes816 import (CError, Unsupported, ICE, where, T, VoidT, IntT, PtrT, ArrT, StructT, FuncT,
                         Field, VOID, BOOL, CHAR, SCHAR, UCHAR, SHORT, USHORT, INT, UINT,
-                        LONG, ULONG, FLOAT, DOUBLE, LDOUBLE, promote, arith_conv, same)
+                        LONG, ULONG, FLOAT, DOUBLE, LDOUBLE, promote, arith_conv, same,
+                        cname, compatible)
 from .ir import V, Imm, Sym, Frame, FrameSlot, Ins, Block, Func
 from . import fp
 from .fp import FV
+from .diag import Diag
 
 FAR_QUAL = '_Atomic'      # the preprocessor maps __far to _Atomic (pycparser knows it)
 
@@ -49,9 +53,16 @@ class LV:
 
 class Sy:
     """a name in scope"""
-    __slots__ = ('kind', 't', 'v', 'asm', 'slot', 'base', 'cval')
+    __slots__ = ('kind', 't', 'v', 'asm', 'slot', 'base', 'cval', 'used', 'coord', 'name',
+                 'defined', 'param', 'local')
 
     def __init__(self, kind, t, v=None, asm=None, slot=None, base=None):
+        self.used = False    # read or written somewhere (-Wunused-variable)
+        self.coord = None    # where it was declared
+        self.name = None
+        self.defined = False # a global: defined here (an initialiser, or a function body)
+        self.param = False
+        self.local = False   # a block-scope object (not extern)
         self.kind = kind     # 'global' 'reg' 'mem' 'enum' 'typedef'
         self.t = t
         self.v = v           # V (reg) / value (enum)
@@ -85,8 +96,15 @@ class Unit:
 
 
 class Front:
-    def __init__(self, filename='?'):
+    def __init__(self, filename='?', diag=None, implicit_int=()):
+        self.diag = diag or Diag()
+        self.loc = None              # the place of the statement / expression being done
+        self.implicit_int = {(c.file, c.line, c.column) for c in implicit_int}
+        self.noreturn_blocks = set()
+        self.sw_seen = {}
+        self.noreturn_names = set(NORETURN)
         self.unit = Unit()
+        self.unit.warnings = self.diag.warnings
         self.scopes = [{}]
         self.tags = [{}]
         self.strings = {}
@@ -101,15 +119,37 @@ class Front:
         self.calls_scanf = False     # ... or a scanf (scanf's %f)
 
     # ------------------------------------------------------------------ errors
+    def place_of(self, node):
+        c = getattr(node, 'coord', None) if node is not None else None
+        return c if c is not None else self.loc
+
     def err(self, msg, node=None):
-        raise CError(msg, getattr(node, 'coord', None))
+        raise CError(msg, self.place_of(node))
 
     def unsup(self, msg, node=None):
-        raise Unsupported(msg, getattr(node, 'coord', None))
+        """a feature cc816 does not have: 'cc816 does not support X' (msg: X and what to
+        do instead)"""
+        raise Unsupported(f'cc816 does not support {msg}', self.place_of(node))
 
-    def warn(self, msg, node=None):
-        w = where(getattr(node, 'coord', None)) or self.filename
-        self.unit.warnings.append(f'{w}: warning: {msg}')
+    def warn(self, msg, node=None, name='other'):
+        self.diag.warning(self.place_of(node) or self.filename, msg, name)
+
+    def record(self, e):
+        """an error found: noted, and the compile goes on (more errors are reported)"""
+        if isinstance(e, ICE):
+            raise e
+        if isinstance(e, _Silent):
+            return
+        coord = e.coord
+        if coord is None:
+            m = _PLACED.match(str(e))
+            if m:
+                self.diag.error(m.group(1), m.group(2), isinstance(e, Unsupported))
+                return
+            coord = self.loc
+        self.diag.error(coord or self.filename, e.msg, isinstance(e, Unsupported))
+        if len(self.diag.errors) >= 100:
+            raise _TooMany()
 
     # ------------------------------------------------------------------ scopes
     def push(self):
@@ -117,13 +157,21 @@ class Front:
         self.tags.append({})
 
     def pop(self):
-        self.scopes.pop()
+        sc = self.scopes.pop()
         self.tags.pop()
+        for name, sy in sc.items():
+            if sy.local and not sy.used and not sy.param and sy.coord is not None and \
+                    sy.kind in ('reg', 'mem', 'global') and not name.startswith('__'):
+                self.diag.warning(sy.coord, f"unused variable '{name}'", 'unused-variable')
 
     def lookup(self, name):
         for s in reversed(self.scopes):
             if name in s:
-                return s[name]
+                sy = s[name]
+                if sy.kind == 'error':
+                    raise _Silent()
+                sy.used = True
+                return sy
         return None
 
     def lookup_tag(self, name):
@@ -151,7 +199,14 @@ class Front:
                     return FLOAT
                 return LDOUBLE if longs else DOUBLE
             if longs >= 2:
+                # (a long long type is kept for constant expressions, sizeof and casts
+                # the compiler folds; a variable, a parameter or code with it is refused)
                 return LLONG_U if 'unsigned' in s else LLONG
+            for w in s:
+                if w in ('__int128', '__int64', '__int128_t', '__uint128_t'):
+                    self.unsup(f'{w} (64- and 128-bit integers): long is 32 bits', node)
+                if w in ('_Complex', '_Imaginary'):
+                    self.unsup('complex numbers (_Complex)', node)
             if 'void' in s:
                 return VOID
             if '_Bool' in s:
@@ -165,6 +220,8 @@ class Front:
                 return ULONG if uns else LONG
             if s & {'int', 'signed', 'unsigned'} or not s:
                 return UINT if uns else INT
+            if len(n) == 1:
+                self.err(f"unknown type name '{n[0]}'", node)
             self.err(f'unknown type {" ".join(names)}', node)
         if isinstance(node, (c_ast.Struct, c_ast.Union)):
             return self.struct_type(node)
@@ -172,7 +229,9 @@ class Front:
             return self.enum_type(node)
         if isinstance(node, c_ast.TypeOf):
             return self.typeof(node.expr)
-        self.unsup(f'type {type(node).__name__}', node)
+        if type(node).__name__ == 'BitIntType':
+            self.unsup('_BitInt', node)
+        self.unsup(f'the type {type(node).__name__}', node)
 
     def struct_type(self, node):
         union = isinstance(node, c_ast.Union)
@@ -185,6 +244,12 @@ class Front:
                     self.tags[-1][node.name] = st
                 return st
             st = self.tags[-1].get(node.name)
+            if st is not None and st.complete and not getattr(st, 'defining', False):
+                self.err(f"redefinition of '{'union' if union else 'struct'} {node.name}'",
+                         node)
+            if st is not None and st.is_struct and st.union != union:
+                self.err(f"'{node.name}' defined as the wrong kind of tag (struct and "
+                         f"union)", node)
             if st is None or st.complete:
                 st = StructT(node.name, union)
                 self.tags[-1][node.name] = st
@@ -194,14 +259,18 @@ class Front:
         off = 0
         size = 0
         bitunit = None     # (offset, size, used bits)
-        for d in node.decls:
+        names = set()
+        decls = node.decls or []
+        for k, d in enumerate(decls):
             if isinstance(d, c_ast.StaticAssert):
+                self.static_assert(d)
                 continue
-            t = self.decl_type(d.type)
-            if d.bitsize is not None:
-                w = self.const_int(d.bitsize)
-                if not t.is_int:
-                    self.err('bit-field of a non-integer type', d)
+            try:
+                t, w = self.member_type(d, k, decls, union, names)
+            except CError as e:
+                self.record(e)
+                continue
+            if w is not None:
                 usz = max(t.size, 1)
                 if w == 0:
                     if bitunit:
@@ -223,12 +292,6 @@ class Front:
             if bitunit:
                 off = bitunit[0] + bitunit[1]
                 bitunit = None
-            if t.is_arr and t.n is None:
-                t = ArrT(t.elem, 0)      # flexible array member
-            if not t.is_arr and t.size == 0 and not t.is_struct:
-                self.err('incomplete field type', d)
-            if t.is_struct and not t.complete:
-                self.err(f'incomplete field type {t!r}', d)
             if union:
                 fields.append(Field(d.name, t, 0))
                 size = max(size, t.size)
@@ -240,19 +303,78 @@ class Front:
             size = max(size, bitunit[0] + bitunit[1])
         st.fields = fields
         st.size = size
+        if size >= 0x10000:
+            self.err(f"the structure is {size:,} bytes: an object is at most 65,535 bytes "
+                     f"in cc816", node)
         return st
+
+    def member_type(self, d, k, decls, union, names):
+        """a member's type and bit-field width (None: not a bit-field), checked"""
+        t = self.decl_type(d.type)
+        if d.name is not None:
+            if d.name in names:
+                self.err(f"duplicate member '{d.name}'", d)
+            names.add(d.name)
+        if t.is_func:
+            self.err(f"member '{d.name}' declared as a function (a pointer to one, "
+                     f"'(*{d.name})(...)', is allowed)", d)
+        if d.bitsize is not None:
+            w = self.const_int(d.bitsize)
+            if not t.is_int:
+                self.err(f"bit-field '{d.name}' has a type that is not an integer "
+                         f"({cname(t)})", d)
+            usz = max(t.size, 1)
+            if w < 0:
+                self.err(f"negative width in bit-field '{d.name}'", d)
+            if w > 8 * usz:
+                more = ' (int is 16 bits in cc816: declare it long or unsigned long ' \
+                       'for up to 32)' if usz == 2 else ''
+                self.err(f"width of bit-field '{d.name}' ({w} bits) exceeds its type "
+                         f"({cname(t)}, {8 * usz} bits){more}", d)
+            if w == 0 and d.name is not None:
+                self.err(f"zero width for bit-field '{d.name}'", d)
+            return t, w
+        if t.is_arr and t.n is None:
+            if k != len(decls) - 1 or union:
+                self.err(f"flexible array member '{d.name}' not at the end of the "
+                         f"structure", d)
+            t = ArrT(t.elem, 0)      # flexible array member
+        if t.is_void:
+            self.err(f"member '{d.name}' declared void", d)
+        if not t.is_arr and t.size == 0 and not t.is_struct:
+            self.err(f"member '{d.name}' has an incomplete type ({cname(t)})", d)
+        if t.is_struct and not t.complete:
+            self.err(f"member '{d.name}' has an incomplete type ({cname(t)}: the "
+                     f"structure is declared but not defined)", d)
+        return t, None
 
     def enum_type(self, node):
         if node.values:
+            if node.name and ('enum ' + node.name) in self.tags[-1]:
+                self.err(f"redefinition of 'enum {node.name}'", node)
             val = 0
-            neg = False
+            lo = hi = 0
             for e in node.values.enumerators:
                 if e.value is not None:
                     val = self.const_int(e.value)
-                neg = neg or val < 0
-                self.bind(e.name, Sy('enum', INT, v=val))
+                if not -0x80000000 <= val <= 0xFFFFFFFF:
+                    self.err(f"the value of '{e.name}' ({val}) does not fit 32 bits", e)
+                prev = self.scopes[-1].get(e.name)
+                if prev is not None:
+                    self.err(f"redeclaration of '{e.name}'", e)
+                # an enumerator's type: int when its value fits, else the smallest
+                # that holds it (a GNU extension: C wants int)
+                et = INT if -0x8000 <= val <= 0x7FFF else UINT if 0 <= val <= 0xFFFF else \
+                    LONG if val <= 0x7FFFFFFF else ULONG
+                sy = Sy('enum', et, v=val)
+                sy.coord = e.coord
+                self.bind(e.name, sy)
+                lo, hi = min(lo, val), max(hi, val)
                 val += 1
-            t = INT if neg else UINT
+            if lo < 0:
+                t = INT if lo >= -0x8000 and hi <= 0x7FFF else LONG
+            else:
+                t = UINT if hi <= 0xFFFF else ULONG
             if node.name:
                 self.tags[-1]['enum ' + node.name] = t
             return t
@@ -287,10 +409,28 @@ class Front:
                 if n is None:
                     if self.in_params:
                         return ArrT(el, None)
-                    self.unsup('variable-length array', node)
+                    self.unsup('variable-length arrays: give the array a constant size, '
+                               'or take the memory from malloc', node)
+                if n < 0:
+                    self.err(f'the size of an array is negative ({n})', node)
+            if el.is_void:
+                self.err('an array of void', node)
+            if el.is_func:
+                self.err('an array of functions (an array of function pointers, '
+                         '(*a[N])(...), is allowed)', node)
+            if el.is_struct and not el.complete:
+                self.err(f'an array of an incomplete type ({cname(el)})', node)
+            if n is not None and el.size * n >= 0x10000:
+                self.err(f'the array is {el.size * n:,} bytes: an object is at most 65,535 '
+                         f'bytes in cc816 (a bigger table can live in its own bank: '
+                         f'hz_far_alloc and a __far pointer)', node)
             return ArrT(el, n)
         if isinstance(node, c_ast.FuncDecl):
             ret = self.decl_type(node.type)
+            if ret.is_arr:
+                self.err('a function cannot return an array', node)
+            if ret.is_func:
+                self.err('a function cannot return a function', node)
             params = []
             variadic = False
             proto = node.args is not None
@@ -348,6 +488,10 @@ class Front:
                 return self.sizeof(e.expr)
             if e.op == '_Alignof':
                 return 1
+            if e.op == '&':
+                # offsetof: &((T *)0)->member (and members of members, elements)
+                k = self.offset_const(e.expr)
+                return k & 0xFFFF if k is not None else None
             v = self.const_eval(e.expr)
             if v is None:
                 return None
@@ -390,6 +534,12 @@ class Front:
             elif e.op in ('/', '%', '>>'):
                 a = self.wrap(a, ct if e.op != '>>' else lt)
                 b = self.wrap(b, ct) if e.op != '>>' else b
+            if e.op in ('<<', '>>') and isinstance(b, int) and (b < 0 or b >= 8 * lt.size):
+                self.warn(f'shift count ({b}) is negative or not less than the width of '
+                          f'{cname(lt)} ({8 * lt.size} bits in cc816)', e,
+                          'shift-count-overflow')
+            if e.op in ('<<', '>>') and isinstance(b, int) and b < 0:
+                return None         # (a negative count: left to the code, as C leaves it)
             try:
                 r = {'+': lambda: a + b, '-': lambda: a - b, '*': lambda: a * b,
                      '/': lambda: _cdiv(a, b), '%': lambda: _cmod(a, b),
@@ -400,7 +550,14 @@ class Front:
                      '&&': lambda: int(bool(a and b)), '||': lambda: int(bool(a or b))}[e.op]()
             except ZeroDivisionError:
                 return None
-            return self.wrap(r, t)
+            w = self.wrap(r, t)
+            if t.is_int and not t.is_bool and t.signed and w != r and (
+                    e.op in ('+', '-', '*') or (e.op == '<<' and r >> (8 * t.size) and
+                                                b < 8 * lt.size)):
+                self.warn(f'integer overflow in a constant expression: the result {r} does '
+                          f'not fit {cname(t)} ({8 * t.size} bits in cc816; it becomes {w})',
+                          e, 'overflow')
+            return w
         if isinstance(e, c_ast.TernaryOp):
             c = self.const_eval(e.cond)
             if c is None:
@@ -420,6 +577,37 @@ class Front:
             if isinstance(v, FV) and t.is_ptr:
                 return None
             return self.wrap(v, t)
+        return None
+
+    def offset_const(self, e):
+        """the address of a member of a structure at a constant address (offsetof's
+        &((T *)0)->m) -> int, or None"""
+        if isinstance(e, c_ast.StructRef):
+            if e.type == '->':
+                if not isinstance(e.name, c_ast.Cast):
+                    return None
+                base = self.const_eval(e.name.expr)
+                st = self.decl_type(e.name.to_type)
+                if not isinstance(base, int) or not st.is_ptr:
+                    return None
+                st = st.to
+            else:
+                base = self.offset_const(e.name)
+                if base is None:
+                    return None
+                st = self.expr_type(e.name)
+            if not st.is_struct or not st.complete:
+                return None
+            r = st.field(e.field.name)
+            if not r:
+                self.err(f"no member named '{e.field.name}' in '{cname(st)}'", e)
+            return base + r[1]
+        if isinstance(e, c_ast.ArrayRef):
+            base = self.offset_const(e.name)
+            k = self.const_eval(e.subscript)
+            if base is None or not isinstance(k, int):
+                return None
+            return base + k * self.expr_type(e).size
         return None
 
     def wrap(self, v, t):
@@ -447,12 +635,25 @@ class Front:
     def constant(self, e):
         """Constant node -> (value, type)"""
         s = e.value
-        if e.type == 'char' or s.startswith("'") or s[:2] in ("L'", "u'", "U'"):
-            if s[0] != "'":
-                s = s[1:]
-            b = unescape(s[1:-1])
-            v = b[0] if len(b) == 1 else int.from_bytes(bytes(b[:2]), 'big')
-            return (v - 256 if v > 127 and len(b) == 1 and False else v), INT
+        if e.type == 'char' or s.startswith("'") or s[:2] in ("L'", "u'", "U'") or \
+                s[:3] == "u8'":
+            pre = s[:s.index("'")]
+            body = s[len(pre) + 1:-1]
+            if pre in ('L', 'u', 'U'):
+                et = {'L': WCHAR, 'u': CHAR16, 'U': CHAR32}[pre]
+                b = unescape_wide(body, et.size)
+                if len(b) != 1:
+                    self.warn('a wide character constant of more than one character: the '
+                              'first is taken', e, 'multichar')
+                return (b[0] if b else 0), (et if et.size == 4 else INT)
+            b = unescape(body)
+            if len(b) > 2:
+                self.warn('a character constant of more than two characters (an int holds '
+                          'two in cc816)', e, 'multichar')
+            v = b[0] if len(b) == 1 else int.from_bytes(bytes(b[-2:]), 'big')
+            if CHAR.signed and len(b) == 1 and v > 127:
+                v -= 256            # (with -fsigned-char '\xff' is -1, as gcc)
+            return v, INT
         if e.type == 'string':
             return None, None
         hexa = s.lower().startswith('0x')
@@ -487,7 +688,7 @@ class Front:
             v = int(t)
             dec = True
         if 'll' in suf:
-            self.unsup('a long long constant: long long is not supported (by cc816 or by vbcc 65816)', e)
+            self.unsup('long long (64-bit integers): long is 32 bits (a constant with LL)', e)
         u = 'u' in suf
         lng = 'l' in suf
         if not lng and not u and v <= 0x7FFF:
@@ -516,14 +717,14 @@ class Front:
         """the type of an expression without generating code"""
         if isinstance(e, c_ast.Constant):
             if e.type == 'string':
-                return ArrT(CHAR, len(self.strbytes(e)) + 1)
+                return self.str_type(e)
             return self.constant(e)[1]
         if isinstance(e, c_ast.ID):
             s = self.lookup(e.name)
             if s is None:
                 if e.name == '__func__':
                     return ArrT(CHAR, len(self.fn.name) + 1 if self.fn else 1)
-                self.err(f'undeclared identifier {e.name}', e)
+                self.undeclared(e.name, e)
             return s.t
         if isinstance(e, c_ast.Cast):
             return self.decl_type(e.to_type)
@@ -539,7 +740,7 @@ class Front:
                     return t.to
                 if t.is_func:
                     return t
-                self.err('dereferencing a non-pointer', e)
+                self.err(f"'*' needs a pointer, not {cname(t)}", e)
             if e.op == '!':
                 return INT
             if e.op in ('-', '+', '~'):
@@ -559,6 +760,8 @@ class Front:
                 return rt
             if op == '-' and lt.is_ptr:
                 return INT if rt.is_ptr else lt
+            if not (lt.is_arith and rt.is_arith):
+                self.err(f'invalid operands to {op} ({cname(lt)} and {cname(rt)})', e)
             return arith_conv(lt, rt)
         if isinstance(e, c_ast.Assignment):
             return self.expr_type(e.lvalue).unqual()
@@ -592,19 +795,20 @@ class Front:
             b = decay(self.expr_type(e.subscript))
             if b.is_ptr:
                 return b.to
-            self.err('subscript of a non-array', e)
+            self.err(f'a subscript ([]) of something that is not an array or a pointer '
+                     f'({cname(a)})', e)
         if isinstance(e, c_ast.StructRef):
             t = self.expr_type(e.name)
             if e.type == '->':
                 t = decay(t)
                 if not t.is_ptr:
-                    self.err('-> on a non-pointer', e)
+                    self.err(f"'->' needs a pointer to a structure, not {cname(t)}"
+                             + (" (use '.')" if t.is_struct else ''), e)
                 t = t.to
-            if not t.is_struct or not t.complete:
-                self.err(f'member of a non-structure ({t!r})', e)
+            self.check_member_base(t, e)
             f = t.field(e.field.name)
             if not f:
-                self.err(f'no member {e.field.name} in {t!r}', e)
+                self.err(f"no member named '{e.field.name}' in {cname(t)}", e)
             ft = f[0].type
             return ft.qual(t.const, t.volatile)
         if isinstance(e, c_ast.ExprList):
@@ -617,34 +821,99 @@ class Front:
         if isinstance(e, c_ast.GenericSelection):
             return self.expr_type(self.generic_pick(e))
         if isinstance(e, c_ast.Compound):
-            self.unsup('statement expressions (GNU)', e)
-        self.unsup(f'expression {type(e).__name__}', e)
+            items = e.block_items or []
+            if not items:
+                return VOID
+            last = items[-1]
+            if isinstance(last, (c_ast.Decl, c_ast.DeclList, c_ast.Typedef)) or \
+                    type(last).__name__ in STATEMENTS:
+                return VOID
+            # the declarations before it, for the names it uses (types only)
+            self.push()
+            try:
+                for x in items[:-1]:
+                    for d in (x.decls if isinstance(x, c_ast.DeclList) else [x]):
+                        if isinstance(d, c_ast.Typedef) or (
+                                isinstance(d, c_ast.Decl) and 'typedef' in (d.storage or [])):
+                            self.typedef(d)
+                        elif isinstance(d, c_ast.Decl) and d.name:
+                            t = self.decl_type(d.type)
+                            if t.is_arr and t.n is None and d.init is not None:
+                                t = ArrT(t.elem, self.init_count(t, d.init))
+                            self.bind(d.name, Sy('reg', t))
+                return decay(self.expr_type(last))
+            finally:
+                self.scopes.pop()
+                self.tags.pop()
+        self.unsup(f'the expression {type(e).__name__}', e)
 
     # ------------------------------------------------------------------ strings
-    def strbytes(self, e):
+    def str_parts(self, e):
+        """a string literal (adjacent ones joined: pycparser gives "a" "b" as one value)
+        -> (element type, [the parts' (prefix, text)])"""
         s = e.value
-        out = []
-        # adjacent literals are concatenated by pycparser into one value "a" "b" -> "ab"
         i = 0
         parts = []
         while i < len(s):
             if s[i] in 'LuU8':
-                i += 1
+                j = i
+                while s[j] != '"':
+                    j += 1
+                pre = s[i:j]
+                i = j
                 continue
             if s[i] == '"':
                 j = i + 1
                 while s[j] != '"':
                     j += 2 if s[j] == '\\' else 1
-                parts.append(s[i + 1:j])
+                k = i - 1
+                pre = ''
+                while k >= 0 and s[k] in 'LuU8':
+                    pre = s[k] + pre
+                    k -= 1
+                parts.append((pre, s[i + 1:j]))
                 i = j + 1
             else:
                 i += 1
-        for p in parts:
-            out += unescape(p)
+        pres = {p for p, _ in parts if p and p != 'u8'}
+        if len(pres) > 1:
+            self.err('a string literal joins two different wide kinds (L, u, U)', e)
+        kind = pres.pop() if pres else ''
+        elem = {'': CHAR, 'L': WCHAR, 'u': CHAR16, 'U': CHAR32}[kind]
+        return elem, parts
+
+    def strvals(self, e):
+        """a string literal's elements (bytes for "...", code points for L"...", u"...",
+        U"...": the source is UTF-8), without the terminating 0"""
+        elem, parts = self.str_parts(e)
+        out = []
+        for pre, text in parts:
+            if elem.size == 1:
+                out += unescape(text)
+            else:
+                out += unescape_wide(text, elem.size)
+        return out
+
+    def str_elem(self, e):
+        return self.str_parts(e)[0]
+
+    def str_type(self, e):
+        return ArrT(self.str_elem(e), len(self.strvals(e)) + 1)
+
+    def strbytes(self, e):
+        """a string literal's bytes (wide elements little-endian), without the
+        terminating 0"""
+        elem = self.str_elem(e)
+        vals = self.strvals(e)
+        if elem.size == 1:
+            return vals
+        out = []
+        for v in vals:
+            out += list(v.to_bytes(elem.size, 'little'))
         return out
 
     def string_sym(self, e):
-        b = bytes(self.strbytes(e)) + b'\0'
+        b = bytes(self.strbytes(e)) + b'\0' * self.str_elem(e).size
         if b not in self.strings:
             name = f'L_S{len(self.strings)}'
             self.strings[b] = name
@@ -653,23 +922,64 @@ class Front:
 
     # ================================================================== top level
     def translate(self, ast):
-        for ext in ast.ext:
-            if isinstance(ext, c_ast.FuncDef):
-                self.funcdef(ext)
-            elif isinstance(ext, c_ast.Decl):
-                self.global_decl(ext)
-            elif isinstance(ext, c_ast.Typedef):
-                self.typedef(ext)
-            elif isinstance(ext, (c_ast.Pragma, c_ast.StaticAssert)):
-                pass
-            else:
-                self.unsup(f'top-level {type(ext).__name__}', ext)
+        try:
+            for ext in ast.ext:
+                self.loc = getattr(ext, 'coord', None)
+                try:
+                    if isinstance(ext, c_ast.FuncDef):
+                        self.funcdef(ext)
+                    elif isinstance(ext, c_ast.Decl):
+                        self.global_decl(ext)
+                    elif isinstance(ext, c_ast.Typedef):
+                        self.typedef(ext)
+                    elif isinstance(ext, c_ast.StaticAssert):
+                        self.static_assert(ext)
+                    elif isinstance(ext, c_ast.Pragma):
+                        self.pragma(ext)
+                    else:
+                        self.unsup(f'{type(ext).__name__} at file scope', ext)
+                except CError as e:
+                    self.record(e)
+                    self.fn = None
+                    del self.scopes[1:]
+                    del self.tags[1:]
+        except _TooMany:
+            self.diag.errors.append(f'{self.filename}: error: too many errors, stopped')
+        self.end_of_unit()
         u = self.unit
         u.externs -= u.defined
         u.uses_float = self.uses_float
         u.float_printf = self.uses_float and self.calls_printf
         u.float_scanf = self.uses_float and self.calls_scanf
         return u
+
+    def end_of_unit(self):
+        """what can only be checked once the whole file is read: the sizes of tentative
+        definitions (a structure defined after them)"""
+        for o in self.unit.data:
+            t = getattr(o, 'ctype', None)
+            if t is None:
+                continue
+            if t.is_struct and not t.complete:
+                n = getattr(o.node, 'name', None) or o.name
+                self.diag.error(self.place_of(o.node) or self.filename,
+                                f"storage size of '{n}' is not known ({cname(t)} is declared "
+                                f"but not defined)")
+            elif t.is_arr and t.n is None:
+                o.size = t.elem.size
+            else:
+                o.size = t.size
+            if t.is_struct or t.is_arr:
+                self.note_float(t)
+
+    def static_assert(self, d):
+        v = self.const_eval(d.cond)
+        if not isinstance(v, int):
+            self.err('_Static_assert needs an integer constant expression', d)
+        if not v:
+            m = self.strbytes(d.message) if d.message is not None else None
+            self.err('static assertion failed' +
+                     (f': "{bytes(m).decode("latin-1")}"' if m is not None else ''), d)
 
     def note_float(self, t):
         """the unit uses floating point when it defines a float object or computes with
@@ -689,21 +999,54 @@ class Front:
         st = d.storage or []
         prev = self.scopes[0].get(d.name)
         asm = mangle(d.name)
+        if prev is not None and prev.kind in ('enum', 'typedef'):
+            self.err(f"'{d.name}' redeclared as a different kind of name (it is "
+                     f"{'an enumerator' if prev.kind == 'enum' else 'a typedef'})", d)
         if not t.is_func:
             _check_ll(t, d, self)
+        else:
+            _check_ll(t.ret, d, self)
+            for _, pt in t.params:
+                _check_ll(pt, d, self)
         if t.is_func:
+            if prev is not None and prev.kind == 'global' and not prev.t.is_func:
+                self.err(f"'{d.name}' redeclared as a different kind of name (a variable "
+                         f"before)", d)
+            if prev is not None and prev.kind == 'global' and not compatible(prev.t, t):
+                self.err(f"conflicting types for '{d.name}': {cname(t)}, and before "
+                         f"{cname(prev.t)}{_at(prev)}", d)
             if prev is None or prev.kind != 'global':
-                self.bind(d.name, Sy('global', t, asm=asm))
+                sy = Sy('global', t, asm=asm)
+                sy.coord, sy.name = d.coord, d.name
+                self.bind(d.name, sy)
+                if '_Noreturn' in (d.funcspec or []):
+                    self.noreturn_names.add(d.name)
             elif not prev.t.proto and t.proto:
                 prev.t = t
             if 'static' not in st:
                 self.unit.externs.add(asm)
             return
+        if t.is_void:
+            self.err(f"variable '{d.name}' declared void", d)
+        if d.init is not None and 'extern' in st:
+            self.warn(f"'{d.name}' is declared extern and given a value (it is defined "
+                      f"here)", d, 'extern-initializer')
         if t.is_arr and t.n is None and d.init is not None:
             t = ArrT(t.elem, self.init_count(t, d.init))
-        if prev is not None and prev.kind == 'global' and prev.t.is_arr and t.is_arr and t.n is None:
-            t = prev.t
+        if prev is not None and prev.kind == 'global':
+            if prev.t.is_func:
+                self.err(f"'{d.name}' redeclared as a different kind of name (a function "
+                         f"before)", d)
+            if not compatible(prev.t.unqual(), t.unqual()):
+                self.err(f"conflicting types for '{d.name}': {cname(t)}, and before "
+                         f"{cname(prev.t)}{_at(prev)}", d)
+            if prev.defined and d.init is not None:
+                self.err(f"redefinition of '{d.name}'{_at(prev)}", d)
+            if prev.t.is_arr and t.is_arr and t.n is None:
+                t = prev.t
         sy = Sy('global', t, asm=asm)
+        sy.coord, sy.name = d.coord, d.name
+        sy.defined = d.init is not None or (prev is not None and prev.defined)
         self.bind(d.name, sy)
         self.const_value(sy, t, d.init)
         if 'extern' in st and d.init is None:
@@ -735,6 +1078,10 @@ class Front:
         if asm in self.unit.defined:
             # a tentative definition followed by a real one: keep the one with data
             if init is None:
+                for o in self.unit.data:
+                    if o.name == asm and getattr(o, 'ctype', None) is not None and \
+                            not (t.is_arr and t.n is None):
+                        o.ctype = t     # int a[]; int a[10];: the size is the last one
                 return
             self.unit.data = [o for o in self.unit.data if o.name != asm]
         self.unit.defined.add(asm)
@@ -744,20 +1091,36 @@ class Front:
         if t.is_arr and t.n is None:
             t = ArrT(t.elem, 1)
         if init is None:
-            self.unit.data.append(DataObj(asm, 'BSS', [], t.size, export))
+            o = DataObj(asm, 'BSS', [], t.size, export)
+            o.ctype, o.node = t, node     # its size again at the end (a structure
+            self.unit.data.append(o)      # completed later)
             return
+        if t.is_struct and not t.complete:
+            self.err(f"'{getattr(node, 'name', None) or asm}' has an incomplete type "
+                     f"({cname(t)})", node)
         img = Image(t.size)
         self.static_init(img, 0, t, init)
         sec = 'RODATA' if _is_const(t) else 'DATA'
         self.unit.data.append(DataObj(asm, sec, img.items(), t.size, export))
 
+    def str_init(self, t, init):
+        """the string literal that initialises the array t (char a[] = "x", or {"x"}),
+        or None"""
+        if isinstance(init, c_ast.InitList) and len(init.exprs) == 1:
+            init = init.exprs[0]
+        if isinstance(init, c_ast.Constant) and init.type == 'string' and t.elem.is_int:
+            es = self.str_elem(init).size
+            if t.elem.size == es:
+                return init
+            self.err(f'an array of {cname(t.elem)} initialised with a string of '
+                     f'{cname(self.str_elem(init))}', init)
+        return None
+
     def init_count(self, t, init):
-        if isinstance(init, c_ast.Constant) and init.type == 'string':
-            return len(self.strbytes(init)) + 1
+        s0 = self.str_init(t, init)
+        if s0 is not None:
+            return len(self.strvals(s0)) + 1
         if isinstance(init, c_ast.InitList):
-            if len(init.exprs) == 1 and isinstance(init.exprs[0], c_ast.Constant) and \
-                    init.exprs[0].type == 'string' and t.elem.is_int and t.elem.size == 1:
-                return len(self.strbytes(init.exprs[0])) + 1
             mx = [-1]
 
             def cb(off, et, e, fld):
@@ -769,27 +1132,42 @@ class Front:
 
     # --- static initialisers -> byte image with relocations
     def static_init(self, img, off, t, init):
+        if (t.is_arr or t.is_struct) and (isinstance(init, c_ast.InitList) or
+                                          (t.is_arr and self.str_init(t, init))):
+            img.clear(off, t.size)      # (an initialiser that overrides an earlier one)
         if t.is_arr:
-            if isinstance(init, c_ast.Constant) and init.type == 'string' or \
-                    (isinstance(init, c_ast.InitList) and len(init.exprs) == 1 and
-                     isinstance(init.exprs[0], c_ast.Constant) and init.exprs[0].type == 'string'
-                     and t.elem.is_int and t.elem.size == 1):
-                if isinstance(init, c_ast.InitList):
-                    init = init.exprs[0]
-                b = self.strbytes(init)
-                n = t.n if t.n is not None else len(b) + 1
+            s0 = self.str_init(t, init)
+            if s0 is not None:
+                b = self.strbytes(s0)
+                es = t.elem.size
+                if t.n is not None and len(b) > t.n * es:
+                    self.warn(f'the string is longer than the array ({len(b) // es} '
+                              f'characters for {t.n})', s0, 'excess-initializers')
+                n = t.n * es if t.n is not None else len(b) + es
                 for i, c in enumerate(b[:n]):
                     img.byte(off + i, c)
                 return
             if not isinstance(init, c_ast.InitList):
-                self.err('array initialiser must be a list', init)
-            self.list_init(init.exprs, 0, img, off, t, static=True)
+                self.err(f"an array is initialised with a list in braces ({{...}}) or a "
+                         f"string, not with {cname(self.expr_type(init))}", init)
+            n = self.list_init(init.exprs, 0, img, off, t, static=True)
+            if n < len(init.exprs):
+                self.warn('excess elements in the array initialiser', init.exprs[n],
+                          'excess-initializers')
             return
         if t.is_struct:
             if isinstance(init, c_ast.InitList):
-                self.list_init(init.exprs, 0, img, off, t, static=True)
+                n = self.list_init(init.exprs, 0, img, off, t, static=True)
+                if n < len(init.exprs):
+                    self.warn('excess elements in the structure initialiser', init.exprs[n],
+                              'excess-initializers')
                 return
-            self.unsup('structure initialised from an expression (static)', init)
+            it = self.expr_type(init)
+            if it.is_struct and same(it, t):
+                self.err('a static structure is initialised with a constant list in braces '
+                         '({...}), not with another structure', init)
+            self.err(f"incompatible types when initialising {cname(t)} with {cname(it)}",
+                     init)
         if isinstance(init, c_ast.InitList):
             if not init.exprs:
                 return
@@ -797,11 +1175,13 @@ class Front:
         self.static_scalar(img, off, t, init)
 
     def static_scalar(self, img, off, t, e):
+        img.clear(off, max(t.size, 1))      # (a value given again replaces the first)
+        self.check_assign(t, self.expr_type(e), e, 'initialization')
         v = self.const_eval(e)
         if t.is_float:
             self.note_float(t)
             if v is None:
-                self.err('initialiser is not a constant', e)
+                self.err('the initialiser is not a constant: a global or static variable takes constants only (numbers, addresses of globals and statics, sizeof); give it its value in a function', e)
             if not isinstance(v, (int, FV)):
                 self.err('initialiser of a float is not a number', e)
             v = self.wrap(v, t).bits
@@ -821,7 +1201,7 @@ class Front:
             return
         a = self.addr_const(e)
         if a is None:
-            self.err('initialiser is not a constant', e)
+            self.err('the initialiser is not a constant: a global or static variable takes constants only (numbers, addresses of globals and statics, sizeof); give it its value in a function', e)
         sym, aoff = a
         if t.size == 4:
             img.reloc(off, ('f', sym, aoff))
@@ -915,60 +1295,86 @@ class Front:
         self.define_data(name, t, e.init, False, e)
         return name
 
-    def list_init(self, exprs, i, img, off, t, static):
+    def list_init(self, exprs, i, img, off, t, static, top=True):
         """initialise an aggregate t at off from exprs[i:], with brace elision.
         Returns the index of the first unused expression. Static: into img; otherwise
-        img is a callback store(off, type, expr)."""
+        img is a callback store(off, type, expr, field).
+        top: exprs is t's own brace list (its designators name t's members); False: the
+        elements t takes from an outer list (brace elision), which end at a designator;
+        'first': the same, but the first one is a designator into t (.a.b = 1, 2: the 2
+        goes on in a)."""
+        def desig_ok(k):
+            return top is True or (top == 'first' and k == i0)
+        i0 = i
         if t.is_arr:
             n = t.n
+            es = t.elem.size
             k = 0
-            while i < len(exprs) and (n is None or k < n or isinstance(exprs[i], c_ast.NamedInitializer)):
+            while i < len(exprs):
                 x = exprs[i]
                 if isinstance(x, c_ast.NamedInitializer):
+                    if not desig_ok(i):
+                        return i
                     d = x.name[0]
                     if not isinstance(d, c_ast.ArrayDesignator):
-                        return i
+                        self.err(f"a member designator (.{getattr(d, 'name', '?')}) in the "
+                                 f"initialiser of an array", x)
                     k = self.const_int(d.expr)
-                    if len(x.name) > 1:
-                        sub = c_ast.InitList([c_ast.NamedInitializer(x.name[1:], x.expr)])
-                        self.init_one(img, off + k * t.elem.size, t.elem, sub, static)
-                    else:
-                        self.init_one(img, off + k * t.elem.size, t.elem, x.expr, static)
-                    i += 1
+                    if k < 0 or (n is not None and k >= n):
+                        self.err(f'the array index {k} in the initialiser is outside the '
+                                 f'array (0 to {n - 1 if n is not None else "..."})', x)
+                    i = self.init_designated(x, exprs, i, img, off + k * es, t.elem, static)
                     k += 1
                     continue
-                i = self.init_elem(exprs, i, img, off + k * t.elem.size, t.elem, static)
+                if n is not None and k >= n:
+                    break
+                i = self.init_elem(exprs, i, img, off + k * es, t.elem, static)
                 k += 1
             return i
         if t.is_struct:
             fields = [f for f in t.fields if f.name is not None or f.type.is_struct]
             k = 0
-            while i < len(exprs) and (k < len(fields) or isinstance(exprs[i], c_ast.NamedInitializer)):
+            while i < len(exprs):
                 x = exprs[i]
                 if isinstance(x, c_ast.NamedInitializer):
+                    if not desig_ok(i):
+                        return i
                     d = x.name[0]
-                    if isinstance(d, c_ast.ID):
-                        names = [f.name for f in fields]
-                        if d.name not in names:
-                            # an anonymous member's field
-                            r = t.field(d.name)
-                            if not r:
-                                self.err(f'no member {d.name}', x)
-                            f = r[0]
-                            self.init_field(img, off + r[1] - f.offset, f, x.expr if len(x.name) == 1 else
-                                            c_ast.InitList([c_ast.NamedInitializer(x.name[1:], x.expr)]), static)
-                            i += 1
-                            continue
+                    if not isinstance(d, c_ast.ID):
+                        self.err(f'an array designator ([...]) in the initialiser of '
+                                 f'{cname(t)}', x)
+                    names = [f.name for f in fields]
+                    if d.name in names:
                         k = names.index(d.name)
                         f = fields[k]
-                        sub = x.expr if len(x.name) == 1 else c_ast.InitList([c_ast.NamedInitializer(x.name[1:], x.expr)])
-                        self.init_field(img, off, f, sub, static)
-                        i += 1
+                        if f.bits is not None:
+                            self.init_field(img, off, f, x.expr, static)
+                            i += 1
+                        else:
+                            i = self.init_designated(x, exprs, i, img, off + f.offset,
+                                                     f.type, static)
                         k += 1
-                        if t.union:
-                            return i
-                        continue
-                    return i
+                    else:
+                        # a member of an anonymous structure or union member
+                        r = t.field(d.name)
+                        if not r:
+                            self.err(f"no member named '{d.name}' in {cname(t)}", x)
+                        f = r[0]
+                        if f.bits is not None:
+                            self.init_field(img, off + r[1] - f.offset, f, x.expr, static)
+                            i += 1
+                        else:
+                            i = self.init_designated(x, exprs, i, img, off + r[1], f.type,
+                                                     static)
+                        # (the positional ones after it go on after the anonymous member)
+                        for kk, ff in enumerate(fields):
+                            if ff.name is None and ff.type.is_struct and ff.type.field(d.name):
+                                k = kk + 1
+                    if t.union:
+                        return i
+                    continue
+                if k >= len(fields):
+                    break
                 f = fields[k]
                 if f.bits is not None:
                     self.init_field(img, off, f, x, static)
@@ -980,6 +1386,26 @@ class Front:
                     break
             return i
         self.init_one(img, off, t, exprs[i], static)
+        return i + 1
+
+    def init_designated(self, x, exprs, i, img, off, t, static):
+        """exprs[i] is x, a designated initialiser for the member or element t at off:
+        initialised, and the positional values after it that go on inside t (.b.x = 3,
+        4: the 4 is b.y). -> the index after them"""
+        if len(x.name) > 1:
+            sub = [c_ast.NamedInitializer(x.name[1:], x.expr, x.coord)] + exprs[i + 1:]
+            return i + self.list_init(sub, 0, img, off, t, static, top='first')
+        e = x.expr
+        if (t.is_arr or t.is_struct) and not isinstance(e, c_ast.InitList):
+            if t.is_arr and self.str_init(t, e) is not None:
+                self.init_one(img, off, t, e, static)
+                return i + 1
+            if t.is_struct and not static and same(self.expr_type(e), t):
+                self.init_one(img, off, t, e, static)
+                return i + 1
+            sub = [e] + exprs[i + 1:]
+            return i + self.list_init(sub, 0, img, off, t, static, top=False)
+        self.init_one(img, off, t, e, static)
         return i + 1
 
     def init_field(self, img, off, f, e, static):
@@ -1006,7 +1432,7 @@ class Front:
             if t.is_struct and not static and same(self.expr_type(x), t):
                 self.init_one(img, off, t, x, static)
                 return i + 1
-            return self.list_init(exprs, i, img, off, t, static)
+            return self.list_init(exprs, i, img, off, t, static, top=False)
         self.init_one(img, off, t, x, static)
         return i + 1
 
@@ -1019,19 +1445,53 @@ class Front:
     # ================================================================== functions
     def funcdef(self, fd):
         d = fd.decl
+        name = d.name
+        self.loc = d.coord
+        c = d.coord
+        if c is not None and (c.file, c.line, c.column) in self.implicit_int:
+            self.diag.error(c, f"the function '{name}' has no return type: write 'int "
+                               f"{name}(...)' (C99 has no implicit int)")
         ft = self.decl_type(d.type)
+        if not ft.is_func:
+            self.err(f"'{name}' is not a function, but is followed by a body", d)
         if fd.param_decls:      # K&R definitions
             kr = {}
+            names = [n for n, _ in ft.params]
             for p in fd.param_decls:
+                if p.name not in names:
+                    self.err(f"declaration for parameter '{p.name}' but no such parameter",
+                             p)
                 kr[p.name] = self.param_adjust(self.decl_type(p.type))
             ft.params = [(n, kr.get(n, INT)) for n, _ in ft.params]
-        name = d.name
-        static = 'static' in (d.storage or [])
+        if ft.ret.is_struct and not ft.ret.complete:
+            self.err(f"the return type {cname(ft.ret)} is incomplete (declared but not "
+                     f"defined)", d)
+        storage = d.storage or []
+        static = 'static' in storage
+        funcspec = d.funcspec or []
         asm = mangle(name)
         prev = self.scopes[0].get(name)
-        if prev is not None and prev.kind == 'global' and prev.t.is_func and 'static' not in (d.storage or []):
-            pass
-        self.bind(name, Sy('global', ft, asm=asm))
+        if prev is not None and prev.kind == 'global':
+            if prev.defined:
+                self.err(f"redefinition of '{name}'{_at(prev)}", d)
+            if not prev.t.is_func:
+                self.err(f"'{name}' redeclared as a different kind of name (a variable "
+                         f"before)", d)
+            if not compatible(prev.t, ft):
+                self.err(f"conflicting types for '{name}': {cname(ft)}, and before "
+                         f"{cname(prev.t)}{_at(prev)}", d)
+        elif prev is not None and prev.kind in ('enum', 'typedef'):
+            self.err(f"'{name}' redeclared as a different kind of name", d)
+        if 'inline' in funcspec and 'extern' not in storage and not static and \
+                (prev is None or prev.kind != 'global'):
+            # a C99 inline definition (in a header, included by several files): private
+            # to the file, so the files do not define it twice
+            static = True
+        if '_Noreturn' in funcspec:
+            self.noreturn_names.add(name)
+        sy = Sy('global', ft, asm=asm)
+        sy.coord, sy.name, sy.defined = d.coord, name, True
+        self.bind(name, sy)
         self.unit.defined.add(asm)
         if not static:
             self.unit.exports.add(asm)
@@ -1049,6 +1509,8 @@ class Front:
         _scan_addr(fd.body, self.addr_taken)
         self.cur = None
         self.newblock('entry')
+        self.label_goto = {}
+        self.label_used = set()
         self.push()
         # the hidden structure-return pointer comes first
         argoff = 0
@@ -1062,16 +1524,26 @@ class Front:
             self.sret = None
         _check_ll(ft.ret, fd, self)
         self.note_float(ft.ret)
+        seen = set()
+        _check_ll(ft.ret, d, self)
         for pname, pt in ft.params:
-            _check_ll(pt, fd, self)
+            _check_ll(pt, d, self)
             self.note_float(pt)
+            if pname is not None:
+                if pname in seen:
+                    self.err(f"redefinition of parameter '{pname}'", d)
+                seen.add(pname)
+            if pt.is_struct and not pt.complete:
+                self.err(f"parameter '{pname}' has an incomplete type ({cname(pt)})", d)
             if pt.is_struct:
                 v = f.newv(2, (pname or 'p'))
                 v.param = argoff
                 argoff += 2
                 f.params.append(v)
                 if pname:
-                    self.bind(pname, Sy('mem', pt, base=v))
+                    sy = Sy('mem', pt, base=v)
+                    sy.param = True
+                    self.bind(pname, sy)
                 continue
             size = 4 if pt.size == 4 else 2
             v = f.newv(size, pname or 'p')
@@ -1083,14 +1555,24 @@ class Front:
             if pname in self.addr_taken or pt.volatile:
                 slot = self.new_slot(pname, pt.size)
                 self.store(Frame(slot), None, 0, pt, v)
-                self.bind(pname, Sy('mem', pt, slot=slot, base=Frame(slot)))
+                sy = Sy('mem', pt, slot=slot, base=Frame(slot))
             else:
                 if pt.is_int and pt.size == 1:
                     # a char argument comes as an int: make it a valid char value
                     self.emit(Ins('x8s' if pt.signed else 'x8u', v, v))
-                self.bind(pname, Sy('reg', pt, v=v))
+                sy = Sy('reg', pt, v=v)
+            sy.param = True
+            self.bind(pname, sy)
         f.argsize = argoff
         self.compound(fd.body, newscope=False)
+        if self.cur is not None and not self.cur.term and not ft.ret.is_void and \
+                name != 'main' and id(self.cur) not in self.noreturn_blocks and \
+                self.reachable(self.cur):
+            c = fd.body.coord
+            end = getattr(self, 'compound_end', {}).get((c.file, c.line, c.column), c) \
+                if c is not None else None
+            self.diag.warning(end or self.filename, f"control reaches the end of the non-void "
+                              f"function '{name}' (a return is missing)", 'return-type')
         if self.cur is not None and not (self.cur.term):
             if name == 'main':
                 self.emit(Ins('ret', a=Imm(0)))
@@ -1099,10 +1581,35 @@ class Front:
         self.pop()
         for lname, (blk, defined) in self.labels.items():
             if not defined:
-                self.err(f'label {lname} used but not defined', fd)
+                self.diag.error(self.label_goto.get(lname) or self.place_of(fd),
+                                f"label '{lname}' used but not defined")
+            elif lname not in self.label_used:
+                self.diag.warning(getattr(blk, 'coord', None), f"label '{lname}' defined "
+                                  f"but not used", 'unused-label')
         f.blocks = [b for b in f.blocks]
         self.unit.funcs.append(f)
         self.fn = None
+
+    def reachable(self, blk):
+        """blk can be reached from the function's entry (a call of a function that does
+        not return, exit() and the like, ends a path)"""
+        k = 0
+        while k + 1 < len(self.fn.blocks) and not self.fn.blocks[k].ins:
+            k += 1              # (the empty entry block runs into the first one)
+        entry = self.fn.blocks[k]
+        seen = {id(entry)}
+        todo = [entry]
+        while todo:
+            b = todo.pop()
+            if b is blk:
+                return True
+            if id(b) in self.noreturn_blocks:
+                continue
+            for n in b.succ():
+                if id(n) not in seen:
+                    seen.add(id(n))
+                    todo.append(n)
+        return False
 
     def new_slot(self, name, size):
         s = FrameSlot(name, max(size, 1))
@@ -1151,11 +1658,46 @@ class Front:
         if newscope:
             self.push()
         for s in node.block_items or []:
-            self.stmt(s)
+            self.stmt_safe(s)
         if newscope:
             self.pop()
 
+    def stmt_safe(self, s):
+        """a statement; an error in it is noted and the next statement is done (the
+        state the statement had changed is put back)"""
+        state = (len(self.scopes), len(self.brk), len(self.cont), len(self.switches),
+                 self.depth)
+        try:
+            self.stmt(s)
+        except CError as e:
+            self.record(e)
+            ns, nb, nc, nw, self.depth = state
+            while len(self.scopes) > ns:
+                self.scopes.pop()
+                self.tags.pop()
+            del self.brk[nb:]
+            del self.cont[nc:]
+            del self.switches[nw:]
+            self.cur = None
+            if isinstance(s, c_ast.Decl) and s.name and s.name not in self.scopes[-1]:
+                self.bind_dummy(s.name)
+
+    def undeclared(self, name, e):
+        if self.fn is not None and len(self.scopes) > 1:
+            self.bind_dummy(name, 1)
+            self.err(f"'{name}' undeclared (first use in this function)", e)
+        self.err(f"'{name}' undeclared", e)
+
+    def bind_dummy(self, name, scope=-1):
+        """a name whose declaration had an error (or that is undeclared): its uses stop
+        their statement without more messages (the error was said once)"""
+        sy = Sy('error', INT)
+        sy.used = True
+        self.scopes[scope][name] = sy
+
     def stmt(self, s):
+        if getattr(s, 'coord', None) is not None:
+            self.loc = s.coord
         m = getattr(self, 'st_' + type(s).__name__, None)
         if m is None:
             if isinstance(s, (c_ast.Assignment, c_ast.UnaryOp, c_ast.BinaryOp, c_ast.FuncCall,
@@ -1173,10 +1715,16 @@ class Front:
         pass
 
     def st_Pragma(self, s):
-        pass
+        self.pragma(s)
+
+    def pragma(self, s):
+        words = (s.string or '').split()
+        if words[:2] == ['cc816', 'internal_error_test']:
+            # (tests/diag: the internal compiler error path, on purpose)
+            raise ZeroDivisionError('a test of the internal compiler error message')
 
     def st_StaticAssert(self, s):
-        pass
+        self.static_assert(s)
 
     def st_Typedef(self, s):
         self.typedef(s)
@@ -1194,97 +1742,154 @@ class Front:
             self.decl_type(d.type)
             return
         t = self.decl_type(d.type)
-        if not t.is_func:
-            _check_ll(t, d, self)
+        _check_ll(t if not t.is_func else t.ret, d, self)
+        prev = self.scopes[-1].get(d.name)
+        if prev is not None and prev.kind == 'error':
+            prev = None             # (an earlier error's stand-in: no redefinition)
         if t.is_func or 'extern' in st:
+            if d.init is not None:
+                self.err(f"'{d.name}' is declared extern inside a function and has a "
+                         f"value", d)
+            if prev is not None and prev.kind != 'global':
+                self.err(f"'{d.name}' redeclared as a different kind of name (a local "
+                         f"variable here){_at(prev)}", d)
             g = self.scopes[0].get(d.name)
             if g is not None and g.kind == 'global':
+                if not compatible(g.t.unqual(), t.unqual()):
+                    self.err(f"conflicting types for '{d.name}': {cname(t)}, and before "
+                             f"{cname(g.t)}{_at(g)}", d)
                 self.bind(d.name, g)
             else:
                 asm = mangle(d.name)
-                self.bind(d.name, Sy('global', t, asm=asm))
+                sy = Sy('global', t, asm=asm)
+                sy.coord, sy.name = d.coord, d.name
+                self.bind(d.name, sy)
+                # (also visible at file scope from now on, as C's linkage says)
+                self.scopes[0].setdefault(d.name, sy)
                 self.unit.externs.add(asm)
             return
+        if prev is not None:
+            what = 'parameter' if prev.param else 'variable'
+            self.err(f"redefinition of '{d.name}' (a {what} of that name in the same "
+                     f"block){_at(prev)}", d)
+        if t.is_void:
+            self.err(f"variable '{d.name}' declared void", d)
         if t.is_arr and t.n is None:
             if d.init is None:
-                self.err('array of unknown size', d)
+                self.err(f"array '{d.name}' has no size (and no initialiser to count)", d)
             t = ArrT(t.elem, self.init_count(t, d.init))
         if 'static' in st:
             self.nstatic += 1
             asm = f'{self.fn.name}__{d.name}_{self.nstatic}'
             sy = Sy('global', t, asm=asm)
+            sy.coord, sy.name, sy.local = d.coord, d.name, True
             self.bind(d.name, sy)
             self.const_value(sy, t, d.init)
             self.define_data(asm, t, d.init, False, d)
             return
         if t.is_struct and not t.complete:
-            self.err(f'variable of incomplete type {t!r}', d)
+            self.err(f"storage size of '{d.name}' is not known ({cname(t)} is declared but "
+                     f"not defined)", d)
         self.note_float(t)
         if t.is_arr or t.is_struct or d.name in self.addr_taken or t.volatile:
             slot = self.new_slot(d.name, t.size)
             sy = Sy('mem', t, slot=slot, base=Frame(slot))
+            sy.coord, sy.name, sy.local = d.coord, d.name, True
             self.bind(d.name, sy)
             if d.init is not None:
-                self.local_init(Frame(slot), t, d.init)
+                self.local_init(Frame(slot), t, d.init, d)
             return
         v = self.newv(4 if t.size == 4 else 2, d.name)
-        self.bind(d.name, Sy('reg', t, v=v))
+        sy = Sy('reg', t, v=v)
+        sy.coord, sy.name, sy.local = d.coord, d.name, True
+        self.bind(d.name, sy)
         if d.init is not None:
             init = d.init
             if isinstance(init, c_ast.InitList):
-                init = init.exprs[0]
-            self.assign_to(LV('reg', t, op=v), init)
+                if not init.exprs:
+                    init = c_ast.Constant('int', '0', init.coord)
+                else:
+                    if len(init.exprs) > 1:
+                        self.warn(f"excess elements in the initialiser of '{d.name}' (a "
+                                  f"scalar)", init.exprs[1], 'excess-initializers')
+                    init = init.exprs[0]
+            self.assign_to(LV('reg', t, op=v), init, 'initialization')
 
-    def local_init(self, base, t, init):
+    def local_init(self, base, t, init, node=None):
         if t.is_arr or (t.is_struct and isinstance(init, c_ast.InitList)):
-            if t.is_arr and t.elem.size == 1 and (
-                    (isinstance(init, c_ast.Constant) and init.type == 'string') or
-                    (isinstance(init, c_ast.InitList) and len(init.exprs) == 1 and
-                     isinstance(init.exprs[0], c_ast.Constant) and init.exprs[0].type == 'string')):
-                s = init if isinstance(init, c_ast.Constant) else init.exprs[0]
+            s = self.str_init(t, init) if t.is_arr else None
+            if s is not None:
                 b = self.strbytes(s)
-                n = min(len(b) + 1, t.n)
+                es = t.elem.size
+                if len(b) > t.n * es:
+                    self.warn(f'the string is longer than the array ({len(b) // es} '
+                              f'characters for {t.n})', s, 'excess-initializers')
+                n = min(len(b) + es, t.size)
                 sym = self.string_sym(s)
                 self.emit(Ins('copy', a=Sym(sym), b=base, n=n))
-                if t.n > n:
-                    self.emit(Ins('zero', a=_addoff(base, n), n=t.n - n))
+                if t.size > n:
+                    self.emit(Ins('zero', a=_addoff(base, n), n=t.size - n))
                 return
             if not isinstance(init, c_ast.InitList):
-                self.err('aggregate initialiser must be a list', init)
+                self.err(f"an array is initialised with a list in braces ({{...}}) or a "
+                         f"string, not with {cname(self.expr_type(init))}", init)
             self.emit(Ins('zero', a=base, n=t.size))
+
+            written = []        # (offset, size) stored so far: an initialiser that
+                                # overrides one (.a = {1, 2}, .a = {3}) clears first
+
+            def overlaps(o, n):
+                return any(o < wo + wn and wo < o + n for wo, wn in written)
 
             def store(off, et, e, fld):
                 if fld is not None:
                     lv = LV('mem', fld.type, base=base, off=off + fld.offset, fld=fld)
                     self.assign_to(lv, e)
+                    written.append((off + fld.offset, fld.type.size))
                     return
+                if isinstance(e, c_ast.InitList) or (et.is_arr and self.str_init(et, e)):
+                    if (et.is_arr or et.is_struct) and overlaps(off, et.size):
+                        # (a whole aggregate given again: what was there goes)
+                        self.emit(Ins('zero', a=_addoff(base, off), n=et.size))
+                        written[:] = [(wo, wn) for wo, wn in written
+                                      if not (off <= wo and wo + wn <= off + et.size)]
                 if isinstance(e, c_ast.InitList):
                     if et.is_arr or et.is_struct:
                         self.list_init(e.exprs, 0, store, off, et, static=False)
                         return
                     e = e.exprs[0] if e.exprs else c_ast.Constant('int', '0')
                 if et.is_arr:
-                    s = e
+                    s = self.str_init(et, e)
+                    if s is None:
+                        self.err(f'an array ({cname(et)}) is initialised with a list in '
+                                 f'braces or a string', e)
                     b = self.strbytes(s)
-                    n = min(len(b) + 1, et.n)
+                    n = min(len(b) + et.elem.size, et.size)
                     self.emit(Ins('copy', a=Sym(self.string_sym(s)), b=_addoff(base, off), n=n))
+                    written.append((off, n))
                     return
                 lv = LV('mem', et, base=base, off=off)
                 v = self.const_eval(e)
-                if v is not None and et.is_scalar and (
+                if v is not None and et.is_scalar and not overlaps(off, et.size) and (
                         self.wrap(v, et).bits == 0 if et.is_float else
                         (isinstance(v, int) and v == 0)):
                     return
-                self.assign_to(lv, e)
-            self.list_init(init.exprs, 0, store, 0, t, static=False)
+                self.assign_to(lv, e, 'initialization')
+                written.append((off, et.size))
+            n = self.list_init(init.exprs, 0, store, 0, t, static=False)
+            if n < len(init.exprs):
+                self.warn('excess elements in the initialiser', init.exprs[n],
+                          'excess-initializers')
             return
         if isinstance(init, c_ast.InitList):
             init = init.exprs[0]
-        self.assign_to(LV('mem', t, base=base, off=0), init)
+        self.assign_to(LV('mem', t, base=base, off=0), init, 'initialization')
 
     def st_If(self, s):
         c = self.const_eval(s.cond)
-        if c is not None:
+        if c is not None and not _has_labels(s.iffalse if c else s.iftrue):
+            # (the branch not taken is left out, unless a label or a case is in it: a
+            # goto or the switch can enter it)
             if c:
                 self.stmt(s.iftrue)
             elif s.iffalse is not None:
@@ -1356,34 +1961,47 @@ class Front:
 
     def st_Break(self, s):
         if not self.brk:
-            self.err('break outside a loop or switch', s)
+            self.err("a 'break' not within a loop or a switch", s)
         self.jump(self.brk[-1])
 
     def st_Continue(self, s):
         if not self.cont:
-            self.err('continue outside a loop', s)
+            self.err("a 'continue' not within a loop", s)
         self.jump(self.cont[-1])
 
     def st_Return(self, s):
         ft = self.fn.ctype
+        rt = ft.ret
+        name = self.fn.cname
         if s.expr is None:
+            if not rt.is_void and name != 'main':
+                self.warn(f"'return' with no value in the function '{name}', which returns "
+                          f"{cname(rt)}", s, 'return-type')
             self.emit(Ins('ret', a=None))
             return
-        rt = ft.ret
         if rt.is_void:
-            self.rv(s.expr)
+            r = self.rv(s.expr)
+            if not r.t.is_void:
+                self.warn(f"'return' with a value in the function '{name}', which returns "
+                          f"void", s, 'return-type')
             self.emit(Ins('ret', a=None))
             return
         if rt.is_struct:
             v = self.rv(s.expr)
+            self.check_assign(rt, v.t, s.expr, 'return')
             self.copy_mem(v.op, self.sret, rt.size)
             self.emit(Ins('ret', a=self.sret))
             return
-        v = self.convert(self.rv(s.expr), rt)
+        r = self.rv(s.expr)
+        self.check_assign(rt, r.t, s.expr, 'return')
+        v = self.convert(r, rt)
         self.emit(Ins('ret', a=v.op))
 
     def st_Label(self, s):
+        if s.name in self.labels and self.labels[s.name][1]:
+            self.err(f"duplicate label '{s.name}'", s)
         b = self.label_block(s.name)
+        b.coord = s.coord
         self.labels[s.name] = (b, True)
         self.place(b)
         self.stmt(s.stmt)
@@ -1397,11 +2015,14 @@ class Front:
 
     def st_Goto(self, s):
         b = self.label_block(s.name)
+        self.label_goto.setdefault(s.name, s.coord)
+        self.label_used.add(s.name)
         self.jump(b)
 
     def st_Switch(self, s):
         if not self.expr_type(s.cond).is_int:
-            self.err('switch on a value that is not an integer', s)
+            self.err(f'switch on a value that is not an integer '
+                     f'({cname(self.expr_type(s.cond))})', s)
         v = self.convert(self.rv(s.cond), promote(self.expr_type(s.cond)))
         t = v.t
         val = v.op
@@ -1412,6 +2033,7 @@ class Front:
             self.emit(Ins('mov', nv, val))
             val = nv
         sw = Ins('sw', a=val, cases=[], default=None, signed=t.signed)
+        self.sw_seen[id(sw)] = {}
         self.emit(sw)
         lend = self.mkblock('endsw')
         self.switches.append((sw, t))
@@ -1426,9 +2048,19 @@ class Front:
 
     def st_Case(self, s):
         if not self.switches:
-            self.err('case outside a switch', s)
+            self.err("a 'case' label not within a switch statement", s)
         sw, t = self.switches[-1]
-        k = self.wrap(self.const_int(s.expr), t)
+        v = self.const_eval(s.expr)
+        if not isinstance(v, int):
+            self.err("a 'case' label needs an integer constant", s)
+        k = self.wrap(v, t)
+        if k in self.sw_seen[id(sw)]:
+            self.err(f'duplicate case value {k} (also at line {self.sw_seen[id(sw)][k].line})'
+                     if getattr(self.sw_seen[id(sw)][k], 'line', None) else f'duplicate case value {k}', s)
+        if k != v and self.wrap(v, LONG) == v:
+            self.warn(f'the case value {v} does not fit the switch\'s type ({cname(t)}): it '
+                      f'is {k}', s, 'overflow')
+        self.sw_seen[id(sw)][k] = s.coord
         b = self.mkblock('case')
         sw.x['cases'].append((k & ((1 << (8 * t.size)) - 1), b))
         self.place(b)
@@ -1436,7 +2068,11 @@ class Front:
             self.stmt(x)
 
     def st_Default(self, s):
+        if not self.switches:
+            self.err("a 'default' label not within a switch statement", s)
         sw, t = self.switches[-1]
+        if sw.x['default'] is not None:
+            self.err("multiple default labels in one switch", s)
         b = self.mkblock('default')
         sw.x['default'] = b
         self.place(b)
@@ -1492,9 +2128,9 @@ class Front:
         return r
 
     def rv_nodecay(self, e, dst=None):
+        if getattr(e, 'coord', None) is not None:
+            self.loc = e.coord
         m = getattr(self, 'ex_' + type(e).__name__, None)
-        if isinstance(e, c_ast.Compound):
-            self.unsup('statement expressions (GNU)', e)
         if m is None:
             self.unsup(f'expression {type(e).__name__}', e)
         return m(e, dst)
@@ -1535,7 +2171,7 @@ class Front:
     def ex_Constant(self, e, dst):
         if e.type == 'string':
             sym = self.string_sym(e)
-            return RV(Sym(sym), ArrT(CHAR, len(self.strbytes(e)) + 1))
+            return RV(Sym(sym), self.str_type(e))
         v, t = self.constant(e)
         return self.to_dst(RV(self.cimm(v, t), t), dst)
 
@@ -1553,9 +2189,9 @@ class Front:
         if s is None:
             if e.name == '__func__':
                 return self.ex_Constant(c_ast.Constant('string', '"' + self.fn.cname + '"'), dst)
-            self.err(f'undeclared identifier {e.name}', e)
+            self.undeclared(e.name, e)
         if s.kind == 'enum':
-            return self.to_dst(RV(Imm(s.v), INT), dst)
+            return self.to_dst(RV(self.cimm(s.v, s.t), s.t), dst)
         if s.kind == 'global':
             if s.cval is not None:
                 return self.to_dst(RV(self.cimm(s.cval, s.t.unqual()), s.t.unqual()), dst)
@@ -1573,7 +2209,7 @@ class Front:
         if isinstance(e, c_ast.ID):
             s = self.lookup(e.name)
             if s is None:
-                self.err(f'undeclared identifier {e.name}', e)
+                self.undeclared(e.name, e)
             if s.kind == 'reg':
                 return LV('reg', s.t, op=s.v)
             if s.kind == 'mem':
@@ -1581,7 +2217,10 @@ class Front:
             if s.kind == 'global':
                 self.unit.externs.add(s.asm)
                 return LV('mem', s.t, base=Sym(s.asm), off=0)
-            self.err(f'{e.name} is not an lvalue', e)
+            if s.kind == 'enum':
+                self.err(f"'{e.name}' is an enumeration constant, which cannot be assigned "
+                         f"or have its address taken", e)
+            self.err(f"'{e.name}' is not a variable (a type name?)", e)
         if isinstance(e, c_ast.UnaryOp) and e.op == '*':
             x = e.expr
             if isinstance(x, c_ast.UnaryOp) and x.op in ('p++', 'p--') and isinstance(x.expr, c_ast.ID):
@@ -1594,25 +2233,26 @@ class Front:
                     return lv
             p = self.rv(e.expr)
             if not p.t.is_ptr:
-                self.err('dereferencing a non-pointer', e)
+                self.err(f"'*' needs a pointer, not {cname(p.t)}", e)
             return self.mem_at(p.op, p.t.to, p.t.isfar)
         if isinstance(e, c_ast.ArrayRef):
             return self.subscript(e)
         if isinstance(e, c_ast.StructRef):
             if e.type == '->':
                 p = self.rv(e.name)
-                if not p.t.is_ptr or not p.t.to.is_struct:
-                    self.err('-> needs a pointer to a structure', e)
+                if not p.t.is_ptr:
+                    self.err(f"'->' needs a pointer to a structure, not {cname(p.t)}"
+                             + (" (use '.')" if p.t.is_struct else ''), e)
+                self.check_member_base(p.t.to, e)
                 base = self.mem_at(p.op, p.t.to, p.t.isfar)
                 st = p.t.to
             else:
                 base = self.lval_or_struct(e.name)
                 st = base.t
-            if not st.is_struct or not st.complete:
-                self.err('member of a non-structure', e)
+            self.check_member_base(st, e)
             r = st.field(e.field.name)
             if not r:
-                self.err(f'no member {e.field.name} in {st!r}', e)
+                self.err(f"no member named '{e.field.name}' in {cname(st)}", e)
             f, foff = r
             ft = f.type.qual(st.const, st.volatile)
             lv = LV('mem', ft, base=base.base, idx=base.idx, off=base.off + foff,
@@ -1630,13 +2270,23 @@ class Front:
             lv.t = self.decl_type(e.to_type)
             return lv
         if isinstance(e, c_ast.Constant) and e.type == 'string':
-            return LV('mem', ArrT(CHAR, len(self.strbytes(e)) + 1), base=Sym(self.string_sym(e)), off=0)
+            return LV('mem', self.str_type(e), base=Sym(self.string_sym(e)), off=0)
         if isinstance(e, c_ast.FuncCall) or isinstance(e, c_ast.Assignment) or \
                 isinstance(e, c_ast.TernaryOp) or isinstance(e, c_ast.ExprList):
             r = self.rv_nodecay(e)
             if r.t.is_struct:
                 return self.mem_at(r.op, r.t, False)
-        self.err('not an lvalue', e)
+        self.err('lvalue required: this cannot be assigned or have its address taken (a '
+                 'variable, an array element, *p or a member can)', e)
+
+    def check_member_base(self, t, e):
+        if not t.is_struct:
+            self.err(f"a member ('{e.field.name}') of something that is not a structure or a "
+                     f"union ({cname(t)})" + (" (use '->' for a pointer)"
+                                               if t.is_ptr and e.type == '.' else ''), e)
+        if not t.complete:
+            self.err(f"a member ('{e.field.name}') of an incomplete type: {cname(t)} is "
+                     f"declared but not defined here", e)
 
     def lval_or_struct(self, e):
         """an lvalue of structure type, or a structure rvalue (a call result) as memory"""
@@ -1667,9 +2317,16 @@ class Front:
             arr, idx = idx, arr
             at = it
         if not at.is_ptr:
-            self.err('subscript of a non-array', e)
+            self.err(f'a subscript ([]) of something that is not an array or a pointer '
+                     f'({cname(decay(self.expr_type(e.name)))})', e)
         if not decay(self.expr_type(idx)).is_int:
-            self.err('an array subscript is not an integer', e)
+            self.err(f'an array subscript is not an integer '
+                     f'({cname(decay(self.expr_type(idx)))})', e)
+        if at.to.is_void:
+            self.err("a subscript of a 'void *' (cast it to a pointer to the elements' type)",
+                     e)
+        if at.to.is_struct and not at.to.complete:
+            self.err(f'a subscript of a pointer to an incomplete type ({cname(at.to)})', e)
         el = at.to
         size = el.size if not el.is_void else 1
         # constant part of the index: a[i + 3] -> base + i*size, offset 3*size
@@ -1726,6 +2383,11 @@ class Front:
 
     def load1(self, lv, dst=None):
         t = lv.t
+        if t.is_void:
+            self.err("a 'void' value is read (through a 'void *': cast it to a pointer to the "
+                     "type it points to)")
+        if t.is_struct and not t.complete:
+            self.err(f'a value of an incomplete type ({cname(t)}) is used')
         if lv.kind == 'reg':
             return self.to_dst(RV(lv.op, t), dst)
         if t.is_arr or t.is_struct or t.is_func:
@@ -1853,20 +2515,27 @@ class Front:
             return v
         return a
 
-    def assign_to(self, lv, e):
+    def assign_to(self, lv, e, what='assignment'):
         """lv = e; returns the RV stored"""
         t = lv.t
+        if t.is_arr:
+            self.err(f"assignment to an array ({cname(t)}): copy the elements (memcpy, a "
+                     f"loop), or put the array in a structure", e)
+        if t.is_func:
+            self.err('assignment to a function', e)
         if t.is_struct:
             src = self.rv_nodecay(e)
-            if not src.t.is_struct:
-                self.err('assigning a non-structure to a structure', e)
+            self.check_assign(t, src.t, e, what)
             self.copy_mem(src.op, self.addr_of(lv), t.size)
             return RV(self.addr_of(lv), t)
         if lv.kind == 'reg':
             r = self.rv(e, dst=lv.op if not (t.is_int and t.size == 1) else None)
+            self.check_assign(t, r.t, e, what)
             r = self.convert(r, t.unqual(), dst=lv.op)
             return r
-        r = self.convert(self.rv(e), t.unqual())
+        r = self.rv(e)
+        self.check_assign(t, r.t, e, what)
+        r = self.convert(r, t.unqual())
         if lv.fld is not None:
             self.store_bits(lv, r)
             return self.bits_value(r, lv.fld)
@@ -1877,10 +2546,94 @@ class Front:
     def ex_Assignment(self, e, dst):
         return self.assignment(e, want=True, dst=dst)
 
+    def check_const(self, lv, target, how, node):
+        """lv must be writable: not const"""
+        if lv.t.const:
+            if isinstance(target, c_ast.ID):
+                self.err(f"{how} of the read-only variable '{target.name}' (it is const)",
+                         node)
+            self.err(f"{how} of a read-only location (its type is {cname(lv.t)})", node)
+
+    def check_assign(self, dt, st, e, what):
+        """the value e (of type st) given to a dt (an assignment, an initialisation, an
+        argument, a return): errors for what C refuses, warnings for what it converts
+        without a cast. what: 'assignment', 'initialization', 'return' or
+        ('argument', n, function name)"""
+        st = decay(st)
+        dt = dt.unqual() if not dt.is_ptr else dt
+        D, S = cname(dt.unqual()), cname(st.unqual())
+        if isinstance(what, tuple):
+            lead = f"passing argument {what[1]} of '{what[2]}'"
+            bad = f"incompatible type for argument {what[1]} of '{what[2]}': {D} expected, " \
+                  f"not {S}"
+        elif what == 'return':
+            lead = f"returning {S} from a function that returns {D}"
+            bad = f"incompatible types when returning {S}: the function returns {D}"
+        elif what == 'initialization':
+            lead = f"initialising {D} with {S}"
+            bad = f"incompatible types when initialising {D} with {S}"
+        else:
+            lead = f"assigning {S} to {D}"
+            bad = f"incompatible types when assigning {S} to {D}"
+        if st.is_void:
+            self.err(f'a void value is used ({lead[0].lower() + lead[1:]})', e)
+        if dt.is_struct or st.is_struct:
+            if dt.is_struct and st.is_struct and same(dt.unqual(), st.unqual()):
+                return
+            self.err(bad, e)
+        if dt.is_arith and st.is_arith:
+            if dt.is_int and not dt.is_bool and st.is_int:
+                self.check_overflow(dt, st, e)
+            return
+        if dt.is_ptr and st.is_ptr:
+            if not (dt.to.is_void or st.to.is_void) and \
+                    not compatible(dt.to.unqual(), st.to.unqual()):
+                self.warn(f'{lead}: incompatible pointer types', e, 'incompatible-pointer-types')
+            if (st.to.const and not dt.to.const) or (st.to.volatile and not dt.to.volatile):
+                q = 'const' if st.to.const and not dt.to.const else 'volatile'
+                self.warn(f"{lead} discards the '{q}' qualifier of the pointer's target", e,
+                          'discarded-qualifiers')
+            if st.isfar and not dt.isfar:
+                self.warn(f"{lead}: a far pointer given to a near one loses its bank (only the "
+                          f"offset is kept: declare the target __far too)", e, 'far-pointer')
+            return
+        if dt.is_ptr and st.is_int:
+            v = self.const_eval(e)
+            if isinstance(v, int) and v == 0:
+                return
+            self.warn(f'{lead} makes a pointer from an integer without a cast', e,
+                      'int-conversion')
+            return
+        if dt.is_int and st.is_ptr:
+            if dt.is_bool:
+                return
+            self.warn(f'{lead} makes an integer from a pointer without a cast', e,
+                      'int-conversion')
+            return
+        self.err(bad, e)
+
+    def check_overflow(self, dt, st, e):
+        """a constant that a conversion to dt changes (gcc's -Woverflow)"""
+        v = self.const_eval(e)
+        if not isinstance(v, int):
+            return
+        n = 8 * dt.size
+        w = self.wrap(v, dt)
+        if w == v:
+            return
+        if dt.signed:
+            if st.size == dt.size:
+                return          # (int)0xFFFFu: the same bits
+        elif -(1 << (n - 1)) <= v < (1 << n):
+            return              # (unsigned char)-1: the same bits
+        more = ' (int is 16 bits in cc816: use long)' if dt.size == 2 and dt.signed else \
+            (' (unsigned int is 16 bits in cc816: use unsigned long)' if dt.size == 2 else '')
+        self.warn(f'the conversion to {cname(dt)} changes the value {v} to {w}{more}', e,
+                  'overflow')
+
     def assignment(self, e, want, dst=None):
         lv = self.lval(e.lvalue)
-        if lv.t.const and False:
-            self.warn('assignment to const', e)
+        self.check_const(lv, e.lvalue, 'assignment', e)
         if e.op == '=':
             r = self.assign_to(lv, e.rvalue)
             return self.to_dst(RV(r.op, lv.t.unqual()), dst) if want else None
@@ -1891,9 +2644,11 @@ class Front:
         target = lv.op if lv.kind == 'reg' and not (lv.t.is_int and lv.t.size == 1) else None
         if lv.t.is_ptr and op in ('+', '-'):
             if not rhs.t.is_int:
-                self.err(f'invalid operands to {e.op} ({lv.t!r}, {rhs.t!r})', e)
+                self.err(f'invalid operands to {e.op} ({cname(lv.t)}, {cname(rhs.t)})', e)
             res = self.ptr_arith(op, cur, rhs, dst=target)
         else:
+            if not (cur.t.is_arith and rhs.t.is_arith):
+                self.err(f'invalid operands to {e.op} ({cname(cur.t)} and {cname(rhs.t)})', e)
             at = arith_conv(cur.t, rhs.t) if op not in ('<<', '>>') else promote(cur.t)
             same_size = target is not None and (4 if at.size == 4 else 2) == target.size
             res = self.arith(op, cur, rhs, e, dst=target if same_size else None)
@@ -1913,6 +2668,12 @@ class Front:
     def incdec(self, e, want, dst=None):
         lv = self.lval(e.expr)
         t = lv.t
+        self.check_const(lv, e.expr, 'increment' if '+' in e.op else 'decrement', e)
+        if not t.is_scalar:
+            self.err(f"wrong type argument to {'increment' if '+' in e.op else 'decrement'} "
+                     f"({cname(t)})", e)
+        if t.is_ptr and t.to.is_struct and not t.to.complete:
+            self.err(f'arithmetic on a pointer to an incomplete type ({cname(t.to)})', e)
         if t.is_float:
             return self.incdec_float(e, lv, want, dst)
         step = t.to.size if t.is_ptr else 1
@@ -1926,15 +2687,28 @@ class Front:
             if want and post:
                 old = self.newv(size)
                 self.emit(Ins('mov', old, lv.op))
-            self.emit(Ins(op, lv.op, lv.op, Imm(step, size)))
-            if t.is_int and t.size == 1:
+            if t.is_int and t.is_bool:
+                # (a _Bool: ++ makes it 1; -- flips it: 1 - 1 = 0, 0 - 1 = -1, true)
+                if op == 'add':
+                    self.emit(Ins('mov', lv.op, Imm(1)))
+                else:
+                    self.emit(Ins('xor', lv.op, lv.op, Imm(1)))
+            else:
+                self.emit(Ins(op, lv.op, lv.op, Imm(step, size)))
+            if t.is_int and t.size == 1 and not t.is_bool:
                 self.emit(Ins('x8s' if t.signed else 'x8u', lv.op, lv.op))
             if not want:
                 return None
             return self.to_dst(RV(old if post else lv.op, t.unqual()), dst)
         cur = self.load(lv, final=False)
         nv = self.newv(size)
-        self.emit(Ins(op, nv, cur.op, Imm(step, size)))
+        if t.is_int and t.is_bool:
+            if op == 'add':
+                self.emit(Ins('mov', nv, Imm(1)))
+            else:
+                self.emit(Ins('xor', nv, cur.op, Imm(1)))
+        else:
+            self.emit(Ins(op, nv, cur.op, Imm(step, size)))
         if lv.fld is not None:
             self.store_bits(lv, RV(nv, t))
             if want and not post:
@@ -2011,7 +2785,7 @@ class Front:
             if c is not None:
                 return self.to_dst(RV(self.cimm(c, t), t), dst)
             if not t.is_arith or (op == '~' and not t.is_int):
-                self.err(f'invalid operand to unary {op} ({t!r})', e)
+                self.err(f'invalid operand to unary {op} ({cname(t)})', e)
             r = self.convert(self.rv(e.expr), t)
             d = dst if dst is not None and dst.size == r.op.size else self.newv(r.op.size)
             if t.is_float:              # -x: the sign bit flipped (also of 0 and NaN)
@@ -2031,6 +2805,9 @@ class Front:
         if c is not None and (t.is_int or t.is_ptr or t.is_float):
             return self.to_dst(RV(self.cimm(c, t), t), dst)
         r = self.rv(e.expr)
+        if r.t.is_ptr and r.t.isfar and t.is_ptr and not t.isfar:
+            self.warn(f'a cast of a far pointer ({cname(r.t)}) to a near one ({cname(t)}): only '
+                      f'its offset is kept, the bank is lost', e, 'far-cast')
         return self.convert(r, t, dst=dst)
 
     def convert(self, r, t, dst=None):
@@ -2041,7 +2818,7 @@ class Front:
         if t.is_struct or st.is_struct:
             if t.is_struct and st.is_struct:
                 return r
-            self.err(f'cannot convert {st!r} to {t!r}')
+            self.err(f'cannot convert {cname(st)} to {cname(t)}', self.loc)
         if t.is_arr:
             t = PtrT(t.elem)
         if t.is_float or st.is_float:
@@ -2121,7 +2898,7 @@ class Front:
         if t.is_float and st.is_float:
             return self.to_dst(RV(op, t), dst)
         if not (t.is_arith and st.is_arith):
-            self.err(f'cannot convert {st!r} to {t!r}')
+            self.err(f'cannot convert {cname(st)} to {cname(t)}', self.loc)
         if isinstance(op, Imm):
             if t.is_float:
                 v = op.val
@@ -2165,9 +2942,13 @@ class Front:
             return self.bool_value(e, dst)
         lt = decay(self.expr_type(e.left))
         rt = decay(self.expr_type(e.right))
+        if lt.is_struct or rt.is_struct or lt.is_void or rt.is_void:
+            self.err(f'invalid operands to {op} ({cname(lt)} and {cname(rt)})', e)
         if op in ('+', '-') and (lt.is_ptr or rt.is_ptr):
             if lt.is_float or rt.is_float:
-                self.err(f'invalid operands to {op} ({lt!r}, {rt!r})', e)
+                self.err(f'invalid operands to {op} ({cname(lt)}, {cname(rt)})', e)
+            if op == '-' and rt.is_ptr and not lt.is_ptr:
+                self.err(f'an integer minus a pointer ({cname(lt)} - {cname(rt)})', e)
             a = self.rv(e.left)
             b = self.rv(e.right)
             return self.ptr_arith(op, a, b, dst)
@@ -2178,7 +2959,7 @@ class Front:
     def arith(self, op, a, b, node, dst=None):
         if a.t.is_float or b.t.is_float:
             if op not in ('+', '-', '*', '/') or not (a.t.is_arith and b.t.is_arith):
-                self.err(f'invalid operands to {op} ({a.t!r}, {b.t!r})', node)
+                self.err(f'invalid operands to {op} ({cname(a.t)}, {cname(b.t)})', node)
             t = arith_conv(a.t, b.t)
             a = self.convert(a, t)
             b = self.convert(b, t)
@@ -2190,17 +2971,25 @@ class Front:
             return self.to_dst(RV(d, t), dst)
         if op in ('<<', '>>'):
             if not a.t.is_int or not b.t.is_int:
-                self.err(f'invalid operands to {op} ({a.t!r}, {b.t!r})', node)
+                self.err(f'invalid operands to {op} ({cname(a.t)}, {cname(b.t)})', node)
             t = promote(a.t)
+            if isinstance(b.op, Imm):
+                k = self.wrap(b.op.val, promote(b.t)) if b.t.signed else b.op.val
+                if k < 0 or k >= 8 * t.size:
+                    self.warn(f'shift count ({k}) is negative or not less than the width of '
+                              f'{cname(t)} ({8 * t.size} bits in cc816)', node,
+                              'shift-count-overflow')
             a = self.convert(a, t)
             b = self.convert(b, UINT)
             irop = 'shl' if op == '<<' else ('sshr' if t.signed else 'ushr')
             return self.binop(irop, a.op, b.op, t, dst)
         if not a.t.is_int or not b.t.is_int:
-            self.err(f'invalid operands to {op} ({a.t!r}, {b.t!r})', node)
+            self.err(f'invalid operands to {op} ({cname(a.t)}, {cname(b.t)})', node)
         t = arith_conv(a.t, b.t)
         a = self.convert(a, t)
         b = self.convert(b, t)
+        if op in ('/', '%') and isinstance(b.op, Imm) and b.op.val == 0:
+            self.warn('division by zero', node, 'div-by-zero')
         irop = {'+': 'add', '-': 'sub', '*': 'mul', '&': 'and', '|': 'or', '^': 'xor',
                 '/': 'sdiv' if t.signed else 'udiv', '%': 'smod' if t.signed else 'umod'}[op]
         return self.binop(irop, a.op, b.op, t, dst)
@@ -2221,9 +3010,18 @@ class Front:
         return self.to_dst(RV(d, t), dst)
 
     def ptr_arith(self, op, a, b, dst=None):
+        for p in (a, b):
+            if p.t.is_ptr and p.t.to.is_struct and not p.t.to.complete:
+                self.err(f'arithmetic on a pointer to an incomplete type ({cname(p.t.to)})')
+            if p.t.is_ptr and p.t.to.is_func:
+                self.err(f'arithmetic on a function pointer ({cname(p.t)})')
         if a.t.is_ptr and b.t.is_ptr:
             if op != '-':
-                self.err('adding two pointers')
+                self.err(f'adding two pointers ({cname(a.t)} and {cname(b.t)})')
+            if not (a.t.to.is_void or b.t.to.is_void) and \
+                    not compatible(a.t.to.unqual(), b.t.to.unqual()):
+                self.err(f'subtracting pointers to different types ({cname(a.t)} and '
+                         f'{cname(b.t)})')
             size = a.t.to.size or 1
             da = a.op if a.op.size == 2 else self.convert(a, UINT).op
             db = b.op if b.op.size == 2 else self.convert(b, UINT).op
@@ -2251,8 +3049,9 @@ class Front:
             return self.binop('add', a.op, Imm(k & 0xFFFF), pt, dst)
         sc = self.scale(i.op, size)
         if pt.isfar:
+            # (an unsigned index is zero-extended: far + 40000u goes forwards)
             z = self.newv(4)
-            self.emit(Ins('sx', z, sc))
+            self.emit(Ins('sx' if i.t.signed else 'zx', z, sc))
             return self.binop('add' if op == '+' else 'sub', a.op, z, pt, dst)
         return self.binop('add' if op == '+' else 'sub', a.op, sc, pt, dst)
 
@@ -2270,6 +3069,8 @@ class Front:
 
     def ex_TernaryOp(self, e, dst):
         c = self.const_eval(e.cond)
+        if c is not None and _has_labels(e.iffalse if c else e.iftrue):
+            c = None
         t = self.expr_type(e)
         if t.is_arr:
             t = PtrT(t.elem)
@@ -2295,6 +3096,28 @@ class Front:
         r = self.convert(r, t, dst=d) if not t.is_struct else self.to_dst(r, d)
         self.place(le)
         return self.to_dst(RV(d, t), dst)
+
+    def ex_Compound(self, e, dst):
+        """a statement expression ({ ...; value; }) (GNU): the value of its last
+        statement"""
+        items = e.block_items or []
+        self.push()
+        try:
+            for x in items[:-1]:
+                self.stmt(x)
+            r = RV(Imm(0), VOID)
+            if items:
+                last = items[-1]
+                if isinstance(last, (c_ast.Decl, c_ast.DeclList, c_ast.Typedef)) or \
+                        type(last).__name__ in STATEMENTS:
+                    self.stmt(last)
+                else:
+                    r = self.rv_nodecay(last, dst)
+                    if r.t.is_arr or r.t.is_func:
+                        r = RV(r.op, decay(r.t))
+        finally:
+            self.pop()
+        return r
 
     def ex_ExprList(self, e, dst):
         for x in e.exprs[:-1]:
@@ -2334,14 +3157,32 @@ class Front:
         if name in BUILTINS:
             return self.builtin(name, args, e, dst)
         if name is not None and self.lookup(name) is None:
-            self.warn(f'implicit declaration of {name}', e)
+            if name in ('asm', '__asm__', '__asm'):
+                self.unsup("inline assembly (asm): put the code in a .s file (ca65 syntax) "
+                           "and call it as a function (docs/c/reference.md, \"Calling "
+                           "convention\")", e)
+            if name.startswith('__builtin_'):
+                self.unsup(f'the GCC built-in function {name}', e)
+            if name in ('setjmp', '_setjmp', 'longjmp', 'sigsetjmp', 'siglongjmp'):
+                self.unsup(f'{name} (setjmp and longjmp): build with hcc --cc vbcc, or '
+                           f'return an error code instead', e)
+            self.warn(f"implicit declaration of the function '{name}' (include its header, "
+                      f"or declare it; its result is taken as an int)", e,
+                      'implicit-function-declaration')
             asm = mangle(name)
-            self.scopes[0][name] = Sy('global', FuncT(INT, [], False, False), asm=asm)
+            sy = Sy('global', FuncT(INT, [], False, False), asm=asm)
+            sy.name, sy.coord = name, e.coord
+            self.scopes[0][name] = sy
             self.unit.externs.add(asm)
         f = self.rv(e.name)
         ft = f.t.to if f.t.is_ptr else f.t
         if not ft.is_func:
-            self.err('calling a non-function', e)
+            what = f"'{name}'" if name else 'the called object'
+            self.err(f'{what} is not a function or a function pointer (its type is '
+                     f'{cname(f.t)})', e)
+        if ft.ret.is_struct and not ft.ret.complete:
+            self.err(f'calling a function with an incomplete return type ({cname(ft.ret)})',
+                     e)
         self.note_float(ft.ret)
         if name in PRINTF_NAMES:
             self.calls_printf = True
@@ -2354,12 +3195,21 @@ class Front:
             sret = Frame(slot)
             ops.append(sret)
         params = ft.params
-        if ft.proto and not ft.variadic and len(args) != len(params):
-            self.err(f'{name or "function"} takes {len(params)} arguments, {len(args)} given', e)
+        fname = name or 'the function'
+        if ft.proto and not ft.variadic and len(args) > len(params):
+            self.err(f"too many arguments to the function {_q(name)}: {len(args)} given, it "
+                     f"takes {len(params)}", e)
         if ft.proto and len(args) < len(params):
-            self.err(f'too few arguments to {name or "function"}', e)
+            self.err(f"too few arguments to the function {_q(name)}: {len(args)} given, it "
+                     f"takes {len(params)}{' or more' if ft.variadic else ''}", e)
+        if name in FORMATS and ft.variadic:
+            self.check_format(name, args, e)
         for i, a in enumerate(args):
             r = self.rv(a)
+            if r.t.is_void:
+                self.err(f"a void value given as argument {i + 1} of {_q(name)}", a)
+            if i < len(params) and ft.proto:
+                self.check_assign(params[i][1], r.t, a, ('argument', i + 1, fname))
             self.note_float(r.t)
             if ft.variadic and i >= len(params):
                 # a float among a variadic function's arguments: most likely for a printf
@@ -2390,6 +3240,8 @@ class Front:
             d = dst if dst is not None and dst.size == size and not (rt.is_int and rt.size == 1) else self.newv(size)
         tgt = f.op
         self.emit(Ins('call', d, tgt=tgt, args=ops))
+        if name in self.noreturn_names:
+            self.noreturn_blocks.add(id(self.cur))
         if rt.is_struct:
             return RV(sret, rt)
         if d is None:
@@ -2401,6 +3253,131 @@ class Front:
             self.emit(Ins('x8s' if rt.signed else 'x8u', nd, d))
             r = RV(nd, rt)
         return self.to_dst(r, dst)
+
+    def check_format(self, name, args, e):
+        """a printf's or a scanf's format string against its arguments (-Wformat): the
+        sizes matter most here (int is 16 bits, long 32: %d with a long prints wrong)"""
+        fi = FORMATS[name]
+        if len(args) <= fi:
+            return
+        f = args[fi]
+        if not (isinstance(f, c_ast.Constant) and f.type == 'string'):
+            return
+        fmt = bytes(self.strbytes(f)).decode('latin-1')
+        rest = args[fi + 1:]
+        scan = 'scanf' in name
+        rx = _SCANF_CONV if scan else _PRINTF_CONV
+        n = 0           # the arguments used
+
+        def arg(want, conv):
+            nonlocal n
+            if n >= len(rest):
+                n += 1
+                return None
+            a = rest[n]
+            n += 1
+            try:
+                t = decay(self.expr_type(a))
+            except CError:
+                return None
+            return a, t, fi + n + 1
+
+        pos = 0
+        while True:
+            k = fmt.find('%', pos)
+            if k < 0:
+                break
+            m = rx.match(fmt, k)
+            if not m:
+                self.warn(f"{name}: an unfinished conversion at the end of the format, or "
+                          f"one cc816's {name} does not know", f, 'format')
+                return
+            pos = m.end()
+            conv, ln = m.group('conv'), m.group('len') or ''
+            spec = m.group(0)
+            if conv == '%':
+                continue
+            if ln in ('ll', 'j', 'q') or ln == 'L' and conv in 'diouxX':
+                self.warn(f"{name}: '{spec}' is a long long conversion: cc816 has no long "
+                          f"long (use %l with a long)", f, 'format')
+                return
+            if not scan:
+                for star in (m.group('width'), m.group('prec')):
+                    if star == '*':
+                        r = arg('int', spec)
+                        if r and not (r[1].is_int and promote(r[1]).size == 2):
+                            self.warn(f"{name}: '*' in '{spec}' takes an int, but argument "
+                                      f"{r[2]} is {cname(r[1])}", r[0], 'format')
+            elif m.group('supp'):
+                continue
+            r = arg(conv, spec)
+            if r is None:
+                self.warn(f"{name}: too few arguments for the format ('{spec}' has none)", e,
+                          'format')
+                return
+            a, t, num = r
+            msg = self.format_mismatch(scan, conv, ln, t)
+            if msg:
+                self.warn(f"{name}: '{spec}' {msg}, but argument {num} is {cname(t)}", a,
+                          'format')
+        if n < len(rest):
+            self.warn(f"{name}: too many arguments for the format ({len(rest)} given, the "
+                      f"format uses {n})", rest[n], 'format')
+
+    def format_mismatch(self, scan, conv, ln, t):
+        """what the conversion expects when t does not match it (or None)"""
+        if not scan:
+            pt = promote(t) if t.is_int else t
+            if conv in 'diouxXc':
+                if conv == 'c':
+                    ln = ''
+                want = 4 if ln == 'l' else 2
+                if not pt.is_int or pt.size != want:
+                    if pt.is_int and pt.size == 4:
+                        return f"takes {'an int' if conv in 'di' else 'an unsigned int'} " \
+                               f"(16 bits in cc816; use %l{conv} for a long)"
+                    if pt.is_int and pt.size == 2:
+                        return f"takes a long (32 bits; use %{conv} for an int)"
+                    return 'takes ' + ('a long' if want == 4 else 'an int')
+                return None
+            if conv in 'fFeEgGaA':
+                return None if pt.is_float else 'takes a double (or a float)'
+            if conv == 's':
+                if pt.is_ptr and not pt.isfar and pt.to.is_int and pt.to.size == 1:
+                    return None
+                if pt.is_ptr and pt.isfar:
+                    return 'takes a near char * (a far string must be copied into the ' \
+                           'code bank first: hz_far_copy)'
+                return 'takes a char * (a string)'
+            if conv == 'p':
+                if pt.is_ptr and not pt.isfar:
+                    return None
+                if pt.is_ptr:
+                    return 'takes a near pointer (print a far one with %lx and (unsigned ' \
+                           'long)p)'
+                return 'takes a pointer'
+            if conv == 'n':
+                return None if pt.is_ptr and pt.to.is_int else 'takes an int *'
+            return None
+        # scanf: every conversion but %% takes a pointer
+        conv = conv[0]
+        if not t.is_ptr:
+            return 'takes a pointer (&variable)'
+        to = t.to
+        if conv in 'diouxXn':
+            want = {'hh': 1, 'h': 2, 'l': 4}.get(ln, 2)
+            if not to.is_int or to.size != want:
+                names = {1: 'a char *', 2: 'a short * or an int *' if ln == 'h' else
+                         'an int * (16 bits)', 4: 'a long *'}
+                return f'takes {names[want]}'
+            return None
+        if conv in 'fFeEgGaA':
+            return None if to.is_float else 'takes a float * (double * with %l)'
+        if conv in 'sc[':
+            return None if to.is_int and to.size == 1 else 'takes a char *'
+        if conv == 'p':
+            return None if to.is_ptr else 'takes a void **'
+        return None
 
     def builtin(self, name, args, e, dst):
         if name in ('__builtin_va_start', '__va_start'):
@@ -2423,7 +3400,7 @@ class Front:
             r = self.rv(args[0])
             want = FLOAT if name == '__builtin_fbits' else ULONG
             if not (r.t.is_arith or r.t.is_ptr) or (r.t.is_ptr and r.t.size != 4):
-                self.err(f'{name} of {r.t!r}', e)
+                self.err(f'{name} of {cname(r.t)}', e)
             r = self.convert(r, want)
             self.uses_float = True
             return self.to_dst(RV(r.op, BUILTINS[name]), dst)
@@ -2460,11 +3437,12 @@ class Front:
             if op in ('<', '>', '<=', '>=', '==', '!='):
                 lt_ = decay(self.expr_type(e.left))
                 rt_ = decay(self.expr_type(e.right))
+                self.check_compare(e, lt_, rt_)
                 a = self.rv(e.left)
                 b = self.rv(e.right)
                 if lt_.is_float or rt_.is_float:
                     if not (lt_.is_arith and rt_.is_arith):
-                        self.err(f'comparison of {lt_!r} and {rt_!r}', e)
+                        self.err(f'comparison of {cname(lt_)} and {cname(rt_)}', e)
                     t = arith_conv(lt_, rt_)
                     ao = self.convert(a, t).op
                     bo = self.convert(b, t).op
@@ -2487,9 +3465,14 @@ class Front:
                     cc = ('s' if signed else 'u') + cc
                 self.emit(Ins('br', a=ao, b=bo, cc=cc, t=lt, f=lf))
                 return
+        if isinstance(e, c_ast.Assignment) and e.op == '=':
+            self.warn('an assignment used as a condition: write == to compare, or put the '
+                      'assignment in parentheses ((a = b) != 0)', e, 'parentheses')
         r = self.rv(e)
         if r.t.is_struct:
-            self.err('a structure used as a condition', e)
+            self.err(f'a structure ({cname(r.t)}) used as a condition', e)
+        if r.t.is_void:
+            self.err('a void value used as a condition', e)
         op = r.op
         if r.t.is_float:                # x != 0: any bit but the sign (-0.0 is false)
             if isinstance(op, Imm):
@@ -2500,6 +3483,79 @@ class Front:
             op = m
         self.emit(Ins('br', a=op, b=Imm(0, op.size), cc='ne', t=lt, f=lf))
 
+
+    def check_compare(self, e, lt, rt):
+        """warnings for a comparison: one whose result its types decide (a char compared
+        with -1 or 256, an int with 40000, an unsigned with < 0), and errors for operands
+        that cannot be compared"""
+        if lt.is_struct or rt.is_struct:
+            self.err(f'invalid operands to {e.op} ({cname(lt)} and {cname(rt)})', e)
+        if lt.is_ptr and rt.is_ptr:
+            if not (lt.to.is_void or rt.to.is_void) and \
+                    not compatible(lt.to.unqual(), rt.to.unqual()):
+                self.warn(f'comparison of distinct pointer types ({cname(lt)} and '
+                          f'{cname(rt)})', e, 'incompatible-pointer-types')
+            return
+        if (lt.is_ptr and rt.is_int) or (lt.is_int and rt.is_ptr):
+            other = e.right if lt.is_ptr else e.left
+            v = self.const_eval(other)
+            if not (isinstance(v, int) and v == 0):
+                self.warn(f'comparison between a pointer and an integer ({cname(lt)} and '
+                          f'{cname(rt)})', e, 'int-conversion')
+            return
+        if not (lt.is_int and rt.is_int):
+            return
+        a, b = self.const_eval(e.left), self.const_eval(e.right)
+        if (a is None) == (b is None):
+            return
+        op = e.op
+        if a is not None:       # the constant on the right
+            var, k, vt = e.right, a, rt
+            op = {'<': '>', '>': '<', '<=': '>=', '>=': '<='}.get(op, op)
+        else:
+            var, k, vt = e.left, b, lt
+        if not isinstance(k, int):
+            return
+        ct = arith_conv(lt, rt)
+        vt0 = _value_type(var, self)
+        if vt0 is not None and vt0.is_int and vt0.size < vt.size:
+            vt = vt0
+        if vt.is_bool:
+            lo, hi = 0, 1
+        else:
+            n = 8 * vt.size
+            lo, hi = (-(1 << (n - 1)), (1 << (n - 1)) - 1) if vt.signed else (0, (1 << n) - 1)
+        if ct.signed or (not vt.signed and ct.size >= vt.size):
+            pass                # the values keep their meaning in ct
+        else:
+            return              # a signed value converted to unsigned: every value
+        kk = self.wrap(k, ct)
+        if not ct.signed and vt.signed:
+            return
+        f = {'<': lambda x: x < kk, '>': lambda x: x > kk, '<=': lambda x: x <= kk,
+             '>=': lambda x: x >= kk, '==': lambda x: x == kk, '!=': lambda x: x != kk}[op]
+        if op in ('==', '!='):
+            if lo <= kk <= hi:
+                return
+            res = op == '!='
+        else:
+            r_lo, r_hi = f(lo), f(hi)
+            if r_lo != r_hi:
+                return
+            res = r_lo
+        # (a constant the type cannot hold: on by default, the porting mistake of int
+        # being 16 bits, or char unsigned; the edges, x <= 32767, u >= 0: -Wall)
+        name = 'type-limits' if vt.size == 1 or not lo <= kk <= hi else 'tautological-compare'
+        what = f"'{var.name}'" if isinstance(var, c_ast.ID) else 'the value'
+        note = ''
+        if vt is CHAR or (vt.is_int and vt.name == 'char'):
+            note = ' (plain char is unsigned in cc816: use int, or signed char)' \
+                if not vt.signed else ''
+        elif vt.size == 2 and vt.is_int:
+            note = ' (int is 16 bits in cc816)' if vt.signed else \
+                ' (unsigned int is 16 bits in cc816)'
+        self.warn(f"comparison is always {'true' if res else 'false'}: {what} is "
+                  f"{cname(vt)}, {lo} to {hi}{note}", e, name)
 
     def float_branch(self, op, a, b, lt, lf):
         """a float compare: __fcmp gives -1 (a < b), 0 (equal), 1 (a > b) or 2 (unordered,
@@ -2528,7 +3584,7 @@ def type_eq(a, b):
     if a.is_ptr:
         return a.to.const == b.to.const and a.to.volatile == b.to.volatile and type_eq(a.to, b.to)
     if a.is_struct:
-        return a is b
+        return a.uid == b.uid
     if a.is_arr:
         return a.n == b.n and type_eq(a.elem, b.elem)
     if a.is_func:
@@ -2536,6 +3592,9 @@ def type_eq(a, b):
     return True
 
 
+WCHAR = IntT(2, False, 'wchar_t')         # L"...": unsigned int (16 bits, the BMP)
+CHAR16 = IntT(2, False, 'char16_t')       # u"..."
+CHAR32 = IntT(4, False, 'char32_t')       # U"..."
 LLONG = IntT(8, True, 'long long')
 LLONG_U = IntT(8, False, 'unsigned long long')
 
@@ -2546,7 +3605,11 @@ def _check_ll(t, node, f):
             return
         t = t.elem
     if t.is_int and t.size == 8:
-        f.unsup('long long is not supported (by cc816 or by vbcc 65816)', node)
+        f.unsup('long long (64-bit integers): long is 32 bits', node)
+    if t.is_struct and t.complete and not getattr(t, 'checked_ll', False):
+        t.checked_ll = True
+        for fl in t.fields:
+            _check_ll(fl.type, node, f)
 
 
 BUILTINS = {'__builtin_va_start': VOID, '__va_start': VOID, '__cop': UINT, '__cbank': UINT,
@@ -2603,6 +3666,8 @@ def _cmod(a, b):
 def fold(op, a, b, size):
     bits = 8 * size
     m = (1 << bits) - 1
+    if op in ('shl', 'ushr', 'sshr') and not 0 <= b < 64:
+        return None
 
     def s(v):
         v &= m
@@ -2616,6 +3681,59 @@ def fold(op, a, b, size):
     except ZeroDivisionError:
         return None
     return r & m
+
+
+def unescape_wide(s, size):
+    """the text of a wide string (L"...", u"...", U"...") -> its code points: the source is
+    UTF-8 (read as Latin-1 bytes); \\x, octal, \\u and \\U escapes give values directly"""
+    out = []
+    i = 0
+    lim = (1 << (8 * size)) - 1
+    raw = []
+
+    def flush():
+        if raw:
+            txt = bytes(raw).decode('utf-8', 'replace')
+            for ch in txt:
+                c = ord(ch)
+                if size == 2 and c > 0xFFFF:          # (a UTF-16 pair for u"")
+                    c -= 0x10000
+                    out.extend([0xD800 + (c >> 10), 0xDC00 + (c & 0x3FF)])
+                else:
+                    out.append(c & lim)
+            raw.clear()
+    simple = {'n': 10, 't': 9, 'r': 13, 'a': 7, 'b': 8, 'f': 12, 'v': 11, '\\': 92,
+              "'": 39, '"': 34, '?': 63, 'e': 27}
+    while i < len(s):
+        c = s[i]
+        if c != '\\':
+            raw.append(ord(c) & 0xFF)
+            i += 1
+            continue
+        flush()
+        i += 1
+        c = s[i]
+        if c == 'x':
+            j = i + 1
+            while j < len(s) and s[j] in '0123456789abcdefABCDEF':
+                j += 1
+            out.append(int(s[i + 1:j], 16) & lim)
+            i = j
+        elif c in 'uU':
+            n = 4 if c == 'u' else 8
+            out.append(int(s[i + 1:i + 1 + n], 16) & lim)
+            i += 1 + n
+        elif c in '01234567':
+            j = i
+            while j < len(s) and j < i + 3 and s[j] in '01234567':
+                j += 1
+            out.append(int(s[i:j], 8) & lim)
+            i = j
+        else:
+            out.append(simple.get(c, ord(c)))
+            i += 1
+    flush()
+    return out
 
 
 def unescape(s):
@@ -2637,6 +3755,10 @@ def unescape(s):
                 j += 1
             out.append(int(s[i + 1:j], 16) & 0xFF)
             i = j
+        elif c in 'uU':                     # a universal character: its UTF-8
+            n = 4 if c == 'u' else 8
+            out += list(chr(int(s[i + 1:i + 1 + n], 16)).encode('utf-8'))
+            i += 1 + n
         elif c in '01234567':
             j = i
             while j < len(s) and j < i + 3 and s[j] in '01234567':
@@ -2673,6 +3795,12 @@ class Image:
 
     def reloc(self, off, r):
         self.rel[off] = r
+
+    def clear(self, off, n):
+        for i in range(off, min(off + n, len(self.b))):
+            self.b[i] = 0
+        for k in [k for k in self.rel if off <= k < off + n]:
+            del self.rel[k]
 
     def items(self):
         out = []
@@ -2725,3 +3853,70 @@ def _scan_addr(node, out):
             out.add(x.name)
     for _, c in node.children():
         _scan_addr(c, out)
+
+
+_PLACED = re.compile(r'^(\S+?:\d+(?::\d+)?): error: (.*)$', re.S)
+
+
+class _TooMany(Exception):
+    pass
+
+
+class _Silent(CError):
+    """a use of a name whose declaration had an error: the statement stops, quietly"""
+    def __init__(self):
+        super().__init__('(an earlier error)')
+
+
+NORETURN = {'exit', 'abort', '_Exit', 'quick_exit', 'longjmp', '__assert_fail'}
+
+
+def _at(sy):
+    """' (line N)' of a symbol's earlier declaration, for messages"""
+    c = getattr(sy, 'coord', None)
+    return f' (declared at line {c.line})' if c is not None and getattr(c, 'line', None) else ''
+
+
+STATEMENTS = {'If', 'While', 'DoWhile', 'For', 'Switch', 'Return', 'Break', 'Continue',
+              'Goto', 'Label', 'Case', 'Default', 'Compound', 'EmptyStatement', 'Pragma',
+              'StaticAssert'}
+
+
+def _has_labels(node):
+    """a label, a case or a default in node (a goto or a switch can jump into it)"""
+    if node is None:
+        return False
+    if isinstance(node, (c_ast.Label, c_ast.Case, c_ast.Default)):
+        return True
+    for _, c in node.children():
+        if _has_labels(c):
+            return True
+    return False
+
+
+def _value_type(e, f):
+    """the type of the value an expression holds before the promotions: a char variable,
+    a char assignment ((c = getchar()) is a char)"""
+    try:
+        if isinstance(e, c_ast.Cast):
+            return f.decl_type(e.to_type)
+        if isinstance(e, (c_ast.ID, c_ast.Assignment, c_ast.ArrayRef, c_ast.StructRef)) or \
+                (isinstance(e, c_ast.UnaryOp) and e.op == '*'):
+            t = f.expr_type(e)
+            return t if t.is_int else None
+    except CError:
+        return None
+    return None
+
+
+def _q(name):
+    return f"'{name}'" if name else '(through a pointer)'
+
+
+# the format argument's index of the printf and scanf functions (-Wformat)
+FORMATS = {'printf': 0, 'fprintf': 1, 'sprintf': 1, 'snprintf': 2, 'dprintf': 1,
+           'cprintf': 0, 'scanf': 0, 'fscanf': 1, 'sscanf': 1}
+_PRINTF_CONV = re.compile(r"%(?P<flags>[-+ #0']*)(?P<width>\*|\d+)?(?:\.(?P<prec>\*|\d*))?"
+                          r"(?P<len>hh|h|ll|l|L|z|j|t|q)?(?P<conv>[diouxXcsfFeEgGaApn%])")
+_SCANF_CONV = re.compile(r"%(?P<supp>\*)?(?P<width>\d+)?(?P<len>hh|h|ll|l|L|z|j|t|q)?"
+                         r"(?P<conv>\[\^?\]?[^\]]*\]|[diouxXcsfFeEgGaApn%])")

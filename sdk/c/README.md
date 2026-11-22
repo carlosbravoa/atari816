@@ -15,7 +15,7 @@ sdk/c/tools/get-toolchain.sh          # only for vbcc: download and install it (
 | | |
 | --- | --- |
 | [bin/hcc](bin/hcc) | the driver: compile, link, make the o65 program; sizes checked; `--cc cc816|vbcc` (or `HZ_CC`) |
-| [cc816/](cc816) | cc816, the C compiler (Python 3: pycparser and pcpp vendored, writes ca65 assembly), its standard headers (`cc816/include`, with `math.h` and `float.h`), its regression set (`make -C cc816 check`: regress programs, random programs against gcc, random floating-point programs checked bit for bit, the c-testsuite) |
+| [cc816/](cc816) | cc816, the C compiler (Python 3: pycparser and pcpp vendored, writes ca65 assembly), its standard headers (`cc816/include`, with `math.h` and `float.h`), its regression set (`make -C cc816 check`: the error and warning messages, regress programs, a program for each part of C, random programs against gcc, random floating-point programs checked bit for bit, the c-testsuite) |
 | [c.mk](c.mk) | make rules: a program's Makefile is `NAME := x`, `SDK ?= ...`, `include $(SDK)/c/c.mk` |
 | [include/horizon.h](include/horizon.h) | every syscall as a C function (`hzsys.h`, generated), the parameter blocks, the helpers; [include/dirent.h](include/dirent.h) |
 | [include/hui.h](include/hui.h) | Horizon's controls library for C: windows with buttons, fields, lists, scroll bars, dialogs ([huigen.h](include/huigen.h), generated); hcc links it when a program uses it ([docs/c/apps.md](../docs/c/apps.md)) |

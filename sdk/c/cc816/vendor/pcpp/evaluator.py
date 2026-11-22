@@ -32,6 +32,12 @@ _expand_escape_sequences_pat = re.compile(r'''
     | \\[\\'"abfnrtv]  # Single-character escapes
 )''', re.UNICODE | re.VERBOSE)
 
+def _cdiv(a, b):
+    """C's integer division: toward zero"""
+    q = abs(a) // abs(b)
+    return q if (a < 0) == (b < 0) else -q
+
+
 class Value(INTBASETYPE):
     """A signed or unsigned integer within a preprocessor expression, bounded
     to within INT_MIN and INT_MAX, or 0 and UINT_MAX. Signed overflow is handled
@@ -212,21 +218,21 @@ class Value(INTBASETYPE):
         other = Value(other)
         if other.exception is not None:
             return other
-        return Value(self.__uclamp(self) / self.__uclamp(other), True) if (self.unsigned or other.unsigned) else Value(super(Value, self).__div__(other))
+        return Value(self.__uclamp(self) // self.__uclamp(other), True) if (self.unsigned or other.unsigned) else Value(_cdiv(int(self), int(other)))  # (cc816: C's division)
     def __truediv__(self, other):
         if self.exception is not None:
             return self
         other = Value(other)
         if other.exception is not None:
             return other
-        return Value(self.__uclamp(self) / self.__uclamp(other), True) if (self.unsigned or other.unsigned) else Value(super(Value, self).__truediv__(other))
+        return Value(self.__uclamp(self) // self.__uclamp(other), True) if (self.unsigned or other.unsigned) else Value(_cdiv(int(self), int(other)))  # (cc816: C's division)
     def __mod__(self, other):
         if self.exception is not None:
             return self
         other = Value(other)
         if other.exception is not None:
             return other
-        return Value(self.__uclamp(self) % self.__uclamp(other), True) if (self.unsigned or other.unsigned) else Value(super(Value, self).__mod__(other))
+        return Value(self.__uclamp(self) % self.__uclamp(other), True) if (self.unsigned or other.unsigned) else Value(int(self) - int(other) * _cdiv(int(self), int(other)))  # (cc816: C's modulo)
     def __neg__(self):
         if self.exception is not None:
             return self

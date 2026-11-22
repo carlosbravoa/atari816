@@ -19,6 +19,17 @@ same type, no structure layout in the checksums.
     ptr       ++/-- of every width through pointers, pointer differences and compares,
               ?: with side effects, comma, recursion, big locals, static locals
     globals   initialised globals of every type, arrays of structures with pointers
+    init      designated initialisers (.a.b = 1, [3] = x, positional values going on after a
+              designator, brace elision) of global, static and local structures and
+              arrays of them, compound literals (their addresses, as values and arrays)
+    union     unions read through another member than the one written (little-endian),
+              designated union initialisers, anonymous unions and structures in a
+              structure, unions copied and passed by value
+    goto      state machines of labels and gotos (forwards, backwards, out of loops, into
+              blocks, labels inside if (0) { ... }), Duff's device
+    misc      enumerations with negative and large values, _Bool (++, --, compound
+              assignments), the comma operator, ?: of mixed widths, statement expressions,
+              compound literal arrays indexed
     float     (not in "all": --features basic,float) float and double (dbl: double on the
               target, float in the host build: cc816's double is a float) arithmetic,
               compares, conversions both ways (guarded: no out-of-range conversion),
@@ -30,7 +41,7 @@ same type, no structure layout in the checksums.
 from genfuzz import TYPES, OPS, CMPS, Gen
 
 FEATURES = ['basic', 'struct', 'bitfield', 'fptr', 'vararg', 'far', 'switch', 'spill', 'ptr',
-            'globals']
+            'globals', 'init', 'union', 'goto', 'misc']
 EXTRA_FEATURES = ['float']          # chosen by name only (all keeps its old programs)
 AVOID_KNOWN = False     # True: leave out the shapes of the compiler bugs in regress/ (while they are open)
 LOWOPS = ['add', 'sub', 'mul', 'and', 'or', 'xor']      # low bits independent of the width
@@ -1071,6 +1082,272 @@ class FGen(Gen):
         L.append(f'    for (s = {P}msg; *s; s++) mix((uint8_t)*s);')
         L.append(f'    for (i = 0; i < 3; i++) for (j = 0; j < 4; j++) mix((uint32_t){P}g2d[i][j]);')
         return self.tail(L, vars_ + sc)
+
+    # ------------------------------------------------------------------ init
+    def finit(self, ts, f, top=False):
+        """an initialiser for a member f (scalar, array, nested structure)"""
+        r = self.r
+        if f[0] == 's':
+            return lit(f[2], self.rval(f[2]))
+        if f[0] == 'a':
+            n = f[3]
+            if r.random() < 0.4:
+                ks = sorted(r.sample(range(n), r.randint(1, n)), key=lambda _: r.random())
+                return '{ ' + ', '.join(f'[{k}] = {lit(f[2], self.rval(f[2]))}' for k in ks) + ' }'
+            return '{ ' + ', '.join(lit(f[2], self.rval(f[2])) for _ in range(r.randint(1, n))) + ' }'
+        return self.dinit(ts, f[2])
+
+    def dpath(self, ts, ti):
+        """a designator path from a structure to one of its scalars: .m, .m[2], .m.k"""
+        r = self.r
+        f = r.choice(ts[ti]['fields'])
+        if f[0] == 's':
+            return f'.{f[1]}', f[2]
+        if f[0] == 'a':
+            return f'.{f[1]}[{r.randrange(f[3])}]', f[2]
+        p, t = self.dpath(ts, f[2])
+        return f'.{f[1]}{p}', t
+
+    def dinit(self, ts, ti):
+        """a random initialiser of the structure ts[ti]: positional values, designators
+        (one level, then the positional ones go on after the member), a nested path as
+        the last one"""
+        r = self.r
+        fields = ts[ti]['fields']
+        n = len(fields)
+        items = []
+        cur = 0
+        for _ in range(r.randint(1, n + 2)):
+            c = r.random()
+            if c < 0.45 and cur < n:
+                items.append(self.finit(ts, fields[cur]))
+                cur += 1
+            elif c < 0.85:
+                j = r.randrange(n)
+                items.append(f'.{fields[j][1]} = {self.finit(ts, fields[j])}')
+                cur = j + 1
+            else:
+                p, t = self.dpath(ts, ti)
+                items.append(f'{p} = {lit(t, self.rval(t))}')
+                break
+        if not items:
+            items.append(self.finit(ts, fields[0]))
+        return '{ ' + ', '.join(items) + ' }'
+
+    def ainit(self, ts, ti, cnt):
+        """an initialiser of an array of cnt structures: [k] = {...}, positional ones,
+        and [k] = a, b going on into element k's first members (brace elision)"""
+        r = self.r
+        items = []
+        cur = 0
+        lead = []
+        for f in ts[ti]['fields']:
+            if f[0] != 's':
+                break
+            lead.append(f)
+        if len(lead) >= 2 and r.random() < 0.3:
+            # (first, so that it does not override an element: what gcc does then is its own)
+            k = r.randrange(cnt)
+            m = r.randint(2, len(lead))
+            items.append(f'[{k}] = ' + ', '.join(lit(f[2], self.rval(f[2])) for f in lead[:m]))
+            cur = cnt
+        for _ in range(r.randint(1, cnt + 1)):
+            c = r.random()
+            if c < 0.45 and cur < cnt:
+                items.append(self.dinit(ts, ti))
+                cur += 1
+            else:
+                k = r.randrange(cnt)
+                items.append(f'[{k}] = {self.dinit(ts, ti)}')
+                cur = k + 1
+        return '{ ' + ', '.join(items) + ' }'
+
+    def feat_init(self, idx):
+        r = self.r
+        pfx = f'F{idx}_'
+        ts = self.struct_types(pfx, r.randint(2, 3), maxsize=24)
+        self.struct_helpers(ts)
+        G = self.G
+        L = self.head(idx)
+        vars_ = self.scalars(L, r.randint(1, 3))
+        L.append('    H = 0;')
+        for ti, st in enumerate(ts):
+            nm = st['name']
+            cnt = r.randint(2, 4)
+            G.append(f'static struct {nm} gi{nm} = {self.dinit(ts, ti)};')
+            G.append(f'static struct {nm} ga{nm}[{cnt}] = {self.ainit(ts, ti, cnt)};')
+            G.append(f'static struct {nm} *gp{nm} = &(struct {nm}){self.dinit(ts, ti)};')
+            L.append(f'    {{ struct {nm} l = {self.dinit(ts, ti)}, la[{cnt}] = {self.ainit(ts, ti, cnt)}, *lp;')
+            L.append(f'      static struct {nm} sl = {self.dinit(ts, ti)};')
+            L.append(f'      lp = &(struct {nm}){self.dinit(ts, ti)};')
+            L.append(f'      mix(sum_{nm}(&gi{nm})); mix(sum_{nm}(gp{nm})); mix(sum_{nm}(&l)); '
+                     f'mix(sum_{nm}(&sl)); mix(sum_{nm}(lp));')
+            L.append(f'      for (i = 0; i < {cnt}; i++) {{ mix(sum_{nm}(&ga{nm}[i])); mix(sum_{nm}(&la[i])); }}')
+            L.append(f'      l = (struct {nm}){self.dinit(ts, ti)}; mix(sum_{nm}(&l));')
+            lv = self.lvals(ts, ti, 'l')
+            n, t = r.choice(lv)
+            L.append(f'      {n} = ({tn(t)}){self.expr(t, vars_, 2)}; sl = l; mix(sum_{nm}(&sl)); }}')
+        t = r.choice(list(TYPES))
+        vals = ', '.join(self.expr(t, vars_, 2) for _ in range(4))
+        L.append(f'    mix((uint32_t)(({tn(t)}[]){{ {vals} }})[{r.randrange(4)}]);')
+        L.append(f'    {{ {tn(t)} arr[6] = {{ [4] = {lit(t, self.rval(t))}, {lit(t, self.rval(t))}, '
+                 f'[1] = {self.expr(t, vars_, 2)} }}; for (i = 0; i < 6; i++) mix((uint32_t)arr[i]); }}')
+        return self.tail(L, vars_)
+
+    # ------------------------------------------------------------------ union
+    def feat_union(self, idx):
+        r = self.r
+        P = f'F{idx}_'
+        G = self.G
+        G.append(f'union {P}U {{ uint32_t w; uint16_t h[2]; uint8_t b[4]; '
+                 f'struct {{ uint8_t lo, hi; uint16_t up; }} p; int32_t s; }};')
+        G.append(f'struct {P}T {{ uint8_t tag; union {{ int16_t i; uint8_t c[2]; }}; '
+                 f'struct {{ int32_t x; uint8_t y; }}; union {P}U u; }};')
+        inits = [f'{{ {lit("u32", self.rval("u32"))} }}',
+                 f'{{ .h = {{ {lit("u16", self.rval("u16"))}, {lit("u16", self.rval("u16"))} }} }}',
+                 f'{{ .b = {{ {", ".join(lit("u8", self.rval("u8")) for _ in range(4))} }} }}',
+                 f'{{ .p.hi = {lit("u8", self.rval("u8"))} }}',
+                 f'{{ .s = {lit("i32", self.rval("i32"))} }}']
+        G.append(f'static union {P}U {P}g = {r.choice(inits)};')
+        G.append(f'static struct {P}T {P}gt = {{ .tag = {r.randint(0, 255)}, .c = {{ {r.randint(0, 255)}, '
+                 f'{r.randint(0, 255)} }}, .y = {r.randint(0, 255)}, .x = {lit("i32", self.rval("i32"))}, '
+                 f'.u = {r.choice(inits)} }};')
+        G.append(f'static uint32_t {P}usum(union {P}U u) {{ return u.w ^ ((uint32_t)u.h[0] << 3) ^ u.b[3]; }}')
+        G.append(f'static union {P}U {P}umk(uint32_t v) {{ union {P}U u; u.w = v; u.p.lo ^= 0x5A; return u; }}')
+        G.append(f'static uint32_t {P}tsum(const struct {P}T *t) {{ return (uint32_t)t->tag * 7u + (uint16_t)t->i '
+                 f'+ t->c[1] + (uint32_t)t->x + t->y + {P}usum(t->u); }}')
+        L = self.head(idx)
+        vars_ = self.scalars(L, r.randint(2, 4))
+        L.append(f'    union {P}U u = {r.choice(inits)}, v;')
+        L.append(f'    struct {P}T t = {P}gt;')
+        L.append('    H = 0;')
+        allv = vars_ + [('u.w', 'u32'), ('u.h[0]', 'u16'), ('u.h[1]', 'u16'), ('u.b[2]', 'u8'),
+                        ('u.p.hi', 'u8'), ('u.s', 'i32'), ('t.i', 'i16'), ('t.x', 'i32')]
+        writes = [('u.w', 'u32'), ('u.h[0]', 'u16'), ('u.h[1]', 'u16'), ('u.b[0]', 'u8'), ('u.b[3]', 'u8'),
+                  ('u.p.lo', 'u8'), ('u.p.up', 'u16'), ('u.s', 'i32'), ('t.i', 'i16'), ('t.c[1]', 'u8'),
+                  ('t.x', 'i32'), ('t.y', 'u8'), ('t.u.h[1]', 'u16'), (f'{P}g.b[1]', 'u8'),
+                  (f'{P}g.w', 'u32')]
+        reads = ['u.w', 'u.h[0]', 'u.h[1]', 'u.b[0]', 'u.b[1]', 'u.b[2]', 'u.b[3]', 'u.p.lo', 'u.p.hi',
+                 'u.p.up', 'u.s', 't.i', 't.c[0]', 't.c[1]', 't.x', 't.y', f'{P}g.w', f'{P}g.h[1]']
+        for _ in range(r.randint(6, 14)):
+            c = r.random()
+            if c < 0.55:
+                n, t = r.choice(writes)
+                L.append(f'    {n} = ({tn(t)}){self.expr(t, allv, 2)};')
+                L.append(f'    mix((uint32_t){r.choice(reads)}); mix((uint32_t){r.choice(reads)});')
+            elif c < 0.7:
+                L.append(f'    v = u; v.b[{r.randrange(4)}]++; u = {P}umk(v.w); mix({P}usum(u)); mix({P}usum(v));')
+            elif c < 0.85:
+                L.append(f'    t.u = u; {P}g = t.u; mix({P}tsum(&t));')
+            else:
+                L.append(f'    u = (union {P}U){r.choice(inits)}; mix(u.w);')
+        L.append(f'    mix({P}usum(u)); mix({P}tsum(&t)); mix({P}usum({P}g));')
+        return self.tail(L, vars_)
+
+    # ------------------------------------------------------------------ goto
+    def feat_goto(self, idx):
+        r = self.r
+        P = f'F{idx}_'
+        G = self.G
+        nsrc = r.randint(5, 30)
+        G.append(f'static uint8_t {P}src[{nsrc}] = {{ {", ".join(str(r.randint(0, 255)) for _ in range(nsrc))} }};')
+        L = self.head(idx)
+        vars_ = self.scalars(L, r.randint(3, 6))
+        L.append('    uint16_t steps = 0;')
+        L.append(f'    uint8_t dst[{nsrc + 8}];')
+        L.append('    H = 0;')
+        nl = r.randint(3, 7)
+        labels = [f'{P}L{k}' for k in range(nl)]
+
+        def jump():
+            return f'if ({self.cond(vars_, 1)} && ++steps < 60) goto {r.choice(labels + ["out"])};'
+        L.append(f'    goto {r.choice(labels)};')
+        for k, lab in enumerate(labels):
+            shape = r.random()
+            n, t = r.choice(vars_)
+            if shape < 0.3:
+                L.append(f'{lab}:')
+                L.append(f'    {n} = {self.expr(t, vars_, 2)}; mix((uint32_t){n});')
+                L.append(f'    {jump()}')
+            elif shape < 0.5:
+                L.append(f'    if (0) {{')
+                L.append(f'{lab}:')
+                L.append(f'        {n} = {self.expr(t, vars_, 2)}; mix((uint32_t){n}); {jump()}')
+                L.append('    }')
+            elif shape < 0.7:
+                L.append(f'    for (i = 0; i < {r.randint(2, 6)}; i++) {{')
+                L.append(f'        {n} = ({tn(t)})ADD_{t}({n}, i); mix((uint32_t){n});')
+                L.append(f'        if ({self.cond(vars_, 1)}) goto {lab}_x;')
+                L.append('    }')
+                L.append(f'{lab}_x:')
+                L.append(f'{lab}:')
+                L.append(f'    {jump()}')
+            else:
+                L.append(f'    {{ {tn(t)} z;')
+                L.append(f'{lab}:')
+                L.append(f'      z = {self.expr(t, vars_, 2)}; {n} = ({tn(t)})XOR_{t}({n}, z); mix((uint32_t)z);')
+                L.append(f'      {jump()} }}')
+        L.append('out:')
+        L.append('    mix(steps);')
+        # Duff's device
+        cnt = r.randint(1, nsrc)
+        L.append(f'    {{ uint8_t *to = dst; const uint8_t *from = {P}src; int16_t count = {cnt}, n = (count + 7) / 8;')
+        L.append('      switch (count % 8) {')
+        L.append('      case 0: do { *to++ = *from++;')
+        for k in range(7, 0, -1):
+            L.append(f'      case {k}: *to++ = *from++;')
+        L.append('              } while (--n > 0);')
+        L.append('      }')
+        L.append(f'      for (i = 0; i < {cnt}; i++) mix(dst[i]); }}')
+        return self.tail(L, vars_)
+
+    # ------------------------------------------------------------------ misc
+    def feat_misc(self, idx):
+        r = self.r
+        P = f'F{idx}_'
+        G = self.G
+        ev = sorted(set([r.randint(-40000, -1), r.randint(0, 100), r.randint(32768, 65535),
+                         r.randint(65536, 2000000)]))
+        enum_items = [f'{P}E0 = {ev[0]}', f'{P}E1', f'{P}E2 = {ev[1]}', f'{P}E3 = {ev[2]}u', f'{P}E4',
+                      f'{P}E5 = {ev[3]}L']
+        G.append(f'enum {P}En {{ {", ".join(enum_items)} }};')
+        enames = [f'{P}E{k}' for k in range(6)]
+        L = self.head(idx)
+        vars_ = self.scalars(L, r.randint(3, 5))
+        L.append(f'    enum {P}En e = {r.choice(enames)};')
+        L.append(f'    _Bool b = {self.cond(vars_, 1)}, b2 = 0;')
+        L.append('    H = 0;')
+        for k in enames:
+            L.append(f'    mix((uint32_t)(int32_t){k});')
+        for _ in range(r.randint(6, 14)):
+            c = r.random()
+            n, t = r.choice(vars_)
+            if c < 0.15:
+                L.append(f'    e = (enum {P}En)(int32_t){r.choice(enames)}; if (e == {r.choice(enames)}) mix(1); '
+                         f'mix((uint32_t)(int32_t)e);')
+            elif c < 0.3:
+                op = r.choice(['b++;', 'b--;', 'b = !b;', f'b += {r.randint(0, 3)};', 'b2 = b;',
+                               f'b = ({tn(t)}){self.expr(t, vars_, 1)};', 'b ^= 1;', 'b2--;', '++b2;'])
+                L.append(f'    {op} mix(b); mix(b2);')
+            elif c < 0.45:
+                n2, t2 = r.choice(vars_)
+                L.append(f'    {n} = ({n2} = ({tn(t2)}){self.expr(t2, vars_, 1)}, ({tn(t)})ADD_{t}({n2}, {self.expr(t, vars_, 1)}));')
+            elif c < 0.6:
+                wide = r.choice(['int32_t', 'uint32_t'])
+                small = r.choice(['int8_t', 'uint8_t', 'int16_t', 'uint16_t'])
+                a, b_ = (wide, small) if r.random() < 0.5 else (small, wide)
+                L.append(f'    mix((uint32_t)({self.cond(vars_, 1)} ? ({a}){self.expr(t, vars_, 1)} : ({b_}){self.expr(t, vars_, 1)}));')
+            elif c < 0.75:
+                L.append(f'    {n} = ({{ {tn(t)} s_ = {self.expr(t, vars_, 1)}; s_ = ({tn(t)})XOR_{t}(s_, {self.expr(t, vars_, 1)}); s_; }});')
+            elif c < 0.85:
+                vals = ', '.join(self.expr(t, vars_, 1) for _ in range(3))
+                L.append(f'    {n} = (({tn(t)}[]){{ {vals} }})[{r.randrange(3)}];')
+            else:
+                L.append(f'    switch (e) {{ case {r.choice([enames[0], enames[2], enames[5]])}: {n}++; break; case {P}E3: {n} = ({tn(t)})({n} ^ 5); '
+                         f'default: mix(7); }}')
+            L.append(f'    mix((uint32_t){n});')
+        L.append('    mix(b); mix(b2); mix((uint32_t)(int32_t)e);')
+        return self.tail(L, vars_)
 
     # ------------------------------------------------------------------ program
     def program_feats(self, feats):

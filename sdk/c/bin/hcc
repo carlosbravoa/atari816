@@ -19,7 +19,14 @@ Options:
   -c                compile/assemble only: one .o per source (with -o: that name)
   -S                write the compiler's assembly (.s) next to each .c, then go on
   -I DIR            look for #include files in DIR too
-  -D NAME[=VALUE]   define a macro
+  -D NAME[=VALUE]   define a macro         -U NAME   undefine one
+  -include FILE     cc816: include FILE before each source
+  -w                cc816: no warnings
+  -Wall             cc816: more warnings (unused variables and labels, x <= 32767 with an
+                    int x, if (a = b), a far pointer cast to a near one)
+  -Werror           cc816: warnings are errors;  -Wno-NAME: one warning off (the NAME
+                    is the one printed in [-W...] after the warning)
+  -fsigned-char     cc816: plain char is signed (-128 to 127); the default is unsigned
   -O0 -O1 -O2 -O3 -Os
                     optimisation. cc816: -O2 (the default) and -O3, -Os are the same;
                     -O1 no loop optimisations, -O0 none. vbcc: default -O1 (its local
@@ -97,7 +104,9 @@ def main(argv):
     o = {"out": None, "srcs": [], "incs": [], "defs": [], "libs": [], "opt": None,
          "model": None, "compile_only": False, "asm_too": False, "want_map": False,
          "debug": False, "float": False, "ui": False, "game": False, "stack": None,
-         "keep": None, "cc": os.environ.get("HZ_CC") or DEFAULT_CC}
+         "keep": None, "cc": os.environ.get("HZ_CC") or DEFAULT_CC,
+         "ccopts": {"w": False, "wall": False, "werror": False, "wflags": {},
+                    "signed_char": False, "undefs": [], "includes": []}}
     i = 0
 
     def val(name):
@@ -119,6 +128,17 @@ def main(argv):
             o["incs"].append(a[2:] or val("-I"))
         elif a.startswith("-D"):
             o["defs"].append(a[2:] or val("-D"))
+        elif a == "-include":
+            o["ccopts"]["includes"].append(val("-include"))
+        elif a.startswith("-U"):
+            o["defs"].append("-U" + (a[2:] or val("-U")))   # (cc816: in order with -D)
+        elif a in ("-fsigned-char", "-fno-unsigned-char"):
+            o["ccopts"]["signed_char"] = True
+        elif a in ("-funsigned-char", "-fno-signed-char"):
+            o["ccopts"]["signed_char"] = False
+        elif a == "-w" or (a.startswith("-W") and len(a) > 2):
+            from cc816 import driver as _drv     # (tools/hzc816.py put cc816 on the path)
+            _drv.parse_warning_flag(a, o["ccopts"])
         elif a.startswith("-O"):
             v = a[2:] or "2"
             if v not in hzc.OPTS:
@@ -227,7 +247,7 @@ def main_cc816(o):
         hzc816.ensure_lib()
         objs, tmp = compile_all(
             o, lambda s, obj, a: hzc816.compile_c(s, obj, opt, incs=incs, defs=o["defs"],
-                                                  asm_out=a),
+                                                  asm_out=a, opts=o["ccopts"]),
             lambda s, obj: hzc816.assemble(s, obj, incs=incs + [os.path.join(hzc.SDKC,
                                                                             "include")]))
         if o["compile_only"]:
@@ -261,7 +281,8 @@ def main_cc816(o):
 
 def main_vbcc(o):
     out = o["out"]
-    srcs, incs, defs, libs = o["srcs"], o["incs"], o["defs"], list(o["libs"])
+    srcs, incs, libs = o["srcs"], o["incs"], list(o["libs"])
+    defs = [d for d in o["defs"] if not d.startswith("-U")]     # (vbcc has no -U)
     opt = o["opt"] or hzc.DEFAULT_OPT
     model = o["model"] or "large"
     want_map, debug, float_, ui = o["want_map"], o["debug"], o["float"], o["ui"]

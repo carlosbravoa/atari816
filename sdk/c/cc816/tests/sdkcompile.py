@@ -30,7 +30,9 @@ def main():
         rel = os.path.relpath(f, SDK)
         incs = [os.path.dirname(f), os.path.join(SDK, 'include')]
         try:
-            asm, _ = driver.compile_c(f, incs, [])
+            asm, warns = driver.compile_c(f, incs, [])
+            for w in warns:
+                print('  warning      ' + w.replace(SDK + '/', ''))
             sp = os.path.join(out, rel.replace('/', '_')[:-2] + '.s')
             open(sp, 'w').write(asm)
             prog.hzc816.assemble(sp, sp[:-2] + '.o')

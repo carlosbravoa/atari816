@@ -652,10 +652,11 @@ _escape_sequence_start_in_string = r"""(\\[0-9a-zA-Z._~!=&\^\-\\?'"])"""
 
 _cconst_char = r"""([^'\\\n]|""" + _escape_sequence + ")"
 _char_const = "'" + _cconst_char + "'"
-_wchar_const = "L" + _char_const
+# (cc816: a wide character may be several bytes of UTF-8 in the source)
+_wchar_const = "L'" + _cconst_char + "{1,4}'"
 _u8char_const = "u8" + _char_const
-_u16char_const = "u" + _char_const
-_u32char_const = "U" + _char_const
+_u16char_const = "u'" + _cconst_char + "{1,4}'"
+_u32char_const = "U'" + _cconst_char + "{1,4}'"
 _multicharacter_constant = "'" + _cconst_char + "{2,4}'"
 _unmatched_quote = "('" + _cconst_char + "*\\n)|('" + _cconst_char + "*$)"
 _bad_char_const = (

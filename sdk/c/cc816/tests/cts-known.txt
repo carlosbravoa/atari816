@@ -1,10 +1,22 @@
-# c-testsuite programs whose result differs on purpose (tests/check.py does not count them).
+# c-testsuite programs that do not pass, each for a reason cc816 cannot or does not mean to
+# change (tests/check.py counts every other one that does not pass).
 # file   reason
 00040.c  8 queens by brute force: no result within the test's time (vbcc neither, in 200 emulated seconds)
+00081.c  long long (64-bit integers): cc816 does not have them
+00082.c  long long
+00104.c  int64_t (long long)
+00128.c  long long
+00133.c  long long constants (LL)
+00134.c  long long constants (LL)
+00135.c  long long
 00166.c  expects a 32-bit int (octal and hex constants above 32767 printed with %d)
 00168.c  expects a 32-bit int (8! and up printed with %d)
-00206.c  #pragma push_macro / pop_macro: a compiler extension the preprocessor (pcpp) has not
-00212.c  expects one of the __LP64__ / __ILP32__ style macros: cc816 is none of them
 00174.c  expects a 64-bit double (12.34 + 56.78 printed with %f: 69.120000; cc816's double is 32 bits: 69.119995)
 00178.c  expects a 32-bit int and a 64-bit double (sizeof)
 00195.c  expects a 64-bit double (12.34 and 56.78 printed with %f)
+00203.c  long long
+00204.c  uint64_t and long long (structures passed by value with 64-bit members)
+00207.c  variable-length arrays: cc816 does not have them (the test's other parts pass)
+00212.c  expects one of the __LP64__ / __ILP32__ style macros: cc816 is none of them
+00216.c  GNU range designators ([1 ... 5] = 9): not supported
+00217.c  long long

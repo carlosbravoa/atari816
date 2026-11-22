@@ -5,8 +5,13 @@
 #define SCHAR_MIN (-128)
 #define SCHAR_MAX 127
 #define UCHAR_MAX 255
+#ifdef __CHAR_UNSIGNED__
 #define CHAR_MIN 0
 #define CHAR_MAX 255
+#else                           /* (hcc -fsigned-char) */
+#define CHAR_MIN (-128)
+#define CHAR_MAX 127
+#endif
 #define MB_LEN_MAX 1
 #define SHRT_MIN (-32767 - 1)
 #define SHRT_MAX 32767

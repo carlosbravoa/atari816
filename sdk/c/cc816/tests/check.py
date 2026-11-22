@@ -3,9 +3,14 @@
 
     check.py [--cts DIR] [--fuzz N] [--seeds S1,S2,...] [--features LIST] [--quick]
 
+  diag      tests/diag/*.c: the compiler's error and warning messages (tests/diag.py: each
+            file says the messages it must give; no emulator)
   regress   tests/regress/*.c: one small program per compiler bug found (each returns 0
             when the bug is not there), plus programs for the parts the random programs
             do not reach
+  lang      tests/lang/*.c: a program for each part of C the front end has (K&R
+            definitions, designators, compound literals, bit-fields, switches, goto,
+            wide strings, the preprocessor, ...), each returns 0
   fuzz      random programs from fuzz/genfuzz.py checked against the host's gcc (seeds 1
             and 2, 200 and 400 programs; --fuzz N programs a seed, --seeds to choose;
             --features: genfuzz.py's shapes, all by default, basic for the original ones)
@@ -16,9 +21,9 @@
             --cts DIR (or $CTS) points at a checkout: its single-exec tests
 
 Prints a summary line for each part and every program that did not pass; exit code 1 when
-a regress or fuzz program failed (in the c-testsuite only a wrong result, a crash or a hang
-counts, and not the differences explained in tests/cts-known.txt: what cc816 does not
-support yet is listed, not counted).
+a diag, regress, lang or fuzz program failed, or a c-testsuite program that is not
+explained in tests/cts-known.txt (what cc816 does not support is listed there, with the
+reason) did not pass.
 """
 import os
 import subprocess
@@ -43,6 +48,24 @@ def conform(files, out, spt=1.0):
     return res
 
 
+def gen_tag():
+    """a tag of the random programs' generator (genfuzz.py, genfeat.py): a changed
+    generator makes its programs again (the folders are kept between runs)"""
+    import hashlib
+    h = hashlib.md5()
+    for f in ('genfuzz.py', 'genfeat.py'):
+        h.update(open(os.path.join(HERE, 'fuzz', f), 'rb').read())
+    return h.hexdigest()[:6]
+
+
+def drop_old(prefix, keep):
+    """the folders of earlier generators' programs (prefix*), but keep"""
+    import shutil
+    for d in glob.glob(os.path.join(prog.BUILD, prefix + '*')):
+        if d != keep and os.path.isdir(d):
+            shutil.rmtree(d, ignore_errors=True)
+
+
 def main():
     a = sys.argv[1:]
     cts = os.environ.get('CTS')
@@ -65,19 +88,28 @@ def main():
         else:
             sys.exit(__doc__)
     bad = 0
-    print('== regress')
-    files = sorted(glob.glob(os.path.join(HERE, 'regress', '*.c')))
-    res = conform(files, os.path.join(prog.BUILD, 'regress'))
-    bad += sum(1 for r in res.values() if r['status'] != 'pass')
+    print('== diag')
+    r = subprocess.run([sys.executable, os.path.join(HERE, 'diag.py')], capture_output=True,
+                       text=True)
+    print(r.stdout.strip())
+    if r.returncode:
+        print(r.stderr[-2000:])
+        bad += 1
+    for part in ('regress', 'lang'):
+        print(f'== {part}')
+        files = sorted(glob.glob(os.path.join(HERE, part, '*.c')))
+        res = conform(files, os.path.join(prog.BUILD, part))
+        bad += sum(1 for r in res.values() if r['status'] != 'pass')
     for seed in seeds:
         n = count or 200 * seed
         print(f'== fuzz, seed {seed}: {n} programs')
-        src = os.path.join(prog.BUILD, f'fuzzsrc{seed}-{n}-{feats.replace(",", "+")}')
+        src = os.path.join(prog.BUILD, f'fuzzsrc{seed}-{n}-{feats.replace(",", "+")}-{gen_tag()}')
         if len(glob.glob(os.path.join(src, 'fz*.c'))) < n * 9 // 10:
             # (a run stopped half-way leaves a partial folder: made again; genfuzz skips the
             # few programs gcc's run rejects, so a full folder may hold a little less than n)
             import shutil
             shutil.rmtree(src, ignore_errors=True)
+            drop_old(f'fuzzsrc{seed}-{n}-{feats.replace(",", "+")}', src)
             subprocess.run([sys.executable, os.path.join(HERE, 'fuzz', 'genfuzz.py'), src, str(n),
                             str(seed), '--features', feats], check=True, capture_output=True)
         res = conform(sorted(glob.glob(os.path.join(src, 'fz*.c'))),
@@ -86,10 +118,11 @@ def main():
     for seed in seeds if flt else ():
         n = (count // 2 if count else 100 * seed)
         print(f'== fuzz float, seed {seed}: {n} programs')
-        src = os.path.join(prog.BUILD, f'fuzzfpsrc{seed}-{n}')
+        src = os.path.join(prog.BUILD, f'fuzzfpsrc{seed}-{n}-{gen_tag()}')
         if len(glob.glob(os.path.join(src, 'fz*.c'))) < n * 9 // 10:
             import shutil
             shutil.rmtree(src, ignore_errors=True)
+            drop_old(f'fuzzfpsrc{seed}-{n}', src)
             subprocess.run([sys.executable, os.path.join(HERE, 'fuzz', 'genfuzz.py'), src, str(n),
                             str(seed), '--features', 'basic,float'], check=True,
                            capture_output=True)
@@ -105,11 +138,14 @@ def main():
             if ln.strip() and not ln.startswith('#'):
                 f, why = ln.split(None, 1)
                 known[f] = why.strip()
-        counted = [r for r in res.values() if r['status'] in ('fail', 'crash', 'killed',
-                                                               'timeout', 'asm-error')
+        counted = [r for r in res.values() if r['status'] != 'pass'
                    and os.path.basename(r['test']) not in known]
+        passed_known = sorted(os.path.basename(r['test']) for r in res.values()
+                              if r['status'] == 'pass' and os.path.basename(r['test']) in known)
         print(f'(not counted, explained in tests/cts-known.txt: '
               f'{", ".join(sorted(known))})')
+        if passed_known:
+            print(f'(listed in tests/cts-known.txt but passed: {", ".join(passed_known)})')
         print(f'c-testsuite: {sum(1 for r in res.values() if r["status"] == "pass")} of '
               f'{len(res)} pass; {len(counted)} wrong, crashed or hung')
         bad += len(counted)

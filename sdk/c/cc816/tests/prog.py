@@ -23,9 +23,44 @@ class LinkError(Exception):
     pass
 
 
+def flags_of(src):
+    """a test's compiler options, from a '// FLAGS: ...' line near its start ->
+    (include dirs, defines, opts)"""
+    incs, defs, opts = [], [], driver.default_opts()
+    try:
+        head = open(src, encoding='latin-1').read(4000).splitlines()[:40]
+    except OSError:
+        return incs, defs, opts
+    words = []
+    for ln in head:
+        ln = ln.strip()
+        if ln.startswith('// FLAGS:'):
+            words += ln[9:].split()
+    i = 0
+    while i < len(words):
+        w = words[i]
+        if w.startswith('-D'):
+            defs.append(w[2:])
+        elif w.startswith('-U'):
+            defs.append(w)
+        elif w.startswith('-I'):
+            incs.append(os.path.join(os.path.dirname(src), w[2:]))
+        elif w == '-include':
+            i += 1
+            opts['includes'].append(os.path.join(os.path.dirname(src), words[i]))
+        elif w == '-fsigned-char':
+            opts['signed_char'] = True
+        else:
+            driver.parse_warning_flag(w, opts)
+        i += 1
+    return incs, defs, opts
+
+
 def compile_obj(src, obj, level=2):
-    """C -> object (raises CError / Unsupported from the compiler, LinkError from ca65)"""
-    asm, _ = driver.compile_c(src, [], [], level)
+    """C -> object (raises CError / Unsupported from the compiler, LinkError from ca65);
+    a '// FLAGS: ...' line in the source gives the compiler's options"""
+    incs, defs, opts = flags_of(src)
+    asm, _ = driver.compile_c(src, incs, defs, level, opts=opts)
     s = obj[:-2] + '.s'
     with open(s, 'w') as fh:
         fh.write(asm)

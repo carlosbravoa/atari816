@@ -760,6 +760,20 @@ class Gen:
     def addr(self, base, idx, off):
         """set up X/Y for an access; returns a function part -> operand text.
         May clobber A."""
+        if isinstance(base, Imm):
+            # a constant address (the optimiser put a constant pointer's value here)
+            v = base.val
+            if base.size == 4:
+                self.I('lda', '#' + hexw(v & 0xFFFF))
+                self.I('sta', '__h2')
+                self.I('lda', '#' + hexw((v >> 16) & 0xFFFF))
+                self.I('sta', '__h2+2')
+                if idx is None:
+                    self.I('ldy', '#' + hexw(off))
+                else:
+                    self.add_to_y(idx, off)
+                return self.yseq('[__h2],y', off if idx is None else None)
+            base = Sym('__abs0', v & 0xFFFF)
         if isinstance(base, Sym):
             name = base.name
             o = base.off + off

@@ -9,9 +9,9 @@ details are in [reference.md](reference.md).
 
 | What | On a PC | Here | What to do |
 | --- | --- | --- | --- |
-| `int` | 32 bits | **16 bits** (-32768 to 32767; `unsigned`: 0 to 65535) | `long` (32 bits) where values pass 32767: counters of bytes, file sizes and positions, products of two ints, `x * 1000` in milliseconds. `<stdint.h>` has `int32_t` and friends. Compile once with warnings and look at every `int` that holds a size or a sum |
+| `int` | 32 bits | **16 bits** (-32768 to 32767; `unsigned`: 0 to 65535) | `long` (32 bits) where values pass 32767: counters of bytes, file sizes and positions, products of two ints, `x * 1000` in milliseconds. `<stdint.h>` has `int32_t` and friends. cc816 warns where it can see it: `int x = 40000;` and `320 * 200` (`-Woverflow`), `x > 40000` with an `int` x (`-Wtype-limits`), `printf("%d", a_long)` (`-Wformat`). Look also at every `int` that holds a size or a sum |
 | `size_t` | 32/64 bits | `unsigned int`, 16 bits | one object, one `malloc`, one `fread` is at most 65,535 bytes |
-| `char` | usually signed | **unsigned** (the library is built that way) | `signed char` where negative bytes matter; `c == EOF` tests on a `char` never match: keep `getc`'s result in an `int` |
+| `char` | usually signed | **unsigned** (the library is built that way) | `signed char` where negative bytes matter; `c == EOF` tests on a `char` never match (cc816 warns: "comparison is always true"): keep `getc`'s result in an `int`. `hcc -fsigned-char` makes plain `char` signed for code that cannot be changed |
 | pointers | 32/64 bits, flat | cc816: 16 bits, an offset in the program's code bank (`__far`: 32 bits, any bank); vbcc: large model 32 bits (offset + bank), tiny 16 bits | memory from `hz_far_alloc` needs `__far` pointers with cc816: `unsigned char __far *p`. Casts between pointers and `int` lose the bank: `long` keeps it (`(unsigned long)p` is p's whole address with cc816). Build far pointers with `hz_farptr(bank, offset)` |
 | big arrays | anything | one object must stay inside one 64 KB bank; a program's code, constants, globals, heap and (cc816) software stack share one bank (65,264 bytes); vbcc's tiny model's data, heap and stack share 32 KB | `hcc` says what does not fit, with the sizes. Move big tables to a bank of their own: `hz_far_alloc()` and `__far` pointers |
 | `malloc` | gigabytes | the rest of the code bank (cc816: below the software stack, about 48 KB for a small program; vbcc large: about 56 KB), or of the window (vbcc tiny: about 27 KB) | check every `malloc` for NULL; big buffers from `hz_far_alloc` (64 KB each; `hz_mem_info()` says how many banks are free) |
@@ -40,8 +40,10 @@ details are in [reference.md](reference.md).
 
 ## How to find what broke
 
-1. **Read the warnings.** `hcc` shows the compiler's warnings with file and line (with
-   vbcc: it turns some errors into warnings and goes on, "; expected": fix every one).
+1. **Read the warnings.** `hcc` shows the compiler's warnings with file, line and column
+   (with vbcc: it turns some errors into warnings and goes on, "; expected": fix every
+   one). With cc816 build once with `-Wall` too, and look at each warning: most of them
+   are the 16-bit `int`, the unsigned `char` or a far pointer.
 2. **Overflowing ints.** Search for `int` used for sizes, positions, times in ms and
    products; test with values above 32767.
 3. **Sizes.** `hcc --map` prints the code bank's and the window's use, and writes
@@ -63,6 +65,57 @@ details are in [reference.md](reference.md).
    (reference.md, "Compiler notes").
 7. **Run in the emulator** with a script that types the input (`--script`) and look at
    `console.txt`; add `printf`s (stdout is line-buffered: end them with `\n`).
+
+## Reading cc816's messages
+
+cc816 writes its messages as gcc does: the file, the line and the column, then `error:`
+or `warning:`, then what is wrong.
+
+```
+game.c:42:13: error: 'score' undeclared (first use in this function)
+game.c:57:9: warning: printf: '%d' takes an int (16 bits in cc816; use %ld for a long), but argument 2 is long [-Wformat]
+game.c:80:5: error: cc816 does not support inline assembly (asm): put the code in a .s file (ca65 syntax) and call it as a function
+hcc: undefined: fire_laser (used in game.c)
+```
+
+- An **error** stops the build: there is no program. cc816 goes on to the end of the
+  file first, so all of a file's errors come in one run. Fix the first one first: a
+  later error can come from an earlier one. After a syntax error cc816 stops at once.
+- A **warning** does not stop the build, but it is usually a real fault in ported code.
+  The name in brackets turns it off (`-Wno-format`); `-w` turns all of them off,
+  `-Werror` makes them errors. reference.md ("Compiler notes", "Errors and warnings")
+  lists them.
+- In a header, the place is the header's file and line. A message about a macro is at
+  the line where the macro is used.
+- **"cc816 does not support ..."** is a part of C that cc816 does not have; the message
+  says what to do. The list is below.
+- **"undefined: NAME (used in FILE)"** comes from the link: no file of the program
+  defines NAME. A `.c` or `.s` file is missing from the `hcc` command, or a library
+  (`-l`), or the name is misspelt, or the function was declared and never written.
+- **"does not fit in its code bank, by N bytes"**: code, constants, data and bss are more
+  than the code bank holds. The message gives each part's size. Move big arrays to a bank
+  of their own (`hz_far_alloc` and a `__far` pointer), make them smaller, or give the
+  software stack less (`--stack N`).
+- **"internal compiler error"** is a fault of cc816 itself. Please report it with the
+  file; `CC816_TRACE=1 hcc ...` shows where it happened. Meanwhile try `-O1` or `-O0`, or
+  write the line another way.
+
+## Not supported, and what to do instead
+
+| cc816 does not support | Do this instead |
+| --- | --- |
+| `long long`, `int64_t`, `LL` constants | `long` (32 bits); for wider numbers a pair of `long`s |
+| a 64-bit `double` | `double` is the 32-bit `float` format: use `long` or fixed point where 7 digits are not enough |
+| variable-length arrays (`int a[n];`) | a fixed size, or `malloc(n * sizeof *a)` |
+| inline assembly (`asm`, `__asm__`) | a `.s` file in ca65 syntax, called as a C function (reference.md, "Calling convention") |
+| `setjmp` / `longjmp` | `hcc --cc vbcc`; or return an error code up the calls |
+| `_Complex` | a structure with the real and the imaginary part |
+| an `int` bit-field wider than 16 bits | make it `long` or `unsigned long` (up to 32 bits) |
+| `case 1 ... 5:`, `[0 ... 9] = x` (GNU ranges) | a `case` for each value, or an `if`; a loop to fill the array |
+| `&&label`, `goto *p` (GNU) | a `switch` on a state number |
+| nested functions (GNU) | a function at file scope; pass it what it needs |
+| `__builtin_...` functions | the C library's function, or a few lines of C |
+| one object of 64 KB or more | a bank of its own (`hz_far_alloc`) |
 
 ## A ported program, step by step
 

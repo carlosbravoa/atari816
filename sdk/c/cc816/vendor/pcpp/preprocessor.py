@@ -483,7 +483,14 @@ class Preprocessor(PreprocessorHooks):
             #print([x.value for x in rep])
             # Concatenation.   Argument is left unexpanded
             if ptype == 't':
-                rep[i:i+1] = args[argnum]
+                if args[argnum]:
+                    rep[i:i+1] = args[argnum]
+                else:
+                    # (cc816) an empty argument next to ## is a placemarker: A ## B+
+                    # with B empty is A then +, not A pasted to the +
+                    pm = copy.copy(rep[i])
+                    pm.type, pm.value = 'CPP_PLACEMARKER', ''
+                    rep[i:i+1] = [pm]
             # Normal expansion.  Argument is macro expanded first
             elif ptype == 'e':
                 #print('*** Function macro arg', rep[i], 'replace with', args[argnum], 'which expands into', self.expand_macros(copy.copy(args[argnum])))
@@ -516,6 +523,7 @@ class Preprocessor(PreprocessorHooks):
                 stitched = True
             else:
                 i += 1
+        rep = [t for t in rep if t.type != 'CPP_PLACEMARKER' and not (t.type is None and t.value == '')]
         if stitched:
             # Stitched tokens will have unknown type, so figure those out now
             i = 0
@@ -817,8 +825,16 @@ class Preprocessor(PreprocessorHooks):
         # =(MACRO, 0) means #ifndef MACRO or #if !defined(MACRO) seen, =(MACRO,1) means #define MACRO seen
         include_guard = None
         self.on_potential_include_guard(None)
+        # (cc816) #line N "file": the lines after it are numbered from N (in that file)
+        line_delta = 0
+        line_src = None
 
         for x in lines:
+            if line_delta or line_src is not None:
+                for tok in x:
+                    tok.lineno += line_delta
+                    if line_src is not None:
+                        tok.source = line_src
             all_whitespace = True
             skip_auto_pragma_once_possible_check = False
             # Handle comments
@@ -850,6 +866,14 @@ class Preprocessor(PreprocessorHooks):
                     if dirtokens:
                         name = dirtokens[0].value
                         args = self.tokenstrip(dirtokens[1:])
+                        if not args and name in ('if', 'ifdef', 'ifndef', 'elif', 'define', 'undef', 'include', 'line'):
+                            # (cc816) a directive without its argument: said, and taken as false
+                            self.on_error(dirtokens[0].source, dirtokens[0].lineno, "#%s without its argument" % name)
+                            if name in ('define', 'undef', 'include', 'line'):
+                                raise OutputDirective(Action.IgnoreAndRemove)
+                            zero = copy.copy(dirtokens[0])
+                            zero.type, zero.value = (self.t_INTEGER, '0') if name in ('if', 'elif') else (self.t_ID, '__cc816_missing__')
+                            args = [zero]
                     
                         if self.debugout is not None:
                             print("%d:%d:%d %s:%d #%s %s" % (enable, iftrigger, ifpassthru, dirtokens[0].source, dirtokens[0].lineno, dirtokens[0].value, "".join([tok.value for tok in args])), file = self.debugout)
@@ -1035,11 +1059,33 @@ class Preprocessor(PreprocessorHooks):
                                 raise OutputDirective(Action.IgnoreAndPassThrough)
                         else:
                             self.on_error(dirtokens[0].source,dirtokens[0].lineno,"Misplaced #endif")
+                    elif name == 'line':
+                        # (cc816) #line, with macros expanded in its arguments
+                        if enable:
+                            for tok in self.expand_macros(chunk):
+                                yield tok
+                            chunk = []
+                            la = [t for t in self.expand_macros(copy.copy(args)) if t.type not in self.t_WS]
+                            num = la[0].value.rstrip('uUlL') if la else ''
+                            if not num.isdigit():
+                                self.on_error(dirtokens[0].source, dirtokens[0].lineno, "#line needs a line number")
+                            else:
+                                raw = dirtokens[0].lineno - line_delta
+                                line_delta = int(num) - raw - 1
+                                if len(la) > 1 and la[1].type == self.t_STRING:
+                                    line_src = la[1].value[1:-1]
+                                    if self.expand_filemacro:
+                                        self.define("__FILE__ \"%s\"" % line_src)
                     elif name == 'pragma' and args[0].value == 'once':
                         if enable:
                             self.include_once[self.source] = None
                     elif enable:
                         # Unknown preprocessor directive
+                        # (cc816: the text before it is expanded first, as for #define: a
+                        # #pragma pop_macro changes the macros)
+                        for tok in self.expand_macros(chunk):
+                            yield tok
+                        chunk = []
                         output_unexpanded_line = (self.on_directive_unknown(dirtokens[0], args, ifpassthru, precedingtoks) is None)
 
                 except OutputDirective as e:
@@ -1231,6 +1277,10 @@ class Preprocessor(PreprocessorHooks):
                     # Empty arguments are permitted
                     if len(a) == 0 and len(args) == 1:
                         continue
+                    if not a:
+                        # (cc816) an empty parameter name: #define F(a, ) ...
+                        self.on_error(name.source,name.lineno,"a macro parameter without a name")
+                        break
                     if len(a) > 1 or a[0].type != self.t_ID:
                         self.on_error(a[0].source,a[0].lineno,"Invalid macro argument")
                         break
@@ -1374,7 +1424,7 @@ class Preprocessor(PreprocessorHooks):
                                 toks[m].value = ' '
             if not self.compress > 1 and not emitlinedirective:
                 newlinesneeded = toks[0].lineno - lastlineno - 1
-                if newlinesneeded > 6 and self.line_directive is not None:
+                if (newlinesneeded > 6 or newlinesneeded < 0) and self.line_directive is not None:
                     emitlinedirective = True
                 else:
                     while newlinesneeded > 0:
@@ -1389,10 +1439,40 @@ class Preprocessor(PreprocessorHooks):
                     lastlineno += tok.value.count('\n')
             blanklines = 0
             #print toks[0].lineno, 
+            prevtok = None
             for tok in toks:
                 #print tok.value,
+                # (cc816) two tokens a macro put side by side that would read as one
+                # ('+' '+' from A ## B+ with B empty is not '++'): a space between them
+                if prevtok is not None and tok.value and prevtok.value and \
+                        tok.type not in self.t_WS and prevtok.type not in self.t_WS and \
+                        not _adjacent(prevtok, tok) and _would_paste(prevtok.value, tok.value):
+                    oh.write(' ')
                 oh.write(tok.value)
+                prevtok = tok
             #print ''
+
+_PUNCT = ('<<=', '>>=', '...', '++', '--', '+=', '-=', '->', '<<', '>>', '<=', '>=', '==',
+          '!=', '&&', '||', '&=', '|=', '^=', '*=', '/=', '%=', '##', '//', '/*')
+
+
+def _adjacent(a, b):
+    """a and b were side by side in the source (not put so by a macro)"""
+    pa, pb = getattr(a, 'lexpos', None), getattr(b, 'lexpos', None)
+    return pa is not None and pb is not None and pa + len(a.value) == pb and \
+        getattr(a, 'source', None) == getattr(b, 'source', None) and a.lineno == b.lineno
+
+
+def _would_paste(a, b):
+    """the end of a and the start of b would be read as one token"""
+    if (a[-1].isalnum() or a[-1] == '_') and (b[0].isalnum() or b[0] == '_'):
+        return True
+    for p in _PUNCT:
+        for k in range(1, len(p)):
+            if a.endswith(p[:k]) and b.startswith(p[k:]):
+                return True
+    return False
+
 
 if __name__ == "__main__":
     import doctest

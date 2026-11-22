@@ -331,12 +331,12 @@ def hcc_messages(only, models):
     for m in [m for m in ("cc816", "large") if m in models]:
         # a compile error: file:line
         rc, out = hcc(os.path.join(b, "BAD.PRG"), [bad], m)
-        ok = rc != 0 and re.search(r"bad\.c:3: error", out) is not None
+        ok = rc != 0 and re.search(r"bad\.c:3(:\d+)?: error", out) is not None
         report("hcc", m, ok, "compile error reported as bad.c:3" if ok else out.strip()[:200])
         # too big for the code bank
         rc, out = hcc(os.path.join(b, "BIG.PRG"), [big], m)
         ok = rc != 0 and "does not fit in its code bank" in out
-        report("hcc", m, ok, "too big: " + (grab(out, r"= [\d,]+ bytes; a code bank holds [\d,]+")
+        report("hcc", m, ok, "too big: " + (grab(out, r"by [\d,]+ bytes|= [\d,]+ bytes; a code bank holds [\d,]+")
                                             or out.strip()[:200]))
         # an undefined function: said in C terms
         rc, out = hcc(os.path.join(b, "UNDEF.PRG"), [undef], m)
@@ -366,14 +366,14 @@ def hcc_messages(only, models):
         ok1 = rc != 0 and "--model tiny is for vbcc" in out
         ll = W("ll.c", "int main(void)\n{\n    long long x = 1;\n    return (int)x;\n}\n")
         rc, out = hcc(os.path.join(b, "LL.PRG"), [ll], "cc816")
-        ok2 = rc != 0 and re.search(r"ll\.c:3: error: long long is not supported", out) is not None
+        ok2 = rc != 0 and re.search(r"ll\.c:3(:\d+)?: error: cc816 does not support long long", out) is not None
         fl = W("fl.c", "int main(void)\n{\n    float f = 2;\n    return (int)f;\n}\n")
         rc, out3 = hcc(os.path.join(b, "FL.PRG"), [fl], "cc816", ["--float"])
         ok3 = rc == 0
         fs = W("fs.c", "int main(void)\n{\n    float f = 2;\n    switch (f) { default: ; }\n"
                "    return 0;\n}\n")
         rc, out4 = hcc(os.path.join(b, "FS.PRG"), [fs], "cc816")
-        ok4 = rc != 0 and re.search(r"fs\.c:4: error: switch on a value that is not an integer",
+        ok4 = rc != 0 and re.search(r"fs\.c:4(:\d+)?: error: switch on a value that is not an integer",
                                     out4) is not None
         report("hcc", "cc816", ok1 and ok2 and ok3 and ok4, "--model and long long refused "
                "with file:line, float built, a float switch refused" if ok1 and ok2 and ok3

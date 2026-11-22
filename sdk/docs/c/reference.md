@@ -129,7 +129,7 @@ programs are smaller (16-bit pointers), but all data must fit in 28 KB.
 
 | Type | Size | Range / note |
 | --- | --- | --- |
-| `char` | 8 bits | **unsigned** (0-255; both compilers, the library is built so); `signed char` for -128-127 |
+| `char` | 8 bits | **unsigned** (0-255; both compilers, the library is built so); `signed char` for -128-127; cc816's `-fsigned-char` makes plain `char` signed |
 | `short`, `int` | 16 bits | -32,768-32,767 (`unsigned`: 0-65,535) |
 | `long` | 32 bits | |
 | `long long` | - | not supported (neither compiler) |
@@ -606,17 +606,152 @@ Tiny-model data addresses (the window) are the same in every task and need nothi
 
 ### cc816
 
-cc816 is new. Its regression set (`make -C sdk/c/cc816 check`) runs, in the emulator,
-one small program for each fault found so far (`cc816/tests/regress/`), random programs
-checked against gcc's results (`cc816/tests/fuzz/genfuzz.py`: arithmetic of every width,
-casts, compares, shifts, division, arrays, structures and their copies, structures by
-value, bit-fields, function pointers, variable arguments, far pointers, switches, loops
-that spill registers; and floating-point programs, `--features basic,float`: float and
-double arithmetic, compares, conversions both ways, `++`, compound assignments, float
-arrays, structures, globals, pointers, parameters, results, variadic doubles, sprintf
-`%f %e %g`, checked bit for bit against gcc's SSE single precision), and the c-testsuite
-when `CTS=` points at a checkout. The faults found while it became the SDK's compiler,
-all fixed in the compiler:
+cc816 is the SDK's own compiler. It reads C99 and most of C11, and some GNU C. This part
+says what it takes, what it does not, how it reports problems, and which faults were
+found and fixed.
+
+#### What cc816 compiles
+
+- C99: `//` comments, declarations anywhere, `for (int i = ...)`, `_Bool` and
+  `<stdbool.h>`, `inline`, `restrict`, designated initialisers (`.a.b = 1`, `[3] = x`, the
+  values after a designator go on from there), compound literals (also at file scope),
+  flexible array members, variadic macros, `__func__`, `static` and qualifiers in array
+  parameters (`int a[static 3]`), hexadecimal floating constants, `long` (32 bits).
+- C11: `_Static_assert`, `_Generic`, `_Alignof` (always 1), anonymous structures and
+  unions, `_Noreturn`, `u"..."`, `U"..."`, `u8"..."`.
+- Old C: K&R function definitions (`int f(a, b) int a; char *b; { ... }`), functions
+  without a prototype, tentative definitions (`int x; int x = 5;`).
+- GNU C: statement expressions (`({ int t = f(); t * 2; })`), `typeof`, a cast as an
+  lvalue, `case` and labels anywhere in a switch (Duff's device), `__attribute__` (read
+  and ignored), `#pragma push_macro` / `pop_macro`.
+- The preprocessor: `#if` with C's arithmetic (32 bits and more, `/` and `%` round toward
+  zero), `defined`, `__has_include`, `#pragma once`, `#line`, `#error`, `#warning`,
+  `__FILE__`, `__LINE__`, `__DATE__`, `__TIME__`, `#` and `##` (also with empty
+  arguments), `__VA_ARGS__`.
+- Wide characters: `wchar_t` is 16 bits (`unsigned int`), `L"..."` and `L'x'` are read
+  from a UTF-8 source (a character of Unicode's first plane each), `\u` and `\U` escapes;
+  `<wchar.h>` has the string and memory functions (`wcslen`, `wcscpy`, `wcscmp`, `wmemcpy`,
+  ...), no locales and no wide input or output.
+- Enumerations: an enumerator may be negative or above 32767; one above 32767 is an
+  `unsigned int`, one above 65535 a `long` (C wants an `int`: gcc does the same).
+- Bit-fields: `signed` and `unsigned`, of `char`, `int` or `long` (an `int` field is at
+  most 16 bits, a `long` one 32), packed into units of their type's size; a field that
+  does not fit in the unit starts a new one; `: 0` ends the unit.
+- Structures and unions by value: passed, returned, assigned, nested.
+- `offsetof` is a constant (array sizes, `case`, enumerators, static initialisers).
+
+#### What cc816 does not support
+
+Each of these is an error that starts with "cc816 does not support". What to do instead:
+
+| Not supported | Do this instead |
+| --- | --- |
+| `long long`, `int64_t`, `uint64_t`, an `LL` constant | `long` (32 bits), or a pair of `long`s. Constant expressions with `long long` (in `sizeof`, in casts the compiler works out itself) are accepted |
+| a 64-bit `double` | none: `double` is the same 32-bit format as `float` ("Floating point") |
+| variable-length arrays (`int a[n];`) | a constant size, or `malloc` |
+| inline assembly (`asm`, `__asm__`) | a `.s` file in ca65 syntax, called as a function ("Calling convention") |
+| `setjmp` / `longjmp` (`setjmp.h` is an `#error`) | `hcc --cc vbcc`, or error codes returned up the calls |
+| `_Complex` | a structure of two `float`s |
+| an `int` bit-field wider than 16 bits | declare it `long` or `unsigned long` (up to 32 bits) |
+| GNU ranges (`case 1 ... 5:`, `[0 ... 9] = x`) | one `case` a value; a loop to fill the array |
+| labels as values (`&&label`, `goto *p`) | a `switch` on a state number |
+| nested functions (a function defined inside another) | a function at file scope, its data passed by pointer |
+| GCC built-ins (`__builtin_popcount`, ...) | the C library, or a few lines of C |
+| `#include_next` | `#include` with the path |
+| an object of 65,536 bytes or more | a bank of its own: `hz_far_alloc` and a `__far` pointer |
+
+#### Errors and warnings
+
+Every message has the form gcc uses, with the file and line of the user's source (an
+included header's own name and line; `#line` is followed):
+
+```
+game.c:42:13: error: 'score' undeclared (first use in this function)
+game.c:57:9: warning: printf: '%d' takes an int (16 bits in cc816; use %ld for a long), but argument 2 is long [-Wformat]
+```
+
+The third number is the column. cc816 goes on after an error, so one run reports the
+errors of the whole file (every statement is checked; a name that is not declared is
+reported once a function; after a syntax error it stops, because the parser cannot go
+on). It then stops without an output file and hcc exits with 1. Warnings do not stop the
+build. A syntax error names what the parser expected where it can: `expected ';' before
+'return'`, `unknown type name 'uint8_t'`.
+
+An internal compiler error (a fault of cc816, not of the program) is one line:
+`file.c: internal compiler error: ... (in function f) (please report; CC816_TRACE=1
+shows where)`. `CC816_TRACE=1 hcc ...` (or `cc816.py --trace`) shows the Python
+traceback.
+
+The warnings, on by default unless marked -Wall. The name in brackets after each
+message turns it off: `-Wno-format`.
+
+| Name | What |
+| --- | --- |
+| `implicit-function-declaration` | a call of a function that is not declared (its result is taken as an `int`): include its header |
+| `int-conversion` | a pointer from an integer or an integer from a pointer without a cast (0 is allowed: it is the null pointer); a pointer compared with an integer |
+| `incompatible-pointer-types` | a pointer given to one of another type (`long *` from `int *`); pointers of different types compared |
+| `discarded-qualifiers` | a `const char *` given to a `char *` |
+| `far-pointer` | a `__far` pointer given to a near one: only the offset is kept |
+| `type-limits` | a comparison whose result the type decides: `c == EOF` with a `char` (plain `char` is unsigned), `x > 40000` with an `int` |
+| `return-type` | the end of a non-void function can be reached; `return;` in a non-void function; `return x;` in a void one |
+| `overflow` | a constant that a conversion changes (`int x = 40000;`, `unsigned char c = 300;`); a constant expression that overflows its type (`320 * 200` in a 16-bit `int`); a `case` value the switch's type cannot hold |
+| `shift-count-overflow` | a shift by the type's width or more, or by a negative count |
+| `div-by-zero` | a division by a constant 0 |
+| `format` | `printf`, `fprintf`, `sprintf`, `snprintf`, `scanf`, `fscanf`, `sscanf` with a constant format: each conversion against its argument's size and kind, too few or too many arguments, `scanf` without `&` |
+| `excess-initializers` | more values than the array or structure has places; a string longer than its array |
+| `cpp` | `#warning` |
+| `extern-initializer` | `extern int x = 1;` (it defines x) |
+| `multichar` | a character constant of three or more characters |
+| `unused-variable` (-Wall) | a local or static variable that is never used |
+| `unused-label` (-Wall) | a label no `goto` uses |
+| `parentheses` (-Wall) | `if (a = b)`: an assignment as a condition |
+| `tautological-compare` (-Wall) | a comparison always true at the type's edges: `u >= 0` with an unsigned `u`, `x <= 32767` with an `int` |
+| `far-cast` (-Wall) | a cast of a `__far` pointer to a near one (only the offset is kept) |
+
+The link's errors are said in C's words too: `undefined: fire_laser (used in
+game.c)` for a function or a variable no file defines, and for a program too big for
+its code bank, by how many bytes, with the sizes of the code and constants, the data and
+the bss, which of them is the biggest, and what the software stack takes (it is part of
+the same 64 KB, so a program that does not fit can also give the stack less: `--stack N`).
+
+#### Options
+
+hcc passes these to cc816 (`cc816.py`, the compiler alone, takes the same):
+
+| Option | What |
+| --- | --- |
+| `-D NAME[=VALUE]`, `-U NAME` | define or undefine a macro, in the order given |
+| `-I DIR` | look for `#include` files in DIR too |
+| `-include FILE` | include FILE before the source |
+| `-O0`, `-O1`, `-O2` | optimisation (`-O2` the default; `-O3` and `-Os` are `-O2`) |
+| `-w` | no warnings |
+| `-Wall` | the -Wall warnings too |
+| `-Werror` | warnings are errors (the build stops) |
+| `-Wno-NAME`, `-WNAME` | one warning off or on (the names above) |
+| `-fsigned-char` | plain `char` is signed (-128 to 127): `CHAR_MIN` is -128, `__CHAR_UNSIGNED__` is not defined. The SDK's library is built with unsigned `char` and takes characters as `int`, so it works with both |
+| `-E` (`cc816.py` only) | preprocess only |
+
+#### How it is tested
+
+Its regression set (`make -C sdk/c/cc816 check`) has five parts. `tests/diag/` (99
+files, no emulator; `make -C sdk/c/cc816 diag` runs it alone): each file says the errors
+and warnings it must give, and nothing else may be said; a Python traceback fails the
+test. Then 400 test programs, each with one random change (a token taken out, doubled
+or replaced), must all give messages or compile, never an internal compiler error. `tests/regress/`: one small program
+for each fault found, run in the emulator. `tests/lang/` (25 programs): one for each part
+of C listed above. Random programs checked against gcc's results
+(`cc816/tests/fuzz/genfuzz.py`: arithmetic of every width, casts, compares, shifts,
+division, arrays, structures and their copies, structures by value, bit-fields, function
+pointers, variable arguments, far pointers, switches, loops that spill registers,
+designated initialisers and compound literals, unions read through other members,
+anonymous unions, `goto` state machines and Duff's device, enumerations, `_Bool`, the
+comma operator, statement expressions; and floating-point programs, `--features
+basic,float`: float and double arithmetic, compares, conversions both ways, `++`, compound
+assignments, float arrays, structures, globals, pointers, parameters, results, variadic
+doubles, sprintf `%f %e %g`, checked bit for bit against gcc's SSE single precision). And
+the c-testsuite when `CTS=` points at a checkout.
+
+#### Faults found and fixed
 
 1. **Branch relaxation stopped after 20 branches**: a switch with about 30 cases made code
    ca65 refused (a branch out of range). Every branch out of reach is now relaxed, pass
@@ -634,7 +769,6 @@ all fixed in the compiler:
 6. **A structure copy through `__far` pointers** (`p[1] = p[0]`, a far structure passed
    or returned by value) moved the bytes inside the code bank: the block move now takes
    both pointers' banks (`r007_far_struct_copy.c`).
-
 7. **A 16-bit value given to a 32-bit variable without a cast** (`long x = -1;`, `long y
    = i;`, `y = i;`) was not sign-extended: -1 became 65,535. The random programs always
    cast, so they never met it; adding floating point did (`float x = 3;` took the same
@@ -644,28 +778,61 @@ all fixed in the compiler:
 9. **`int e = 97.0;`** gave 0: a mistake of the fix for bug 7 (the float's bits were cut to
    16 bits before the conversion). Found by the c-testsuite (00175.c;
    `r010_float_init_conv.c`).
+10. **A far pointer plus an unsigned variable of 32,768 or more** (`p + u`, `p - u`) was
+    sign-extended, as bug 3 was for constants (`r012_far_unsigned_index.c`).
+11. **The branch of an `if` with a constant condition was left out even with a label or
+    a `case` in it**: a `goto` into `if (0) { ... }` was refused, and a `case` inside an
+    `if (0)` in a switch was lost (the switch took the default). Found by the c-testsuite
+    (00213.c; `r013_dead_branch_labels.c`).
+12. **A tentative definition's size**: `int a[];` then `int a[10];` kept one element, and
+    a variable of a structure defined later in the file got 0 bytes; the zeroed variables
+    after them were written over (`r014_tentative_size.c`).
+13. **The preprocessor**: `#if` worked out `-7 / 2` and `-7 % 3` as Python does (-4 and
+    2, not -3 and -1); `A ## B` with B empty pasted A to the next token; two tokens a macro
+    put side by side were read as one (`a-X` with X defined as -1 became `a--1`); `#line`
+    was ignored. Found by the c-testsuite (00202.c, 00152.c; `r015_pp_div_paste.c`).
+14. **An enumerator of 32,768 or more was an `int`**: 40000 became -25536 when widened to
+    a `long`, 100000 lost its high word (`r016_enum_wide.c`).
+15. **`++` of a `_Bool` made it 2** (`r017_bool_incdec.c`).
+16. **After a designator into a member** (`.b.x = 3, 4`) the next values went to the
+    outer structure's next member, not on inside b; `[1] = 7, 8` of an array of
+    structures was refused (`r018_designator_continue.c`).
+17. **An initialiser given twice for one member**: a later brace list did not clear the
+    rest of the member (`.a = {1, 2}, .a = {3}` left a[1] at 2), and a later 0 was
+    skipped in a local (`.x = 5, .x = 0` left 5). Found by the random programs once they
+    learnt designators (`r019_init_override.c`).
+18. **A pointer variable holding a constant address** (`p = (char *)0x100; *p`): the
+    optimiser put the constant into the access and the code generator stopped with an
+    internal error. Found by compiling changed (broken) test programs, the robustness
+    part of `tests/diag.py` (`r020_const_pointer.c`).
 
 Bugs 4-6 were found by the random programs once they learnt structures, bit-fields and
-far pointers. `r003_nearfar.c` and `r004_coalesce32.c` guard two changes made on the way
-(near pointers widened to far ones; 32-bit results sharing their operand's registers).
-While floating point was added, its own tests found more, fixed before they reached a
-program. In math.h: `pow` as ported from fdlibm's single-precision code lost up to 100 ulp
-near x = 1 (the 13-bit head of 2/(3 ln 2) made a product inexact; it has 12 bits now) and
-gave infinity or 0 for every |y| > 2^27 when x was more than 8 ulp from 1 (now only when
-the result overflows); `floor`, `ceil`, `trunc`, `round`, `rint` and `frexp` of infinity
-gave NaN; `cbrt(FLT_MAX)` and `log1p(FLT_MAX)` overflowed inside; `cosh` of a tiny argument
+far pointers; 10-16 by the programs of `tests/lang/` and the c-testsuite; 17 by the
+random programs, 18 by the robustness check.
+`r003_nearfar.c` and `r004_coalesce32.c` guard two changes made on the way (near pointers
+widened to far ones; 32-bit results sharing their operand's registers). While floating
+point was added, its own tests found more, fixed before they reached a program. In
+math.h: `pow` as ported from fdlibm's single-precision code lost up to 100 ulp near x = 1
+(the 13-bit head of 2/(3 ln 2) made a product inexact; it has 12 bits now) and gave
+infinity or 0 for every |y| > 2^27 when x was more than 8 ulp from 1 (now only when the
+result overflows); `floor`, `ceil`, `trunc`, `round`, `rint` and `frexp` of infinity gave
+NaN; `cbrt(FLT_MAX)` and `log1p(FLT_MAX)` overflowed inside; `cosh` of a tiny argument
 and `sinh`'s overflow were wrong. In the code generator: the peephole pass dropped the
 high word of a register whose address goes to a float helper, and address 0 (`__rg+0`)
 was taken for "no destination".
 
-The c-testsuite (single-exec, 220 programs): 195 pass. Of the others, 10 need `long
-long`, a variable-length array or a GNU statement expression; 7 meet gaps of the front
-end (pycparser and pcpp: a structure and a label of the same name, empty macro
-arguments, `#line`, `wchar.h`, one more parse) or `int64_t`; 8 are listed in
-`cc816/tests/cts-known.txt` (two expect a 32-bit `int`, three a 64-bit `double`, two
-compiler extensions, and an 8-queens search too slow for the test's time, with vbcc too).
-The random programs: seeds 1, 2 and 3 (1,200 programs, and 600 floating-point ones) all
-agree with gcc.
+Gaps of the front end closed at the same time (refused before, compiled now): statement
+expressions, wide strings and characters, `offsetof` in constant expressions, a label
+with the name of a typedef (c-testsuite 00129.c, a fix of the vendored pycparser),
+`#pragma push_macro` / `pop_macro` (00206.c), `__has_include`, `-U`, `-include` and
+`-fsigned-char`.
+
+The c-testsuite (single-exec, 220 programs): 201 pass. Each of the other 19 is listed in
+`cc816/tests/cts-known.txt` with its reason: 10 need `long long` (or `int64_t`), 1 a
+variable-length array, 1 GNU range designators, 2 a 32-bit `int`, 3 a 64-bit `double`
+(one of them also a 32-bit `int`), 1 one of the `__LP64__` / `__ILP32__` macros, and an
+8-queens search too slow for the test's time (with vbcc too). The random programs of
+seeds 1, 2 and 3 (1,200 programs, and 600 floating-point ones) all agree with gcc.
 
 ### vbcc
 
