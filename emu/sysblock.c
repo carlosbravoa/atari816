@@ -183,5 +183,8 @@ void sound_write(uint32_t a, uint8_t v)
     if (!(s->sv_ctrl & 0x04)) { s->snd_ignored++; return; }   /* only while FREEZE_REQ */
     s->snd[i] = v;
     s->snd_writes++;
-    if (s->snd_log & 1) fprintf(stderr, "sound $%04X = $%02X\n", 0xDB00 + i, v);
+    if (s->snd_log & 32)                                /* --log-sound-us: with the emulated time */
+        fprintf(stderr, "sound %llu $%04X = $%02X\n", (unsigned long long)(M.cpu.cycles * 1e6 / CPU_HZ),
+                0xDB00 + i, v);
+    else if (s->snd_log & 1) fprintf(stderr, "sound $%04X = $%02X\n", 0xDB00 + i, v);
 }

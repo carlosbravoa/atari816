@@ -40,7 +40,10 @@ Options:
                   with command lists, Lau, sprites, fine scrolling); 10 no sprites or
                   scrolling, 9 no Lau, 8 no command lists / raster / NV_FRAME, 7 no blitter
   --log-sound     log every write to POKEY 2 / the DACs in emu.err
+  --log-sound-us  the same with the emulated time in microseconds ("sound US $DBxx = $yy")
   --log-lau       log every write to Lau, the sample player, in emu.err ("lau $DBxx = $yy")
+  --kbd-release MS  release the keys held when no key changed for MS ms: the board's
+                  firmware before 2026-11 did so after 1000 ms (a held key went up)
   --wav FILE      (Horizon 0.26) record Lau's output (48 kHz stereo WAV): listen on the PC;
                   (0.27) with the OPL2's, mixed as on the board (no POKEY)
   --net           (Horizon 0.22) the internet through an emulated PC link: tcp:// URLs
@@ -101,7 +104,7 @@ def main():
             return a[i + 1]
         if w in ('--horizon', '--emu', '--dest', '--args', '--script', '--seconds', '--out',
                  '--rev', '--mode', '--net-root', '--wav', '--cd', '--prof', '--prof-from',
-                 '--prof-to'):
+                 '--prof-to', '--kbd-release'):
             opt[w[2:]] = val(); i += 2
         elif w == '--shot':
             opt['shots'].append(float(val())); i += 2
@@ -109,7 +112,7 @@ def main():
             opt['files'].append(val()); i += 2
         elif w == '--expect':
             opt['expect'].append(val()); i += 2
-        elif w in ('--log-sound', '--log-lau', '--window', '--net'):
+        elif w in ('--log-sound', '--log-sound-us', '--log-lau', '--window', '--net'):
             opt[w[2:]] = True; i += 1
         elif w.startswith('--'):
             die(f'unknown option {w}')
@@ -206,6 +209,10 @@ def main():
         cmdl += ['--rev', opt['rev']]
     if opt.get('log-sound'):
         cmdl.append('--log-sound')
+    if opt.get('log-sound-us'):
+        cmdl.append('--log-sound-us')
+    if opt.get('kbd-release'):
+        cmdl += ['--kbd-release', opt['kbd-release']]
     if opt.get('log-lau'):
         cmdl.append('--log-lau')
     if opt.get('wav'):

@@ -6,8 +6,8 @@
  * soundint() 72.8 times a second. newsnd.c turns that into samples (soundgen.c); here each
  * timer is one of hgame's 16-bit POKEY voices (hg_note: channels joined in pairs at
  * 1.79 MHz), a square wave like the speaker's at the very same pitch: voice 0 the effects
- * (timer 2), voice 1 the music (timer 0, its pulse width as the volume). soundint() is
- * called from the frame loop (hzs_tick) as often as 72.8 Hz makes due. */
+ * (timer 2), voice 1 the music (timer 0, its pulse width as the volume). soundint() runs at
+ * its 72.8 Hz by the music timer's clock (hz_timer.c), whatever the game is doing. */
 #include <hgame.h>
 #include "def.h"
 #include "device.h"
@@ -128,35 +128,6 @@ void pausesounddevice(bool p)
 {
     paused = p;
     update();
-}
-
-/* the sound's interrupt, 72.8 a second (upstream: every samprate / 72.8 samples) */
-static unsigned long due_us;
-static unsigned lastf;
-static bool started;
-
-void hzs_reset_clock(void)
-{
-    started = false;
-}
-
-void hzs_tick(void)
-{
-    unsigned f = hz_frame(), n = 0;
-    if (!started) {
-        started = true;
-        lastf = f;
-        due_us = 0;
-    }
-    due_us += (unsigned long)(unsigned)(f - lastf) * 16658UL;   /* 60.03 frames a second */
-    lastf = f;
-    while (due_us >= 13736UL && n < 4) {        /* 1 / 72.8 s */
-        due_us -= 13736UL;
-        ++n;
-        soundint();
-    }
-    if (due_us >= 13736UL)
-        due_us = 0;
 }
 
 /* upstream's "no sound card" stubs (hardware.h) */

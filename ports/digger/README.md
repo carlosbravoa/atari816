@@ -65,7 +65,8 @@ the resolution. Horizon's modes are 320 x 180 and 640 x 360 (shown 4 x 4 or 2 x 
 - **The score line stays, the playfield follows the digger.** The framebuffer has the
   whole 640 x 400 picture (hgame's `hg_screen_fb`); a split in the display (`hg_split`)
   keeps rows 0-27 (the score and lives line) fixed at the top, and below it shows 332 of
-  the playfield's 372 rows, scrolling smoothly (3 rows a sixtieth) to keep the digger in
+  the playfield's 372 rows, gliding every sixtieth of a second (1-2 rows a vertical blank,
+  whatever the game is doing in its 80 ms frame) to keep the digger in
   the middle: the 10 rows of the maze are all reachable, 2 rows' worth (40 lines) are out
   of sight at a time. With two diggers it follows the middle between them.
 - **The title screen** shows its top 360 rows for 6 seconds, then glides down to show the
@@ -83,24 +84,32 @@ Here each timer is one of POKEY's two 16-bit voices (two channels joined, clocke
 pitch. The music's loudness envelope is the voice's volume. As on the PC one of the two sounds
 at a time (upstream's speaker switching is kept: an effect silences the music while it
 plays). The level-end jingle's beating is played as its plain notes. (The emulator does not play POKEY: it logs the writes,
-`--log-sound`; the board plays them.)
+`--log-sound`, `--log-sound-us` with their times; the board plays them.)
+
+The speaker's steps come 72.8 times a second, as the original's timer interrupt made them,
+also while the game is busy drawing: the program keeps time by Horizon's music timer
+(`sample_timer`, a message every 3.4 ms) and looks at it every few milliseconds of its work
+(PORTING-NOTES.md, "The board's report"). It needs a board with Lau (REV $0A or later);
+without it the steps go by the vertical blanks, as before.
 
 ## Speed
 
 The game runs at the original's 12.5 frames a second (upstream's default frame time,
-80 ms; frames come 5, 5, 5, 5, 4 vertical blanks apart). Measured in the emulator (which
-models the board's timing within a few per cent):
+80 ms), each frame starting within 3.4 ms of its beat (the music timer's clock:
+`horizon/hz_timer.c`); the picture changes at vertical blanks, 5, 5, 5, 5, 4 apart.
+Measured in the emulator (which models the board's timing within a few per cent):
 
-- the scripted game (`make test`): 798 game frames, 11 of them later than their time (the
-  level start, the deaths), 8 ms of CPU a frame of 80 on average;
+- the scripted game (`make test`): 811 frames counted, 8 later than their time (the title
+  drawn, the level's start, the game over: none in play);
 - upstream's recorded `thevoids.drf` played back at the game's pace (9 levels, 41,561
-  frames): 3,358 s against 3,325 s at exactly 80 ms a frame (1.0 % slower in all, level
-  drawing included); 95 frames late (0.2 %), in short runs where many sprites overlap
-  (upstream's software sprites redraw every overlapping one: up to 133 ms a frame here);
-- at full speed (`/S:0`) a frame takes 20-31 ms on average, level drawing included.
+  frames): 3,365 s against 3,325 s at exactly 80 ms a frame (1.2 % slower in all, level
+  drawing included); 298 frames late (0.7 %), in short runs where many sprites overlap
+  (upstream's software sprites redraw every overlapping one);
+- a key reaches the screen in 65 ms on average, 116 at most (it is read at every vertical
+  blank; the game reads its direction at the start of its frame);
+- at full speed (`/S:0`) a frame takes 20-45 ms on average, level drawing included.
 
-(Before the faster blits and compiler of PORTING-NOTES.md, "Speed": 21 late frames and
-12 ms a frame in the scripted game; 425 late, up to 166 ms, in `thevoids.drf`.)
+PORTING-NOTES.md ("Speed", "The board's report") has the figures before and after.
 
 ## What differs from the original
 

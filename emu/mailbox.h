@@ -64,6 +64,7 @@ extern double mailbox_pc_back;          /* --pc-back-at: emulated second it come
 /* --card-kbps R:W, --pc-kbps R:W: slow transfers (KB/s for READ / LOAD and WRITE; 0 = instant).
  * Given (either rate not 0): every request on that volume also costs a fixed time */
 extern double mailbox_card_kbps[2], mailbox_pc_kbps[2];
+extern long long mailbox_card_free;     /* --card-free BYTES (-1: no limit) */
 /* (Horizon 0.23) printing: --no-pc-print (the gateway cannot make PDFs: STAT /PC: without
  * bit 4), --classic-print FILE@SECONDS (a print job of the classic Atari's printer, P:) */
 extern int     mailbox_no_pc_print;

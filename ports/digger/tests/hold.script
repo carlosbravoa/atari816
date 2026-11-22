@@ -1,0 +1,8 @@
+# hold.script - one key held 3 s (left, in the bottom tunnel at the start of level 1). On
+# the board before the 2026-11 firmware the key went up by itself after 1 s; run with
+# run816.py --kbd-release 1000 to see that (the digger stops after a third of the way).
+2500 key enter 100
+7000 key left 3000
+10500 shot
+11000 key esc 100
+12500 key esc 100

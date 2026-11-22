@@ -1,0 +1,7 @@
+# emer.script - a busy scene for the sound's timing (tests/sndtime.py): level 1, left along
+# the bottom tunnel to column 4, then up through its five emeralds while the nobbins come
+2500 key enter 100
+6500 key left 1200
+7800 key up 4500
+9000 shot
+12500 shot

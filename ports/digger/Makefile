@@ -16,7 +16,7 @@ HZ_CODE   ?= large
 SRCS      := $(wildcard src/*.c) $(wildcard horizon/*.c) horizon/hz_blit.s build/alpha_ok.c
 HCCFLAGS  += --map --stack 4096 --heap 4096 -D_HORIZON -Dmain=digger_main -I src -I horizon -fsigned-char
 SCRIPT    := tests/play.script
-RUNFLAGS  += --file DIGGER.DAT:/APPS/DIGGER.DAT --seconds 72
+RUNFLAGS  += --file DIGGER.DAT:/APPS/DIGGER.DAT --seconds 74
 TESTFLAGS := --log-sound --expect 'digger: paced frames'
 TESTCHECK := sh tests/check.sh $(HORIZON)
 include $(SDK)/c/c.mk

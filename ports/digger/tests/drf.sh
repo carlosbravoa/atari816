@@ -18,7 +18,7 @@ wait
 for n in $names; do
   got=$(grep -a '^score=' build/drf/$n/console.txt | tr -d '\r')
   want=$(cat tests/drf/$n.drf.out)
-  t=$(grep -a '^digger: ' build/drf/$n/console.txt | tr -d '\r')
+  t=$(grep -a '^digger: [0-9]* game frames' build/drf/$n/console.txt | tr -d '\r')
   if [ "$got" = "$want" ]; then echo "PASS  $n: $got ($t)"; else echo "FAIL  $n: got '$got', upstream '$want'"; fail=1; fi
 done
 exit $fail

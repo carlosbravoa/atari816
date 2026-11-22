@@ -21,18 +21,33 @@ static unsigned long t0;
 int digger_main(int argc, char *argv[]);
 uint32_t getframe(void);
 
-/* at the end: how long the run took (the recorded games' tests: their speed) */
-extern unsigned long hzt_frames, hzt_late, hzt_busy_us, hzt_maxbusy_us;
+/* at the end: how long the run took (the recorded games' tests: their speed), and the
+ * timing statistics (hz_timer.c) */
+static unsigned long avg(unsigned long sum, unsigned long n)
+{
+    return n ? sum / n : 0;
+}
 
 static void report(void)
 {
+    struct hzt_stats *s = &hzt_st;
     unsigned long ms = (unsigned long)hz_uptime() - t0;
     printf("digger: %lu game frames in %lu.%02lu s\n", (unsigned long)getframe(), ms / 1000,
            ms % 1000 / 10);
-    if (hzt_frames)
-        printf("digger: paced frames %lu, late %lu, busy %lu ms a frame (most %lu)\n",
-               hzt_frames, hzt_late, hzt_busy_us / hzt_frames / 1000,
-               hzt_maxbusy_us / 1000);
+    if (!s->frames)
+        return;
+    printf("digger: paced frames %lu, late %lu, busy %lu ms a frame (most %lu)\n",
+           s->frames, s->late, avg(s->busy_us, s->frames) / 1000, s->busy_max / 1000);
+    printf("digger: beat: frame starts off 80 ms by %lu us on average (most %lu; %lu "
+           "starts after a pause or a level drawn)\n", avg(s->beat_us, s->beat_n), s->beat_max,
+           s->beat_far);
+    printf("digger: sound: %lu steps, %lu us late on average (most %lu)\n", s->snd_n,
+           avg(s->snd_late_us, s->snd_n), s->snd_late_max);
+    printf("digger: view: off target at %lu blanks, moved at %lu\n", s->view_need,
+           s->view_moves);
+    printf("digger: keys: %lu, to their frame %lu ms, to the screen %lu ms (most %lu)\n",
+           s->key_n, avg(s->key_frame_us, s->key_n) / 1000, avg(s->key_show_us, s->key_n) / 1000,
+           s->key_show_max / 1000);
 }
 
 int main(int argc, char *argv[])

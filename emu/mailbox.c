@@ -681,7 +681,10 @@ static void serve(Mailbox *m, uint8_t *msg)
         if (pc_dead(m, arg0)) { res = MB_PC_LOST; break; }
         if (!(m->fmode[arg0] & (msg[0] == 0x04 ? 2 : 1))) { res = FR_DENIED; break; }
         fseek(f, 0, SEEK_CUR);                           /* allow switching read/write */
+        if (msg[0] == 0x04 && !m->fpc[arg0] && mailbox_card_free >= 0 && len > mailbox_card_free)
+            len = (uint32_t)mailbox_card_free;           /* --card-free: a full card writes short */
         val = xfer(f, buf, len, msg[0] == 0x04, &res);
+        if (msg[0] == 0x04 && !m->fpc[arg0] && mailbox_card_free >= 0) mailbox_card_free -= val;
         if (msg[0] == 0x04 && val) m->fdirty[arg0] = 1;
         break;
     case 0x05:                                           /* SEEK */
@@ -783,6 +786,7 @@ static void serve(Mailbox *m, uint8_t *msg)
         if (is_prn(path)) { res = MB_UNSUPPORTED; break; }
         if ((res = resolve(path, host, sizeof host, &pc))) break;
         if (pc && pc_is_root(path)) { res = msg[0] == 0x08 ? FR_EXIST : FR_DENIED; break; }
+        if (msg[0] == 0x08 && !pc && mailbox_card_free == 0) { res = FR_DENIED; break; }
         if (msg[0] == 0x08) { if (mkdir(host, 0777)) res = errno_fr(errno, host); else stamp(host, pc); }
         else if (!lstat(host, &st) && S_ISDIR(st.st_mode)) { if (rmdir(host)) res = errno_fr(errno, host); }
         else if (unlink(host)) res = errno_fr(errno, host);
@@ -1064,6 +1068,10 @@ static int key_event(Mailbox *m)
  * READ, WRITE and LOAD: a fixed cost per request + the bytes / the rate; the other file ops
  * the fixed cost. Only for a volume whose option was given. */
 double mailbox_card_kbps[2], mailbox_pc_kbps[2];
+/* --card-free BYTES: the card's free space for the run's writes (-1: no limit). When it is
+ * used up, a WRITE writes what still fits and answers that count, as FatFs does on a full
+ * volume (FR_OK, fewer bytes); MKDIR answers FR_DENIED, as FatFs does with no free cluster */
+long long mailbox_card_free = -1;
 #define CARD_REQ_MS 1.0
 #define PC_REQ_MS   6.0
 

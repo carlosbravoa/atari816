@@ -183,14 +183,17 @@ void vgaputi(int16_t x, int16_t y, uint8_t __far *p, int16_t w, int16_t h)
 {
     if (OK(x, y)) {
         hzb_put((unsigned)x, (unsigned)y * 2, p, (unsigned)w * 4, (unsigned)h * 2);
+        hzt_work((unsigned)w * (unsigned)h * 8);
         mark((unsigned)x, (unsigned)y * 2, (unsigned)w * 4, (unsigned)h * 2);
     }
 }
 
 void vgageti(int16_t x, int16_t y, uint8_t __far *p, int16_t w, int16_t h)
 {
-    if (OK(x, y))
+    if (OK(x, y)) {
         hzb_get((unsigned)x, (unsigned)y * 2, p, (unsigned)w * 4, (unsigned)h * 2);
+        hzt_work((unsigned)w * (unsigned)h * 8);
+    }
 }
 
 void vgaputim(int16_t x, int16_t y, int16_t ch, int16_t w, int16_t h)
@@ -202,6 +205,7 @@ void vgaputim(int16_t x, int16_t y, int16_t ch, int16_t w, int16_t h)
     if (bw * rows > n)              /* (never: the data is at least as large) */
         rows = n / bw;
     hzb_putm((unsigned)x, (unsigned)y * 2, a, bw, rows);
+    hzt_work(bw * rows * 2);
     mark((unsigned)x, (unsigned)y * 2, bw, rows);
 }
 
@@ -240,6 +244,7 @@ void vgawrite(int16_t x, int16_t y, int16_t ch, int16_t c)
     a = hzd_char((unsigned)ch - 32, (unsigned)c);
     if (a) {
         hzb_copy((unsigned)x, (unsigned)y * 2, a, 12, 24);
+        hzt_work(12 * 24);
         mark((unsigned)x, (unsigned)y * 2, 12, 24);
     }
 }

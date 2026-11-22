@@ -3253,7 +3253,6 @@ static uint8_t ch_cmd = 0;
 static uint8_t ch_len = 0;
 static uint8_t ch_buf[16];
 static uint8_t ch_idx = 0;
-static uint32_t last_kbd_time = 0;
 uint8_t ch_raw[64];          // last raw bytes from the CH9350 (diagnosis, read with fwpeek)
 uint8_t ch_raw_i;
 
@@ -3308,7 +3307,6 @@ HOT_FN void ch_byte(uint8_t b) {
                         
                         kv_set0(modifier | (key1 << 8) | (key2 << 16) | (key3 << 24));
                         kv_set1((option_arrow_joystick ? 0x200 : 0x000) | key4);
-                        last_kbd_time = time_millis();
                     } else if ((ch_cmd == 0x88 || ch_cmd == 0x83) && (ch_buf[0] & 0xF0) == 0x20 && ch_len >= 5) {
                         // relative mouse report: buttons, dx, dy, wheel (57 AB 88 07 2x btn dx dy wheel serial sum)
                         in_mouse(ch_buf[1], (int8_t)ch_buf[2], (int8_t)ch_buf[3], ch_len >= 7 ? (int8_t)ch_buf[4] : 0);
@@ -3348,12 +3346,12 @@ void uart_keyboard_poll(void) {
         ch_byte(b);
     }
 
-    // Safety timeout: if no keyboard packet received for 1 second, clear keys
-    if (last_kbd_time != 0 && (time_millis() - last_kbd_time) > 1000) {
-        kv_set0(0);
-        apply_input_options();
-        last_kbd_time = 0;
-    }
+    // (No timeout on held keys.) Until 2026-11 the keys were cleared when no keyboard report
+    // had come for 1 s. But a USB keyboard sends a report only when its keys change (the
+    // CH9350 and the Pico/TinyUSB bridge set its idle rate to 0), so a key held longer than
+    // 1 s was released here while the player still held it: Horizon's key repeat stopped,
+    // and a game saw the key go up (Digger: the digger stopped). A report that is lost (a
+    // full UART FIFO) is corrected by the next one, which carries the whole state.
 }
 
 void backup_process(void) {

@@ -102,7 +102,7 @@ Consequences:
 | `simpleuart` RX samples with a half-bit-centered FSM (start→center, then 8 data LSB-first) | `simpleuart.v:66–105` | The new module mirrors this exactly so timing matches the proven receiver. |
 | CH9350 frame format | `firmware.c:1147–1207` (`uart_keyboard_poll`) | `0x57 0xAB <cmd> <len> <data[len]>` where `data[len-1]` is an 8-bit additive checksum over `data[0..len-2]`. |
 | Keyboard report extraction | `firmware.c:1192–1200` | When `(cmd==0x88 \|\| cmd==0x83)` and `data[0]==0x10`: `modifier=data[1]`, `key1=data[3]`, `key2=data[4]`, `key3=data[5]`, `key4=data[6]` (data[2] reserved). |
-| Safety timeout clears keys after 1 s of no packet | `firmware.c:1210–1215` | Replicated in hardware so a dropped "key-up" frame cannot stick a key down forever. |
+| Safety timeout clears keys after 1 s of no packet | `firmware.c:1210–1215` | Replicated in hardware so a dropped "key-up" frame cannot stick a key down forever. **Removed from the firmware in 2026-11**: a keyboard reports only when its keys change (the CH9350 sends status packets `57 AB 82` meanwhile, not key reports), so it released every key held longer than 1 s. |
 | Matrix stage `usb_to_atari800` is purely combinational | `usb_to_atari800.sv` (clk/reset_n present but unused) | So CDC into the core domain is just a 2-FF sync of the slow held bytes. |
 | Held key bytes change at human/USB-poll rate (≤1 kHz), far slower than any clock | — | Multi-bit CDC of the 5 bytes is safe with simple 2-FF synchronizers; no handshake needed. |
 | `combined_key*` merges virtual-kbd and USB-HID keys; OSD nav + `rv_joy1` derive from `combined_key*` | `tang_top.sv:441–480` | Insertion point: feed the new hardware bytes into this merge. |

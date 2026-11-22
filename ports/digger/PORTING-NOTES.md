@@ -218,6 +218,95 @@ At full speed (`/S:0`, `tests/drf.sh`) a game frame takes 20-31 ms on average wi
 level drawing and the copying to the screen after every vertical blank (30-45 ms before
 the faster blits): about three times the original's speed.
 
+## The board's report (round 2): held keys, choppy sound, the scrolling
+
+The owner played the port on the board: it worked, with sound and joystick, but (1) a
+held key stopped acting after a short time, (2) the effects were choppy while collecting
+emeralds, (3) the scrolling went in jumps.
+
+**1. Held keys: the firmware released them after 1 s.** The whole path, read: the CH9350
+(the owner's adapter) sends a keyboard report `57 AB 88 ..` only when the keys change, and
+between them status packets `57 AB 82 ..` about 30 times a second (measured in the bring-up,
+`Docs/03-bringup1-log.md`); the Pico/TinyUSB bridge forwards the keyboard's reports, which
+a USB keyboard also sends only on a change (its idle rate is 0). The I/O processor's
+firmware (`uart_keyboard_poll`, `core/firmware/firmware.c`) parses the reports into the keys
+held and sends Horizon a press / release for each change; but it also had a "safety
+timeout": **no keyboard report for 1 s, every key cleared** (a release to Horizon). A key
+held longer than a second, with no other key changing, went up by itself; Horizon's key
+repeat (from 0.4 s, every 50 ms, kernel `input.s`) stopped with it, and hgame's state, the
+game, everything above was right to take it as released. The joystick has no such path.
+The emulator's keys never went through that code (`emu/mailbox.c` models the event
+queue, not the timeout), so no test could show it.
+- **Fixed** in the firmware: the timeout is gone (a lost report is corrected by the next
+  one, which carries the whole state). Both adapters' forms are untouched. It needs a
+  firmware build (`make -C core/firmware`), a bitstream and a flash: not done here (no
+  board).
+- **The emulator reproduces the old board**: `emu816 --kbd-release MS` / `run816.py
+  --kbd-release MS` releases the held keys MS ms after the last key change, as the old
+  firmware did. `tests/hold.script` (left held 3 s in level 1's bottom tunnel): without it
+  the digger goes all the way and eats the two emeralds there (50 points); with
+  `--kbd-release 1000` it stops after a third of the way (0 points).
+- **On the board**: `tools/keyhold.c` (`hcc -o KEYHOLD.PRG tools/keyhold.c`) lists every key
+  event with its time. Hold a letter 3 s: with the old firmware "down", "rep" every 50 ms
+  from 0.4 s, then "up" about 1,000 ms after the "down" while the key is still held (the
+  emulator with `--kbd-release 1000`: down 2087, reps to 3067, up 3117); with the new one
+  the reps go on until the key is let go.
+
+**2. Choppy sound: the speaker's steps went by the vertical blanks.** The PC's sound comes
+from a 72.8 Hz timer interrupt (`soundint`, every 13.7 ms). The port ran it from the frame
+loop's waits only, by the frame counter: (a) the steps were taken at 60 Hz, so one in five
+vertical blanks ran two of them back to back and the first was heard for no time at all;
+(b) none ran while the game drew its frame (up to 100 ms), and then several at once. An
+emerald's note lasts two steps of eight: it was cut or lost. A Horizon program runs no code
+in interrupts, the uptime counts in 10 ms steps and the frame counter in 16.7 ms; but the
+music timer (`sample_timer`, the one MUSICD uses) sends a port a message every period with
+a count that follows the microsecond clock. So (`horizon/hz_timer.c`): a clock from that
+count (a period of 3,434 us, a quarter of a sound step: the steps fall exactly on it);
+while waiting the game sleeps until the next period (or the coming vertical blank when
+nothing is due before it); while working, the drawing calls look at the clock when, by the
+work done (a cost per unit learnt as it goes), the next step or blank should have come.
+Measured with the new `emu816 --log-sound-us` and `tests/sndtime.py` in a busy scene
+(`tests/emer.script`: up through five emeralds with nobbins about; 8 s):
+
+| | effects (voice 0) | music (voice 1) |
+| --- | --- | --- |
+| before: off the 13.7 ms grid, average / 95 % / most | 3.0 / 12.4 / 12.4 ms | 4.9 / 12.7 / 12.7 ms |
+| before: steps less than 6 ms after the one before (cut short) | 4 of 69 | 45 of 202 |
+| after | 1.8 / 4.6 / 6.9 ms | 2.2 / 6.0 / 12.7 ms |
+| after: cut short | 0 of 81 | 7 of 220 |
+
+The remaining 1-2 ms is the kernel's wake-up of a task that is not at priority 0. A step
+no longer waits for the game's drawing. Without Lau (REV $09 and older: no music timer) it
+goes by the frame counter as before. "A list of steps the system plays on time" would do
+better still and cost the game nothing: suggested for hgame / MUSICD below.
+
+**3. Scrolling in jumps: the view moved only while the game waited.** It moved toward the
+digger by up to 3 rows a vertical blank, but only in the frame loop's waits; while the game
+drew its frame the view stood. Now the view takes one step at every vertical blank, also in
+the middle of the game's work (the vertical blank's work above: hgame's frame, which sends
+the scroll registers for the next blank; `hg_split` costs nothing more), a quarter of the
+way and 1-4 rows: the digger's 6 rows a frame become steps of 1-2 rows at 60 Hz. In the
+scripted game the view was off its target at 114 blanks and moved at all 114 (before: only
+at the blanks in waits). In 4.5 s of digging upwards (`tests/emer.script`) the scroll
+registers were written 32 times (steps of about one row) against 14 before (two to three
+rows). The changed rectangles still go to the screen only between the game's frames, just
+after a vertical blank (now right at it: the wait sleeps until the blank), so a half-drawn
+frame is never shown; the scroll registers change only at a blank.
+
+**The frame beat and the input.** A frame now begins within the clock's 3.4 ms of its
+80 ms beat: 1.6 ms off on average, at most 32 ms in a frame that came late (scripted
+game); before, frames began at vertical blanks, 83.3 ms apart four times and 66.7 ms once
+(3.3 and 13.3 ms off, 5.3 ms on average). The picture still changes at vertical blanks
+(5, 5, 5, 5, 4 apart: 12.5 a second on a 60 Hz screen). The keys are read at every
+vertical blank; the game reads its direction at the start of its frame (upstream does), so
+a key reaches the frame that uses it in 40 ms on average and the screen 65 ms on average,
+116 ms at most (`tests/keys.script`: 40 taps at uneven times): within one game frame and its
+drawing. The late frames of the scripted game (8 of 811) are the title being drawn, the
+level's start (its field drawn, which upstream paces itself), the game over and the
+initials: none in play. In `thevoids.drf` at the game's pace: 298 late frames of 41,561
+(0.7 %; 97 before: the looks at the clock and the vertical blanks' work in the middle of a frame add to the busiest frames), the whole game
+3,365 s against 3,358 s before and 3,325 s at exactly 80 ms a frame.
+
 ## Suggestions for the porting guide (sdk/docs/c/porting.md)
 
 1. **Start with the recorded-game or replay test if the game has one.** A deterministic
@@ -244,3 +333,9 @@ the faster blits): about three times the original's speed.
    map to the two 16-bit voices.
 8. **`SDL_KEYDOWN`** → `hg_key_next()`; SDL scancodes are HID usages: key tables port as
    they are.
+9. **Sound that must keep time while the game draws** (a PC timer interrupt, a tracker):
+   the music timer (`hz_sample_timer`) is the only fine clock a program has; poll it from
+   the drawing loop (Digger's `horizon/hz_timer.c`). Better, for hgame: a call that hands a
+   list of (time, register, value) steps to a priority-0 player (MUSICD could do it) so that
+   no game needs to poll.
+

@@ -2,8 +2,8 @@
 """oplwav.py FILE.wav - checks emu816 --wav's recording of tests/asm/opltone.bin (REV $0C):
 a 440 Hz sine on OPL2 channel 0 for 1 s, then released. Both sides equal (the OPL2 is mono);
 the pitch over the held part (zero crossings, +-0.5 Hz); its peak (one operator at total level
-0, channel 0 at 0 dB in JTOPL's sum: 4,000 to 4,100); the note sounds 1.0 to 1.1 s (above 200:
-the release, rate 8, is quick); then silence (the last 0.5 s within +-2: a silent operator still
+0, channel 0 at 0 dB in JTOPL's sum, times 3 in the mix: 12,000 to 12,300); the note sounds 1.0 to 1.1 s (above 200:
+the release, rate 8, is quick); then silence (the last 0.5 s within +-6: a silent operator still
 gives -1 in the negative half of its phase). Prints the measures; exit 1 on a failure."""
 import struct
 import sys
@@ -23,7 +23,7 @@ f = (len(z) - 1) * 48000 / (z[-1] - z[0]) if len(z) > 2 else 0
 peak = max(abs(v) for v in L[a:a + 43200])
 tail = max(abs(v) for v in L[-24000:])
 dur = (b - a) / 48000
-ok = L == R and abs(f - 440) < 0.5 and 4000 <= peak <= 4100 and 1.0 <= dur <= 1.1 and tail <= 2 and \
+ok = L == R and abs(f - 440) < 0.5 and 12000 <= peak <= 12300 and 1.0 <= dur <= 1.1 and tail <= 6 and \
     len(L) > b + 24000
 print('%.2f Hz, peak %d, %.3f s, then %d at most%s' % (f, peak, dur, tail, '' if L == R else ', sides differ'))
 sys.exit(0 if ok else 1)

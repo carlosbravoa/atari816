@@ -55,9 +55,15 @@ static void prof_write(void)
 
 /* ── host keyboard: SDL or --keys ── */
 #define HID_F12 0x45
+/* --kbd-release MS: the I/O processor's firmware before 2026-11 released every key when no
+ * keyboard report had come for 1 s; a USB keyboard (through the CH9350 or the Pico/TinyUSB
+ * bridge) reports only when its keys change, so a key held longer went up by itself. This
+ * models it (a report = any key change), to reproduce that board's behaviour. 0: off */
+static uint64_t kbd_release, kbd_last;
 static void host_key(int usage, int down)
 {
     if (usage <= 0 || usage > 0xFF) return;
+    kbd_last = M.cpu.cycles;
     if (usage == HID_F12 && down) sys_raise_nmi(1);     /* F12: SYSTEM_KEY NMI and a KEY event */
     mailbox_key(usage, down);
 }
@@ -131,6 +137,7 @@ void machine_reschedule(void)
     se = opl_next_event();
     if (se < n) n = se;
     if (nextkey < nkeys && keys[nextkey].cycle < n) n = keys[nextkey].cycle;
+    if (kbd_release && kbd_last && kbd_last + kbd_release < n) n = kbd_last + kbd_release;
     M.next_event = n;
 }
 
@@ -143,6 +150,14 @@ void machine_sync_slow(void)
     opl_update(now);
     nvc_update(now);
     keys_due(now);
+    if (kbd_release && kbd_last && now >= kbd_last + kbd_release) {
+        Mailbox *m = &M.mb;                             /* the old firmware's timeout */
+        for (int i = 0; i < 4; i++)
+            if (m->kb_now[i]) mailbox_key(m->kb_now[i], 0);
+        for (int i = 0; i < 8; i++)
+            if (m->kb_now_mods & (1 << i)) mailbox_key(0xE0 + i, 0);
+        kbd_last = 0;
+    }
     mailbox_poll(now);
     machine_reschedule();
     machine_update_irq();
@@ -343,6 +358,8 @@ static void usage(void)
         "  --net-root DIR       ... and http://, https://, ftp:// URLs are served from DIR/host/path\n"
         "  --net-delay MS       the PC's time to answer a URL OPEN or STAT (default 0)\n"
         "  --card-kbps R:W      slow card: READ / LOAD at R KB/s, WRITE at W KB/s, + 1 ms a request\n"
+        "  --card-free BYTES    the card has room for BYTES more (written in the run): then a WRITE writes\n"
+        "                       short, as on a full card, and MKDIR is denied (tests)\n"
         "                       (0:0 = instant, the default; the board: about 170:100)\n"
         "  --pc-kbps R:W        slow PC volume: the same, + 6 ms a request (the board: about 100:55)\n"
         "  --ideal-timing       every CPU cycle ideal: no cache misses, SDRAM write or sweep stalls,\n"
@@ -359,6 +376,9 @@ static void usage(void)
         "  --log-sound          print every accepted sound write ($DB00-$DB13; REV 12 $DB00-$DB0F) on stderr\n"
         "  --log-lau            print every write to Lau, the sample player ($DB20-$DBFF, REV 10), on stderr\n"
         "  --log-lau-us         the same, each line with the emulated time in microseconds: lau US $DBxx = $yy\n"
+        "  --log-sound-us       as --log-sound, each line with the emulated time in microseconds: sound US $DBxx = $yy\n"
+        "  --kbd-release MS     release the keys held when no key changed for MS ms (the firmware before 2026-11 did,\n"
+        "                       after 1000 ms: a key held longer went up by itself on the board)\n"
         "  --log-opl            print every OPL2 data write ($DB31, REV 12) on stderr: opl $RR = $yy\n"
         "                       (RR the register selected at $DB30)\n"
         "  --log-opl-us         the same, with the emulated time in microseconds: opl US $RR = $yy\n"
@@ -418,11 +438,14 @@ int main(int argc, char **argv)
             double *k = a[2] == 'c' ? mailbox_card_kbps : mailbox_pc_kbps;
             if (sscanf(argv[++i], "%lf:%lf", &k[0], &k[1]) != 2 || k[0] < 0 || k[1] < 0) usage();
         }
+        else if (!strcmp(a, "--card-free") && i + 1 < argc) mailbox_card_free = atoll(argv[++i]);
         else if (!strcmp(a, "--console-us") && i + 1 < argc) console_us = atof(argv[++i]);
         else if (!strcmp(a, "--keys") && i + 1 < argc) parse_keys(argv[++i]);
         else if (!strcmp(a, "--mouse") && i + 1 < argc) parse_mouse(argv[++i]);
         else if (!strcmp(a, "--rev") && i + 1 < argc) M.sys.rev = (uint8_t)strtol(argv[++i], NULL, 0);
         else if (!strcmp(a, "--log-sound")) M.sys.snd_log |= 1;
+        else if (!strcmp(a, "--log-sound-us")) M.sys.snd_log |= 32;
+        else if (!strcmp(a, "--kbd-release") && i + 1 < argc) kbd_release = (uint64_t)(atof(argv[++i]) * CPU_HZ / 1000.0);
         else if (!strcmp(a, "--log-lau")) M.sys.snd_log |= 2;
         else if (!strcmp(a, "--log-lau-us")) M.sys.snd_log |= 4;
         else if (!strcmp(a, "--log-opl")) M.sys.snd_log |= 8;

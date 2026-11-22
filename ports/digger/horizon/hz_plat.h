@@ -43,13 +43,18 @@ unsigned long hzd_char(unsigned ch, unsigned colour);    /* a character's 12 x 2
 unsigned long hzd_title(unsigned half);                   /* 200 rows of 320 bytes */
 
 /* hz_timer.c */
-void hzt_pump(void);                    /* a frame of hgame (events, input), sound ticks */
-void hzt_camera(void);                  /* the view for this frame */
+void hzt_pump(void);                    /* the sound's steps due, a vertical blank's work */
+void hzt_work(unsigned bytes);          /* (drawing calls) their work: the clock looked at */
+void hzt_camera(void);                  /* the view, one step */
 extern bool hzt_fast;                   /* /S:0: no waiting */
-
-/* hz_snd.c */
-void hzs_tick(void);                    /* the sound's 72.8 Hz interrupt, due ones */
-void hzs_reset_clock(void);
+struct hzt_stats {
+    unsigned long frames, late, busy_us, busy_max;      /* game frames, CPU a frame */
+    unsigned long beat_n, beat_us, beat_max, beat_far;  /* frame starts off the 80 ms beat */
+    unsigned long snd_n, snd_late_us, snd_late_max;     /* sound steps, their delay */
+    unsigned long view_need, view_moves;                /* blanks the view was off / moved */
+    unsigned long key_n, key_frame_us, key_show_us, key_show_max;   /* key to frame, screen */
+};
+extern struct hzt_stats hzt_st;
 
 /* hz_kbd.c */
 void hzk_poll(void);                    /* after each hgame frame: the keys pressed */
