@@ -56,6 +56,9 @@ UIPROGS += freecell
 # (user/musicd.s with the replayer library user/modplay.s, build/modplay.o; protocol user/music.inc)
 PROGS  += music
 UIPROGS += music
+# (0.29) the Installer: apps from .HZA archives into /APPS, and their removal (user/install.s)
+PROGS  += install
+UIPROGS += install
 
 # self test keys: 'a' 1.0-1.2 s with F12 (system key NMI) in between. SELFTEST holds the
 # keyboard from its start, so they queue up whenever they come; KEYS reads them at the end.
@@ -498,6 +501,7 @@ test: all $(EMU)
 	@$(MAKE) --no-print-directory test-26
 	@$(MAKE) --no-print-directory test-27
 	@$(MAKE) --no-print-directory test-28
+	@$(MAKE) --no-print-directory test-29
 	@rm -rf build/run-sd; cp -r $(SD) build/run-sd; rm -rf build/run-sd/Music; touch build/run-sd/SYSTEM/NODESK; cp tests/basic.bas build/run-sd/BT.BAS
 	@$(EMU) $(EMUFLAGS) $(CARDDATE) --headless --sd build/run-sd --max-seconds $(BASSECS) \
 	    --keys "$$(python3 tests/keyscript.py tests/basic-t.keys)" \
@@ -793,6 +797,12 @@ test-net: all $(EMU)
 # pictures-23 freezes their pictures.
 D23SHOTS := 10.5 13 16 18 20.5 23 26.5 32.3 35 37.5 39.5
 D23PREP := python3 ../../tests/mk23.py
+# (0.29) the second in the name of the classic Atari's job: the clock counts from the moment the
+# Desktop loaded /SYSTEM/CLOCK; without the blitter (REV $07) the Desktop gets there after the
+# second's turn since 0.29 (it and Settings, which it runs first, are larger), so the job made
+# at 6 s is a second earlier: 15.30.04 (pictures: tests/pictures/desk23-rev7.md5 and
+# desk23b-rev7.md5)
+P23S    = $(if $(findstring --rev 7,$(EMUFLAGS)),04,05)
 test-23: all $(EMU)
 	@rm -rf build/run-sd; cp -r $(SD) build/run-sd; rm -rf build/run-sd/Music; touch build/run-sd/SYSTEM/NODESK; (cd build/run-sd && $(D23PREP))
 	@$(EMU) $(EMUFLAGS) $(CARDDATE) --headless --sd build/run-sd --max-seconds 18 \
@@ -806,13 +816,14 @@ test-23: all $(EMU)
 	@PREP='$(D23PREP)' DESK=1 sh tests/shots.sh "$(EMU) $(EMUFLAGS) $(CARDDATE) --classic-print tests/p23.atascii@6" $(SD) desk23 45 $(D23SHOTS)
 	@if diff -u tests/pictures/$(call REV7IF,desk23) $(B)/desk23.md5; then echo "PASS  0.23 Desktop: the print notice, the folder disk (dialog, numbers, Refresh), Run in Atari (an icon, Files), Files' Print"; \
 	else echo "FAIL  0.23 Desktop pictures (look at $(B)/desk23*.ppm, then make pictures-23)"; exit 1; fi
-	@if grep 'emu816: CLASSIC\|emu816: P: job' $(B)/desk23.err | diff -u tests/desk23.err - && cmp -s "build/run-pic/Printouts/2026-11-18 15.30.05 Atari.txt" tests/p23-atari.txt \
+	@sed 's/15\.30\.05 Atari/15.30.$(P23S) Atari/' tests/desk23.err > $(B)/desk23.exp
+	@if grep 'emu816: CLASSIC\|emu816: P: job' $(B)/desk23.err | diff -u $(B)/desk23.exp - && cmp -s "build/run-pic/Printouts/2026-11-18 15.30.$(P23S) Atari.txt" tests/p23-atari.txt \
 	  && cmp -s "build/run-pic/Printouts/2026-11-18 15.30.35 Files.txt" $(SD)/README.TXT; \
 	then echo "PASS  0.23 Desktop: the folder disk mounted twice (Refresh), kind 4 from the icon and from Files, the classic Atari's job and Files' job"; \
 	else echo "FAIL  0.23 Desktop: classic ops or jobs ($(B)/desk23.err, build/run-pic/Printouts)"; exit 1; fi
 	@rm -rf build/run-pc; cp -r tests/pc build/run-pc
 	@DESK=1 sh tests/shots.sh "$(EMU) $(EMUFLAGS) $(CARDDATE) --pc-folder build/run-pc --pc-time 2026-11-18T15:30 --classic-print tests/p23.atascii@6" $(SD) desk23b 13 10.5
-	@if diff -u tests/pictures/$(call REV7IF,desk23b) $(B)/desk23b.md5 && cmp -s "build/run-pc/Printouts/2026-11-18 15.30.05 Atari.pdf" tests/desk23b.pdf; \
+	@if diff -u tests/pictures/$(call REV7IF,desk23b) $(B)/desk23b.md5 && cmp -s "build/run-pc/Printouts/2026-11-18 15.30.$(P23S) Atari.pdf" tests/desk23b.pdf; \
 	then echo "PASS  0.23 Desktop with a PC that makes PDFs: the notice \"(to the PC)\", PRINTD's marked .pdf on the PC"; \
 	else echo "FAIL  0.23 Desktop with the PC ($(B)/desk23b*.ppm, build/run-pc/Printouts, tests/desk23b.pdf)"; exit 1; fi
 	@if grep -l 'emu816: blitter:' $(B)/sh23.err $(B)/desk23.err $(B)/desk23b.err; then echo "FAIL  blitter rules (0.23 sessions)"; exit 1; \
@@ -1023,6 +1034,76 @@ test-28: all $(EMU) $(B)/ptest.prg
 	else echo "FAIL  0.28 PTEST on the Desktop ($(B)/ptestd.out)"; exit 1; fi
 
 .PHONY: test-28
+
+# (0.29) apps: one folder each in /APPS with APP.INF; the Installer (user/install.s) and .HZA
+# archives; the Desktop's Programs menu (user/desk.s); HZ_NEEDS (user/needs.inc). APPTEST
+# (user/apptest.s, not on the card) is the apps' program, built five times: without needs,
+# and needing Horizon 0.99 (NEEDV), 60,000 KB (NEEDM), the OPL2 (NEEDO), 0.29 and 64 KB
+# (NEEDOK, it runs); APSCAN (user/apscan.s) measures the Desktop's scan. tests/mkapps.py
+# puts them on the test copies, in app folders and in archives (the good ones and the
+# refused ones). Sessions: the shell (tests/app29.keys, tests/app29.txt; REV $0C only, else
+# tests/app29-rev11.txt: NEEDO is refused there), a full card (--card-free 1500,
+# tests/app29f.keys), the scan time of 20 apps at the board's card speed (tests/app29s.keys),
+# the Desktop with one app, an install from Files, a file opened by its app and Remove app...
+# (tests/app29d.src), and with 20 apps and the odd folders (tests/app29m.src). Their pictures
+# are compared without the status text at the right of the menu bar (tests/apppic.py: the
+# free memory there differs between revisions). See README, "Version 0.29".
+APP29PRGS := $(B)/apptest.prg $(B)/needv.prg $(B)/needm.prg $(B)/needo.prg $(B)/needok.prg $(B)/apscan.prg
+$(B)/apptest.prg: user/apptest.s user/needs.inc user/horizon.inc user/prog.cfg $(B)/ulib.o | $(B)
+	$(CA65) -I user -o $(B)/apptest.o $<
+	$(LD65) -C user/prog.cfg -o $@ $(B)/apptest.o $(B)/ulib.o
+$(B)/need%.prg: user/apptest.s user/needs.inc user/horizon.inc user/prog.cfg $(B)/ulib.o | $(B)
+	$(CA65) -I user -D NEED$(call UPPER,$*)=1 -o $(B)/need$*.o $<
+	$(LD65) -C user/prog.cfg -o $@ $(B)/need$*.o $(B)/ulib.o
+$(B)/apscan.prg: user/apscan.s user/horizon.inc user/ui.inc user/prog.cfg $(B)/ulib.o $(B)/ui.lib | $(B)
+	$(CA65) -I user -o $(B)/apscan.o $<
+	$(LD65) -C user/prog.cfg -o $@ $(B)/apscan.o $(B)/ulib.o $(B)/ui.lib
+APP29TXT = $(if $(PRE12),app29-rev11.txt,app29.txt)
+A29DSHOTS := 6.5 9.5 17 19.5 30 37
+A29MSHOTS := 6.5 9 13.5
+test-29: all $(EMU) $(APP29PRGS)
+	@rm -rf build/run-sd; cp -r $(SD) build/run-sd; rm -rf build/run-sd/Music; touch build/run-sd/SYSTEM/NODESK
+	@python3 tests/mkapps.py shell $(B) build/run-sd
+	@$(EMU) $(EMUFLAGS) $(CARDDATE) --headless --sd build/run-sd --max-seconds 150 \
+	    --keys "$$(python3 tests/keyscript.py tests/app29.keys)" \
+	    $(SD)/SYSTEM/HORIZON.SYS > $(B)/app29.out 2> $(B)/app29.err || true
+	@python3 tests/cutlog.py $(B)/app29.out '> install' > $(B)/app29.txt
+	@if python3 tests/compare.py tests/$(APP29TXT) $(B)/app29.txt; then echo "PASS  0.29 the Installer in the shell: list, install, an update keeping the user's files, spaces in names, pax skipped, eleven refused archives (nothing left behind), HZ_NEEDS of copied programs, removal"; \
+	else echo "FAIL  0.29 the Installer in the shell ($(B)/app29.out)"; exit 1; fi
+	@rm -rf build/run-sd; cp -r $(SD) build/run-sd; rm -rf build/run-sd/Music; touch build/run-sd/SYSTEM/NODESK
+	@python3 tests/mkapps.py shell $(B) build/run-sd
+	@$(EMU) $(EMUFLAGS) $(CARDDATE) --headless --sd build/run-sd --card-free 1500 --max-seconds 9 \
+	    --keys "$$(python3 tests/keyscript.py tests/app29f.keys)" \
+	    $(SD)/SYSTEM/HORIZON.SYS > $(B)/app29f.out 2> $(B)/app29f.err || true
+	@python3 tests/cutlog.py $(B)/app29f.out '> install' > $(B)/app29f.txt
+	@if python3 tests/compare.py tests/app29f.txt $(B)/app29f.txt && test ! -e build/run-sd/APPS/.INSTALL && test ! -e build/run-sd/APPS/GOOD; then echo "PASS  0.29 a full card: the install stops, says so, nothing left behind"; \
+	else echo "FAIL  0.29 the full card ($(B)/app29f.out)"; exit 1; fi
+	@rm -rf build/run-sd; cp -r $(SD) build/run-sd; rm -rf build/run-sd/Music; touch build/run-sd/SYSTEM/NODESK
+	@python3 tests/mkapps.py scan20 $(B) build/run-sd
+	@$(EMU) $(EMUFLAGS) --card-date 2026-11-01T12:00 $(SLOWFLAGS) --headless --sd build/run-sd --max-seconds 8 \
+	    --keys "$$(python3 tests/keyscript.py tests/app29s.keys)" \
+	    $(SD)/SYSTEM/HORIZON.SYS > $(B)/app29s.out 2> $(B)/app29s.err || true
+	@grep -a '^apscan: ' $(B)/app29s.out > $(B)/app29s.txt || true
+	@if python3 tests/compare.py tests/app29s.txt $(B)/app29s.txt; then echo "PASS  0.29 the Desktop's scan of 20 apps at the board's card speed: $$(cut -c9- $(B)/app29s.txt)"; \
+	else echo "FAIL  0.29 the scan time ($(B)/app29s.out)"; exit 1; fi
+	@PREP='python3 ../../tests/mkapps.py desk1 ../../$(B) .' DESK=1 sh tests/shots.sh "$(EMU) $(EMUFLAGS) $(CARDDATE)" $(SD) app29d 42 $(A29DSHOTS)
+	@python3 tests/apppic.py app29d
+	@if diff -u tests/pictures/app29d.md5 $(B)/app29d.pic; then echo "PASS  0.29 the Desktop: one app, an archive installed from Files (category Games), its pop-up, a file opened by its app, Remove app... in Files"; \
+	else echo "FAIL  0.29 the Desktop's apps pictures (look at $(B)/app29d*.ppm, then make pictures-29)"; exit 1; fi
+	@grep -a '^apptest: ' $(B)/app29d.out > $(B)/app29d.txt || true
+	@if python3 tests/compare.py tests/app29d.txt $(B)/app29d.txt && test -d $(B)/run-pic/APPS/GAMEA && test ! -e $(B)/run-pic/APPS/ONE; then echo "PASS  0.29 the Desktop: apps started from the menu in their folder, a .ZZT file opened by the app that registered it"; \
+	else echo "FAIL  0.29 the Desktop's apps ($(B)/app29d.out, $(B)/run-pic/APPS)"; exit 1; fi
+	@PREP='python3 ../../tests/mkapps.py desk20 ../../$(B) .' DESK=1 sh tests/shots.sh "$(EMU) $(EMUFLAGS) $(CARDDATE)" $(SD) app29m 16 $(A29MSHOTS)
+	@python3 tests/apppic.py app29m
+	@if diff -u tests/pictures/app29m.md5 $(B)/app29m.pic; then echo "PASS  0.29 the Desktop: 20 apps and the odd folders (More apps), the needs window"; \
+	else echo "FAIL  0.29 the Desktop's 20 apps pictures (look at $(B)/app29m*.ppm, then make pictures-29)"; exit 1; fi
+
+pictures-29:
+	cp $(B)/app29d.pic tests/pictures/app29d.md5
+	cp $(B)/app29m.pic tests/pictures/app29m.md5
+	python3 -c "from PIL import Image; import glob; [Image.open(f).save('tests/pictures/' + f.split('/')[-1][:-4] + '.png') for f in sorted(glob.glob('$(B)/app29[dm][0-9]*.ppm'))]"
+
+.PHONY: test-29 pictures-29
 
 pictures-net:
 	cp $(B)/download.md5 tests/pictures/$(call REV7,download)

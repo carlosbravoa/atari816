@@ -1,0 +1,4 @@
+# (0.29) APSCAN with 20 apps at the board's card speed (--card-kbps 170:100): the Desktop's
+# full scan and its quick check (tests/app29s.txt: the times as patterns)
+1500 {esc}
++1500 /T/APSCAN.PRG\n

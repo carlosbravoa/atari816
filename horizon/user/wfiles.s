@@ -885,7 +885,11 @@ ctxmenu:
         bne     @file
         lda     #A_NEWW
         jsr     additem
-        lda     #A_SEP
+        jsr     isapp                   ; (0.29) an app's folder: Remove app...
+        bcs     :+
+        lda     #A_RMAPP
+        jsr     additem
+:       lda     #A_SEP
         jsr     additem
         bra     @desk
 @file:  cmp     #FT_TEXT
@@ -1112,6 +1116,66 @@ a_runat:
         jcs     oops
         jsr     footer                  ; the footer says what is mounted
         jmp     loop
+; (0.29) Remove app...: the Installer removes the app (it asks first): INSTALL -w -r "PATH"
+a_rmapp:
+        jsr     fullsel
+        jcs     long
+        lda     #'-' | ('w' << 8)
+        sta     rmarg
+        lda     #' ' | ('-' << 8)
+        sta     rmarg+2
+        lda     #'r' | (' ' << 8)
+        sta     rmarg+4
+        lda     #'"'
+        sta     rmarg+6
+        ldx     #.loword(pth)
+        ldy     #.loword(rmarg + 7)
+        jsr     ui_strcpy
+        clc
+        adc     #.loword(rmarg + 7)
+        tax
+        lda     #'"'
+        sta     a:0,x
+        ldx     #.loword(p_inst)
+        ldy     #.loword(rmarg)
+        lda     #.loword(n_inst)
+        jsr     ui_launch
+        jmp     loop
+; (0.29) C clear if the selected entry is an app's folder: /APPS/NAME (pth = its path)
+isapp:  jsr     fullsel
+        bcs     @no
+        ldy     #0
+:       lda     s_apps,y
+        and     #$00FF
+        beq     :+
+        sta     z:pd
+        lda     pth,y
+        and     #$00FF
+        cmp     #'a'
+        bcc     @c
+        cmp     #'z' + 1
+        bcs     @c
+        and     #$00DF
+@c:     cmp     z:pd
+        bne     @no
+        iny
+        bra     :-
+:       lda     pth,y
+        and     #$00FF
+        beq     @no
+        cmp     #'.'
+        beq     @no
+:       lda     pth,y
+        and     #$00FF
+        beq     @yes
+        cmp     #'/'
+        beq     @no
+        iny
+        bra     :-
+@yes:   clc
+        rts
+@no:    sec
+        rts
 ; pth = the selected entry's full path; C set: too long
 fullsel:
         ldx     z:sel
@@ -3199,10 +3263,12 @@ A_UP    = 12
 A_PRINT = 13                            ; (0.23)
 A_RUNAT = 14
 A_NEWT  = 15                            ; (0.27) New text file...
+A_RMAPP = 16                            ; (0.29) Remove app...
 acttab: .addr   open, a_neww, a_edit, a_write, a_load, loop, copy, addesk, rename, delete
-        .addr   newdir, paste, parent, a_print, a_runat, newtxt
+        .addr   newdir, paste, parent, a_print, a_runat, newtxt, a_rmapp
 acttxt: .addr   s_aopen, s_aneww, s_aedit, s_awrite, s_aload, s_asep, s_acopy, s_adesk
         .addr   s_aren, s_adel, s_anewf, s_apaste, s_aup, s_aprint, s_arunat, s_anewt
+        .addr   s_armapp
 s_aopen: .byte  "Open", 9, "Enter", 0
 s_aneww: .byte  "Open in new window", 0
 s_aedit: .byte  "Open with Edit", 0
@@ -3219,6 +3285,10 @@ s_aup:  .byte   "Parent folder", 9, "Backspace", 0
 s_aprint: .byte "Print", 0
 s_arunat: .byte "Run in Atari", 0
 s_anewt: .byte  "New text file...", 0
+s_armapp: .byte "Remove app...", 0      ; (0.29)
+s_apps: .byte   "/APPS/", 0
+p_inst: .byte   "/BIN/INSTALL.PRG", 0
+n_inst: .byte   "Installer", 0
 s_newt: .byte   "New.txt", 0
 t_newtxt: .byte "New text file", 0
 l_newtxt: .byte "Name of the new file:", 0
@@ -3312,6 +3382,7 @@ pow10:  .word   10000, 1000, 100, 10, 1
 KUP     = 9                             ; kind: the ".." entry (after the FT_* types)
 icons:  .addr   ic_blank, ic_folder, ic_atari, ic_prg, ic_page, ic_page, ic_pic, ic_page
         .addr   ic_page, ic_up, ic_page       ; (KUP 9; (0.26) FT_MUSIC 10)
+        .addr   ic_pkg                        ; (0.29) FT_APP 11: an app archive
 ; the Up button's arrow: {w, h, dx, dy} from (tbx + 7, 3) (centred in it), 0
 uparrow: .word  2, 1, 1, 0,  4, 1, 0, 1,  6, 1, $FFFF, 2,  8, 1, $FFFE, 3,  2, 4, 1, 4,  0
 ; (0.25) the Reload button's arrow going round (the same {w, h, dx, dy})
@@ -3361,6 +3432,12 @@ ic_pic:                                             ; a picture: sky, sun, a hil
         IR      WD_FILL, C_GREEN, 5, 7, 12, 3
         IR      WD_FILL, C_GREEN, 8, 6, 5, 1
         .word   0
+ic_pkg:                                             ; (0.29) an app archive: a parcel
+        IR      WD_FRAME, C_BLACK, 4, 2, 14, 10
+        IR      WD_FILL, C_ORANGE, 5, 3, 12, 8
+        IR      WD_FILL, C_YELLOW, 10, 3, 2, 8
+        IR      WD_FILL, C_YELLOW, 5, 6, 12, 2
+        .word   0
 ic_prg:                                             ; a small window
         IR      WD_FRAME, C_BLACK, 4, 1, 14, 10
         IR      WD_FILL, C_TITLE, 5, 2, 12, 2
@@ -3382,6 +3459,7 @@ m_show: .byte   MS_STATE, "Show system files", 0, "-", 0, "Parent folder", 9, "B
         .res    256 - (* - menus)
 
         .segment "BSS"
+rmarg:  .res    140                     ; (0.29) the Installer's arguments
 tbx:    .res    2                       ; (0.25) tbtn: the button's x, its picture, dimmed
 rf_h:   .res    2                       ; (0.25) refresh: the listing before (check value,
 rf_n:   .res    2                       ; entries, heap), the footer's entry, sel and top;

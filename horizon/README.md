@@ -15,8 +15,9 @@ It boots into the Desktop (or, with `/SYSTEM/NODESK` on the card, into the text 
 | `/SYSTEM` | `HORIZON.SYS` (the kernel), `INIT.PRG`, the system programs `DESK.PRG` (the Desktop), `SH.PRG` (the shell), `ABOUT.PRG`, (0.23) `PRINTD.PRG` (sends a print job to the PC), (0.24) `SAVER.PRG` (the screen saver), (0.26) `MUSICD.PRG` (the music engine; (0.27) with `OPL2.WOPL` next to it, if present, its
 General MIDI sound bank), the settings files `CONFIG` (Settings), `PROGRAMS` (the Desktop's Programs menu) and `NODESK` (optional: boot into the text shell), and (0.14) `ICONS` (the Desktop's icons, made from `sdfiles/icons.txt`), `CLOCK` (the last time set, written by the Desktop and the shell) and `LAYOUT` (where the desktop icons are), (0.22) `URLS` (the Downloader's last addresses) and `BBS.TXT` (the BBS terminal's address book). Files hides it and refuses to start its programs |
 | `/SYSTEM/TESTS` | Test and demo programs: SELFTEST, HELLO, COUNT, SPIN, TICK, REGS, CRASH, FTEST, PING, PONG, KEYS, MOUSE, MTEST, BENCH, WDEMO, LEAK, HOG, (0.15) KTEST, (0.17) STEST, (0.18) GTEST, (0.27) OTEST |
-| `/BIN` | The applications: WFILES (Files), TERM (Terminal), EDIT, WRITE, SHEET, PAINT, BASIC, CALC, SOLITAIR, (0.17) QUABRICK (Quabricks; its samples QUABRICK.SFX, its high scores QUABRICK.DAT), SETTINGS, (0.22) DOWNLOAD (the Downloader), BBS (the BBS terminal), (0.23) PRINTER (Printer), (0.25) FREECELL (FreeCell; its sounds FREECELL.SFX, its statistics FREECELL.DAT), (0.26) MUSIC (Music Player, the music player; "Music" before 0.27), and the shell's tools FILES (the text browser), CAT, DIR, MEM |
+| `/BIN` | The applications: WFILES (Files), TERM (Terminal), EDIT, WRITE, SHEET, PAINT, BASIC, CALC, SOLITAIR, (0.17) QUABRICK (Quabricks; its samples QUABRICK.SFX, its high scores QUABRICK.DAT), SETTINGS, (0.22) DOWNLOAD (the Downloader), BBS (the BBS terminal), (0.23) PRINTER (Printer), (0.25) FREECELL (FreeCell; its sounds FREECELL.SFX, its statistics FREECELL.DAT), (0.26) MUSIC (Music Player, the music player; "Music" before 0.27), (0.29) INSTALL (the Installer: `install FILE.HZA`, `install -r NAME`), and the shell's tools FILES (the text browser), CAT, DIR, MEM |
 | `/Music` | (0.26) Music to play: `HORIZON.MOD` (83 s) and `LAU.MOD` (13 s), original modules generated at build time by `tools/mkmod.py`; (0.27) MIDI files (`.MID`) play on the OPL2: `PRELUDE.MID`, `ELISE.MID`, `ENTERTNR.MID` and `THEME.MID`, written as notes at build time by `tools/mkmid.py --song` (see "Music Player", the card's songs) |
+| `/APPS` | (0.29) The apps: one folder each (`/APPS/NAME/` with its program, its files, its `APP.INF`), installed from `.HZA` archives by the Installer (`/BIN/INSTALL.PRG`); the Desktop lists them in its Programs menu. See "Version 0.29" and `sdk/docs/apps.md` |
 | `/Desktop` | Created by the Desktop if missing: what is in it shows as icons on the desktop (0.14: shortcuts are `.LNK` files, below) |
 | `/atari.ini` | The classic machine's settings, read by the I/O processor at boot (Settings > Classic Atari edits it; 0.23: also the folder disk, `folder=` and `folderdrive=`; 0.27: `basic=`, `fastdisk=`) |
 | `/Printouts` | (0.23) The print jobs, made by the I/O processor at the first one (see "Version 0.23") |
@@ -412,6 +413,28 @@ the blitter: the software drawing paths; both must pass):
    Horizon program"), and `mem` shows the same free banks before and after. On the Desktop
    (`tests/ptestd.keys`, `tests/ptestd.txt`): `/BIG/PTESTBIG.PRG` from the Programs menu
    (its folder `/`), then from Files (in `/BIG`: Enter on it).
+34. **0.29 apps** (`make test-29`; `tests/mkapps.py` makes the test cards' app folders and
+   archives; APPTEST, `user/apptest.s`, is the apps' program, built five times: without
+   needs, and with HZ_NEEDS for Horizon 0.99, 60,000 KB, the OPL2, 0.29 + 64 KB). In the
+   text shell (`tests/app29.keys`, compared with `tests/app29.txt`; `tests/app29-rev11.txt`
+   before REV $0C): `install -l`, an install with its question, an update (GOOD2.HZA) that
+   keeps the user's SAVE.DAT and SAVES/HISCORE.DAT and replaces the archive's files, a
+   folder name with spaces and brackets, pax headers skipped, eleven refused archives
+   (checksum, cut short, `..`, absolute, two top folders, no APP.INF, no program, GNU long
+   names, a link, a '?', no such file: nothing left in /APPS), the four needs programs
+   started as bare copies (0.99 and 60,000 KB refused; the OPL2 refused before REV $0C),
+   `install -r` with yes and no, two refused removals. A full card (`emu816 --card-free
+   1500`, `tests/app29f.keys`): the install stops, says so, leaves nothing. The scan of 20
+   apps at the board's card speed (`tests/app29s.keys`, APSCAN, `user/apscan.s`): the
+   times are printed (275 ms for a full read, 10 ms for the check). The Desktop
+   (`tests/app29d.src`, pictures compared by `tests/apppic.py` without the status text,
+   so one list holds for every revision): two apps with shortcuts showing their APP.INF
+   icons (a file, a built-in name), ZZGAMES.HZA and ZZGAMEB.HZA installed from Files
+   (typed, Enter, the Installer's question, Enter), the Programs menu with "Games >", its
+   pop-up, Game A started from it (in its folder), /ZZDOC.ZZT opened with Game A (its
+   types=), Remove app... in Files' pop-up menu; 20 apps and the odd folders
+   (`tests/app29m.src`: a junk APP.INF, a missing program, no APP.INF, a program right in
+   /APPS, a hidden folder; "More apps >" and its pop-up; the needs window of NEEDV).
 
 The Desktop sessions (`DESK=1` in `tests/shots.sh`) get `tests/desk.programs` as their
 Programs menu (the order of 0.12), so programs added to `sdfiles/PROGRAMS` do not change
@@ -816,7 +839,7 @@ INIT starts **DESK** (`user/desk.s`). It starts the window system and opens a ba
 window (borderless, under all others) with the desktop picture; it carries the system
 menus "Horizon" (About Horizon, Settings..., Force quit..., Switch to Atari (F12),
 Restart..., Shut down...; 0.15 wording) and
-"Programs" (read from /SYSTEM/PROGRAMS). The menu bar's right end
+"Programs" (read from /SYSTEM/PROGRAMS; 0.29: then the apps of /APPS). The menu bar's right end
 shows the time since start, "up H:MM" (the board has no clock). DESK opens **Files** at start.
 Programs started from the menu run detached.
 
@@ -1098,6 +1121,75 @@ bus time (see emu/README.md, "Memory timing"). Expect the same factor on the CPU
   source stride), SYS_WGEOM, SYS_TNAME, WE_DROP's modifiers, the date routines (ui_clk*,
   `user/uidate.s`), shortcuts (ui_lnkread, ui_mklink), program and file icons (ui_prog,
   ui_ficon). See ABI.md and ui.inc.
+
+## Version 0.29 (apps)
+
+- **Apps.** An app is one folder, `/APPS/NAME/`, with its program, its files and
+  `APP.INF`: a few `key=value` lines (name, program, icon, types, category, version,
+  description, needs; `user/uiapp.s` parses them for every program, `sdk/docs/apps.md`
+  documents them). Install = the folder is there; uninstall = the folder is deleted. There
+  are no shared libraries and no dependencies between apps.
+- **The Programs menu** (the Desktop, `user/desk.s`) lists the apps after the programs of
+  `/SYSTEM/PROGRAMS`, below a line: those without a category one item each, then one item
+  per category ("Games >": choosing it opens a pop-up menu of its apps at the pointer),
+  sorted by category and name, ignoring case. When they do not fit in the drop-down's 24
+  lines, the last line is "More apps >" with the rest; a pop-up of more than 24 ends with
+  "All apps in Files". A folder without APP.INF is listed by its folder's name when it
+  holds FOLDER.PRG or one .PRG; a program right in `/APPS` by its file name; folders
+  starting with '.' and folders whose program is missing are left out. 64 apps at most.
+  An app starts with its folder as the current folder. The records live in the icon bank
+  from $8000. When the menu opens, `/APPS` is listed (one READDIR) and `/SYSTEM/APPS.NEW`
+  looked for; the APP.INF files are read again only when the listing changed or that file
+  is there (the Installer makes it). Measured at the board's card speed with 20 apps:
+  10 ms for the check, 275 ms for a full read (`make test-29`, APSCAN).
+- **The Installer** (`/BIN/INSTALL.PRG`, `user/install.s`): an `.HZA` file is a plain
+  POSIX ustar archive (no compression) holding the app's one folder. Files opens it with
+  the Installer (`-w FILE`: alerts and a small progress window); the shell runs `install
+  FILE.HZA` (a question on the console; `-y` none, `-l` a listing). It reads the headers
+  first (SEEK over the data): every checksum, the names (no `..`, no absolute path, no
+  character FAT or the card cannot take, one top folder, the lengths), the types (files and
+  folders; pax headers skipped; GNU long names, links and devices refused), APP.INF and
+  the program; then says what the app is (name, version, description, files, KB, where it
+  goes, whether it replaces one, and what this machine lacks of its `needs=`), and asks.
+  It unpacks in pieces of 16 KB into `/APPS/.INSTALL`, then renames that to `/APPS/NAME`.
+  An update moves the old folder's files that the archive does not have (saves, high
+  scores, settings) into the new one first. Any error deletes `/APPS/.INSTALL`: the old app
+  stays. There is no call for the card's free space: a full card shows as a short write,
+  and the install stops and cleans up. `install -r NAME` and Files' new **Remove app...**
+  (the pop-up menu of a folder in `/APPS`) delete an app after a question.
+- **File types**: a file whose type has no Horizon program opens with the first app whose
+  `types=` lists its extension (`ui_open` in the controls library: Files and the Desktop).
+  Horizon's own types keep their programs. `.HZA` opens with the Installer; Files shows
+  it as a parcel.
+- **Icons**: a desktop shortcut to an app (its folder or a file in it) shows the app's
+  `icon=`: a built-in icon's name or a 32 x 32 icon file in its folder (loaded into the icon
+  bank).
+- **What a program needs**: `user/needs.inc`'s `HZ_NEEDS` (assembly) and `hcc --needs`
+  (C) put a small check at the program's start: a Horizon version, a hardware revision,
+  Lau, the OPL2, sprites, the blitter, free memory. Where something is missing the program
+  prints one line, shows it in a small window when the window system runs, and exits with
+  code 1. It works on older Horizons too (task_path and the OPL2 call tell 0.28 and 0.27).
+- **sys_info** ($36, SYS_INFO): A = Horizon's version (major << 8 | minor), X = the
+  hardware revision. Before 0.29: ENOSYS.
+- **A kernel fix**: win_menu called while a menu was open (the Desktop refreshing its
+  Programs menu on WE_MENUOPEN, since 0.14) stored the new menus in the wrong place
+  (mn_close's win_close took kg_e): the menu kept its old items until the Desktop
+  restarted. Now the window is fetched again.
+- **Kernel** +22 bytes in bank $01 (sys_info 14, the fix 8); 548 left.
+- **Programs' room** (of 65,280 bytes in the code bank): DESK 2,419 bytes left (it grew by
+  5,971 bytes: its apps code, the icons of app shortcuts, and uiapp; the app records live
+  in its icon bank, not in its own), WFILES 26,029 left (4.0 KB more: uiapp, Remove app...,
+  the parcel icon), the new INSTALL 21,263 left. Programs that link the controls library's
+  `ui_launch` (Settings, Printer) get `ui_open` with it and so uiapp too: 3.6 KB each
+  (26,637 and 31,946 left).
+- **The emulator**: `--card-free BYTES`, a card that fills up (a short WRITE, MKDIR denied).
+- **Host tool**: `sdk/tools/hzapp.py pack | list | check` makes and checks archives.
+- **Compatibility**: programs and cards of 0.28 work unchanged; `/SYSTEM/PROGRAMS` works as
+  before. On 0.28 and older the apps' folders are ordinary folders (start their programs
+  from Files or the shell); a program with a needs block says there what it lacks.
+- **Tests**: item 34 of the list above (`make test-29`, run by `make test`). The pictures
+  that show About ("Horizon 0.29") and some that show a moment's free memory in the menu
+  bar (the Desktop starts a little later: its scan of /APPS) were refreshed.
 
 ## Version 0.28 (large program files, task_path)
 

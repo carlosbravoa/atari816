@@ -223,6 +223,9 @@ point".
   the template `sdk/templates/c-window-app`, the example `sdk/c/examples/viewer`.
 - [porting.md](porting.md): what breaks when C from a PC or from cc65 comes over, how
   to find it, and what to do when the program is too big (`hcc --code large`).
+- [../apps.md](../apps.md) (Horizon 0.29): your program as an app that users install
+  with a double click: one folder in `/APPS` with APP.INF, an `.HZA` archive made with
+  `sdk/tools/hzapp.py`, and `hcc --needs` (the program checks what it needs at its start).
 - `make -C sdk/c test`: the SDK's own tests in the emulator.
 
 ## 10. vbcc, the second compiler

@@ -1,0 +1,3 @@
+apptest: /APPS/GAMEA/GAMEA.PRG in /APPS/GAMEA args []
+apptest: /APPS/GAMEA/GAMEA.PRG in / args ["/ZZDOC.ZZT"]
+apptest: the file says: a document of type ZZT

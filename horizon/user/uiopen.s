@@ -279,14 +279,32 @@ ui_open:
         lda     #0
         jmp     ui_launch
 @data:  cmp     #FT_OTHER
-        bne     :+
-        ldx     #.loword(m_noprog)      ; nothing opens it
+        bne     @known
+        ldx     op_path                 ; (0.29) an app that registered its type (APP.INF)?
+        jsr     ui_appfind
+        bcs     :+
+        ldx     op_path
+        jsr     op_quote
+        ldx     #.loword(ui_approg)
+        ldy     #.loword(op_abuf)
+        lda     #.loword(ui_apname)
+        jmp     ui_launch
+:       ldx     #.loword(m_noprog)      ; nothing opens it
         ldy     #.loword(t_open)
         jsr     op_alert
         sec
         rts
-:       ldx     op_path                 ; its program, with the path
-        jsr     op_quote
+@known: ldx     op_path                 ; its program, with the path
+        ldy     #0
+        lda     op_type                 ; (0.29) an app archive: "-w PATH" (the Installer's
+        cmp     #FT_APP                 ; window)
+        bne     :+
+        lda     #'-' | ('w' << 8)
+        sta     op_abuf
+        lda     #' '
+        sta     op_abuf+2
+        ldy     #3
+:       jsr     op_qat
         lda     op_type
         asl     a
         tax
@@ -338,15 +356,16 @@ op_isdir:
 @no:    clc
         rts
 
-; op_abuf = string X in quotes (at most 127 characters of it)
+; op_abuf = string X in quotes (at most 127 characters of it); (0.29) op_qat: from op_abuf + Y
 op_quote:
-        lda     #'"'
-        sta     op_abuf
-        ldy     #1
+        ldy     #0
+op_qat: lda     #'"'
+        sta     op_abuf,y
+        iny
 :       lda     a:0,x
         and     #$00FF
         beq     :+
-        cpy     #128
+        cpy     #131
         bcs     :+
         sep     #$20
         .a8
@@ -896,7 +915,7 @@ pg_tab: .byte   "EDIT", 0, ICO_EDIT, "Edit", 0, "WRITE", 0, ICO_WRITE, "Write", 
         .byte   "ABOUT", 0, ICO_ABOUT, "About", 0, 0
 ; the icon of each type (FT_* order)
 ft_icon: .byte  ICO_DOC, ICO_FOLDER, ICO_DISK, ICO_PROGRAM, ICO_TEXT, ICO_BASDOC, ICO_PICTURE
-        .byte   ICO_SHEETDOC, ICO_WRITEDOC, ICO_DOC, ICO_MUSICDOC
+        .byte   ICO_SHEETDOC, ICO_WRITEDOC, ICO_DOC, ICO_MUSICDOC, ICO_DOC
 s_title: .byte  "TITLE=", 0
 s_args: .byte   "ARGS=", 0
 s_tl:   .byte   "title=", 0
@@ -913,10 +932,11 @@ ft_tab: .byte   "LNK", 0, FT_LINK, "PRG", 0, FT_PRG, "BAS", 0, FT_BASIC, "PIC", 
         .byte   "LST", 0, FT_TEXT       ; (0.23) a BASIC listing (LIST "D:..." on the Atari: $9B line ends)
         .byte   "MOD", 0, FT_MUSIC, "WAV", 0, FT_MUSIC  ; (0.26) Music
         .byte   "MID", 0, FT_MUSIC                      ; (REV $0C) OPL2 MIDI
+        .byte   "HZA", 0, FT_APP                        ; (0.29) an app archive: the Installer
         .byte   0
 ; the program of each type (FT_* order) and its name for messages
-ft_prog: .addr  0, p_files, 0, 0, p_edit, p_basic, p_paint, p_sheet, p_write, 0, p_music
-ft_name: .addr  0, n_files, 0, 0, n_edit, n_basic, n_paint, n_sheet, n_write, 0, n_music
+ft_prog: .addr  0, p_files, 0, 0, p_edit, p_basic, p_paint, p_sheet, p_write, 0, p_music, p_inst
+ft_name: .addr  0, n_files, 0, 0, n_edit, n_basic, n_paint, n_sheet, n_write, 0, n_music, n_inst
 p_files: .byte  "/BIN/WFILES.PRG", 0
 p_edit: .byte   "/BIN/EDIT.PRG", 0
 p_basic: .byte  "/BIN/BASIC.PRG", 0
@@ -924,6 +944,7 @@ p_paint: .byte  "/BIN/PAINT.PRG", 0
 p_sheet: .byte  "/BIN/SHEET.PRG", 0
 p_write: .byte  "/BIN/WRITE.PRG", 0
 p_music: .byte  "/BIN/MUSIC.PRG", 0
+p_inst: .byte   "/BIN/INSTALL.PRG", 0
 p_req:  .byte   "/SYSTEM/OPEN.REQ", 0
 n_files: .byte  "Files", 0
 n_edit: .byte   "Edit", 0
@@ -932,6 +953,7 @@ n_paint: .byte  "Paint", 0
 n_sheet: .byte  "Sheet", 0
 n_write: .byte  "Write", 0
 n_music: .byte  "Music Player", 0
+n_inst: .byte   "Installer", 0
 s_sys:  .byte   "/SYSTEM/", 0
 s_ok:   .byte   "OK", 0
 hexd:   .byte   "0123456789ABCDEF"
@@ -971,7 +993,7 @@ op_dot: .res    2
 op_nmax: .res   2
 op_ext: .res    6
 op_nbuf: .res   NAMEMAX + 2
-op_abuf: .res   132
+op_abuf: .res   136
 op_title: .res  34
 op_msg: .res    3 * 90
 op_sblk: .res   6

@@ -12,9 +12,15 @@ code then fills several banks (still one file, NAME.PRG, for Horizon 0.28; data,
 and the stacks stay in the first bank): [docs/c/reference.md](../docs/c/reference.md),
 "The two code models".
 
+(Horizon 0.29) `hcc --needs horizon=0.29,opl2,mem=1024K` makes the program check what it
+needs when it starts (a message and exit 1 where something is missing, also on older
+Horizons); `sdk/tools/hzapp.py` packs a program's folder into an `.HZA` archive that users
+install with a double click: [docs/apps.md](../docs/apps.md).
+
 ```
 sdk/c/bin/hcc -o HELLO.PRG hello.c    # a Horizon program from C, in one command (cc816)
 sdk/c/bin/hcc --code large -o GAME.PRG *.c   # code in several banks, still one file
+sdk/c/bin/hcc --needs horizon=0.29,lau -o GAME.PRG *.c  # it checks what it needs at its start
 make -C sdk/c test                    # the SDK's tests in the emulator
 sdk/c/tools/get-toolchain.sh          # only for vbcc: download and install it (Linux x86-64)
 ```

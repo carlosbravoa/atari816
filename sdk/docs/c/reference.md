@@ -11,7 +11,7 @@ controls library, `hui.h`): [apps.md](apps.md); games: [games.md](games.md); por
 | --- | --- |
 | Compilers | **cc816**, the SDK's own (`sdk/c/cc816`, Python 3, writes ca65 assembly): the default. **vbcc 65816** Release 2 (Volker Barthelmann): `hcc --cc vbcc`, installed by `sdk/c/tools/get-toolchain.sh` |
 | Driver | `sdk/c/bin/hcc` (`hcc -h` lists the options); `--cc cc816` or `--cc vbcc`, or `HZ_CC` in the environment (`make HZ_CC=vbcc` for a program built with c.mk) |
-| Headers | `horizon.h` (syscalls, blocks, helpers), `hui.h` (the controls library: [apps.md](apps.md)), `hgame.h`, `conio.h`, `joystick.h` ([games.md](games.md)), `dirent.h`; the C library's: cc816's own (`sdk/c/cc816/include`: `stdio.h`, `stdlib.h`, `string.h`, `math.h`, `float.h`, `ctype.h`, `time.h`, `errno.h`, `stdint.h`, `inttypes.h`, `stdarg.h`, `setjmp.h`, `limits.h`, ...), vbcc's |
+| Headers | `horizon.h` (syscalls, blocks, helpers), `hui.h` (the controls library: [apps.md](apps.md)), `hgame.h`, `conio.h`, `joystick.h` ([games.md](games.md)), `dirent.h`; the C library's: cc816's own (`sdk/c/cc816/include`: `stdio.h`, `stdlib.h`, `string.h`, `fcntl.h`, `unistd.h`, `math.h`, `float.h`, `ctype.h`, `time.h`, `errno.h`, `stdint.h`, `inttypes.h`, `stdarg.h`, `setjmp.h`, `limits.h`, ...), vbcc's |
 | Library | `sdk/c/lib` (both compilers), `sdk/c/lib/cc816` and `sdk/c/rt/cc816` (cc816: the whole C library and its runtime), `sdk/c/lib/vbcc`, `sdk/c/rt`, `sdk/c/fastrt` (vbcc: over vbcc's own binary library); hcc builds them into `sdk/c/build/lib/<cc816, large, tiny>/` |
 | Make | `sdk/c/c.mk` (a program's Makefile is three lines) |
 
@@ -725,6 +725,7 @@ Where it differs from the table below:
 | `strtoll`, `strtoull`, `atoll`, `llabs`, `lldiv` | yes (`inttypes.h`: `strtoimax`, `strtoumax`, `imaxabs`, `imaxdiv` are the same) |
 | `setjmp`, `longjmp` | yes ("setjmp and longjmp (cc816)", below) |
 | `assert` | prints the expression, the file and the line on stderr, then exit code 3 |
+| `open`, `creat` (`fcntl.h`), `read`, `write`, `lseek`, `close`, `unlink`, `isatty` (`unistd.h`) | POSIX's file descriptors, for code written for Unix or DOS (the Xargon port's boards): `O_RDONLY O_WRONLY O_RDWR O_CREAT O_TRUNC O_EXCL O_APPEND` (`O_BINARY`, `O_TEXT` are 0: nothing is converted); descriptors 0-2 are the console, files 3 and up (Horizon's 4 handles, shared with `fopen`). No buffer for writing; a read-only descriptor reads ahead 512 bytes from the heap (small reads of records, each a call to the card otherwise), a read of 512 or more goes straight to the card. `lseek` any 32-bit position (`SEEK_END` from the size at open); `read` returns all the bytes asked for unless the file ends. Errors in `errno` (`ENOENT`, `EEXIST`, `EBADF`, `ESPIPE`, `ENFILE`). `sdk/c/lib/cc816/posixio.c`; tested by `tests/libc` |
 
 **vbcc**: its C library (binary only, its 65816 "simulator" target) does the formatting,
 strings, sorting, memory and buffering; the SDK replaces what reaches the machine and what
@@ -998,6 +999,15 @@ hz_close(h);
   strcat(path, "LEVELS.DAT");
   f = fopen(path, "rb");
   ```
+- **What the program needs** (Horizon 0.29): `hcc --needs horizon=0.29,opl2,mem=1024K`
+  (cc816; also `rev=N`, `lau`, `sprites`, `blitter`, `joystick`) adds a check that runs
+  before `main`: where something is missing the program prints one line ("GAME needs the
+  OPL2 sound chip (hardware revision $0C).", also in a small window when the window system
+  runs) and exits with code 1. It works on older Horizons too. Without `--needs` nothing is
+  added. `hz_sys_info()` returns Horizon's version (major x 256 + minor, 0x001D for 0.29)
+  and sets `hz_x` to the hardware revision (-1 / 0xFFFF and `HZ_ENOSYS` before 0.29). An
+  app (a program in its own folder, installed from an `.HZA` archive):
+  [../apps.md](../apps.md).
 - **A syscall without a wrapper** (a newer kernel's): `hz_syscall(n, a, x, y)` returns A and
   sets hz_errno, hz_x, hz_y. A pointer is two arguments: `HZ_OFF(p)` and `HZ_BANK(p)`. Or
   write the stub in assembly as the generated ones are (cc816: `build/lib/cc816/stubs/*.s`;
@@ -1353,6 +1363,36 @@ the c-testsuite when `CTS=` points at a checkout.
     = (struct S){1, 2};`, an element of a static array given so) was refused as not a
     constant; GNU C takes the literal's list (`r024_static_compound_literal.c`). 21 and 22
     were found by the c-testsuite (00216.c) once range designators were there.
+
+23. **`#define NAME= value`** (no white space between the name and the replacement) was
+    refused ("Bad macro definition"). C99 asks for the space; older compilers took the
+    line as it is, and gcc warns and takes the rest of the line, `=` and all: cc816 now
+    does as gcc (`warning: missing whitespace after the macro name`). Xargon's
+    keyboard.h has one (`r032_define_no_space.c`).
+24. **A header with bytes above 127 that are not UTF-8** (a DOS program's code page 437
+    text in a string: Xargon's cfg_win.h) made an internal error (UnicodeDecodeError): the
+    main file was read byte for byte (Latin-1), included files as UTF-8. Every file is read
+    byte for byte now (`r033_latin1_source.c`).
+25. **An undeclared name in an array's size** (`int t[numkinds];` without the header that
+    defines numkinds) was reported as "cc816 does not support variable-length arrays"; it
+    is "'numkinds' undeclared" now (`tests/diag/array_size_undeclared.c`).
+
+Faster code from the same port (its profile: 13 % of the time in `__mul16` and
+`__sdiv16`, and its board, a `__far` array of arrays, read through 32-bit address
+arithmetic at every access):
+
+- a multiply by a constant with up to four non-zero digits in binary **or in the
+  non-adjacent form** (signed digits: `x * 31` = `x * 32 - x`, an array of 31-byte
+  structures) is shifts and adds or subtracts, inline (before: only binary, so 31, 15,
+  63, 255 called `__mul16`);
+- a **signed divide by a power of two** (`x / 16` of an `int`) is inline: the bias for
+  negative values, then arithmetic shifts (C rounds toward zero); before, `__sdiv16`;
+- an **element of an array of arrays** (`a[i][j]`, and members that are arrays) adds its
+  indexes into one 16-bit index; in a `__far` object, which lies in one bank, that index
+  goes in Y (`[base],y`) instead of a 32-bit address built at every access; an unsigned
+  index through a far pointer does the same (Y carries into the bank as the 32-bit add
+  did); a signed one through a far pointer keeps the 32-bit step (it may be negative)
+  (`r034_mul_div_const.c`, `r035_far_index.c`).
 
 Bugs 4-6 were found by the random programs once they learnt structures, bit-fields and
 far pointers; 10-16 by the programs of `tests/lang/` and the c-testsuite; 17 by the

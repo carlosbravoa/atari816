@@ -482,6 +482,18 @@ fn    void ui_chime(unsigned kind)
 in    kind=A
 doc   A chime (CH_INFO, CH_WARN, CH_QUESTION, CH_ERROR) at the beep volume.
 
+unbound ui_appinf  (Horizon 0.29) the apps (uiapp.s): the Desktop's and Files' own; a C program reads APP.INF with fopen
+unbound ui_apparse  (Horizon 0.29) the apps (uiapp.s): the Desktop's and Files' own; a C program reads APP.INF with fopen
+unbound ui_appfind  (Horizon 0.29) the apps (uiapp.s): the Desktop's and Files' own; a C program reads APP.INF with fopen
+unbound ui_apname  (Horizon 0.29) the apps (uiapp.s): the Desktop's and Files' own; a C program reads APP.INF with fopen
+unbound ui_apicon  (Horizon 0.29) the apps (uiapp.s): the Desktop's and Files' own; a C program reads APP.INF with fopen
+unbound ui_aptypes  (Horizon 0.29) the apps (uiapp.s): the Desktop's and Files' own; a C program reads APP.INF with fopen
+unbound ui_apcat  (Horizon 0.29) the apps (uiapp.s): the Desktop's and Files' own; a C program reads APP.INF with fopen
+unbound ui_apver  (Horizon 0.29) the apps (uiapp.s): the Desktop's and Files' own; a C program reads APP.INF with fopen
+unbound ui_apdesc  (Horizon 0.29) the apps (uiapp.s): the Desktop's and Files' own; a C program reads APP.INF with fopen
+unbound ui_apneeds  (Horizon 0.29) the apps (uiapp.s): the Desktop's and Files' own; a C program reads APP.INF with fopen
+unbound ui_approg  (Horizon 0.29) the apps (uiapp.s): the Desktop's and Files' own; a C program reads APP.INF with fopen
+unbound ui_apprg  (Horizon 0.29) the apps (uiapp.s): the Desktop's and Files' own; a C program reads APP.INF with fopen
 unbound ui_strcpy  strcpy (string.h)
 unbound ui_strlen  strlen (string.h)
 unbound ui_win     zero page: the drawing functions take it as an argument; a row callback gets it in ui_rowinfo

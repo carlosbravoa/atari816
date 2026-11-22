@@ -1,0 +1,5 @@
+name=C App
+version=1.0
+description=The C SDK test window program
+category=Tests
+needs=horizon=0.29,mem=256K

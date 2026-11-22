@@ -207,4 +207,7 @@ emulator should keep it on the board; still check it there.
 - `sdk/docs/reference/`: every syscall with an example, the window system, drawing,
   sound, the hardware, performance; `games.md` for full-screen mode, sprites, draw lists,
   palette entries and frame sync; `internet.md` for URLs and connections (Horizon 0.22).
+- [apps.md](apps.md) (Horizon 0.29): your program as an app: one folder in `/APPS` with
+  APP.INF, an `.HZA` archive made with `sdk/tools/hzapp.py` that users install with a
+  double click, and `HZ_NEEDS` (`needs.inc`): the program checks what it needs at its start.
 - `sdk/skill/atari-816-dev/`: the same knowledge as a Claude skill.

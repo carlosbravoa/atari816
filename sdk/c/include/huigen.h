@@ -3,7 +3,7 @@
  * ui/hui.tab: do not edit (make -C sdk/c gen). Included by hui.h, which has the
  * structures and the rules (sdk/docs/c/apps.md).
  *
- * 61 functions, 11 variables; 34 names of the library are not bound
+ * 61 functions, 11 variables; 46 names of the library are not bound
  * (hui.tab says why: C has its own way).
  * hui.h includes it three times: the constants, the structure names, then (after its
  * own types) the structures and the prototypes. */
@@ -100,6 +100,7 @@
 #define FT_WRITE         8
 #define FT_LINK          9
 #define FT_MUSIC         0xA
+#define FT_APP           0xB
 #define UI_NAMEMAX       0x40
 #define CK_YEAR          0
 #define CK_MON           2

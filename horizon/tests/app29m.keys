@@ -1,0 +1,32 @@
+# (0.29) 20 apps on the Desktop (DESK=1; tests/mousegen.py makes tests/app29m.keys from
+# this; tests/mkapps.py desk20: 18 without a category, Snake and Tetra in Games, BROKEN
+# (APP.INF of junk: by its folder's name), NOPROG (its program is not there: left out),
+# NOINF (no APP.INF: by its folder's name), LOOSE.PRG (a program right in /APPS), .HIDDEN
+# (left out), NEEDV ("Needs 0.99")). Shots (s), compared by tests/apppic.py:
+#   1   6.5  Programs: 6 built-in programs, a line, 16 apps, "More apps  >"
+#   2   9    More apps: its pop-up (the other six apps, then Snake and Tetra)
+#   3  13.5  "Needs 0.99" chosen: its program's window "NEEDV needs Horizon 0.99 or later"
+6000 M -100:-100:0:0
+6050 M -100:-72:0:0
+6100 M -15:0:0:0
+6200 M 0:0:0:1
+6280 M 0:0:0:0
+7000 M -8:100:0:0
+7050 M 0:100:0:0
+7100 M 0:100:0:0
+7150 M 0:37:0:0
+7400 M 0:0:0:1
+7480 M 0:0:0:0
+10000 {esc}
+11000 M 8:-100:0:0
+11050 M 0:-100:0:0
+11100 M 0:-100:0:0
+11150 M 0:-37:0:0
+11200 M 0:0:0:1
+11280 M 0:0:0:0
+11800 M -8:100:0:0
+11850 M 0:100:0:0
+11900 M 0:100:0:0
+11950 M 0:23:0:0
+12200 M 0:0:0:1
+12280 M 0:0:0:0

@@ -46,6 +46,11 @@ Tests (in tests/):
            scripted tests, then their screenshots compared pixel by pixel
   appsdoc  the code blocks of docs/c/apps.md (the tutorial) are in examples/guests/stepN.c
            as written (no emulator; make -C examples/guests test runs the steps)
+  apps     (Horizon 0.29) apps (tests/apps): hcc --needs refuses bad lists; CWIN (C, a
+           window, --needs horizon=0.29,mem=256K) and ASMAPP (assembly, HZ_NEEDS: 0.29 and
+           Lau) packed with sdk/tools/hzapp.py (check, pack, list: no warning), installed
+           with the Installer (install -y), started from their folders; the needs refused:
+           Horizon 0.99, the OPL2 on REV 11, Lau on REV 9 (console and desktop)
 """
 import os
 import re
@@ -791,11 +796,12 @@ def run_ui(horizon, only, m="large"):
                     c = Image.open(os.path.join(tpl, "c-window-app", "build", "test",
                                                 f"shot{i + 1}.png")).convert("RGB")
                     # (Files' status line shows the time a file changed: not compared)
+                    # (the menu bar's free memory: the large program's code bank; (Horizon
+                    # 0.29) and in any model a moment's memory: the Desktop samples it
+                    # every 5 s, and a program being loaded then holds the loader's bank)
                     for im in (a, c):
                         im.paste((0, 0, 0), (0, 480, 680, 512))
-                        if m == "cc816l":
-                            # (the menu bar's free memory: the large program's code bank)
-                            im.paste((0, 0, 0), (900, 0, 1280, 24))
+                        im.paste((0, 0, 0), (900, 0, 1280, 24))
                     box = ImageChops.difference(a, c).getbbox()
                     n += 1
                     if box:
@@ -805,6 +811,110 @@ def run_ui(horizon, only, m="large"):
         report("uitwin", m, not [x for x in bad if not x.startswith("(")],
                f"both templates' tests pass; {n} screenshots identical" if not bad
                else " | ".join(bad))
+
+
+def run_apps(horizon, only, models):
+    """(Horizon 0.29) apps: hcc --needs, hzapp.py, the Installer, the needs checked at the
+    start (tests/apps)"""
+    if only and "apps" not in only:
+        return
+    src = os.path.join(HERE, "apps")
+    hza = [sys.executable, os.path.join(SDK, "tools", "hzapp.py")]
+    cwin = os.path.join(src, "cwin.c")
+    b = os.path.join(SDKC, "build", "tests", "apps")
+    shutil.rmtree(b, ignore_errors=True)
+    os.makedirs(b)
+    for bad, msg in (("horizon=1", "a version such as 0.29"), ("warp", "unknown need"),
+                     ("mem=99M", "65535K at most")):
+        rc, out = sh([sys.executable, HCC, "--needs", bad, "-o", os.path.join(b, "X.PRG"), cwin])
+        report("apps", "hcc", rc != 0 and msg in out, f"--needs {bad}: refused")
+    # ASMAPP: the assembly SDK's way (ca65 + ld65 + ulib.o)
+    user = os.path.join(horizon, "user")
+    asm = os.path.join(b, "ASMAPP")
+    os.makedirs(asm)
+    rc1, o1 = sh(["ca65", "-I", user, "-o", os.path.join(b, "asmapp.o"),
+                  os.path.join(src, "asmapp.s")])
+    rc2, o2 = sh(["ld65", "-C", os.path.join(user, "prog.cfg"), "-o",
+                  os.path.join(asm, "ASMAPP.PRG"), os.path.join(b, "asmapp.o"),
+                  os.path.join(horizon, "build", "ulib.o")])
+    shutil.copy(os.path.join(src, "ASMAPP.INF"), os.path.join(asm, "APP.INF"))
+    report("apps", "asm", rc1 == 0 and rc2 == 0, "ASMAPP assembled (HZ_NEEDS)" + o1 + o2)
+    for m in [m for m in ("cc816", "cc816l") if m in models]:
+        d = os.path.join(b, m)
+        app = os.path.join(d, "CWIN")
+        os.makedirs(app)
+        rc, out = hcc(os.path.join(app, "CWIN.PRG"), [cwin], m,
+                      ["--needs", "horizon=0.29", "--needs", "mem=256K"])
+        shutil.copy(os.path.join(src, "CWIN.INF"), os.path.join(app, "APP.INF"))
+        rv, outv = hcc(os.path.join(d, "CNEEDV.PRG"), [cwin], m, ["--needs", "horizon=0.99"])
+        ro, outo = hcc(os.path.join(d, "CNEEDO.PRG"), [cwin], m, ["--needs", "opl2"])
+        report("apps", m, rc == 0 and rv == 0 and ro == 0, "CWIN, CNEEDV, CNEEDO built with "
+               "--needs" + ("" if rc == 0 else ": " + out[-300:]))
+        if rc:
+            continue
+        # hzapp.py: check (the needs block read from the program: no warning), pack, list
+        rc, out = sh(hza + ["check", app])
+        okc = rc == 0 and out.strip().endswith("hzapp: OK")
+        rc, out2 = sh(hza + ["pack", app, "-o", os.path.join(d, "CWIN.HZA"), "--mtime", "1793000000"],
+                      cwd=d)
+        rc3, out3 = sh(hza + ["list", os.path.join(d, "CWIN.HZA")])
+        rc4, out4 = sh(hza + ["pack", asm, "-o", os.path.join(d, "ASMAPP.HZA")], cwd=d)
+        report("apps", m, okc and rc == 0 and rc3 == 0 and "CWIN.PRG" in out3 and
+               "needs: horizon=0.29,mem=256K" in out3 and rc4 == 0 and "warning" not in out4,
+               "hzapp.py check, pack, list (CWIN, ASMAPP)" +
+               ("" if okc else ": " + out[-300:]))
+        # the Installer (shell): both installed, then started from their folders
+        inst = os.path.join(horizon, "build", "sd", "BIN", "INSTALL.PRG")
+        scr = os.path.join(d, "install.script")
+        open(scr, "w").write("3000 install -y /ASMAPP.HZA\\n\n+3000 /APPS/CWIN/CWIN.PRG\\n\n"
+                             "+4000 /APPS/ASMAPP/ASMAPP.PRG\\n\n")
+        sh([sys.executable, RUN816, inst, "--horizon", horizon, "--mode", "shell",
+            "--dest", "/BIN/INSTALL.PRG", "--args", "-y /CWIN.HZA", "--script", scr,
+            "--seconds", "14", "--out", os.path.join(d, "run-install"),
+            "--file", os.path.join(d, "CWIN.HZA") + ":/CWIN.HZA",
+            "--file", os.path.join(d, "ASMAPP.HZA") + ":/ASMAPP.HZA"])
+        p = os.path.join(d, "run-install", "console.txt")
+        con = open(p, encoding="latin-1").read() if os.path.exists(p) else ""
+        exp = ["C App is installed", "Assembly App is installed",
+               "cwin: in /APPS/CWIN/, current folder /, Horizon 0.29", "cwin: done",
+               "asmapp: running"]
+        miss = [e for e in exp if e not in con]
+        report("apps", m, not miss and os.path.isdir(os.path.join(d, "run-install", "card",
+                                                                  "APPS", "CWIN")),
+               "installed with install -y, started" + (f": missing {miss}" if miss else ""))
+        # started from the Desktop, in its folder
+        sh([sys.executable, RUN816, os.path.join(app, "CWIN.PRG"), "--horizon", horizon,
+            "--mode", "desktop", "--dest", "/APPS/CWIN/CWIN.PRG", "--seconds", "5",
+            "--out", os.path.join(d, "run-desk")])
+        p = os.path.join(d, "run-desk", "console.txt")
+        con = open(p, encoding="latin-1").read() if os.path.exists(p) else ""
+        report("apps", m, "cwin: done" in con and "Horizon 0.29" in con,
+               "CWIN on the Desktop (its window, then its end)")
+        # the needs refused (console; the Desktop: the message window too)
+        for prg, rev, want, mode in (
+                ("CNEEDV.PRG", None, "CNEEDV needs Horizon 0.99 or later (this is 0.29).", "shell"),
+                ("CNEEDV.PRG", None, "CNEEDV needs Horizon 0.99 or later (this is 0.29).", "desktop"),
+                ("CNEEDO.PRG", "11", "CNEEDO needs the OPL2 sound chip (hardware revision $0C).", "shell"),
+                ("CNEEDO.PRG", None, "cwin: in", "shell")):
+            out_dir = os.path.join(d, f"run-{prg[:-4].lower()}-{mode}-{rev or 'def'}")
+            cmd = [sys.executable, RUN816, os.path.join(d, prg), "--horizon", horizon,
+                   "--mode", mode, "--seconds", "4", "--out", out_dir]
+            if rev:
+                cmd += ["--rev", rev]
+            if mode == "desktop":
+                cmd += ["--shot", "2"]
+            sh(cmd)
+            p = os.path.join(out_dir, "console.txt")
+            con = open(p, encoding="latin-1").read() if os.path.exists(p) else ""
+            report("apps", m, want in con, f"{prg} ({mode}{', REV ' + rev if rev else ''}): "
+                   f"{want}")
+    out_dir = os.path.join(b, "run-asm-rev9")
+    sh([sys.executable, RUN816, os.path.join(asm, "ASMAPP.PRG"), "--horizon", horizon,
+        "--mode", "shell", "--seconds", "3", "--rev", "9", "--out", out_dir])
+    p = os.path.join(out_dir, "console.txt")
+    con = open(p, encoding="latin-1").read() if os.path.exists(p) else ""
+    want = "ASMAPP needs Lau, the sample player (hardware revision $0A or later)."
+    report("apps", "asm", want in con, f"ASMAPP on REV 9: {want}")
 
 
 def main():
@@ -864,6 +974,7 @@ def main():
     for m in ("cc816", "cc816l", "large"):
         if m in models:
             run_ui(horizon, only, m)
+    run_apps(horizon, only, models)
     bad = [r for r in results if not r[2]]
     print(f"\nC SDK tests: {len(results) - len(bad)} passed, {len(bad)} failed "
           f"({time.time() - t0:.0f} s)")

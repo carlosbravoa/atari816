@@ -64,6 +64,13 @@ Options:
   --debug           paint the stack; at exit the program prints how much it used (cc816:
                     both stacks, and the most of the heap in use at once)
   -l FILE           link an extra object or library (.o, .a)
+  --needs LIST      cc816: what the program needs, checked when it starts (Horizon 0.29's
+                    HZ_NEEDS, sdk/docs/apps.md): comma-separated horizon=0.29, rev=11,
+                    lau, opl2, sprites, blitter, joystick, mem=1024K (or 2M); repeatable.
+                    Missing -> one line on the console, the same in a small window when
+                    the window system runs, exit 1 ("GAME needs the OPL2 sound chip
+                    (hardware revision $0C)."); this works on older Horizons too. With
+                    --code large, horizon is at least 0.28. Without --needs: no check
   --game            link hgame, the game library (sdk/c/game); hcc also does it by
                     itself when a C source includes <hgame.h>, <conio.h> or <joystick.h>
   -v                show the commands
@@ -124,7 +131,7 @@ def main(argv):
          "keep": None, "cc": os.environ.get("HZ_CC") or DEFAULT_CC,
          "code": os.environ.get("HZ_CODE") or "small", "heap": None,
          "bank_room": _env_int("HZ_BANK_ROOM"), "main_room": _env_int("HZ_MAIN_ROOM"),
-         "spread": _env_int("HZ_SPREAD"),
+         "spread": _env_int("HZ_SPREAD"), "needs": [],
          "ccopts": {"w": False, "wall": False, "werror": False, "wflags": {},
                     "signed_char": False, "undefs": [], "includes": []}}
     i = 0
@@ -201,6 +208,8 @@ def main(argv):
             o["libs"].append(val("-l"))
         elif a == "--game":
             o["game"] = True
+        elif a == "--needs" or a.startswith("--needs="):
+            o["needs"].append(a.split("=", 1)[1] if a.startswith("--needs=") else val("--needs"))
         elif a == "-v":
             hzc.VERBOSE = True
         elif a == "--keep":
@@ -224,9 +233,81 @@ def main(argv):
     if o["compile_only"] and o["out"] and \
             len([s for s in srcs if not s.endswith((".o", ".a", ".lib"))]) > 1:
         die("-c with -o takes one source")
+    if o["needs"]:
+        try:
+            o["needs"] = parse_needs(",".join(o["needs"]))
+        except ValueError as e:
+            die(f"--needs: {e}")
     if o["cc"] == "cc816":
         return main_cc816(o)
+    if o["needs"]:
+        die("--needs is for cc816 (hcc --cc cc816); in a vbcc program, check with "
+            "hz_sys_info() yourself")
     return main_vbcc(o)
+
+
+NEED_FLAGS = {"lau": 0x01, "opl2": 0x02, "sprites": 0x04, "blitter": 0x08, "joystick": 0x10}
+
+
+def parse_needs(text):
+    """'horizon=0.29,opl2,mem=1024K' -> {major, minor, rev, flags, kb} (ValueError)"""
+    n = {"major": 0, "minor": 0, "rev": 0, "flags": 0, "kb": 0}
+    for t in (t.strip().lower() for t in text.split(",")):
+        if not t:
+            continue
+        k, _, v = t.partition("=")
+        if k == "horizon":
+            parts = v.split(".")
+            if len(parts) != 2 or not all(p.isdigit() for p in parts) or \
+                    int(parts[0]) > 255 or int(parts[1]) > 255:
+                raise ValueError(f"horizon={v}: a version such as 0.29")
+            n["major"], n["minor"] = int(parts[0]), int(parts[1])
+        elif k == "rev":
+            try:
+                r = int(v, 0)
+            except ValueError:
+                raise ValueError(f"rev={v}: a hardware revision number (7 to 255)")
+            if not 1 <= r <= 255:
+                raise ValueError(f"rev={v}: a hardware revision number (7 to 255)")
+            n["rev"] = r
+        elif k == "mem":
+            m = v.upper()
+            mult = 1024 if m.endswith("M") else 1
+            m = m.rstrip("KM")
+            if not m.isdigit() or not 0 < int(m) * mult <= 65535:
+                raise ValueError(f"mem={v}: KB of free memory, such as 1024K or 2M "
+                                 f"(65535K at most)")
+            n["kb"] = int(m) * mult
+        elif k in NEED_FLAGS and not v:
+            n["flags"] |= NEED_FLAGS[k]
+        else:
+            raise ValueError(f"unknown need {t!r} (horizon=X.Y, rev=N, lau, opl2, sprites, "
+                             f"blitter, joystick, mem=NK)")
+    return n
+
+
+def needs_object(o, tmp, code):
+    """the HZ_NEEDS check as a constructor (an object for the link), or None"""
+    n = o["needs"]
+    if not n:
+        return None
+    if code == "large" and (n["major"], n["minor"]) < (0, 28):
+        n["major"], n["minor"] = 0, 28          # (its code banks follow the o65: task_path)
+    out = o["out"] or os.path.basename(os.path.splitext(o["srcs"][0])[0]).upper() + ".PRG"
+    name = os.path.splitext(os.path.basename(out))[0][:15]
+    name = "".join(c for c in name if 32 < ord(c) < 127 and c != '"') or "PROGRAM"
+    src = os.path.join(tmp, "hzneeds.s")
+    with open(src, "w") as f:
+        f.write("; hcc --needs: the program's requirements, checked before main\n"
+                "\t.p816\n\t.smart\t-\n\t.a16\n\t.i16\n"
+                "\t.include \"needs.inc\"\n\t.include \"model.inc\"\n"
+                "\t.constructor\t__hz_needs, 30\n"
+                "\t.segment\t\"CODE\"\n"
+                f"__hz_needs:\n\tHZ_NEEDS \"{name}\", {n['major']}, {n['minor']}, {n['rev']}, "
+                f"{n['flags']}, {n['kb']}\n\tRET\n")
+    obj = os.path.join(tmp, "hzneeds.o")
+    hzc816.assemble(src, obj, code=code)
+    return obj
 
 
 def _env_int(name):
@@ -297,6 +378,9 @@ def main_cc816(o):
                                            code=code))
         if o["compile_only"]:
             return 0
+        nobj = needs_object(o, tmp, code)
+        if nobj:
+            objs = objs + [nobj]
         libs = list(o["libs"])
         if o["game"] or hgbuild.uses_game(o["srcs"]):
             libs.insert(0, hgbuild.lib_for("cc816l" if code == "large" else "cc816"))

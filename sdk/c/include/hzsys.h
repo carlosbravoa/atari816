@@ -2,7 +2,7 @@
  * from horizon.inc, ABI.md and tools/syscalls.tab: do not edit (make -C sdk/c gen).
  * Included by horizon.h, which defines the parameter blocks (hz_io, hz_winopen, ...).
  *
- * 112 syscalls, 114 C functions.
+ * 113 syscalls, 115 C functions.
  * Each function: carry clear -> hz_errno = 0 and the result; carry set -> hz_errno =
  * the Horizon error code (HZ_E*) and -1 ($FFFF for unsigned results). */
 #ifndef HZSYS_H
@@ -243,6 +243,7 @@
 #define SYS_TINFO        0x33
 #define SYS_SINGLE       0x34
 #define SYS_TPATH        0x35
+#define SYS_INFO         0x36
 #define SYS_PCREATE      0x40
 #define SYS_SEND         0x41
 #define SYS_RECV         0x42
@@ -320,7 +321,7 @@
 #define SYS_SHEETNEW     0xA1
 #define SYS_SHEETFREE    0xA2
 #define SYS_SHEETDRAW    0xA3
-#define HZ_NSYSCALLS     112
+#define HZ_NSYSCALLS     113
 
 /* ---- the syscalls */
 /** exit (SYS_EXIT, $00): End the task with an exit code. Nothing is flushed: exit() (stdlib.h) flushes the C streams first.
@@ -428,6 +429,9 @@ int hz_task_single(void);
 /** task_path (SYS_TPATH, $35): The absolute path of the file the program was loaded from (zero-terminated) into buf -> its length. A 128-byte buffer always fits; EINVAL if buf is too small. Horizon 0.28 and later (before: ENOSYS). See hz_prog_dir.
  *  [buf: XY, size: A] */
 int hz_task_path(char *buf, unsigned size);
+/** sys_info (SYS_INFO, $36): Horizon's version: major * 256 + minor (0x001D = 0.29); hz_x = the hardware revision (SYS_REV: 0x0C the OPL2, 0x0B sprites, 0x0A Lau, 0x08 the blitter). Horizon 0.29 and later (before: ENOSYS, 0xFFFF). hcc --needs checks a program's needs with it at its start.
+ *  [no arguments; out: hz_x] */
+unsigned hz_sys_info(void);
 /** port_create (SYS_PCREATE, $40): A message port owned by the caller -> its number (0-15).
  *  [no arguments] */
 int hz_port_create(void);

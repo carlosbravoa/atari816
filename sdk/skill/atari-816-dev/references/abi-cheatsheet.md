@@ -74,6 +74,7 @@ it yourself (`dec5` / `digit` in `SDK/templates/game/main.s`: A -> ASCII digits)
 | $33 | SYS_TINFO | A slot, X,Y 16 bytes | |
 | $34 | SYS_SINGLE | | C set: already running (exit) |
 | $35 | SYS_TPATH | X,Y buf, A size (128 fits) | A length; the program file's absolute path (0.28) |
+| $36 | SYS_INFO | - | A version (major<<8\|minor, $001D = 0.29), X REV (0.29; ENOSYS before). Apps and HZ_NEEDS: sdk/docs/apps.md |
 | $40-$43 | SYS_PCREATE / SEND / RECV / PCLOSE | ports, 16-byte messages | |
 | $50 | SYS_ICLAIM | | |
 | $51 | SYS_IREAD | (blocks) | A usage, X mods\|down<<8 |

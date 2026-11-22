@@ -53,6 +53,8 @@ SYS_SINGLE    = $34   ; one instance of this program only: C set, A = ERUNNING, 
                       ;   already (its windows were raised: exit); else later spawns of it raise this one
 SYS_TPATH     = $35   ; (0.28) X, Y = buffer, A = its size -> A = length: the absolute path of the
                       ;   caller's program file (EINVAL if the buffer is too small; 128 bytes always do)
+SYS_INFO      = $36   ; (0.29) -> A = Horizon's version (major << 8 | minor: $001D = 0.29), X = the
+                      ;   hardware revision (SYS_REV). ENOSYS before 0.29. HZ_NEEDS (needs.inc) uses it
 TI_WINDOWS = 1        ; task_info byte 13: it has windows
 TI_MODAL   = 2        ;   a WF_MODAL window (a dialog, an alert) is open
 TI_IDLE    = 4        ;   waiting in win_event with nothing queued

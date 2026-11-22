@@ -1,0 +1,10 @@
+> install -y /T/GOOD.HZA
+Good App 1.0 - The apps test's app
+4 files, 3 KB, into /APPS/GOOD.
+The card is full. Nothing was installed
+(what was written is deleted again).
+exit 0001
+> ls /APPS
+> ls /APPS/GOOD
+dir: not found
+> 

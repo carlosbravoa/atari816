@@ -138,11 +138,30 @@ folder. On Horizon before 0.28 the call returns ENOSYS.
         lda     #128
         sys     SYS_TPATH       ; "/GAMES/MINE/GAME.PRG"
         bcs     @old            ; ENOSYS: Horizon before 0.28
+        ; ... the path is in path
+@old:
 ```
 
 A program file may also carry its own data after the o65 part: the loader reads only the
 o65 and ignores the rest, in a file of any size (before 0.28: files below 64 KB only). The
 program opens its own file with this path and reads the data from there.
+
+### $36 sys_info (SYS_INFO)
+(Horizon 0.29.) Out: A = Horizon's version, major x 256 + minor ($001D for 0.29); X = the
+hardware revision (SYS_REV: $0C the OPL2, $0B sprites and scrolling, $0A Lau, $08 the
+blitter, $07 POKEY's sound). No side effects. Before 0.29 the call does not exist (ENOSYS).
+```asm
+        sys     SYS_INFO        ; A = $001D (0.29), X = $0C (REV $0C)
+        bcs     @old            ; ENOSYS: Horizon before 0.29
+        cpx     #$0A
+        bcc     @nolau          ; REV below $0A: no Lau
+        ; ... Horizon 0.29 or later, and Lau
+@nolau:
+@old:
+```
+To refuse to run where something is missing, a program puts `HZ_NEEDS` (`needs.inc`) at
+its start instead: it also works on Horizons older than 0.29 and shows the message. See
+[../apps.md](../apps.md), "What a program needs".
 
 ## Time
 

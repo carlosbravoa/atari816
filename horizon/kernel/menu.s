@@ -1141,6 +1141,10 @@ sys_wmenu:
         lda     mn_sticky
         sta     mn_rs
 :       jsr     mn_close
+        ldx     cur                     ; (0.29) mn_close's win_close of the drop-down took
+        lda     t_a,x                   ; kg_e: the window again (before, the new menus went
+        asl     a                       ; to the drop-down's place and were lost: a menu
+        sta     kg_e                    ; refreshed while open kept its old items)
 :       ldx     cur
         lda     t_x,x
         sta     kt0

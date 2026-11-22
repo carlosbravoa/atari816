@@ -18,7 +18,7 @@ sys_tab:
         .word   .loword(sys_nosys), .loword(sys_nosys), .loword(sys_nosys), .loword(sys_nosys), .loword(sys_nosys), .loword(sys_nosys)
         .assert (* - sys_tab) = $30 * 2, error, "syscall table: spawn must be $30"
         .word   .loword(sys_spawn), .loword(sys_wait), .loword(sys_kill), .loword(sys_tinfo)    ; $30
-        .word   .loword(sys_single), .loword(sys_tpath), .loword(sys_nosys), .loword(sys_nosys), .loword(sys_nosys), .loword(sys_nosys)
+        .word   .loword(sys_single), .loword(sys_tpath), .loword(sys_info), .loword(sys_nosys), .loword(sys_nosys), .loword(sys_nosys)
         .word   .loword(sys_nosys), .loword(sys_nosys), .loword(sys_nosys), .loword(sys_nosys), .loword(sys_nosys), .loword(sys_nosys)
         .word   .loword(sys_pcreate), .loword(sys_send), .loword(sys_recv), .loword(sys_pclose)    ; $40
         .word   .loword(sys_nosys), .loword(sys_nosys), .loword(sys_nosys), .loword(sys_nosys), .loword(sys_nosys), .loword(sys_nosys), .loword(sys_nosys)
@@ -254,6 +254,15 @@ sys_bfree:
         lda     #0
         jmp     set_ok
 @bad:   jmp     err_inval
+
+; ---- $36 sys_info -> A = Horizon's version (HORIZON_MAJOR << 8 | HORIZON_MINOR: $001D for
+; 0.29), X = the hardware revision (SYS_REV). (0.29) A program checks what it needs with it ----
+sys_info:
+        ldx     cur
+        lda     k_rev
+        sta     t_x,x
+        lda     #HORIZON_MAJOR << 8 | HORIZON_MINOR
+        jmp     set_ok
 
 ; $12 mem_info -> A = free banks, X = banks usable by tasks (free, owned or kernel scratch)
 sys_minfo:

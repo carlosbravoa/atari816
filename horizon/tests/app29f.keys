@@ -1,0 +1,6 @@
+# (0.29) a full card (emu816 --card-free 1500): the install stops at the program's data, says
+# so, and leaves nothing behind (tests/app29f.txt).
+1500 {esc}
++1500 install -y /T/GOOD.HZA\n
++3000 ls /APPS\n
++1500 ls /APPS/GOOD\n

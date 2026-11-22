@@ -1,0 +1,1 @@
+~ apscan: 20 apps; full scan * ms, quick check * ms

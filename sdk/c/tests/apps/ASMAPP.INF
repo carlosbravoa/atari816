@@ -1,0 +1,4 @@
+name=Assembly App
+version=1.0
+description=The C SDK test assembly program
+needs=horizon=0.29,lau

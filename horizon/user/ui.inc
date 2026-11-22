@@ -8,7 +8,8 @@
 ; = DBR): a "pointer" below is a 16-bit address there. The library uses SYS_WEVENT, so a
 ; program using it reads its events with ui_getev (into ui_ev) instead of SYS_WEVENT.
 ; Cost: about 8.7 KB of code (0.2 KB more with ui_dlg*, 0.3 KB with ui_ask, 1.6 KB and 0.5 KB of
-; bss with ui_launch / ui_open, (0.21) 0.8 KB with ui_cpwin), 1.5 KB of bss, 38 bytes of zero
+; bss with ui_launch / ui_open, (0.29) and with them uiapp's 1.3 KB of code and 2.3 KB of bss,
+; (0.21) 0.8 KB with ui_cpwin), 1.5 KB of bss, 38 bytes of zero
 ; page (ui_*), and a bank only while the file dialog is open. Examples: user/edit.s (a scroll
 ; bar, the dialogs, ui_dlg* for Find / Replace / Go to line).
 ;
@@ -265,6 +266,26 @@ FT_SHEET   = 7          ; .sht .csv (Sheet)
 FT_WRITE   = 8          ; .md (Write)
 FT_LINK    = 9          ; (0.14) .lnk: a shortcut (ui_open opens its target)
 FT_MUSIC   = 10         ; (0.26) .mod .wav (Music)
+FT_APP     = 11         ; (0.29) .hza: an app archive (the Installer, /BIN/INSTALL.PRG -w FILE)
+;                         (0.29) A type with no built-in program: the first app in /APPS whose
+;                         APP.INF lists it in types= opens it (ui_appfind).
+;
+; ---------------------------------------------------------------- apps (0.29, uiapp.s)
+; An app is a folder in /APPS with its program and APP.INF ("key=value" lines: name, program,
+; icon, types, category, version, description, needs; sdk/docs/apps.md).
+; ui_appinf         X = an app's folder ("/APPS/DIGGER") -> APP.INF read (1023 bytes at most)
+;                   and parsed (ui_apparse); ui_approg = the program's full path: program=,
+;                   else FOLDER.PRG, else the folder's only .PRG; ui_apname = name= or the
+;                   folder's name. C set: no program file (not an app).
+; ui_apparse        X = APP.INF's text (zero-terminated, in the program's bank) -> the fields
+;                   below ("" when missing; cut to their size; keys ignore case, blanks around
+;                   keys and values dropped, '#' lines and unknown keys ignored).
+; ui_appfind        X = a file's path -> C clear: the app whose types= has its extension
+;                   (ui_approg, ui_apname and the other fields are that app's); C set: none.
+;                   Reads /APPS (one READDIR an entry) and each app's APP.INF.
+; Fields (strings): ui_apname (24 characters), ui_apicon (31), ui_aptypes (47), ui_apcat (15),
+; ui_apver (15), ui_apdesc (63), ui_apneeds (47), ui_apprg (program= as written, 63),
+; ui_approg (127).
 ;
 ; (0.14) shortcuts: a .LNK file is text: the target's absolute path on a line of its own,
 ; optional "title=Name" (the label the Desktop shows) and "args=..." (a program's argument
@@ -380,6 +401,8 @@ CK_WDAY  = 12
 .global ui_popup, ui_popat, ui_menukey, ui_chime, ui_dlfilt, ui_atload
 .global ui_launch, ui_spawnerr, ui_ftype, ui_open
 .global ui_lnkread, ui_mklink, ui_prog, ui_ficon, ui_lktgt, ui_lktitl, ui_lkargs
+.global ui_appinf, ui_apparse, ui_appfind, ui_apname, ui_apicon, ui_aptypes, ui_apcat
+.global ui_apver, ui_apdesc, ui_apneeds, ui_approg, ui_apprg
 .global ui_clk, ui_clksplit, ui_clkjoin, ui_clkcheck, ui_clkmdays, ui_clkfmt, ui_clklong
 .global ui_clkparse, ui_clkload, ui_clksave, ui_clkpc
 .global ui_cptree, ui_rmtree, ui_mvtree, ui_cpcb, ui_cpname, ui_cpk, ui_cpsize

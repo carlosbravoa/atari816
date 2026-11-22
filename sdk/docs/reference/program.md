@@ -204,7 +204,12 @@ start:  sys     SYS_SINGLE      ; C set: already running (its windows were raise
 | --- | --- |
 | `/BIN` | applications (the shell finds `NAME` there: type `name args`) |
 | `/SYSTEM`, `/SYSTEM/TESTS` | Horizon's own programs and tests (Files refuses to start programs in /SYSTEM) |
+| `/APPS/NAME/` | (0.29) an app: its program, its files and APP.INF, installed from an `.HZA` archive; listed in the Desktop's Programs menu by itself ([../apps.md](../apps.md)) |
 | anywhere else | start it by its path in the shell (`/APPS/GAME.PRG`), from Files (double click), or from the Desktop's Programs menu |
 
 To add a program to the Desktop's Programs menu, add a line `Title=/path/NAME.PRG` to
-`/SYSTEM/PROGRAMS` (plain text, read when the Desktop starts; 16 entries at most).
+`/SYSTEM/PROGRAMS` (plain text, read when the menu opens; 16 entries at most). (0.29) A
+program in its own folder in `/APPS` (an app) needs no line there: the Desktop lists the
+apps after the programs of `/SYSTEM/PROGRAMS`. A program right in `/APPS` is listed too,
+by its file name. See [../apps.md](../apps.md), which also explains `HZ_NEEDS`: a program
+that checks what it needs (a Horizon version, hardware, memory) at its start.

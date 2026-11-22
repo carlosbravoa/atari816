@@ -7,6 +7,12 @@
 ;     whose program is not on the card is left out (and Settings, which is in the Horizon
 ;     menu), so new programs need no rebuild (a built-in list when the file is missing).
 ;     Read again each time the menu opens (WE_MENUOPEN): the kernel shows the new list.
+;     (0.29) Then the apps of /APPS (sdk/docs/apps.md): a folder with APP.INF (or FOLDER.PRG,
+;     or one .PRG) and a .PRG right in /APPS, behind a line, by category ("Games  >": a
+;     pop-up menu of its apps) and name; "More apps  >" when they do not fit (see apmenu).
+;     /APPS is listed each time the menu opens; the APP.INF files are read again when the
+;     listing changed or /SYSTEM/APPS.NEW is there (the Installer makes it). An app starts
+;     in its folder. A desktop shortcut to an app shows the app's icon= (apicon).
 ;   (the kernel adds "Windows" after them)
 ; The menu bar's right end shows the free memory and the time: "5632K free  up 0:05" (the
 ; time since start) until the clock is set, then "5632K free  14:05" (every 5 s). A click
@@ -278,8 +284,10 @@ loop:   lda     #0
         beq     @sys
         lda     ui_ev+4
         cmp     z:nprog
-        jcs     loop
-        asl     a
+        bcc     :+
+        jsr     apchoose                ; (0.29) an app, a category, More apps
+        jmp     loop
+:       asl     a
         tax
         lda     ptitle,x
         pha
@@ -383,7 +391,8 @@ dither: lda     #C_DESK2
 ; menu = the Horizon menu, then "Programs" and the titles of /SYSTEM/PROGRAMS whose program
 ; is on the card (ptitle / ppath: their strings in pool); Settings is left out (it is in
 ; the Horizon menu)
-mkmenu: ldx     #.loword(m_sys)         ; the Horizon menu and the "Programs" title
+mkmenu: jsr     appscan                 ; (0.29) /APPS
+        ldx     #.loword(m_sys)         ; the Horizon menu and the "Programs" title
         ldy     #.loword(menu)
         lda     #m_sys_end - m_sys
         jsr     memcpy
@@ -538,9 +547,631 @@ mkmenu: ldx     #.loword(m_sys)         ; the Horizon menu and the "Programs" ti
         bne     :-
         jmp     @line
 @end2:  stx     z:lp
-@end:   ldx     z:mp                    ; "", "" after the last menu
+@end:   jsr     apmenu                  ; (0.29) the apps after them
+        ldx     z:mp                    ; "", "" after the last menu
         stz     a:0,x
         rts
+
+; ---------------------------------------------------------------- (0.29) the apps
+; The apps of /APPS (sdk/docs/apps.md) come after the built-in programs, behind a separator:
+; a folder with an APP.INF (or with FOLDER.PRG, or with one .PRG: its name is the folder's),
+; and a .PRG right in /APPS (by its file name). Sorted by category, then name, ignoring case:
+; those without a category one item each, then one item per category ("Games  >": choosing
+; it opens a pop-up menu of its apps at the pointer). The drop-down holds 24 items: when the
+; built-in programs, the separator and these rows are more, the last row is "More apps  >"
+; with the apps of the rows that did not fit. A pop-up holds 24: a longer one ends with
+; "All apps in Files" (Files at /APPS). An app starts with its folder as the current folder.
+; The records (APREC bytes: the name, the category, the program's path) live in the icon
+; bank from APBASE. /APPS is read (READDIR) each time the menu opens; the APP.INF files only
+; when its listing changed (a sum of its entries) or /SYSTEM/APPS.NEW is there (the Installer
+; makes it; deleted here); with no icon bank, no apps.
+APMAX   = 64                            ; apps at most
+APREC   = 128                           ; a record: the name (25 + 0),
+AP_CAT  = 26                            ; the category (15 + 0),
+AP_PATH = 42                            ; the program's path (85 + 0)
+AP_PL   = APREC - AP_PATH - 1
+APBASE  = $8000                         ; (the icons end at ICO_COUNT * 1024)
+MROWS   = 24                            ; a drop-down's or a pop-up's items at most
+APDBL   = 640                           ; /APPS's READDIR buffer (pbuf)
+
+; A = an app's index -> ap = its record
+apptr:  xba
+        lsr     a
+        clc
+        adc     #APBASE
+        sta     z:ap
+        lda     z:icbank
+        sta     z:ap+2
+        rts
+apptr2: xba
+        lsr     a
+        clc
+        adc     #APBASE
+        sta     z:aq
+        lda     z:icbank
+        sta     z:aq+2
+        rts
+
+; the next entries of /APPS (skip apsk) -> pbuf, apcnt = their count; C set: no more
+aprd:   lda     #.loword(p_apps)
+        sta     rblk
+        lda     #^p_apps
+        sta     rblk+2
+        lda     #.loword(pbuf)
+        sta     rblk+3
+        lda     #^pbuf
+        sta     rblk+5
+        lda     #APDBL - 2
+        sta     rblk+6
+        lda     apsk
+        sta     rblk+8
+        ptr     rblk
+        sys     SYS_READDIR
+        bcs     @no
+        cmp     #0
+        beq     @no
+        sta     apcnt
+        clc
+        adc     apsk
+        sta     apsk
+        clc
+        rts
+@no:    sec
+        rts
+
+; X = the next entry's offset in pbuf, after the one at apdp
+apnext: ldx     apdp
+        lda     pbuf+5,x
+        and     #$00FF
+        clc
+        adc     #6
+        adc     apdp
+        tax
+        rts
+
+; /APPS read: A = a sum of its entries (those not starting with '.')
+apsum:  stz     apsk
+        stz     apsg
+@call:  jsr     aprd
+        bcs     @end
+        ldx     #0
+@ent:   stx     apdp
+        lda     pbuf+6,x
+        and     #$00FF
+        cmp     #'.'
+        beq     @nx
+@sum:   lda     pbuf+5,x                ; every byte of the entry: size, attribute, name
+        and     #$00FF
+        clc
+        adc     #6
+        tay
+:       lda     apsg                    ; (rotated left, then added)
+        asl     a
+        adc     #0
+        sta     apsg
+        lda     pbuf,x
+        and     #$00FF
+        clc
+        adc     apsg
+        sta     apsg
+        inx
+        dey
+        bne     :-
+@nx:    jsr     apnext
+        dec     apcnt
+        bne     @ent
+        bra     @call
+@end:   lda     apsg
+        rts
+
+; the apps found again when /APPS changed (or at the first time, or after APPS.NEW)
+appscan:
+        lda     z:icbank
+        bne     :+
+        stz     apn
+        rts
+:       stz     aprs                    ; /SYSTEM/APPS.NEW: the Installer asks
+        ldx     #.loword(p_rescan)
+        jsr     statx
+        bcs     :+
+        inc     aprs
+:       jsr     apsum
+        ldx     aprs
+        bne     @full
+        ldx     apok
+        beq     @full
+        cmp     apsig
+        bne     @full
+        rts
+@full:  sta     apsig
+        lda     #1
+        sta     apok
+        lda     aprs
+        beq     :+
+        ptr     p_rescan                ; (read: the request is done)
+        sys     SYS_DELETE
+:       stz     apn
+        stz     apsk
+@call:  jsr     aprd
+        jcs     apsort
+        ldx     #0
+@ent:   stx     apdp
+        lda     pbuf+6,x                ; (".name": left out)
+        and     #$00FF
+        cmp     #'.'
+        jeq     @nx
+        lda     pbuf+5,x                ; apth = "/APPS/" + its name
+        and     #$00FF
+        cmp     #96
+        jcs     @nx
+        sta     z:t
+        ldy     #0
+:       lda     p_apps,y
+        sta     apth,y
+        iny
+        cpy     #6
+        bcc     :-
+        lda     #'/'
+        sta     apth+5
+        ldy     #6
+        sep     #$20
+        .a8
+:       lda     pbuf+6,x
+        sta     apth,y
+        inx
+        iny
+        dec     z:t
+        bne     :-
+        lda     #0
+        sta     apth,y
+        rep     #$20
+        .a16
+        sty     z:t0                    ; (the path's length)
+        ldx     apdp
+        lda     pbuf+4,x                ; a folder: an app?
+        and     #$0010
+        beq     @file
+        ldx     #.loword(apth)
+        jsr     ui_appinf
+        bcs     @nx
+        ldx     #.loword(ui_apname)
+        ldy     #.loword(ui_apcat)
+        lda     #.loword(ui_approg)
+        jsr     apadd
+        bra     @nx
+@file:  ldx     z:t0                    ; a file NAME.PRG: an app "NAME"
+        cpx     #6 + 5
+        bcc     @nx
+        lda     apth-4,x
+        jsr     lower
+        cmp     #'.'
+        bne     @nx
+        lda     apth-3,x
+        jsr     lower
+        cmp     #'p'
+        bne     @nx
+        lda     apth-2,x
+        jsr     lower
+        cmp     #'r'
+        bne     @nx
+        lda     apth-1,x
+        jsr     lower
+        cmp     #'g'
+        bne     @nx
+        ldx     #.loword(apth + 6)      ; its name without ".PRG" (24 characters at most)
+        ldy     #0
+        sep     #$20
+        .a8
+:       lda     a:0,x
+        cmp     #'.'
+        beq     :+
+        sta     aptl,y
+        inx
+        iny
+        cpy     #24
+        bcc     :-
+:       lda     #0
+        sta     aptl,y
+        rep     #$20
+        .a16
+        ldx     #.loword(aptl)
+        ldy     #.loword(s_none)
+        lda     #.loword(apth)
+        jsr     apadd
+@nx:    jsr     apnext
+        dec     apcnt
+        jne     @ent
+        jmp     @call
+
+; sorted (insertion): apidx by category, then name, ignoring case
+apsort: lda     apn
+        asl     a
+        sta     apn2
+        ldx     #2
+@i:     cpx     apn2
+        bcs     @out
+        stx     api
+        lda     apidx,x
+        sta     apkey
+@j:     stx     apj
+        cpx     #0
+        beq     @put
+        lda     apidx-2,x
+        jsr     apcmp
+        bcc     @put
+        ldx     apj
+        lda     apidx-2,x
+        sta     apidx,x
+        dex
+        dex
+        bra     @j
+@put:   ldx     apj
+        lda     apkey
+        sta     apidx,x
+        ldx     api
+        inx
+        inx
+        bra     @i
+@out:   rts
+
+; A = an app: C set if it comes after apkey (category, then name)
+apcmp:  jsr     apptr
+        lda     apkey
+        jsr     apptr2
+        ldy     #AP_CAT
+        jsr     apscmp
+        bne     :+
+        ldy     #0
+        jsr     apscmp
+:       rts
+; the strings at ap + Y and aq + Y: Z set (C clear) if equal, else C set if ap's is after
+apscmp:
+:       lda     [aq],y
+        jsr     lower
+        sta     z:t
+        lda     [ap],y
+        jsr     lower
+        cmp     z:t
+        bne     @d
+        cmp     #0
+        beq     @eq
+        iny
+        bra     :-
+@eq:    clc
+@d:     rts
+
+; an app (X = its name, Y = its category, A = its program's path) kept
+apadd:  sta     apa_p
+        stx     apa_t
+        sty     apa_c
+        lda     apn
+        cmp     #APMAX
+        bcs     @out
+        ldx     apa_p
+        jsr     ui_strlen
+        cmp     #AP_PL + 1
+        bcs     @out
+        lda     apn
+        jsr     apptr
+        ldx     apa_t
+        ldy     #0
+        lda     #24
+        jsr     apput
+        ldx     apa_c
+        ldy     #AP_CAT
+        lda     #15
+        jsr     apput
+        ldx     apa_p
+        ldy     #AP_PATH
+        lda     #AP_PL
+        jsr     apput
+        lda     apn
+        asl     a
+        tax
+        lda     apn
+        sta     apidx,x
+        inc     apn
+@out:   rts
+; string X -> ap + Y, at most A characters (and its 0)
+apput:  sta     z:t
+        sep     #$20
+        .a8
+:       lda     a:0,x
+        beq     :+
+        sta     [ap],y
+        inx
+        iny
+        dec     z:t
+        bne     :-
+        lda     #0
+:       sta     [ap],y
+        rep     #$20
+        .a16
+        rts
+
+; the rows after the built-in programs -> mrow (apnr of them): a sorted position s (an
+; app), $8000 | s (a category from its first app s), $4000 | s (More apps: s to the end);
+; their items appended to the menu (z:mp)
+apmenu: stz     apnr
+        lda     apn
+        bne     :+
+        rts
+:       lda     apn
+        asl     a
+        sta     apn2
+        lda     #MROWS - 1              ; the rows that fit
+        sec
+        sbc     z:nprog
+        bmi     :+
+        bne     :++
+:       lda     #1
+:       sta     aproom
+        ldx     #0                      ; X = s * 2
+@r:     cpx     apn2
+        bcs     @fit
+        stx     api
+        lda     apidx,x
+        jsr     apptr
+        ldy     #AP_CAT
+        lda     [ap],y
+        and     #$00FF
+        bne     @cat
+        txa
+        lsr     a
+        jsr     aprow
+        ldx     api
+        inx
+        inx
+        bra     @r
+@cat:   txa                             ; a category: one row for all its apps
+        lsr     a
+        ora     #$8000
+        jsr     aprow
+:       ldx     api
+        inx
+        inx
+        stx     api
+        cpx     apn2
+        bcs     @fit
+        lda     apidx,x
+        jsr     apptr2
+        ldy     #AP_CAT
+        jsr     apscmp
+        beq     :-
+        ldx     api
+        bra     @r
+@fit:   lda     apnr                    ; too many rows: the last one "More apps"
+        cmp     aproom
+        beq     @items
+        bcc     @items
+        lda     aproom
+        sta     apnr
+        dec     a
+        asl     a
+        tax
+        lda     mrow,x
+        and     #$3FFF
+        ora     #$4000
+        sta     mrow,x
+@items: ldx     #.loword(s_sep)         ; "-", then the rows' items
+        jsr     apmstr
+        stz     api
+@it:    lda     api
+        cmp     apnr
+        bcs     @out
+        asl     a
+        tax
+        lda     mrow,x
+        bit     #$4000
+        beq     :+
+        ldx     #.loword(s_more)
+        jsr     apmstr
+        bra     @nx
+:       sta     z:t0
+        and     #$3FFF
+        asl     a
+        tax
+        lda     apidx,x
+        jsr     apptr
+        ldy     #0                      ; an app: its name
+        lda     z:t0
+        bpl     :+
+        ldy     #AP_CAT                 ; a category: "Games", TAB, ">"
+:       jsr     apmrec
+        lda     z:t0
+        bpl     @nx
+        ldx     z:mp
+        dex
+        lda     #9 | ('>' << 8)
+        sta     a:0,x
+        stz     a:2,x
+        inx
+        inx
+        inx
+        stx     z:mp
+@nx:    inc     api
+        bra     @it
+@out:   rts
+; A -> mrow[apnr++] (MROWS + 1 at most: one more than fits, then "More apps")
+aprow:  ldy     apnr
+        cpy     #MROWS + 1
+        bcs     :+
+        pha
+        tya
+        asl     a
+        tax
+        pla
+        sta     mrow,x
+        inc     apnr
+:       rts
+; string X appended to the menu as an item (when it has room)
+apmstr: ldy     z:mp
+        cpy     #.loword(menu + MENUMAX - 40)
+        bcs     :+
+        jsr     ui_strcpy
+        sec
+        adc     z:mp
+        sta     z:mp
+:       rts
+; the string at ap + Y appended to the menu as an item
+apmrec: ldx     z:mp
+        cpx     #.loword(menu + MENUMAX - 40)
+        bcs     @out
+        sep     #$20
+        .a8
+:       lda     [ap],y
+        sta     a:0,x
+        beq     :+
+        inx
+        iny
+        bra     :-
+:       rep     #$20
+        .a16
+        inx
+        stx     z:mp
+@out:   rts
+
+; WE_MENU in Programs at item A (>= nprog): the separator, an app, a category's pop-up,
+; More apps' pop-up
+apchoose:
+        sec
+        sbc     z:nprog
+        beq     @out                    ; (the separator)
+        dec     a
+        cmp     apnr
+        bcs     @out
+        asl     a
+        tax
+        lda     mrow,x
+        bit     #$C000
+        bne     @pop
+        jmp     aplaunch
+@out:   rts
+@pop:   sta     z:t0                    ; the pop-up: its apps from s
+        and     #$3FFF
+        sta     api
+        stz     apj                     ; items
+        lda     #.loword(pbuf)          ; (built like a menu, in pbuf)
+        sta     apmp
+@add:   lda     api
+        asl     a
+        cmp     apn2
+        bcs     @show
+        tax
+        lda     apidx,x
+        jsr     apptr
+        lda     z:t0                    ; a category's: while the category is the same
+        bpl     :+
+        and     #$3FFF
+        asl     a
+        tax
+        lda     apidx,x
+        jsr     apptr2
+        ldy     #AP_CAT
+        jsr     apscmp
+        bne     @show
+:       lda     apj                     ; full: "All apps in Files" instead
+        cmp     #MROWS - 1
+        bcc     :+
+        ldx     #.loword(s_all)
+        ldy     apmp
+        jsr     ui_strcpy
+        sec
+        adc     apmp
+        sta     apmp
+        lda     apj
+        asl     a
+        tax
+        lda     #$FFFF
+        sta     popmap,x
+        inc     apj
+        bra     @show
+:       ldx     apmp                    ; its name
+        ldy     #0
+        sep     #$20
+        .a8
+:       lda     [ap],y
+        sta     a:0,x
+        beq     :+
+        inx
+        iny
+        bra     :-
+:       rep     #$20
+        .a16
+        inx
+        stx     apmp
+        lda     apj
+        asl     a
+        tax
+        lda     api
+        sta     popmap,x
+        inc     apj
+        inc     api
+        bra     @add
+@show:  ldx     apmp
+        stz     a:0,x
+        lda     z:back
+        ldx     #.loword(pbuf)
+        jsr     ui_popup
+        cmp     apj
+        bcs     @no
+        asl     a
+        tax
+        lda     popmap,x
+        cmp     #$FFFF
+        beq     @files
+        jmp     aplaunch
+@files: ldx     #.loword(p_files)       ; Files at /APPS
+        ldy     #.loword(p_apps)
+        lda     #.loword(t_files)
+        jmp     ui_launch
+@no:    rts
+
+; the app at sorted position A started (detached), in its folder
+aplaunch:
+        asl     a
+        tax
+        lda     apidx,x
+        jsr     apptr
+        ldy     #0                      ; its name -> lbuf, its path -> pth
+:       lda     [ap],y
+        sta     lbuf,y
+        iny
+        iny
+        cpy     #AP_CAT
+        bcc     :-
+        ldy     #AP_PATH
+        ldx     #0
+:       lda     [ap],y
+        sta     pth,x
+        iny
+        iny
+        inx
+        inx
+        cpy     #APREC
+        bcc     :-
+        ldx     #.loword(pth)           ; its folder (up to the last '/') -> apth
+        ldy     #.loword(apth)
+        jsr     ui_strcpy
+        tay
+:       dey
+        beq     :+
+        lda     apth,y
+        and     #$00FF
+        cmp     #'/'
+        bne     :-
+        lda     apth,y
+        and     #$FF00
+        sta     apth,y
+:       ptr     apth
+        sys     SYS_CHDIR
+        ldx     #.loword(pth)
+        ldy     #0
+        lda     #.loword(lbuf)
+        jsr     ui_launch
+        ptr     p_root                  ; (the Desktop's own: the root)
+        sys     SYS_CHDIR
+        jmp     clock
 
 ; the menus to the kernel, unless they are what it has already (mold)
 setmenu:
@@ -944,7 +1575,8 @@ kindof: asl     a
         rts
 
 ; every icon's picture, label and whether it is a shortcut (after a change of /Desktop)
-load:   lda     #ICO_SD
+load:   stz     apislot                 ; (0.29) the app icon files loaded: none yet
+        lda     #ICO_SD
         sta     ic_ico
         lda     #ICO_ATARI
         sta     ic_ico+2
@@ -1059,7 +1691,129 @@ loadent:
         lda     #1
 :       ldx     #.loword(ui_lktgt)
         jsr     ui_ficon
+        jsr     apicon                  ; (0.29) an app's: its APP.INF's icon=
         bra     @set
+
+; (0.29) A = the icon ui_ficon gave for a shortcut's target (ui_lktgt) -> A = the app's own
+; when the target is an app's folder or a file in it (/APPS/NAME...) and its APP.INF has
+; icon=: a built-in icon's name (apinames), or an icon file in the folder (32 x 32, 8 bpp,
+; 255 transparent: 1024 bytes, read into the icon bank from slot APISLOT0; 24 at most)
+APISLOT0 = 40                           ; ($A000: after the app records)
+APISLOTS = 24
+apicon: sta     apic
+        lda     z:icbank
+        jeq     @keep
+        ldy     #0                      ; "/APPS/"?
+:       lda     ui_lktgt,y
+        jsr     lower
+        sta     z:t
+        lda     p_apps,y
+        jsr     lower
+        cmp     #0                      ; (lower's flags are its compares')
+        beq     :+
+        cmp     z:t
+        jne     @keep
+        iny
+        bra     :-
+:       lda     z:t
+        cmp     #'/'
+        jne     @keep
+        ldx     #0                      ; apth = /APPS/NAME (to the next '/')
+:       lda     ui_lktgt,x
+        and     #$00FF
+        beq     :++
+        cpx     #6
+        bcc     :+
+        cmp     #'/'
+        beq     :++
+:       sta     apth,x
+        inx
+        cpx     #100
+        bcc     :--
+        jmp     @keep
+:       stz     apth,x
+        stx     apix
+        cpx     #7
+        jcc     @keep
+        ldx     #.loword(apth)
+        jsr     ui_appinf
+        lda     ui_apicon
+        and     #$00FF
+        jeq     @keep
+        ldx     #0                      ; a built-in name? ("name", 0, icon)
+@n:     lda     apinames,x
+        and     #$00FF
+        beq     @file
+        ldy     #0
+:       lda     apinames,x
+        jsr     lower
+        sta     z:t
+        lda     ui_apicon,y
+        jsr     lower
+        cmp     z:t
+        bne     @nn
+        inx
+        iny
+        cmp     #0
+        bne     :-
+        lda     apinames,x
+        and     #$00FF
+        rts
+@nn:    lda     apinames,x              ; (the next name)
+        and     #$00FF
+        inx
+        cmp     #0
+        bne     @nn
+        inx
+        bra     @n
+@file:  lda     apislot                 ; an icon file: apth/ICON into the next slot
+        cmp     #APISLOTS
+        jcs     @keep
+        ldy     apix
+        lda     #'/'
+        sta     apth,y
+        iny
+        tya
+        clc
+        adc     #.loword(apth)
+        tay
+        ldx     #.loword(ui_apicon)
+        jsr     ui_strcpy
+        ptr     apth
+        lda     #O_READ
+        sys     SYS_OPEN
+        jcs     @keep
+        sta     z:t
+        sta     rwblk
+        lda     apislot
+        clc
+        adc     #APISLOT0
+        xba
+        asl     a
+        asl     a
+        sta     rwblk+1
+        lda     z:icbank
+        sta     rwblk+3
+        lda     #1024
+        sta     rwblk+4
+        ptr     rwblk
+        sys     SYS_READ
+        php
+        pha
+        lda     z:t
+        sys     SYS_CLOSE
+        pla
+        plp
+        jcs     @keep
+        cmp     #1024
+        jne     @keep
+        lda     apislot
+        inc     apislot
+        clc
+        adc     #APISLOT0
+        rts
+@keep:  lda     apic
+        rts
 
 ; ---- the grid
 ; every icon a cell: from /SYSTEM/LAYOUT (not for Tidy up), the rest the first free one
@@ -4976,6 +5730,25 @@ d_progs: .byte  "Edit=/BIN/EDIT.PRG", 10, "Write=/BIN/WRITE.PRG", 10, "Sheet=/BI
         .byte   "Solitaire=/BIN/SOLITAIR.PRG", 10, "Terminal=/BIN/TERM.PRG", 10
         .byte   "Files=/BIN/WFILES.PRG", 10, "Printer=/BIN/PRINTER.PRG", 10, 0
 p_progs: .byte  "/SYSTEM/PROGRAMS", 0
+p_apps: .byte   "/APPS", 0              ; (0.29) the apps
+p_rescan: .byte "/SYSTEM/APPS.NEW", 0
+p_root: .byte   "/", 0
+s_none: .byte   0
+s_sep:  .byte   "-", 0
+s_more: .byte   "More apps", 9, ">", 0
+s_all:  .byte   "All apps in Files", 0
+; (0.29) the built-in icons by name, for APP.INF's icon= ("name", 0, ICO_*), then 0
+apinames:
+        .byte   "folder", 0, ICO_FOLDER, "sd", 0, ICO_SD, "atari", 0, ICO_ATARI, "doc", 0, ICO_DOC
+        .byte   "text", 0, ICO_TEXT, "writedoc", 0, ICO_WRITEDOC, "sheetdoc", 0, ICO_SHEETDOC
+        .byte   "picture", 0, ICO_PICTURE, "basdoc", 0, ICO_BASDOC, "disk", 0, ICO_DISK
+        .byte   "xex", 0, ICO_XEX, "cart", 0, ICO_CART, "program", 0, ICO_PROGRAM
+        .byte   "edit", 0, ICO_EDIT, "write", 0, ICO_WRITE, "sheet", 0, ICO_SHEET
+        .byte   "paint", 0, ICO_PAINT, "basic", 0, ICO_BASIC, "calc", 0, ICO_CALC
+        .byte   "solitaire", 0, ICO_SOLITAIRE, "terminal", 0, ICO_TERMINAL, "files", 0, ICO_FILES
+        .byte   "settings", 0, ICO_SETTINGS, "about", 0, ICO_ABOUT, "pc", 0, ICO_PC
+        .byte   "freecell", 0, ICO_FREECELL, "music", 0, ICO_MUSIC, "musicdoc", 0, ICO_MUSICDOC
+        .byte   0
 p_ini:  .byte   "/atari.ini", 0         ; (0.25) the folder disk after a restart: fdqry
 t_inkey: .byte  "folder", 0
 t_indrv: .byte  "drive", 0
@@ -5391,6 +6164,33 @@ in_ln:  .res    128
 in_fold: .res   128
 fdnum:  .res    64                      ;   its numbers' line
 fdtmp:  .res    64
+; (0.29) the apps (their records: in the icon bank from APBASE)
+apn:    .res    2                       ; how many
+apn2:   .res    2                       ; (x 2)
+apidx:  .res    APMAX * 2               ; their records in sorted order
+apok:   .res    2                       ; /APPS read once
+apsig:  .res    2                       ; its listing's sum then
+apsg:   .res    2
+aprs:   .res    2                       ; /SYSTEM/APPS.NEW seen
+apsk:   .res    2                       ; READDIR's skip
+apcnt:  .res    2
+apdp:   .res    2
+api:    .res    2
+apj:    .res    2
+apkey:  .res    2
+apa_p:  .res    2
+apa_t:  .res    2
+apa_c:  .res    2
+apnr:   .res    2                       ; the menu's app rows
+aproom: .res    2
+apmp:   .res    2                       ; a pop-up's items: the end
+mrow:   .res    (MROWS + 1) * 2
+popmap: .res    MROWS * 2
+apth:   .res    128
+aptl:   .res    26
+apic:   .res    2                       ; apicon: the icon so far, the folder's length, the
+apix:   .res    2                       ; icon files loaded
+apislot: .res   2
 
         .segment "ZEROPAGE"
 back:   .res    2
@@ -5464,3 +6264,5 @@ pcon:   .res    2                       ; the PC volume is there (its icon shown
 pcwas:  .res    2                       ; (at the last scan)
 pccell: .res    2                       ; the PC icon's cell ($FFFF: none yet)
 mvcp:   .res    2                       ; moveto: copy, not move
+ap:     .res    4                       ; (0.29) far pointers to app records
+aq:     .res    4

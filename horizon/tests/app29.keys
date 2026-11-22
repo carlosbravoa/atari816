@@ -1,0 +1,52 @@
+# (0.29) apps in the text shell (NODESK; tests/mkapps.py shell put the archives in /T): the
+# Installer's listing, an install with its question, an update that keeps the user's files
+# (SAVE.DAT, SAVES/HISCORE.DAT), names with spaces, pax headers skipped, every refused
+# archive (no /APPS/.INSTALL left behind), a bare copied program checking its needs, removal.
+# The console from the first "install" on must match tests/app29.txt.
+1500 {esc}
++1750 install -l /T/GOOD.HZA\n
++3200 install /T/GOOD.HZA\n
++3050 y
++2550 ls /APPS/GOOD\n
++2250 cat /APPS/GOOD/DATA.TXT\n
++2750 cp /T/SAVE.DAT /APPS/GOOD/SAVE.DAT\n
++3300 mkdir /APPS/GOOD/SAVES\n
++2700 cp /T/HISCORE.DAT /APPS/GOOD/SAVES/HISCORE.DAT\n
++3900 install -y /T/GOOD2.HZA\n
++4250 ls /APPS/GOOD\n
++2250 ls /APPS/GOOD/SAVES\n
++2550 ls /APPS/GOOD/LEVELS\n
++2600 cat /APPS/GOOD/DATA.TXT\n
++2750 cat /APPS/GOOD/SAVE.DAT\n
++2750 cat /APPS/GOOD/LEVELS/L1.DAT\n
++3000 /APPS/GOOD/GOOD.PRG\n
++3050 install -y /T/SPACE.HZA\n
++3750 install -y /T/PAX.HZA\n
++3650 ls /APPS\n
++2000 "/APPS/My Game (2)/Start Me.PRG" "/APPS/My Game (2)/Read me first.txt"\n
++5600 install -y /T/BADSUM.HZA\n
++3300 install -y /T/CUT.HZA\n
++3150 install -y /T/DOTDOT.HZA\n
++3300 install -y /T/ABS.HZA\n
++3150 install -y /T/TWO.HZA\n
++3150 install -y /T/NOINF.HZA\n
++3250 install -y /T/NOPRG.HZA\n
++3250 install -y /T/GNU.HZA\n
++3150 install -y /T/LINK.HZA\n
++3200 install -y /T/BADCH.HZA\n
++3250 install -y /T/NOPE.HZA\n
++3200 ls /APPS\n
++2000 cd /T\n
++1850 NEEDV.PRG\n
++2050 NEEDM.PRG\n
++2050 NEEDO.PRG\n
++2050 NEEDOK.PRG arg\n
++2300 cd /\n
++1800 install -r GOOD\n
++2850 y
++2550 install -r PAXAPP\n
++2950 n
++2050 install -y -r NOPE\n
++3000 install -y -r /BIN\n
++3000 ls /APPS\n
++2000 ls /APPS/GOOD\n
