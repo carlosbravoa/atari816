@@ -65,12 +65,22 @@ agents' own. "Fixed" means the SDK changed since; the lesson still holds.
   explicitly.
 - **One object at most 65,535 bytes**, and it must not cross a bank. Bigger: a bank from
   `hz_far_alloc()` and a `__far` pointer.
-- **Near vs far**: a plain pointer is an offset in the main bank. `(char *)hz_far_alloc()`
+- **Near vs far** (near data, the default): a plain pointer is an offset in the main bank. `(char *)hz_far_alloc()`
   points into the main bank, not the new bank (`-Wfar-pointer` warns; `-Wall` adds
   `-Wfar-cast`): say `__far`. A far string passed to `printf` or a `hui.h` call must be
   copied to a near buffer first (`hz_far_copy`). `(unsigned long)p` keeps the bank.
 - **The main bank is shared** by code (small model), constants, data, bss, heap and the
-  software stack. `hcc` prints what does not fit, with sizes.
+  software stack. `hcc` prints what does not fit, with sizes; `hcc --sizes` lists every
+  object and function, biggest first.
+- **Porting a DOS large-model program** (Watcom `-ml`, MSC `/AL`: every plain pointer
+  far): build with `--code large --data far` instead of adding `__far` by hand. Then:
+  `sizeof(void *)` is 4 but `size_t`/`ptrdiff_t` stay 16 bits (`p - q` of 40,000 bytes is
+  negative as an `int`: cast to `unsigned`, as on DOS); structures with pointers grow 2
+  bytes a pointer; `(char *)some_int` gives bank 0 (use `hz_farptr` or a `long`); a
+  `__near` pointer to a `const` or `__far` object loses the bank (`-Wfar-pointer`);
+  `#pragma aux f = "..."` is ignored with a warning (give `f` a C body); `hui.h` is not
+  there; objects of near and far data never link together. Speed: pointer-heavy loops
+  15-40 % slower, calls with pointer arguments about twice, code about 30 % bigger.
 - **Local arrays live on the 8 KB software stack** (`--stack N`). Big arrays: `static` or
   `malloc`. An overflow is reported only at exit ("stack overflow: ... guard zone ...
   was written"); `hcc --debug` prints what each stack and the heap used.

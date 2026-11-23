@@ -12,7 +12,7 @@ window applications (the controls library, `hui.h`): [apps.md](apps.md); games:
 | Compiler | **cc816**, the SDK's own (`sdk/c/cc816`, Python 3, writes ca65 assembly). It needs Python 3 and cc65's ca65, ld65 and ar65: nothing to download |
 | Driver | `sdk/c/bin/hcc` (`hcc -h` lists the options) |
 | Headers | `horizon.h` (syscalls, blocks, helpers), `hui.h` (the controls library: [apps.md](apps.md)), `hgame.h`, `conio.h`, `joystick.h` ([games.md](games.md)), `dirent.h`; the C library's in `sdk/c/cc816/include`: `stdio.h`, `stdlib.h`, `string.h`, `fcntl.h`, `unistd.h`, `math.h`, `float.h`, `ctype.h`, `time.h`, `errno.h`, `stdint.h`, `inttypes.h`, `stdarg.h`, `setjmp.h`, `limits.h`, ... |
-| Library | `sdk/c/lib` (the C library, in C) and `sdk/c/rt` (the startup and the runtime, in assembly); hcc builds them for each code model into `sdk/c/build/lib/small/` and `sdk/c/build/lib/large/` |
+| Library | `sdk/c/lib` (the C library, in C) and `sdk/c/rt` (the startup and the runtime, in assembly); hcc builds them for each code model into `sdk/c/build/lib/small/` and `sdk/c/build/lib/large/`, and for the far data model into `sdk/c/build/lib/large-far/` |
 | Make | `sdk/c/c.mk` (a program's Makefile is three lines) |
 
 cc816 has floating point (IEEE 754 single precision; `double` is the same 32-bit format),
@@ -332,8 +332,8 @@ direct-page register: the 65816's own long indirect addressing). The rules:
   not supported: it would need 24-bit index arithmetic on every access. XCOM-XT has no
   huge object (its arena keeps every block inside a bank), so it is not done; `huge` and
   `__huge` are accepted as `__far` in the compatibility spellings (below).
-- **printf `%p`** prints the 24-bit address as 6 hexadecimal digits (`05A3F0`); `scanf
-  %p` reads it back. `%s` takes a far string. Variable arguments: a pointer is 4 bytes.
+- **printf `%p`** prints the 24-bit address as `0x` and 6 hexadecimal digits
+  (`0x05a3f0`; near data: 4 digits); `scanf %p` reads it back. `%s` takes a far string. Variable arguments: a pointer is 4 bytes.
 - **Function pointers** are as in the large code model: 16 bits, the function's entry in
   the main bank. Converting one to `void *` gives a far pointer into the main bank, and
   back.
@@ -391,14 +391,17 @@ far` is only the part of the heap kept in the main bank (default 1024).
 `malloc`, `calloc`, `realloc` and `free` return and take far pointers. The heap is a list of
 arenas: the main bank's free room first (from the end of bss to the software stack's guard
 zone), then whole banks taken from Horizon (`hz_bank_alloc`) when no arena has room, each a
-first-fit free list as before. A block is at most 65,516 bytes and never crosses a bank
+first-fit free list as before. A block is at most 65,528 bytes and never crosses a bank
 (DOS's far heap had the same 64 KB limit). A bank whose blocks are all freed goes back to
-Horizon (and every bank at the program's end). `malloc` returns NULL with `errno` ENOMEM
-when no arena has room and Horizon has no free bank. `hz_heap_free()` and
-`hz_heap_largest()` count the arenas a program has (a `long`'s worth: `hz_heap_free()`
-returns `unsigned long` with far data), `hz_heap_peak()` the most in use at once; `hcc
---debug` reports them at exit. There is no near heap: a `__near` object is a global or a
-local.
+Horizon while another bank of the heap is empty too (one empty bank is kept, so a
+program that takes and frees a big block in turn does not ask Horizon each time); every
+bank goes back at the program's end. `malloc` returns NULL with `errno` ENOMEM when no
+arena has room and Horizon has no free bank (`tests/libc` takes every bank to see it).
+`hz_heap_free()` counts the free bytes of every arena and `hz_heap_peak()` the most in use
+at once (both `unsigned long` with far data), `hz_heap_largest()` the biggest `malloc` that
+would work now (65,528 while Horizon has a free bank); `hcc --debug` reports the peak at
+exit. There is no near heap: a `__near` object is a global or a local. (`lib/malloc.c`:
+64 arenas at most, about 4 MB.)
 
 ### The C library
 
@@ -483,16 +486,17 @@ micro-cases, is filled in below under "Costs of far data".)
 | `long` | 32 bits | |
 | `long long` | 64 bits | `int64_t`, `uint64_t`, `intmax_t`; `LLONG_MAX` ... |
 | `float`, `double`, `long double` | 32 bits (all three) | IEEE 754 single precision (24-bit significand: about 7 decimal digits, 1.2e-38 to 3.4e38, denormals down to 1.4e-45) |
-| data pointer | 16 bits | an offset in the main bank; `__far` pointers are 32 bits (offset, bank, 0) |
+| data pointer | 16 bits | an offset in the main bank; `__far` pointers are 32 bits (offset, bank, 0). With far data (`hcc --data far`) 32 bits, `__near` ones 16 ("The far data model") |
 | function pointer | 16 bits | the function (small model) or its entry in the main bank (large model) |
-| `size_t`, `ptrdiff_t` | 16 bits | `unsigned int`, `int`: one object at most 65,535 bytes |
+| `size_t`, `ptrdiff_t` | 16 bits | `unsigned int`, `int`: one object at most 65,535 bytes (in both data models) |
+| `intptr_t`, `uintptr_t` | 16 bits; 32 with far data | `int`, `unsigned int`; `long`, `unsigned long` with far data (they hold a pointer) |
 
 Structures are packed (no padding): the parameter blocks in `horizon.h` match ABI.md byte
 for byte (each has a compile-time size check). Bytes are little-endian.
 
 Predefined macros: `__CC816__`, `__65816__`, `__HORIZON__`, `__ATARI816__`,
-`__CHAR_UNSIGNED__` (not with `-fsigned-char`), and `__CC816_LARGE__` in the large code
-model.
+`__CHAR_UNSIGNED__` (not with `-fsigned-char`), `__CC816_LARGE__` in the large code
+model, and `__CC816_FAR_DATA__` in the far data model.
 
 ## Pointers, banks and far memory
 
@@ -1295,6 +1299,8 @@ message turns it off: `-Wno-format`.
 | `multichar` | a character constant of three or more characters |
 | `attributes` | a GNU attribute cc816 does not honour (`aligned(16)`, `constructor`, `section`, ...): ignored |
 | `frame-larger-than` | a function's software-stack frame over 1 KB (its arrays, structures, the copies of structures returned by value), with the stack's size ("The heap and the stacks"); a frame bigger than the whole software stack is an error |
+| `unknown-pragmas` | a `#pragma` cc816 does not know, ignored: Watcom's `#pragma aux name = "..."` (inline machine code: the function needs a C body) and `#pragma aux name parm ...`, `pack(n)` with n above 1; `once`, `pack(1)`, `GCC`, `STDC` and Watcom's message pragmas are silent |
+| `far-function` | `__far` on a function pointer (`void (__far *f)(void)`), ignored: a function pointer is the main-bank entry in every model |
 | `unused-variable` (-Wall) | a local or static variable that is never used |
 | `unused-label` (-Wall) | a label no `goto` uses |
 | `parentheses` (-Wall) | `if (a = b)`: an assignment as a condition |
@@ -1325,8 +1331,11 @@ hcc passes these to cc816 (`cc816.py`, the compiler alone, takes the same):
 | `-E` (`cc816.py` only) | preprocess only |
 
 hcc's own: `--code small|large` (the code model, "The two code models"; `HZ_CODE` in the
-environment), with `--code large` also `--heap N` (the main bank's room kept for malloc)
-and, for tests, `--main-room N`,
+environment), `--data near|far` (the data model, "The far data model"; `HZ_DATA`; far
+needs `--code large`), `-fdos-keywords` (`far`, `near`, `huge` as keywords; cc816 takes it
+too), `--sizes` (every object and function of the link, its size and where it went:
+"Where objects live"), with `--code large` also `--heap N` (the main bank's room kept for
+malloc) and, for tests, `--main-room N`,
 `--bank-room N` and `--spread N` (how much code the main bank and each other bank may
 take; the functions in turn in N banks); `--no-stack-check` (the program's functions
 without the software stack's entry check, "The heap and the stacks": about 1-3 % less
@@ -1450,6 +1459,19 @@ the c-testsuite when `CTS=` points at a checkout.
     of a signed compare, which `dec` does not set). No code of the generator produced that
     sequence until the compares as values below; found by their test
     (`r039_compare_values.c`).
+28. **A far pointer plus a long** (`p + 39999`: a decimal constant over 32,767 is a
+    `long`) took the long's low word as an `int`: 39999 became -25537 and the pointer went
+    back a bank. The whole value is added now (`r041_far_long_offset.c`; found by the far
+    data model's own test).
+29. **`p = p->next` through a far pointer**: the value got the pointer's own register, and
+    the 4-byte load stored its low word before it read the high one through the
+    half-changed pointer (a crash). Every word is read first now
+    (`r043_far_load_self.c`; found by the random programs in the far data model).
+30. **A qualified pointer to a structure defined later** (`struct n __near *p;` before
+    `struct n {...}`) never saw the definition ("incomplete type"); the qualified copy now
+    shares the structure's members. DOS's declarators `T __far *a, __far *b;` and `void
+    (__far *f)(void)` were refused ("Invalid declarator") (`r042_far_declarators.c`,
+    `tests/diag/far_declarators.c`; the XCOM-XT port).
 
 Faster code from the same port (its profile: 13 % of the time in `__mul16` and
 `__sdiv16`, and its board, a `__far` array of arrays, read through 32-bit address

@@ -50,11 +50,19 @@
 #define PRIoMAX "llo"
 #define PRIxMAX "llx"
 #define PRIXMAX "llX"
+#ifdef __CC816_FAR_DATA__
+#define PRIdPTR "ld"
+#define PRIiPTR "li"
+#define PRIuPTR "lu"
+#define PRIxPTR "lx"
+#define PRIXPTR "lX"
+#else
 #define PRIdPTR "d"
 #define PRIiPTR "i"
 #define PRIuPTR "u"
 #define PRIxPTR "x"
 #define PRIXPTR "X"
+#endif
 #define SCNd8 "hhd"
 #define SCNu8 "hhu"
 #define SCNx8 "hhx"

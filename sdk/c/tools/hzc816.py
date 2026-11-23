@@ -639,7 +639,8 @@ def object_sizes(out, s, top=None):
         for a in inside:
             n = labels[a]
             if re.match(r"^(_\w|L_S\d|L_lit\d|S[0-9a-f]{6}_)", n) and not n.startswith("__T") \
-                    and not re.match(r"^S[0-9a-f]{6}_L\w*_(b|x|asm)?\d+$", n):
+                    and not re.match(r"^S[0-9a-f]{6}_L\w*_(b|x|asm)?\d+$", n) and \
+                    not re.match(r"^__[A-Z0-9_]+__$", n):     # (ld65's own symbols)
                 keep.append(a)
         for k, a in enumerate(keep):
             end = keep[k + 1] if k + 1 < len(keep) else hi

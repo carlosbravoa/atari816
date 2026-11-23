@@ -1529,9 +1529,11 @@ class Gen:
         acc = self.addr(i.x['base'], i.x['idx'], i.x['off'])
         if sz >= 4:
             b = i.x['base']
+            # (a word stored before the last one is read must not be part of the pointer)
             if isinstance(b, V) and b.loc and d.loc and b.loc[0] == 'dp' == d.loc[0] and \
-                    b.loc[1] < d.loc[1] + d.size and d.loc[1] < b.loc[1] + b.size and \
-                    d is not self.res:
+                    d is not self.res and any(
+                        b.loc[1] < d.loc[1] + 2 * p + 2 and d.loc[1] + 2 * p < b.loc[1] + b.size
+                        for p in range(sz // 2 - 1)):
                 # (p = p->next of a far p: the value's register is the pointer's own, which
                 # the first word stored would change before the second is read: every word
                 # read first, through the hardware stack)
