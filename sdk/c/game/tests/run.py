@@ -229,7 +229,7 @@ def main():
     sys.path.insert(0, GAME)
     import hgbuild
     for cc in ccs:
-        hgbuild.lib_for(cc)
+        hgbuild.lib_for({"largefar": "large-far"}.get(cc, cc))
         run_tests(cc, horizon, only, update)
     bad = [n for n, ok in results if not ok]
     print(f"hgame tests: {len(results) - len(bad)} passed, {len(bad)} failed"
