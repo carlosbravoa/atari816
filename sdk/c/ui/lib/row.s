@@ -1,10 +1,10 @@
-; row.s - the list row callback. Every C list's LS_ROW is HUI_ROWCB (hui.h: UI_LIST), a
-; JMP here; the list's C function is the 4 bytes after the library's structure
+; row.s - the list row callback for cc816. Every C list's LS_ROW is hui_rowtramp (hui.h:
+; UI_LIST, HUI_ROWCB); the list's C function is the word after the library's structure
 ; (ui_list.rowfn). Called by the library (uilist.s) with JSR: A = row, ui_c = the list,
 ; ui_win, ui_x, ui_y = the row's top left, ui_rsel = 1 if selected. Returns X = the row's
-; text in the code bank (the C function's string, or a copy of it in scratch buffer 2).
+; text (the C function's string: cc816's pointers are in the code bank already).
 ;
-; The C function runs with the block's direct page saved (it may draw with ui_rect,
+; The C function runs with the library's direct page saved (it may draw with ui_rect,
 ; ui_text ...; those change ui_x ... which the library needs back) and hui_incb set: a
 ; control routine called from it stops the program with a message (so this never nests:
 ; its state is static).
@@ -12,14 +12,19 @@
         .smart  off
         .include "horizon.inc"
         .include "ui.inc"
-        .include "huidefs.inc"
+        .include "hui816.inc"
+        .include "model.inc"
+.if LARGE
+        .import __fpt, __icall
+.endif
+        .export _hui_rowtramp
 
         .segment "BSS"
 rinfo:  .res    8               ; ui_rowinfo: win, x, y, sel
 rres:   .res    2
 rrow:   .res    2
 rlist:  .res    2
-rfn:    .res    4
+rfn:    .res    2
 
         .segment "RODATA"
 empty:  .byte   0
@@ -28,17 +33,15 @@ empty:  .byte   0
         .a16
         .i16
 
+_hui_rowtramp:
 hui_rowtramp:
         sta     rrow
         ldx     z:ui_c
         stx     rlist
         lda     a:LS_SIZE,x             ; the C function
         sta     rfn
-        lda     a:LS_SIZE+2,x
-        sta     rfn+2
-        ora     rfn
         bne     :+
-        ldx     #.loword(empty)         ; none: an empty row
+        ldx     #empty                  ; none: an empty row
         rts
 :       lda     z:ui_win
         sta     rinfo
@@ -49,32 +52,27 @@ hui_rowtramp:
         lda     z:ui_rsel
         sta     rinfo+6
         ZSAVE
-        lda     rfn
-        sta     z:hui_fn
-        lda     rfn+2
-        sta     z:hui_fn+2
         inc     hui_incb
-        lda     #^rinfo                 ; const ui_rowinfo *ri (o65: a bank byte only
-        pha                             ;   as an immediate)
-        pea     rinfo
+        pea     rinfo                   ; const ui_rowinfo *ri
         lda     rrow                    ; unsigned row
         pha
-        lda     rlist                   ; ui_list *ls: A = offset, X = bank
-        ldx     #^rinfo
-        CALLC
+        lda     rlist                   ; ui_list *ls
+        pha
+.if LARGE                               ; (the large code model: JSL, the function's RTL)
+        lda     rfn
+        sta     __fpt
+        jsl     __icall
+.else
+        ldx     #0
+        jsr     (rfn,x)
+.endif
         ply
         ply
         ply
         dec     hui_incb
-        sta     z:hui_s                 ; the text (a C pointer)
-        stx     z:hui_s+2
-        ora     z:hui_s+2
-        bne     :+
-        lda     #.loword(empty)         ; NULL: empty
-        bra     @set
-:       ldx     #2                      ; elsewhere than the code bank: a copy
-        jsr     hui_instr
-@set:   sta     rres
+        sta     rres                    ; the text
         ZRESTORE
         ldx     rres
-        rts
+        bne     :+
+        ldx     #empty                  ; NULL: empty
+:       rts

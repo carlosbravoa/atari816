@@ -3,7 +3,7 @@
         .smart  off
         .include "horizon.inc"
         .include "ui.inc"
-        .include "huidefs.inc"
+        .include "hui816.inc"
 
 
         .segment "CODE"

@@ -175,3 +175,12 @@ cannot hold it:
 ### Status: WONTFIX on the Tang Nano 20K
 There is no useful partial VBXE (every feature software uses depends on the 512 KB VRAM).
 The Atari816's own video (Marga) is the way forward on this board.
+
+## OPEN: `shot816` shows a black picture for Xargon (the board's screen is right)
+
+2026-11-22. Xargon on the board plays correctly (picture, OPL2 music, speed: seen on the
+monitor), but `atari.py shot816` returns an all-black 320x180 picture while it runs (video
+state: mode 2, base $480000, stride 512). Digger and the Desktop are captured correctly.
+Xargon flips between two pages and loads its palette every frame: the tool probably reads the
+palette or the page from the wrong place for a program that does this. Only the PC tool is
+affected.

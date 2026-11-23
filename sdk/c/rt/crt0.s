@@ -1,251 +1,297 @@
-; crt0.s - the C startup and exit for Horizon (vasm oldstyle syntax), both memory models.
-; Assembled twice by the library build: plain for the large model, -DTINY=1 for tiny.
+; crt0.s - the C startup and exit for programs built with cc816 (ca65). Linked first: Horizon
+; enters a program at code bank:$0100, the start of its text (hzprog.cfg: STARTUP first).
 ;
 ; Horizon starts a task native, A/X/Y 16-bit, PBR = DBR = code bank, D = 0, S just below
 ; the argument string in the window (bank 0), X = the string's window offset, A = its
 ; length (ABI.md, "Task start conditions").
 ;
-; _start:  (tiny: copy the data image to the window, clear bss, DBR = 0), clear the direct
-;          page, remember the argument string, fill the stack's lowest 256 bytes with a
-;          guard pattern (and, linked with hcc --debug, paint the whole stack first),
-;          call __main.
-; __main:  the constructors, then main(argc, argv) (lib/args.c builds them), then exit.
-; exit:    the atexit functions, the destructors (lib/stdio.c's flushes and closes every
-;          FILE), then __exit: lib/exitchk.c checks the guard zone (and reports the stack
-;          used with --debug), then SYS_EXIT.
-; This replaces the C library's _main.o, whose main() gets no arguments and whose exit()
-; loses its argument.
+; cc816's memory model (sdk/docs/c/reference.md):
+;   code bank  $0100..        code, constants, data, bss (every near pointer is an offset
+;                             in this bank: DBR), then the heap (malloc, upwards)
+;              __hz_sslo..    the software stack's guard zone (256 bytes)
+;              ..$FFF0        the software stack (__sp, downwards): arrays, structures and
+;                             locals whose address is taken; __HZ_SSTACK__ bytes (hcc
+;                             --stack N, default 8192)
+;   bank 0     $0000-$00FF    the direct page: cc816's registers (ZEROPAGE below), the
+;                             controls library's when it is linked
+;              $0100-$01FF    the hardware stack's guard zone
+;              ..S            the hardware stack: return addresses, arguments, spilled
+;                             registers (about 32 KB, up to the argument string)
+;
+; __start: the argument string copied into the code bank, both stacks' guard zones filled
+;          (hcc --debug: both stacks painted first), the constructors, main(argc, argv),
+;          exit.
+; exit:    the atexit functions (newest first), the destructors (the C library's: every
+;          FILE flushed and closed), the stack checks (lib/exitchk.c), SYS_EXIT.
+;
+; The large code model (hcc --code large, ca65 -D __CC816_LARGE__): C functions are called
+; with JSL and return with RTL (model.inc), wherever they are. Before the constructors,
+; __hz_xload (lib/cc816/xload.c) loads the program's other code banks from its own file;
+; then the constructors, main and the exit functions are called as JSL calls. __icall is
+; the call through a function pointer: JSL __icall with the pointer in __fpt (a 16-bit
+; address in this bank: the function, or its thunk JML in the main bank).
 
-; vbcc's direct-page registers at fixed direct-page addresses: Horizon's D is 0 and the
-; direct page is always window $0000, so they need no relocation. r0..r31 = $00..$3F,
-; btmp0..btmp3 = $40..$4F. $50..$FF stay free for assembly code.
-r0	ezp	$00
-r1	ezp	$02
-r2	ezp	$04
-r3	ezp	$06
-r4	ezp	$08
-r5	ezp	$0A
-r6	ezp	$0C
-r7	ezp	$0E
-r8	ezp	$10
-r9	ezp	$12
-r10	ezp	$14
-r11	ezp	$16
-r12	ezp	$18
-r13	ezp	$1A
-r14	ezp	$1C
-r15	ezp	$1E
-r16	ezp	$20
-r17	ezp	$22
-r18	ezp	$24
-r19	ezp	$26
-r20	ezp	$28
-r21	ezp	$2A
-r22	ezp	$2C
-r23	ezp	$2E
-r24	ezp	$30
-r25	ezp	$32
-r26	ezp	$34
-r27	ezp	$36
-r28	ezp	$38
-r29	ezp	$3A
-r30	ezp	$3C
-r31	ezp	$3E
-btmp0	ezp	$40
-btmp1	ezp	$44
-btmp2	ezp	$48
-btmp3	ezp	$4C
-	global	r0,r1,r2,r3,r4,r5,r6,r7,r8,r9,r10,r11,r12,r13,r14,r15
-	global	r16,r17,r18,r19,r20,r21,r22,r23,r24,r25,r26,r27,r28,r29,r30,r31
-	global	btmp0,btmp1,btmp2,btmp3
+	.p816
+	.smart	-
+	.a16
+	.i16
+	.include "model.inc"
 
-	global	_start
-	global	___main
-	global	_exit
-	global	__Exit
-	global	___exit
-	global	___firstexit
-	global	___hz_argoff
-	global	___hz_arglen
-	global	___hz_stktop
+	.exportzp __rg, __sp, __rv, __h0, __h1, __h2, __h3, __cbank, __hz_zpend
+	.export	__start, __fpt, __abs0
+	.export	___hz_argbuf, ___hz_arglen, ___hz_argoff, ___hz_stktop, ___hz_sslo
+	.export	_exit, __Exit, _atexit, _abort
+	.export	_hz_stack_free, _hz_sstack_free
+	.export	___hz_heapstart, ___hz_heapend, ___hz_paintflag
+	.export	___hz_heapuse, ___hz_heappeak
+	.import	_main, ___hz_mkargs, ___hz_argv, ___hz_exitchk
+	.import	__HZ_SSTACK__, __HZ_PAINT__
+	.import	__CONSTRUCTOR_TABLE__, __CONSTRUCTOR_COUNT__
+	.import	__DESTRUCTOR_TABLE__, __DESTRUCTOR_COUNT__
+.if LARGE
+	.export	__icall, __cc816_large
+	.import	___hz_xload
+__cc816_large = 1		; (every object cc816 makes for the large model imports it)
+.else
+	.export	__cc816_small
+__cc816_small = 1
+.endif
 
-HZ_GUARD	equ	$C35A		; the stack guard pattern (lib/exitchk.c knows it)
-HZ_PAINTW	equ	$A5A5		; the paint pattern of --debug
+__abs0	= 0			; *(T *)constant: an absolute address in the code bank
+SSTOP	= $FFF0			; the software stack's top (it grows down from here)
+HSLO	= $0100			; the hardware stack's lowest address (window)
+GUARD	= $C35A			; the guard zones' pattern (lib/exitchk.c knows it)
+PAINTW	= $A5A5			; hcc --debug's paint
+ZONE	= 256			; the guard zones' size
+MAXEXIT	= 32			; atexit functions
 
-	section	"DONTMERGE_text.startup","acrx"
-	a16
-	x16
-_start:
-	if	TINY
-	pha				; the argument string's length
-	phx				; and window offset
-	lda	#___WDL			; copy the data image: code bank -> window
-	beq	nodata
-	dec	a
-	ldx	#<___WDC
-	ldy	#___WDS
-	mvn	___WDC,___WDS		; (sets DBR = 0, the destination bank)
-nodata:
-	pea	#0
-	plb
-	plb				; DBR = 0 also without data
-	sep	#32
-	a8
-	ldx	#___WBS			; clear bss (the loader clears only its own)
-	bra	clrtst
-clr:	stz	0,x
-	inx
-clrtst:	cpx	#___WBE
-	bcc	clr
-	rep	#32
-	a16
-	plx
+	.segment "ZEROPAGE"
+__rg:	.res	96		; registers: 48 bytes scratch, 48 callee-saved
+__sp:	.res	2		; the software stack pointer (code bank)
+__rv:	.res	4		; the return value across an epilogue, helper scratch
+__h0:	.res	4		; the runtime helpers' operands and scratch
+__h1:	.res	4
+__h2:	.res	4
+__h3:	.res	4
+__cbank: .res	2		; the code bank's number (far pointers to near data)
+__hz_zpend:			; (the end of cc816's direct page: the controls library's
+				; zero page follows, ui/lib816/hui816.inc)
+
+	.segment "STARTUP"
+__start:
+	sta	___hz_arglen
+	stx	___hz_argoff
+	sep	#$20
+	.a8
+	phk
 	pla
-	endif
-	stx	!___hz_argoff		; the argument string: window offset
-	sta	!___hz_arglen		; and length
-	ldx	#254			; clear the direct page (the loader clears only an o65
-clrdp:	stz	0,x			; zp segment, and there is none)
-	dex
-	dex
-	bpl	clrdp
+	sta	__cbank
+	stz	__cbank+1
+	; the argument string (bank 0) into the code bank, at most 255 characters
+	ldy	#0
+@cp:	lda	f:$000000,x
+	sta	___hz_argbuf,y
+	beq	@cpd
+	inx
+	iny
+	cpy	#255
+	bcc	@cp
+	lda	#0
+	sta	___hz_argbuf,y
+@cpd:	rep	#$20
+	.a16
+	; the hardware stack (window): paint it (--debug), then its guard zone
 	tsc
-	sta	>___hz_stktop		; the stack's top (for --debug's report)
-	lda	#___hz_paint		; hcc --debug: paint the stack, ___hz_stklo .. S - 32
-	beq	nopaint
-	ldx	#___hz_stklo
+	sta	___hz_stktop
+	lda	#__HZ_PAINT__
+	beq	@nohp
 	tsc
 	sec
 	sbc	#32
-	sta	r0
-	lda	#HZ_PAINTW
-paint:	sta	>0,x
+	sta	__h0
+	ldx	#HSLO
+	lda	#PAINTW
+@hp:	sta	f:$000000,x
 	inx
 	inx
-	cpx	r0
-	bcc	paint
-nopaint:
-	ldx	#___hz_stklo		; the guard zone: the stack's lowest 256 bytes
-	lda	#HZ_GUARD
-guard:	sta	>0,x
+	cpx	__h0
+	bcc	@hp
+@nohp:	ldx	#HSLO
+	lda	#GUARD
+@hg:	sta	f:$000000,x
 	inx
 	inx
-	cpx	#___hz_stklo+256
-	bcc	guard
-	lda	#0
-	jsl	>___main		; never returns
-___exit:				; A = exit code
-	rep	#48
-	pha
-	jsl	>___hz_exitchk		; lib/exitchk.c: the stack guard (and --debug report)
-	pla
-	cop	#0			; SYS_EXIT, never returns
-	bra	___exit
-
-	section	"DONTMERGE_text.far.hzmain","acrx"
-	a16
-	x16
-indir:	jml	[r0]
-
-; __main: the constructors (vlink's list: a 3-byte count, then 3-byte addresses), then
-; main. (The C library's own __main reads the count as the first address: a program with
-; a constructor, as the float library has, jumped to address 1.)
-___main:
-	lda	>___CTOR_LIST__
-	beq	ctordone
-	sta	r16+2			; the count
-	ldx	#3
-ctor:	lda	>___CTOR_LIST__,x
-	sta	r0
-	lda	>___CTOR_LIST__+2,x
-	and	#255
-	sta	r1
-	stx	r16
-	jsl	>indir
-	ldx	r16
-	inx
-	inx
-	inx
-	dec	r16+2
-	bne	ctor
-ctordone:
-	jsl	>___hz_mkargs		; lib/args.c -> A = argc, ___hz_argv = argv
-	if	TINY
-	lda	>___hz_argv
-	pha
-	else
-	lda	>___hz_argv+2
-	pha
-	lda	>___hz_argv
-	pha
-	endif
-	lda	>___hz_argc
-	jsl	>_main			; main(argc, argv) (or main(void): the same call)
-	; fall into exit with main's result
-
-; exit(code): A = code. The atexit functions (newest first), then the destructors.
-_exit:
-	tay
-	lda	>inexit			; exit() from an atexit function: ignored
-	beq	doexit
-	rtl
-doexit:	phy				; the code
-	lda	#1
-	sta	>inexit
-	lda	>___firstexit
-	sta	r16
-	lda	>___firstexit+2
-	sta	r17
-	bra	atest
-anext:	ldy	#4			; {far next, function}
-	lda	[r16],y
-	sta	r0
-	iny
-	iny
-	lda	[r16],y
-	sta	r1
-	jsl	>indir
-	ldy	#0
-	lda	[r16],y
+	cpx	#HSLO + ZONE
+	bcc	@hg
+	; the software stack (code bank): the same
+	lda	#SSTOP
+	sta	__sp
+	sec
+	sbc	#__HZ_SSTACK__
+	sta	___hz_sslo
+	lda	#__HZ_PAINT__
+	beq	@nosp
+	lda	___hz_sslo
 	tax
-	iny
-	iny
-	lda	[r16],y
-	sta	r17
-	stx	r16
-atest:	lda	r16
-	ora	r17
-	bne	anext
-	bra	dtors
-
-; _Exit(code): no atexit functions, but the destructors (the files are flushed)
-__Exit:	pha
-dtors:	lda	>___DTOR_LIST__		; vlink's list: a count, then 3-byte addresses
-	beq	dtordone
-	sta	r0
+	lda	#PAINTW
+@sp:	sta	a:0,x
+	inx
+	inx
+	cpx	#SSTOP
+	bcc	@sp
+@nosp:	ldx	___hz_sslo
+	lda	___hz_sslo
 	clc
-	adc	r0
-	adc	r0
+	adc	#ZONE
+	sta	__h0
+	lda	#GUARD
+@sg:	sta	a:0,x
+	inx
+	inx
+	cpx	__h0
+	bcc	@sg
+	; the constructors (functions named _INIT_n_...: cc816 lists them for ld65)
+.if LARGE
+	jsl	___hz_xload	; the other code banks (lib/cc816/xload.c)
+.endif
+	ldx	#0
+@ct:	cpx	#__CONSTRUCTOR_COUNT__ * 2
+	bcs	@ctd
+	phx
+.if LARGE
+	phk			; a JSL's return address (constructors are in this bank)
+	pea	@ctr - 1
+	jmp	(__CONSTRUCTOR_TABLE__,x)
+@ctr:
+.else
+	jsr	(__CONSTRUCTOR_TABLE__,x)
+.endif
+	plx
+	inx
+	inx
+	bra	@ct
+@ctd:	CALL	___hz_mkargs	; lib/args.c: A = argc, ___hz_argv = argv
 	tax
-dtor:	lda	>___DTOR_LIST__,x
-	sta	r0
-	lda	>___DTOR_LIST__+2,x
-	sta	r1
-	stx	r16
-	jsl	>indir
-	ldx	r16
-	dex
-	dex
-	dex
-	bne	dtor
-dtordone:
-	pla
-	jml	>___exit
+	lda	___hz_argv	; main(int argc, char **argv) (or main(void): the same call)
+	pha
+	phx
+	CALL	_main
+	ply
+	ply
+	jmp	exitA
 
-	section	"DONTMERGE_bss.near.hzstart","aurw"
-___hz_argoff:	reserve	2
-___hz_arglen:	reserve	2
-___hz_stktop:	reserve	2
-inexit:		reserve	2
-___firstexit:	reserve	4
+; void exit(int code)
+_exit:	lda	ARGS,s
+exitA:	ldx	inexit		; exit() inside an atexit function or a destructor: ignored
+	beq	@go
+	RET			; (after main: main's return was the program's end, exitA)
+@go:	sta	exitcode
+	inc	inexit
+@at:	ldx	nexit		; the atexit functions, newest first
+	beq	dtors
+	dex
+	dex
+	stx	nexit
+.if LARGE
+	lda	exittab,x
+	sta	__fpt
+	jsl	__icall
+.else
+	jsr	(exittab,x)
+.endif
+	bra	@at
 
+; void _Exit(int code): no atexit functions, but the destructors (the files are flushed)
+__Exit:	lda	ARGS,s
+	sta	exitcode
+	inc	inexit
+dtors:	ldx	#__DESTRUCTOR_COUNT__ * 2
+@dt:	cpx	#2
+	bcc	@dtd
+	dex
+	dex
+	phx
+.if LARGE
+	phk
+	pea	@dtr - 1
+	jmp	(__DESTRUCTOR_TABLE__,x)
+@dtr:
+.else
+	jsr	(__DESTRUCTOR_TABLE__,x)
+.endif
+	plx
+	bra	@dt
+@dtd:	CALL	___hz_exitchk	; lib/exitchk.c: the guard zones (and --debug's report)
+	lda	exitcode
+@end:	cop	#0		; SYS_EXIT, never returns
+	bra	@end
+
+; void abort(void): exit code 3, no atexit functions, no flushing
+_abort:	lda	#3
+	cop	#0
+	bra	_abort
+
+; int atexit(void (*f)(void)): 0, or -1 when MAXEXIT functions are registered
+_atexit:
+	lda	nexit
+	cmp	#MAXEXIT * 2
+	bcs	@full
+	tax
+	lda	ARGS,s
+	sta	exittab,x
+	inx
+	inx
+	stx	nexit
+	lda	#0
+	RET
+@full:	lda	#$FFFF
+	RET
+
+; unsigned hz_stack_free(void): bytes of the hardware stack below S now
+_hz_stack_free:
+	tsc
+	clc
+	adc	#ARGS - 1	; (S before the call)
+	sec
+	sbc	#HSLO
+	RET
+
+; unsigned hz_sstack_free(void): bytes of the software stack below __sp now
+_hz_sstack_free:
+	lda	__sp
+	sec
+	sbc	___hz_sslo
+	RET
+
+.if LARGE
+; a call through a function pointer (the large code model): JSL __icall with the pointer
+; (an address in this bank) in __fpt; the function returns to the caller with its RTL
+__icall:
+	ldx	#0
+	jmp	(__fpt,x)
+.endif
+
+	.segment "RODATA"
+; the heap: from the end of bss to the software stack's guard zone (lib/cc816/malloc.c)
+___hz_heapstart:
+	.addr	heap0
+___hz_paintflag:		; nonzero with hcc --debug (lib/exitchk.c's report)
+	.word	__HZ_PAINT__
+
+	.segment "BSS"
+___hz_argbuf:	.res	256	; the argument string (lib/args.c splits it into argv)
+___hz_arglen:	.res	2
+___hz_argoff:	.res	2
+___hz_stktop:	.res	2	; S at the start (--debug's report)
+___hz_sslo:	.res	2	; the software stack's lowest address (its guard zone)
+___hz_heapend	= ___hz_sslo
+__fpt:	.res	2		; indirect calls: JSR (__fpt,X)
+inexit:	.res	2
+exitcode: .res	2
+nexit:	.res	2
+exittab: .res	MAXEXIT * 2
+___hz_heapuse:	.res	2	; the heap's bytes in use (lib/cc816/malloc.c), and the most
+___hz_heappeak:	.res	2	; since the start (hz_heap_peak, --debug's report)
+
+	.segment "HEAPSTART"		; (hzprog.cfg: after every module's bss)
+heap0:	.res	2
