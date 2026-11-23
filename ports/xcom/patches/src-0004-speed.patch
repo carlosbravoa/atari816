@@ -1,0 +1,109 @@
+diff -ruN src/battle.c /home/carlos/devel/atari816-xcom-spd/ports/xcom/scratch/pb/src/battle.c
+--- a/src/battle.c	2026-11-23 14:28:27.565229016 -0300
++++ b/src/battle.c	2026-11-23 14:28:40.086398684 -0300
+@@ -1473,6 +1473,12 @@
+         if (g_roster)
+             inv_screen(-1);     /* DOS's inventory before the battle (invscr.c) */
+     }
++#if defined(XCOM_PORT)
++    {
++        void plat_bb_prepare(void);     /* (plat.h) the pictures for the blitter now */
++        plat_bb_prepare();              /* (a saved battle comes here too) */
++    }
++#endif
+     battle_view();              /* (reads g_bs_resume) */
+     g_bs_resume = 0;
+ 
+diff -ruN src/main.c /home/carlos/devel/atari816-xcom-spd/ports/xcom/scratch/pb/src/main.c
+--- a/src/main.c	2026-11-23 14:28:27.572125338 -0300
++++ b/src/main.c	2026-11-23 14:28:40.085990461 -0300
+@@ -252,6 +252,12 @@
+ #endif
+     }
+ #endif
++#if defined(XCOM_PORT)
++    {
++        void plat_bb_prepare(void);     /* (plat.h) the pictures for the blitter now */
++        plat_bb_prepare();
++    }
++#endif
+     if (g_bench) {
+         g_seen = NULL;
+         g_cursor_on = 1;
+diff -ruN src/path.c /home/carlos/devel/atari816-xcom-spd/ports/xcom/scratch/pb/src/path.c
+--- a/src/path.c	2026-11-23 14:28:27.573051536 -0300
++++ b/src/path.c	2026-11-23 14:51:01.938923109 -0300
+@@ -521,9 +521,16 @@
+         p.h0 = heur(u->x, u->y, gx, gy, p.hs);
+         p.kmax = slack < MAX_BUCKET ? slack : MAX_BUCKET - 1;
+     }
++#if defined(XCOM_PORT) && defined(__CC816__)
++    if (g_path_asm) {
++        void hz_path_search(struct PathParams *p);  /* (plat/way.c: in assembly) */
++        hz_path_search(&p);
++    } else
++#else
+     if (g_path_asm)
+         path_search_asm(&p);
+     else
++#endif
+         path_search_c(&p);              /* (BENCH, vbench.c) */
+     mark_units(unit, 0);
+     return p.best;
+diff -ruN src/vbench.c /home/carlos/devel/atari816-xcom-spd/ports/xcom/scratch/pb/src/vbench.c
+--- a/src/vbench.c	2026-11-23 14:28:27.585429877 -0300
++++ b/src/vbench.c	2026-11-23 14:44:49.834285914 -0300
+@@ -1147,6 +1147,53 @@
+                 fprintf(f, "VGA lights: %u relights in %u night presents\n", nl[0], nl[1]);
+             }
+ #endif
++#if defined(XCOM_PORT)
++            {
++                /* the same check of DOS's smoke and fire pictures' step with
++                   the port's (plat/vgabat.c vga_pics_next, entry 26) */
++                int vga_pics_loaded(void);
++                void vga_pics_start(void);
++                int vga_pics_over(void);
++                const int far *vga_pics_next(void);
++                const int far *r;
++                unsigned long t0, t1, all = 0, most = 0;
++                int n = 0, x, y;
++                if (vga_pics_loaded()) {
++                    fx_reset();
++                    fx_smoke_cloud(20, 20, 0);
++                    for (y = 22; y < 26; y++)
++                        for (x = 16; x < 20; x++)
++                            fx_fire_set(x, y, 0, 3, 5);
++                    g_view_z = 0;
++                    vga_pics_start();
++                    render_center(20, 20, 0);
++                    render_full();
++                    for (;;) {
++                        t0 = timer_read();
++                        if ((r = vga_pics_next()) == NULL)
++                            break;
++                        render_rect(r[0], r[1], r[2], r[3]);
++                        t1 = timer_read() - t0;
++                        all += t1;
++                        if (t1 > most)
++                            most = t1;
++                        if (++n == 12)
++                            check_redraw(f, "pictures halfway through their step");
++                        if (vga_pics_over())
++                            break;
++                    }
++                    fprintf(f, "VGA pictures: picture %08lx\n", buf_sum());
++                    fprintf(f, "VGA pictures' step: %d redraws for %d smoke + %d fire tiles, %lu ms, longest %lu ms\n",
++                            n, n_smoke, n_fire, timer_ms(all), timer_ms(most));
++                    for (x = 0; x < n_smoke; x++)
++                        g_los_flags[TIDX(smoke[x].x, smoke[x].y, 0)] &= ~LF_FX;
++                    for (x = 0; x < n_fire; x++)
++                        g_los_flags[TIDX(fire[x].x, fire[x].y, 0)] &= ~LF_FX;
++                    fx_reset();
++                    render_full();
++                }
++            }
++#endif
+         }
+         fclose(f);
+     }

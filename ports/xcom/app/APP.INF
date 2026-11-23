@@ -1,0 +1,10 @@
+# APP.INF of XCOM-XT (sdk/docs/apps.md): make app packs it with XCOM.PRG, MUSD.PRG (the
+# music task), XCOM.ICN (app/XCOM-ICON.txt, drawn for the port) and README.TXT into
+# XCOM.HZA. No game data: the packs are made by XCOMCONV from the player's own copy of
+# X-COM and copied into the app's folder (README.TXT). needs= comes from XCOM.PRG.
+name=X-COM UFO Defense
+version=0.5.1-a816.1
+description=XCOM-XT, an X-COM engine (GPL-3): needs your own game data
+category=Games
+program=XCOM.PRG
+icon=XCOM.ICN

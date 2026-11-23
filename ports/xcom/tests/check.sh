@@ -5,7 +5,7 @@
 #
 #   1. on the host build (the reference, build/host/xcomhost: the engine on Linux with the
 #      virtual clock): its LOG, its pictures (the model's test pictures, plat.h "test
-#      runs"); the pictures' checksums against tests/host.md5 (the reference itself has not
+#      runs"); the pictures' checksums against RUNS.md5 (tests/runs.md5: the reference itself has not
 #      moved: the data's pictures are not in git, only their checksums)
 #   2. on the Atari816 in the emulator (XCOM.PRG /V: the same virtual clock), in parallel:
 #      the same LOG line for line (tests/compare.py: the lines that may differ, and why),
@@ -13,15 +13,21 @@
 #      DAC, printed by both), and what the emulator showed at each (the 320 x 180 shown
 #      of the 320 x 200 at the pan printed) equal pixel for pixel to the host's picture
 #
-# --refs: write tests/host.md5 anew (look at the pictures first). The packs must be in
+# --refs: write RUNS.md5 anew (look at the pictures first). The packs must be in
 # data/packs (make data).
+# A run's line may start with s=N: its emulator run's length (default XCOM_SECONDS, 400:
+# the emulator runs that long whatever the program does; "xcom: end ... (machine N s)"
+# tells what a run needs).
+# RUNS=FILE: the runs of FILE instead of tests/runs (make test-long: tests/runs-long; the
+# real input's run only with tests/runs); O=DIR the output folder (build/test).
 HZ=${1:-../../horizon}
 REFS=$2
+RUNS=${RUNS:-tests/runs}
 cd "$(dirname "$0")/.." || exit 1
 fail=0
 ok() { echo "PASS  $1"; }
 bad() { echo "FAIL  $1"; fail=1; }
-O=build/test
+O=${O:-build/test}
 rm -rf $O
 mkdir -p $O
 
@@ -29,29 +35,34 @@ mkdir -p $O
 FILES=
 for f in data/packs/*.PAK data/packs/PACKS.VER; do FILES="$FILES --file $f:/GAMES/XCOM/$(basename "$f")"; done
 for f in data/packs/VGA/*; do FILES="$FILES --file $f:/GAMES/XCOM/VGA/$(basename "$f")"; done
+[ -f MUSD.PRG ] && FILES="$FILES --file MUSD.PRG:/GAMES/XCOM/MUSD.PRG"   # the music task (sound)
 
 # ---------------------------------------------------------------- 1. the host
 while read -r name args; do
   case "$name" in ''|\#*) continue ;; esac
+  secs=${XCOM_SECONDS:-400}
+  case "$args" in s=*) secs=${args%% *}; secs=${secs#s=}; args=${args#* } ;; esac
   mkdir -p $O/$name
   sh tests/hostrun.sh "$name" $O/$name/host $args > $O/$name/host.txt 2>&1 || true
   [ -d $O/$name/host ] || { bad "$name: the host run"; continue; }
-done < tests/runs
+done < $RUNS
 (cd $O && for n in */host/shot*.ppm; do md5sum "$n"; done | sed 's|/host/|/|') > $O/host.md5
 if [ "$REFS" = --refs ]; then
-  cp $O/host.md5 tests/host.md5
-  echo "tests/host.md5 written ($(wc -l < $O/host.md5) pictures)"
-elif cmp -s tests/host.md5 $O/host.md5; then
-  ok "the host's reference runs: $(wc -l < $O/host.md5) pictures as tests/host.md5"
+  cp $O/host.md5 $RUNS.md5
+  echo "$RUNS.md5 written ($(wc -l < $O/host.md5) pictures)"
+elif cmp -s $RUNS.md5 $O/host.md5; then
+  ok "the host's reference runs: $(wc -l < $O/host.md5) pictures as $RUNS.md5"
 else
-  bad "the host's reference runs: pictures not as tests/host.md5:"
-  diff tests/host.md5 $O/host.md5 | head -6
+  bad "the host's reference runs: pictures not as $RUNS.md5:"
+  diff $RUNS.md5 $O/host.md5 | head -6
 fi
 
 # ---------------------------------------------------------------- 2. the Atari816
-pids=
+pids= running=
 while read -r name args; do
   case "$name" in ''|\#*) continue ;; esac
+  secs=${XCOM_SECONDS:-400}
+  case "$args" in s=*) secs=${args%% *}; secs=${secs#s=}; args=${args#* } ;; esac
   U=$(echo "$name" | tr a-z A-Z)
   # (BENCH reads the back buffer behind the blitter's back: /S waits for it at once)
   S=; case " $args " in *" BENCH "*) S=/S ;; esac
@@ -61,39 +72,93 @@ while read -r name args; do
   python3 ../../sdk/tools/run816.py XCOM.PRG --horizon "$HZ" --mode shell \
     --dest /GAMES/XCOM/XCOM.PRG --cd /GAMES/XCOM --args "@$U.ARG" $FILES \
     $( [ -f tests/$name.keys ] && echo --file tests/$name.keys:/GAMES/XCOM/$U.KEY) --file $O/$name/$U.ARG:/GAMES/XCOM/$U.ARG \
-    --script $O/$name/end.script --shot-on "xcom: shot" --seconds ${XCOM_SECONDS:-400} \
+    --script $O/$name/end.script --shot-on "xcom: shot" --seconds $secs \
     --out $O/$name/816 > $O/$name/run816.log 2>&1 &
   pids="$pids $!"
-done < tests/runs
+  # (at most JOBS emulators at once: the machine is shared)
+  running="$running $!"
+  set -- $running
+  if [ $# -ge "${JOBS:-6}" ]; then wait "$1"; shift; running="$*"; fi
+done < $RUNS
 wait $pids
+
+# ---------------------------------------------------------------- the full card
+# tests/save.keys with the card nearly full (emu816 --card-free: 8,000 bytes more fit):
+# the save is written short, the engine says "Could not save the game!", the model removes
+# the cut save (no XCOMXT1.SAV left to load as garbage), the game goes on (its Load Game
+# finds no save) and ends normally. (emu816 counts the bytes written in the run, so the
+# card stays full after the removal: the LOG's later lines are lost, not checked)
+fpid=
+if [ "$RUNS" = tests/runs ]; then
+  mkdir -p $O/full
+  echo "/V /T 5 VGA NOINTRO LOG SAVE.TXT KEYS SAVE.KEY" > $O/full/FULL.ARG
+  printf '0 wait xcom: end\n' > $O/full/end.script
+  python3 ../../sdk/tools/run816.py XCOM.PRG --horizon "$HZ" --mode shell \
+    --dest /GAMES/XCOM/XCOM.PRG --cd /GAMES/XCOM --args "@FULL.ARG" $FILES \
+    --file tests/save.keys:/GAMES/XCOM/SAVE.KEY --file $O/full/FULL.ARG:/GAMES/XCOM/FULL.ARG \
+    --script $O/full/end.script --emu-arg --card-free --emu-arg 8000 --seconds 150 \
+    --out $O/full/816 > $O/full/run816.log 2>&1 &
+  fpid=$!
+fi
 
 # ---------------------------------------------------------------- 3. the real input
 # Horizon's keyboard and mouse in full screen, the real clock, no KEYS script
 # (tests/input.script): start menu, New Game, the difficulty, a base placed by a click
 # on the globe and Enter, the base screen by its button, back by GEOSCAPE (the pan
 # brings the bottom rows in), G for the graphs; the engine's LOG says each happened
-echo "VGA NOINTRO LOG INPUT.TXT" > $O/INPUT.ARG
-python3 ../../sdk/tools/run816.py XCOM.PRG --horizon "$HZ" --mode shell \
-  --dest /GAMES/XCOM/XCOM.PRG --cd /GAMES/XCOM --args "@INPUT.ARG" $FILES \
-  --file $O/INPUT.ARG:/GAMES/XCOM/INPUT.ARG --script tests/input.script --seconds 70 \
-  --out $O/input > $O/input.log 2>&1 &
-ipid=$!
+# The same three times: as the machine is after its start, with the microsecond clock as
+# after 5 minutes (/U: the port's clock reading plus an offset) and with it wrapping
+# (2^32 us, 71.6 minutes) about 25 s into the run, in the middle of the game: the
+# port's clock (plat_counts, the BIOS clock, the polls' gaps) must go on through it.
+ipids=
+if [ "$RUNS" = tests/runs ]; then
+for v in input late5 wrap; do
+  case $v in input) U= ;; late5) U="/U 300000000" ;; wrap) U="/U 4264967296" ;; esac
+  echo "$U VGA NOINTRO LOG INPUT.TXT" > $O/$v.ARG
+  python3 ../../sdk/tools/run816.py XCOM.PRG --horizon "$HZ" --mode shell \
+    --dest /GAMES/XCOM/XCOM.PRG --cd /GAMES/XCOM --args "@INPUT.ARG" $FILES \
+    --file $O/$v.ARG:/GAMES/XCOM/INPUT.ARG --script tests/input.script --seconds 70 \
+    --out $O/$v > $O/$v.log 2>&1 &
+  ipids="$ipids $!"
+done
+fi
 
 while read -r name args; do
   case "$name" in ''|\#*) continue ;; esac
+  secs=${XCOM_SECONDS:-400}
+  case "$args" in s=*) secs=${args%% *}; secs=${secs#s=}; args=${args#* } ;; esac
   log=$(echo "$args" | sed -n 's/.*LOG \([^ ]*\).*/\1/p')
   python3 tests/compare.py $name $O/$name "$log" || fail=1
-done < tests/runs
+done < $RUNS
 
-wait $ipid
-L=$O/input/card/GAMES/XCOM/INPUT.TXT
-okl=1
-for w in "new game, difficulty Beginner" "X-COM base operational" "BASE menu: 11 buttons" \
-         "GRAPHS UFO areas"; do
-  grep -q "$w" $L 2>/dev/null || { bad "the real input: no '$w' in INPUT.TXT"; okl=0; }
+if [ -n "$ipids" ]; then
+wait $ipids
+for v in input late5 wrap; do
+  case $v in input) what= ;; late5) what=", the clock as 5 minutes after the machine's start" ;;
+             wrap) what=", the microsecond clock wrapping during the game (71.6 minutes)" ;; esac
+  L=$O/$v/card/GAMES/XCOM/INPUT.TXT
+  okl=1
+  for w in "new game, difficulty Beginner" "X-COM base operational" "BASE menu: 11 buttons" \
+           "GRAPHS UFO areas"; do
+    grep -q "$w" $L 2>/dev/null || { bad "the real input ($v): no '$w' in INPUT.TXT"; okl=0; }
+  done
+  grep -aq '\[kill\]' $O/$v/console.txt && { bad "the real input ($v): $(grep -a '\[kill\]' $O/$v/console.txt)"; okl=0; }
+  if [ $v = wrap ] && ! grep -aq "xcom: the microsecond clock wrapped" $O/$v/console.txt; then
+    bad "the real input (wrap): the clock did not wrap during the run"; okl=0
+  fi
+  [ $okl = 1 ] && ok "the real input (mouse and keys through Horizon): new game, base placed, base screen, back, graphs$what"
 done
-grep -aq '\[kill\]' $O/input/console.txt && { bad "the real input: $(grep -a '\[kill\]' $O/input/console.txt)"; okl=0; }
-[ $okl = 1 ] && ok "the real input (mouse and keys through Horizon): new game, base placed, base screen, back, graphs"
+fi
+
+if [ -n "$fpid" ]; then
+  wait $fpid
+  F=$O/full/816
+  if grep -aq 'written short (the card is full?): removed' $F/console.txt \
+     && [ ! -e $F/card/GAMES/XCOM/XCOMXT1.SAV ] && grep -aq 'xcom: end at' $F/console.txt \
+     && ! grep -aq '\[kill\]' $F/console.txt; then
+    ok "a full card: the save written short, the cut file removed, the game went on to its end"
+  else bad "a full card ($F): $(grep -a 'save slot\|written short\|kill' $F/console.txt $F/card/GAMES/XCOM/SAVE.TXT 2>/dev/null | head -3)"; fi
+fi
 
 if [ $fail = 0 ]; then echo "check: all passed"; else echo "check: FAILED"; fi
 exit $fail

@@ -1,0 +1,18 @@
+diff -ruN src/vbench.c /tmp/claude-1000/-home-carlos-devel-fpga-atari-816/adcb2d20-7d3a-4500-868d-39800608853d/scratchpad/p5/b/src/vbench.c
+--- a/src/vbench.c	2026-11-23 14:36:11.329231451 -0300
++++ b/src/vbench.c	2026-11-23 14:36:18.597380172 -0300
+@@ -43,7 +43,14 @@
+     unsigned char *wf = MK_FP(p->walkseg + TILES / 16, 0);
+     unsigned char *cost = MK_FP(p->searchseg, 0), *from = cost + TILES;
+     unsigned short *next = (unsigned short *)(cost + 2 * TILES);
++#if defined(XCOM_PORT)
++    /* (4 * TILES is 40,000: an int of 16 bits overflows to -25,536, which DOS's far
++       pointers added to the offset alone, wrapping back to 40,000; a 24-bit far pointer
++       goes 25,536 bytes back, into the walk tables) */
++    unsigned short *bucket = (unsigned short *)(cost + 4u * TILES);
++#else
+     unsigned short *bucket = (unsigned short *)(cost + 4 * TILES);
++#endif
+     int c, max_tu = p->max_tu;
+ 
+     _fmemset(cost, COST_NONE, p->n);

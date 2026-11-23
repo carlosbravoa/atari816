@@ -14,7 +14,7 @@
 
 static void said(const char *kind, const char *name)
 {
-    static const char *seen[64];
+    static const char *__far seen[64];      /* (__far: out of the full main bank) */
     static int n;
     char b[96];
     int i;
@@ -77,7 +77,7 @@ void hgc_flush(int scan) { (void)scan; }
 void hgc_runs(const void far *frame) { (void)frame; XD_NEVER("hgc_runs"); }
 void hgc_buf(unsigned bufseg, unsigned rows_r0, unsigned b0, unsigned n)
 { (void)bufseg; (void)rows_r0; (void)b0; (void)n; }  /* (gfx.c calls it on every present: a no-op off Hercules) */
-void hgc_white2(void far *p, unsigned n) { (void)p; (void)n; XD_NEVER("hgc_white2"); }
+void hgc_white2(void far *p, unsigned n) { (void)p; (void)n; }  /* (geo.c on every world load: a no-op off Hercules) */
 void hgc_set(unsigned seg, unsigned off) { (void)seg; (void)off; XD_NEVER("hgc_set"); }
 unsigned char hgc_off(void) { return 3; }
 unsigned __cdecl hgc_blob(unsigned seg) { (void)seg; XD_NEVER("hgc_blob"); return 0; }
@@ -155,13 +155,15 @@ void __cdecl uk_remap4(unsigned char far *planes, const unsigned char far *cmap)
 { (void)planes; (void)cmap; XD_NEVER("uk_remap4"); }
 void __cdecl uk_remap_vram(void) { XD_NEVER("uk_remap_vram"); }
 
-/* heldasm.asm: the inventory's held item at the pointer. */
-void __cdecl held_blit(void far *h, unsigned what) { (void)h; (void)what; XD_TODO("held_blit"); }
+/* heldasm.asm: the inventory's held item at the pointer, EGA and CGA only:
+   invscr.c's VGA path (g_vga) draws and saves the picture itself in C
+   (held_put), so this is never called in the port's mode. */
+void __cdecl held_blit(void far *h, unsigned what) { (void)h; (void)what; XD_NEVER("held_blit"); }
 
-/* cutasm.asm: the intro's frames (VGA: the FLI chunks). */
+/* cutasm.asm: the intro's frames: EGA / CGA runs never; the VGA FLI chunks
+   are plat/fli.c's cut_fli. */
 unsigned __cdecl cut_runs(const unsigned char far *src, unsigned planes, unsigned vseg)
 { (void)src; (void)planes; (void)vseg; XD_NEVER("cut_runs"); return 0; }
-unsigned __cdecl cut_fli(const unsigned char far *frame) { (void)frame; XD_TODO("cut_fli"); return 0; }
 
 /* litasm.asm: EGA night light: never. */
 void __cdecl lit_rect(unsigned bufseg, void far *now, unsigned c0, unsigned r0, unsigned cols, unsigned rows)

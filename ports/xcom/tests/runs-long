@@ -1,0 +1,4 @@
+# The longer runs (make test-long): as tests/runs
+bsavebig   s=650 VGA NOINTRO BATTLE SEED 2 MISSION FA5V.PAK RACE RSV.PAK LOG BSAVE.TXT
+endlose    VGA NOINTRO ENDTEST 0 LOG ENDLOSE.TXT
+soak       s=1200 VGA NOINTRO TERROR LOG SOAK.TXT

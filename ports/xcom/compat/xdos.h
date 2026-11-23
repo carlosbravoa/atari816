@@ -169,6 +169,13 @@ int xd_remove(const char *name);
 int xd_rename(const char *a, const char *b);
 size_t xd_fread(void *p, size_t size, size_t n, FILE *f);
 int xd_read(int fd, void *p, unsigned n);
+/* the files open now (Horizon has 4 for the whole system): counted, the peak
+   reported at the end (plat/xdos.c "open files") */
+int xd_fclose(FILE *f);
+int xd_close(int fd);
+extern int xd_files, xd_files_peak;
+#define fclose(f)           xd_fclose(f)
+#define close(fd)           xd_close(fd)
 #define fread(p, s, n, f)   xd_fread(p, s, n, f)
 #define read(fd, p, n)      xd_read(fd, p, n)
 #define fopen(n, m)     xd_fopen(n, m)
@@ -204,6 +211,16 @@ int xd_vsnprintf(char *buf, size_t n, const char *fmt, va_list ap);
 #define vfprintf        xd_vfprintf
 #define snprintf        xd_snprintf
 #define vsnprintf       xd_vsnprintf
+#endif
+
+#if defined(__CC816__)
+/* The Atari816: the engine's printf goes to the console as before, its last lines kept;
+   exit with an error shows them on the screen first (horizon/hz_plat.c), as DOS left
+   them on the text screen */
+int xd_printf(const char *fmt, ...);
+void xd_exit(int code);
+#define printf          xd_printf
+#define exit(n)         xd_exit(n)
 #endif
 
 /* ---------------------------------------------------------------- the platform */

@@ -10,12 +10,22 @@
      xcomhost [-C packdir] [-o shotdir] [-t seconds] XCOMXT-OPTIONS...
        -C   the packs (default data/packs); the engine runs there (its saves too)
        -o   where the pictures go (default build/host/shots)
-       -t   end the run after this much idle virtual time (default 30 s) */
+       -t   end the run after this much idle virtual time (default 30 s)
+       -opl FILE  the OPL2's register writes: "TICK MS REG VAL" (TICK: the music
+            driver's ticks so far, plat/timer.c), and the track starts and stops
+            ("# play TRACK LOOP BYTES", "# stop", "# fx N")
+       -sb FILE   the Sound Blaster's blocks (plat/sb.c): "MS sfx KIND BYTES at LIN
+            RATE Hz sum SUM samples N", "MS halt" */
 #include "xcompat.h"
 #include "plat.h"
 #include "input.h"
+#include "sb.h"
 #undef calloc
 #undef free
+/* (the host's own files, pictures and logs, are not the engine's: not counted as the
+   model's open files, plat/xdos.c) */
+#undef fopen
+#undef fclose
 
 int xcom_main(int argc, char **argv);
 void xd_init(int argc, char **argv);
@@ -28,6 +38,10 @@ static unsigned long vclock;            /* PIT counts */
 static char shot_dir[256] = "build/host/shots";
 static int mx = 160, my = 100;
 
+void plat_progress(void)
+{
+}
+
 int plat_arena(void)
 {
     arena = calloc(1, XD_ARENA + 16);
@@ -37,7 +51,6 @@ int plat_arena(void)
 
 /* Each reading of the clock moves it on (a busy loop ends); waits move it
    by their length. 1193 counts are a millisecond. */
-#define XD_TICK_STEP 60
 
 unsigned long plat_counts(void)
 {
@@ -175,12 +188,57 @@ void plat_mem_changed(const void *p, unsigned long n)
     (void)p; (void)n;
 }
 
-static FILE *opl_log;
+static FILE *opl_log, *sb_log;
 
 void plat_opl(int reg, int val)
 {
     if (opl_log)
-        fprintf(opl_log, "%lu %02X %02X\n", vclock / 1193UL, reg, val);
+        fprintf(opl_log, "%lu %lu %02X %02X\n", g_hook_ticks, vclock / 1193UL, reg, val);
+}
+
+/* music.c's hooks (patches/src-0002-sound.patch): the Atari816 hands these to its
+   music task; here they are marks in the OPL2's log */
+void plat_mus_play(int track, int loop, unsigned char *buf, unsigned len)
+{
+    (void)buf;
+    if (opl_log)
+        fprintf(opl_log, "# play %d %d %u at tick %lu\n", track, loop, len, g_hook_ticks);
+}
+
+void plat_mus_stop(void)
+{
+    if (opl_log)
+        fprintf(opl_log, "# stop at tick %lu\n", g_hook_ticks);
+}
+
+void plat_mus_sound(int on)
+{
+    if (opl_log)
+        fprintf(opl_log, "# sound %d at tick %lu\n", on, g_hook_ticks);
+}
+
+void plat_mus_fx(int sfx)
+{
+    if (opl_log)
+        fprintf(opl_log, "# fx %d at tick %lu\n", sfx, g_hook_ticks);
+}
+
+/* a Sound Blaster block: the line the Atari816 prints for it too (horizon/hz_snd.c) */
+void plat_sfx(const unsigned char *src, unsigned bytes, unsigned rate, int kind,
+              unsigned long lin, unsigned sum)
+{
+    static signed char pcm[65536 * 2];
+    unsigned n = sb_decode(src, bytes, kind, pcm);
+
+    if (sb_log)
+        fprintf(sb_log, "%lu sfx %d %u at %05lX %u Hz sum %04X samples %u\n",
+                vclock / 1193UL, kind, bytes, lin, rate, sum, n);
+}
+
+void plat_sfx_stop(void)
+{
+    if (sb_log)
+        fprintf(sb_log, "%lu halt\n", vclock / 1193UL);
 }
 
 void plat_note(const char *s)
@@ -208,6 +266,8 @@ int main(int argc, char **argv)
             g_plat_idle = (unsigned)atoi(argv[i + 1]);
         else if (!strcmp(argv[i], "-opl"))
             opl_log = fopen(argv[i + 1], "w");
+        else if (!strcmp(argv[i], "-sb"))
+            sb_log = fopen(argv[i + 1], "w");
         i += 2;
     }
     if (shot_dir[0] != '/' && getcwd(cwd, sizeof cwd)) {

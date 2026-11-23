@@ -1,4 +1,4 @@
-# XCOM-XT on the Atari816 (stage 1: assessment and foundation)
+# XCOM-XT on the Atari816 (stage 5: a playable app)
 
 [XCOM-XT](https://github.com/fmikowski/xcom-xt) is a from-scratch engine for **X-COM: UFO
 Defense** (1994) written for 8088 XTs (EGA, CGA, Hercules) and 286 VGA machines: Open
@@ -6,48 +6,55 @@ Watcom C (16-bit large model, about 49,000 lines) plus NASM assembly (about 12,9
 GPL-3, alpha 0.5.1. You bring your own copy of the game; its converter (XCOMCONV, Python)
 makes the engine's packs from it.
 
-This folder is the port to the Atari816 (Horizon 0.30). **State: stage 4a of 5**: the
-game runs (menus, geoscape, base screens, UFOpaedia, graphs, battles), checked against the
-host build by `make test`; no sound, no intro yet; the battle view is drawn by the blitter
-but a full redraw still takes 0.2-0.4 s.
+This folder is the port to the Atari816 (Horizon 0.30). **State: a complete, playable
+app** (`make app`: XCOM.HZA, no game data in it): the intro, menus, geoscape, base screens,
+UFOpaedia, interceptions, battles, debriefings, the end slides; the AdLib music on the
+OPL2 (a helper task keeps its tempo while the game computes) and the Sound Blaster effects
+on Lau; saves (also inside a battle) in the app's folder. Every screen is checked against
+the PC build by `make test`. Battles are still slow in places (PORTING-NOTES.md, "What is
+next").
 
 | | State |
 | --- | --- |
-| Upstream | fetched at a pinned commit (`tools/getsrc.sh`), built through one patch (`patches/src-0001-port.patch`: about 180 lines added in 13 files, all in `#if defined(XCOM_PORT)`) |
-| Data | `tools/getdata.sh` runs upstream's XCOMCONV on your copy (GOG works with `--skip-check` and one converter patch) |
+| Upstream | fetched at a pinned commit (`tools/getsrc.sh`), built through patches (`patches/src-000N-*.patch`, all in `#if defined(XCOM_PORT)`: the port's hooks, sound, screens and three upstream bugs, the speed hooks, fixes) |
+| Data | `tools/getdata.sh` runs upstream's XCOMCONV on your copy (GOG works with `--skip-check` and one converter patch); the VGA mode uses 18.3 MB of it |
 | Host build (Linux) | the whole engine headless on a model of the DOS machine (`plat/xdos.c`), with DOS's 16-bit `int` (`tools/host16.py`): the reference |
-| Atari816 build | `hcc --code large --data far`: XCOM.PRG 846 KB; the main bank 58.6 of 65 KB |
-| Tests | `make test`: upstream's KEYS scripts (new game and geoscape, a quick battle, a save and load, BENCH) on both builds with a virtual clock: the same LOG, the same pictures at the same times (the emulator's screen pixel for pixel), the same save file byte for byte; and the real mouse and keyboard through Horizon |
+| Atari816 build | `hcc --code large --data far`: XCOM.PRG and MUSD.PRG (the music task) |
+| Tests | `make test`: 14 KEYS-script runs of every screen on both builds (same LOG, same pictures pixel for pixel, same saves, open files counted), the real mouse and keyboard three times (the clock as after the start, after 5 minutes, wrapping), a full card, the sound (OPL2 stream and Sound Blaster blocks against the host's, the beat, the volume); `make test-long`: longer runs (a big battle saved and loaded, the defeat slides, the campaign soak); `make test-app`: the app installed and started from the Desktop |
 | Screen | 320 x 200 on 320 x 180: every screen pans with the pointer; the battle view is split (the panel whole below 124 rows of the view) |
-| Speed | idle 77 % on idle screens (it was 2 %); battle: full redraw 0.21 s (one level) / 0.42 s (four), scroll 0.05-0.11 s, cursor 21 ms (it was 1.3 / 1.9 s, 0.9 s, 81 ms) |
 
-Read [PORTING-NOTES.md](PORTING-NOTES.md): the assessment, the measurements, the plan.
+Read [PORTING-NOTES.md](PORTING-NOTES.md): the assessment, the measurements, the plan,
+what is next. The player's guide is [app/README.TXT](app/README.TXT) (it goes into the app).
 
 ## Build
 
 ```sh
 sh tools/getsrc.sh                          # upstream/ at the pinned commit (or: make src)
 make data GAME="/path/to/X-COM UFO Defense" # data/packs/ from your copy (never in git)
-make host                                   # build/host/xcomhost (gcc; Linux)
-make host-run ARGS="VGA NOINTRO KEYS $PWD/tests/geo.keys LOG LOG.TXT"
-                                            # pictures in build/host/shots/*.ppm, the
-                                            # engine's log in data/packs/LOG.TXT
-make                                        # XCOM.PRG (hcc --code large --data far)
-make test                                   # host vs Atari816 in the emulator (tests/runs)
+make builds                                 # MUSD.PRG, XCOM.PRG, build/host/xcomhost
+make test                                   # host vs Atari816 in the emulator (about 2 min)
+make test-long                              # the longer runs
+make app                                    # XCOM.HZA: the app, no game data
+make test-app                               # installed and started in the emulator
+make card                                   # build/card/APPS/XCOM: the app + YOUR data, for your card
+make app DATA=1                             # also build/XCOM-DATA.HZA: the same with your data
 make run ARGS="VGA NOINTRO"                 # XCOM.PRG in the emulator's shell (build/run)
+make host-run ARGS="VGA NOINTRO KEYS $PWD/tests/geo.keys LOG LOG.TXT"
 ```
 
-The host runs in the packs folder (as the DOS program runs in its game folder); arguments
-are upstream's (`release/MANUAL.TXT` section 10: `VGA`, `NOINTRO`, `BATTLE`, `MISSION
-FA1V.PAK`, `SEED n`, `KEYS file`, `LOG file`, `BENCH`, ...). Its clock is virtual: a run
-gives the same pictures on any machine. `make check-host` runs `tests/runs` on the host alone. On the Atari816 the options `/V` (virtual clock, test pictures), `/T n` (end after n idle seconds) and `/S` (wait for the blitter at once) come before the engine's.
+On the Atari816 the options `/V` (virtual clock, test pictures), `/T n` (end after n idle
+seconds), `/S` (wait for the blitter at once) and `/U n` (n microseconds added to the
+clock: a machine on for long) come before the engine's (upstream's `release/MANUAL.TXT`
+section 10: `NOINTRO`, `BATTLE`, `MISSION FA1V.PAK`, `SEED n`, `KEYS file`, `LOG file`,
+`BENCH`, ...). Without options the game starts in VGA mode with its intro.
 
 ## Data
 
 Your own copy of X-COM: UFO Defense (DOS 1.4; the GOG edition, whose fonts differ, works
-with `--skip-check`, which the Makefile passes). The packs it makes (43 MB; the VGA mode
-uses `data/packs/*.PAK` and `data/packs/VGA/`) are for your own use: `data/` is ignored by
-git, and reference pictures will be kept as checksums only.
+with `--skip-check`, which the Makefile passes). The packs it makes are for your own use:
+`data/` is ignored by git, reference pictures are kept as checksums only, and XCOM.HZA
+holds none of them. On the card the app needs `PACKS.VER`, `*.PAK` and `VGA/` in its folder
+(`/APPS/XCOM/`); without them it says so on its screen.
 
 Dependencies of the converter: Python 3 and PyYAML.
 

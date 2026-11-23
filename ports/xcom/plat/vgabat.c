@@ -16,10 +16,10 @@
 
    Not ported (remain): the night lights (vgaasm.asm "Night lights",
    lit_present / vshift: light sources, per-cell levels): here a night
-   battle is shown at the sky's one shade (NIGHT_SHADE) everywhere; DOS's
-   smoke and fire pictures (fxpic, SMOKEV.PAK) and their animation step
-   (pics_next): the dithered shapes are drawn instead, as upstream does
-   without SMOKEV.PAK.
+   battle is shown at the sky's one shade (NIGHT_SHADE) everywhere.
+   DOS's smoke and fire pictures (fxpic, SMOKEV.PAK, loaded by
+   vga_smoke_load) and their animation step (pics_next) are entry 23's
+   and 26's, below.
 
    A platform with a blitter draws the buffer itself (plat.h "the battle
    view": the Atari816, horizon/hz_bb.c); every entry asks it first and
@@ -30,6 +30,9 @@
 #include "input.h"
 #include "render.h"
 #include "vga.h"
+#include "fx_in.h"
+#include "map.h"
+#include <stdio.h>
 
 #define ROW     320u
 #define BYTES   (ROW * VIEW_H)          /* 46080 */
@@ -76,12 +79,13 @@ static u16 header(const unsigned char far *s, unsigned dest, unsigned *first, un
 void __cdecl blitc_masked(const void *spr, unsigned bufseg, unsigned dest)
 {
     const unsigned char far *s = (const unsigned char far *)spr;
-    unsigned char far *buf = BUF(bufseg);
+    unsigned char far *buf;
     unsigned first, rows, n, x, len;
     u16 o;
 
     if (plat_bb_sprite(s, 0, dest, 0, 0xFFFF, 0, 0xFFFF))
         return;
+    buf = BUF(bufseg);
     o = header(s, dest, &first, &rows);
     s += 2;
     for (; rows; rows--, o = (u16)(o + ROW)) {
@@ -132,13 +136,14 @@ void __cdecl blitc_masked_clip(const void *spr, unsigned bufseg, unsigned dest,
                                unsigned top, unsigned bottom, unsigned wmask)
 {
     const unsigned char far *s = (const unsigned char far *)spr;
-    unsigned char far *buf = BUF(bufseg);
+    unsigned char far *buf;
     unsigned first, rows, n, x, len, row;
     u16 o;
 
     clip_vars(top, bottom, wmask);
     if (plat_bb_sprite(s, 0, dest, vtop, vbot, lx, rx))
         return;
+    buf = BUF(bufseg);
     o = header(s, dest, &first, &rows);
     s += 2;
     for (row = first; rows; rows--, row++, o = (u16)(o + ROW)) {
@@ -162,12 +167,13 @@ void __cdecl blitc_masked_clip(const void *spr, unsigned bufseg, unsigned dest,
 void __cdecl blitc_or(const void *spr, unsigned bufseg, unsigned dest)
 {
     const unsigned char far *s = (const unsigned char far *)spr;
-    unsigned char far *buf = BUF(bufseg);
+    unsigned char far *buf;
     unsigned first, rows, x, n;
     u16 o;
 
     if (plat_bb_sprite(s, 1, dest, 0, 0xFFFF, 0, 0xFFFF))
         return;
+    buf = BUF(bufseg);
     o = header(s, dest, &first, &rows);
     s += 2;
     for (; rows; rows--, o = (u16)(o + ROW)) {
@@ -188,13 +194,14 @@ void __cdecl blitc_or_clip(const void *spr, unsigned bufseg, unsigned dest,
                            unsigned top, unsigned bottom, unsigned wmask)
 {
     const unsigned char far *s = (const unsigned char far *)spr;
-    unsigned char far *buf = BUF(bufseg);
+    unsigned char far *buf;
     unsigned first, rows, x, n, row;
     u16 o;
 
     clip_vars(top, bottom, wmask);
     if (plat_bb_sprite(s, 1, dest, vtop, vbot, lx, rx))
         return;
+    buf = BUF(bufseg);
     o = header(s, dest, &first, &rows);
     s += 2;
     for (row = first; rows; rows--, row++, o = (u16)(o + ROW)) {
@@ -260,9 +267,20 @@ void __cdecl bufc_present_rect(unsigned bufseg, unsigned col, unsigned row, unsi
            level; here every cell at the sky's) */
         if (shade_lev != g_vshade)
             mktab(g_vshade);
+#if defined(__CC816__)
+        {
+            /* horizon/hz_vga.s: the same remap in assembly (the C took about
+               a second for the whole view) */
+            void hz_shade_rect(unsigned char far *d, const unsigned char far *s, unsigned w,
+                               unsigned rows, const unsigned char far *tab);
+            hz_shade_rect(scr + d, buf + d, w, n, shade_tab);
+            (void)i;
+        }
+#else
         for (; n; n--, d = (u16)(d + ROW))
             for (i = 0; i < w; i++)
                 scr[(u16)(d + i)] = shade_tab[buf[(u16)(d + i)]];
+#endif
     } else {
         for (; n; n--, d = (u16)(d + ROW))
             for (i = 0; i < w; i++)
@@ -386,16 +404,136 @@ void render_arrow(int c0, int r0, int cols, int rows)
    the 8-pixel columns of cols only. */
 static const unsigned char fx_col[4] = { 7, 10, 12, 14 };
 
+/* DOS's smoke and fire pictures (vgaasm.asm fxpic, OpenXcom
+   Map::drawTerrain, SMOKE.PCK as tools/convert.py build_smoke made
+   SMOKEV.PAK: "XSM1", 2, 14 pictures, u16 bytes, then u16 offsets[14] and
+   the masked pictures, each a 32 x 40 box): fire frames 0-3, smoke 4-9
+   (thin 4, thick 5, 6 by its thickness, + the step), a burning unit's
+   10-13. A tile's step is its own start (mixed from its place) + the
+   pictures' step (pics_next: every 4 BIOS ticks), the tile's old step while
+   a pass has not redrawn it yet (no seams). */
+static unsigned char far *smk;          /* the pack's bytes (offsets, pictures), NULL: none */
+static unsigned char v_step, v_old;     /* V_STEP, V_OLD */
+static unsigned v_nxt;                  /* V_NXT: pics_next's next of fire + smoke */
+static int rect[4];                     /* V_RX0, V_RY0, V_RX1, V_RY1 */
+
+/* SMOKEV.PAK into the DOS memory once (vgainit.c smoke_pics; plat/vga.c's
+   vgx_init calls it where upstream's vga_init loads it) */
+void vga_smoke_load(void)
+{
+    unsigned char h[8];
+    unsigned n;
+    void *p;
+    FILE *f;
+
+    if (smk || (f = fopen("SMOKEV.PAK", "rb")) == NULL)
+        return;
+    if (fread(h, 8, 1, f) == 1 && !memcmp(h, "XSM1", 4) && h[4] == 2 && h[5] == 14) {
+        n = h[6] | h[7] << 8;
+        if ((p = malloc(n)) != NULL) {
+            if (fread(p, n, 1, f) == 1)
+                smk = (unsigned char far *)p;
+            else
+                free(p);
+        }
+    }
+    fclose(f);
+}
+
+/* fxpic: 1 when done (drawn or nothing to draw), 0: the dithered shape at
+   rows *r0..*r1 (which it may narrow) */
+static int fxpic(unsigned seg, unsigned off, unsigned *r0, unsigned *r1, unsigned q01,
+                 unsigned q23, unsigned colour, unsigned cols)
+{
+    unsigned char al = (unsigned char)colour, ah, fr;
+    const Spot *list;
+    int n, i, camx4 = (short)g_cam_x >> 2, ftop, fbot, sy = 0;
+
+    ah = (unsigned char)(q01 | q01 >> 8 | q23 | q23 >> 8);
+    if (al == 0xFF) {
+        /* colour 3: the dot of something on the floor (the full pattern) is
+           dithered at its shape's rows 31-32; a flare's glow and fire's
+           inner flames are not drawn */
+        if ((u16)q01 != 0xFFFF || (u16)q23 != 0xFFFF)
+            return 1;
+        if ((int)*r0 < 31)
+            *r0 = 31;
+        if ((int)*r1 > 33)
+            *r1 = 33;
+        return 0;
+    }
+    if (al == 0xAA) {
+        fr = 0;
+        list = fire;
+        n = n_fire;
+    } else if (al == 0) {
+        fr = ah == 0xFF ? 5 : 4;        /* not found: thin or thick by the pattern */
+        list = smoke;
+        n = n_smoke;
+    } else
+        return 0;                       /* colour 1: none */
+    for (i = 0; i < n; i++) {
+        const Spot *t = &list[i];
+        int dz = (t->z & 7) * 24;
+        u16 o;
+        sy = (int)(short)((((t->x + t->y) & 0xFF) << 3) - dz + g_cam_y);
+        o = (u16)((u16)sy * 80u + (u16)((int)(signed char)(t->x - t->y) * 4 + camx4));
+        if (o == (u16)off)
+            break;
+    }
+    if (i == n) {
+        if (fr == 0)                    /* a burning unit (no start of its own) */
+            fr = (unsigned char)(10 + (v_step & 3));
+        ftop = (int)*r0;
+        fbot = (int)*r1;
+    } else {
+        const Spot *t = &list[i];
+        unsigned char a, b, st;
+        unsigned k = (unsigned)i;
+        if (fr) {
+            unsigned v = t->v & 15;
+            fr = (unsigned char)(v <= 6 ? 4 : v <= 12 ? 5 : 6);
+            k += (unsigned)n_fire;      /* its place in fire, then smoke */
+        }
+        a = (unsigned char)(t->x * 5);
+        b = t->y;
+        a ^= b;
+        a ^= (unsigned char)(b << 1);
+        a = (unsigned char)(a + (unsigned char)(b << 3));
+        a ^= t->z;
+        a ^= (unsigned char)(a >> 3);
+        st = v_nxt && k >= v_nxt ? v_old : v_step;
+        fr = (unsigned char)(fr + ((a + st) & 3));
+        ftop = (int)clear_y0 - sy;
+        if (ftop < 0)
+            ftop = 0;
+        fbot = (int)clear_y1 - sy;
+        if (fbot > 40)
+            fbot = 40;
+    }
+    if (fbot > ftop) {
+        const unsigned char far *pic = smk + (smk[fr * 2] | smk[fr * 2 + 1] << 8);
+        blitc_masked_clip(pic, seg, off, (unsigned)ftop, (unsigned)fbot, cols);
+    }
+    return 1;
+}
+
 void __cdecl fxtile_cga(unsigned seg, unsigned off, const unsigned char *shape, unsigned r0,
                         unsigned r1, unsigned q01, unsigned q23, unsigned colour, unsigned cols)
 {
-    unsigned char far *buf = BUF(seg);
+    unsigned char far *buf;
     const unsigned char far *s = (const unsigned char far *)shape;
     unsigned char pat[4], dl;
-    u16 di = (u16)(r0 * ROW + (u16)(off << 2));
-    unsigned t0 = r0;
-    int n = (int)r1 - (int)r0;
+    u16 di;
+    unsigned t0;
+    int n;
 
+    if (smk && fxpic(seg, off, &r0, &r1, q01, q23, colour, cols))
+        return;
+    buf = BUF(seg);
+    di = (u16)(r0 * ROW + (u16)(off << 2));
+    t0 = r0;
+    n = (int)r1 - (int)r0;
     if (n <= 0)
         return;
     plat_bb_sync();
@@ -451,12 +589,99 @@ void vga_gfx_dot(int x, int y, int colour)
     plat_present(x, y, x + 2, y + 2);
 }
 
-/* ---- 26: pics_next: the smoke and fire pictures' animation is not
-   ported (no SMOKEV.PAK pictures here): nothing to redraw. */
+/* ---- 26: pics_next: the rectangle to redraw for the smoke and fire
+   pictures' step, NULL: nothing. A pass over fire, then smoke, starts when
+   the BIOS clock's tick / 4 is not the step (which it then becomes), with
+   the view showing and the pictures loaded. A tile in sight (its level
+   drawn, its box on the view, discovered) adds render_tile's rectangle to
+   the one handed back while that stays within 64 x 72 (neighbours go
+   together; a key waits for one such rectangle at most). */
+#define PICS_W  64
+#define PICS_H  72
+
 const int far *vga_pics_next(void)
 {
-    return NULL;
+    rect[0] = -1;
+    if (!smk || g_view_off)
+        return NULL;
+    if (!v_nxt) {
+        unsigned char t = (unsigned char)(*(volatile unsigned char far *)MK_FP(0x40, 0x6C) >> 2);
+        if (t == v_step)
+            return NULL;
+        v_old = v_step;
+        v_step = t;
+    }
+    for (;;) {
+        const Spot *t;
+        unsigned d = v_nxt;
+        int z, sx, sy, x0, x1, y0, y1;
+        if (d < (unsigned)n_fire)
+            t = &fire[d];
+        else if (d - (unsigned)n_fire < (unsigned)n_smoke)
+            t = &smoke[d - (unsigned)n_fire];
+        else {
+            v_nxt = 0;                  /* the pass is over */
+            break;
+        }
+        v_nxt++;
+        z = t->z & 7;
+        if (z > g_view_z && !g_all_layers)
+            continue;
+        sx = (short)((int)(signed char)(t->x - t->y) * 16 + g_cam_x);
+        if (sx <= -32 || sx >= 320)
+            continue;
+        sy = (short)((((t->x + t->y) & 0xFF) << 3) - z * 24 + g_cam_y);
+        if (sy <= -40 || sy >= VIEW_H + 24)
+            continue;
+        if (g_seen && !(g_seen[(u16)((u16)((u16)z * g_my + t->y) * g_mx + t->x)] & 0x10))
+            continue;
+        x0 = sx < 0 ? 0 : sx;
+        x1 = sx + 32 > 320 ? 320 : sx + 32;
+        y0 = sy - 24 < 0 ? 0 : sy - 24;
+        y1 = sy + 40 > VIEW_H ? VIEW_H : sy + 40;
+        if (rect[0] != -1) {
+            if (rect[0] < x0) x0 = rect[0];
+            if (rect[2] > x1) x1 = rect[2];
+            if (rect[1] < y0) y0 = rect[1];
+            if (rect[3] > y1) y1 = rect[3];
+            if ((unsigned)(x1 - x0) > PICS_W || (unsigned)(y1 - y0) > PICS_H) {
+                v_nxt--;                /* that tile starts the next one */
+                break;
+            }
+        }
+        rect[0] = x0;
+        rect[1] = y0;
+        rect[2] = x1;
+        rect[3] = y1;
+    }
+    return rect[0] == -1 ? NULL : rect;
 }
+
+/* BENCH (the patch: vbench.c's pictures' step check): the pictures are
+   loaded; a pass from the start with a new step; the pass is over */
+int vga_pics_loaded(void)
+{
+    return smk != NULL;
+}
+
+void vga_pics_start(void)
+{
+    v_step = (unsigned char)~(*(volatile unsigned char far *)MK_FP(0x40, 0x6C) >> 2);
+    v_nxt = 0;
+}
+
+int vga_pics_over(void)
+{
+    return !v_nxt;
+}
+
+#if !defined(__CC816__)
+/* plat_bb_prepare (plat.h): the host draws by the C, nothing to prepare
+   (the Atari816's is horizon/hz_bb.c; host/host.c has the other plat_bb_*) */
+void plat_bb_prepare(void)
+{
+}
+#endif
 
 /* fxasm.asm's EGA overlay (inside plat/asm.c's XD_HAVE_VGABAT block):
    never called in the VGA mode. */

@@ -3,11 +3,19 @@
    reprograms the PIT and hooks INT 08h; here the clock is plat_counts()
    (PIT counts) and the hook (the music, 72.8 Hz) is called from
    timer_read and xd_poll whenever its time has come, as the interrupt
-   would have between two of the engine's instructions. */
+   would have between two of the engine's instructions. The Sound Blaster's
+   IRQ (plat/sb.c) comes the same way: from the clock's readings.
+
+   On the Atari816 the music is played by a task of its own (mus/musd.c,
+   horizon/hz_snd.c) that runs this same driver on Horizon's music timer;
+   the engine's copy runs here as on the host (its state, its LOG) and its
+   OPL2 writes go nowhere. */
 #include "xcompat.h"
 #include "plat.h"
 #include "input.h"
 #include "timer.h"
+#include "sb.h"
+#include "sound.h"
 
 #define FAST_DIV 16384u
 
@@ -15,16 +23,24 @@ static void (*tick_hook)(void);
 static unsigned long hook_next;
 static int in_hook;
 int g_pace_log;
+unsigned long g_hook_ticks;
+static int sound_was = 1;
 
 void timer_run_hook_at(unsigned long now)
 {
     int n = 0;
 
+    sb_poll(now);
     if (!tick_hook || in_hook || (long)(now - hook_next) < 0)
         return;
     in_hook = 1;
     while ((long)(now - hook_next) >= 0 && n++ < 8) {
         hook_next += FAST_DIV;
+        g_hook_ticks++;
+        if (g_sound_on != sound_was) {
+            sound_was = g_sound_on;
+            plat_mus_sound(sound_was);
+        }
         tick_hook();
     }
     if ((long)(now - hook_next) >= 0)

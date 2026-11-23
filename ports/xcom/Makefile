@@ -5,7 +5,7 @@
 #   make data GAME=DIR   your X-COM (DOS 1.4 / GOG) -> data/packs (upstream's XCOMCONV)
 #   make host       build/host/xcomhost: the engine on Linux (headless, the reference)
 #   make host-run ARGS="NOINTRO ..."   run it on data/packs: pictures in build/host/shots
-#   make check-host  the reference runs (tests/runs) against tests/host.md5
+#   make check-host  the reference runs (tests/runs) against tests/runs.md5
 #   make            XCOM.PRG (hcc --code large --data far): the engine on the Atari816
 #   make test       tests/check.sh: every run of tests/runs on the host and on the Atari816
 #                   in the emulator, compared (LOG, pictures, saves)
@@ -83,7 +83,7 @@ data/packs/PACKS.VER:
 S16       := build/host/s16
 HOST16    := $(PYTHON) tools/host16.py
 HOSTWARN  ?= -w
-HOSTFLAGS := -std=gnu99 -O1 -g -fno-strict-aliasing $(HOSTWARN) -I$(S16)/compat -I$(S16)/plat \
+HOSTFLAGS := -std=gnu99 -O1 -g -fno-strict-aliasing -funsigned-char $(HOSTWARN) -I$(S16)/compat -I$(S16)/plat \
              -I$(S16)/src -include xcompat.h $(PLATDEFS)
 HOSTHDRS   = $(wildcard build/src/*.h compat/*.h plat/*.h)
 host: build/host/xcomhost
@@ -129,8 +129,13 @@ host-run: build/host/xcomhost
 # ---------------------------------------------------------------- Atari816
 # the far data model (hcc --data far): the engine's plain pointers are DOS far pointers,
 # its strings and constant tables in far data (sdk/docs/c/reference.md)
-CFLAGS816 := --code large --data far -Icompat -Iplat -Ibuild/src -include compat/xcompat.h -fsigned-char -w $(PLATDEFS)
-LFLAGS816 := --code large --data far --game --map --sizes --stack 8192 --heap 2048
+CFLAGS816 := --code large --data far -Icompat -Iplat -Ibuild/src -include compat/xcompat.h -w $(PLATDEFS)
+# what XCOM.PRG checks before it starts (hcc --needs; APP.INF gets it from the program):
+# Horizon 0.30, Marga's scrolling and split (sprites, REV $0B), the blitter; the memory:
+# NEEDS_MEM (PORTING-NOTES.md "The app": the banks a big battle holds, MUSD.PRG's)
+NEEDS_MEM ?= 2304K
+NEEDS    := horizon=0.30,sprites,blitter,mem=$(NEEDS_MEM)
+LFLAGS816 := --code large --data far --game --map --sizes --stack 8192 --heap 2048 --needs $(NEEDS)
 DEPS816   := build/sum/headers.sum build/sum/sdk.sum
 build/816/o/%.o: build/src/%.c build/src/.stamp $(DEPS816)
 	@mkdir -p build/816/o
@@ -154,7 +159,10 @@ OBJS816 = $(patsubst build/src/%.c,build/816/o/%.o,$(UPSRC)) \
 XCOM.PRG: build/src/.stamp FORCE
 	$(MAKE) build/816/XCOM.PRG
 	cp build/816/XCOM.PRG $@
-build/816/XCOM.PRG: $(OBJS816) build/sum/sdk.sum
+build/sum/lflags.sum: FORCE
+	@mkdir -p build/sum
+	@echo "$(LFLAGS816)" > $@.new; if cmp -s $@.new $@; then rm $@.new; else mv $@.new $@; fi
+build/816/XCOM.PRG: $(OBJS816) build/sum/sdk.sum build/sum/lflags.sum
 	$(HCC) $(LFLAGS816) -o $@ $(OBJS816) > build/816/link.txt || { cat build/816/link.txt; exit 1; }
 	@grep -i "bytes on the card\|main bank" build/816/link.txt | head -4
 
@@ -162,12 +170,27 @@ build/816/XCOM.PRG: $(OBJS816) build/sum/sdk.sum
 $(CARD):
 	$(MAKE) -C $(HORIZON)
 
-test: XCOM.PRG build/host/xcomhost $(CARD)
+# (the two builds one after the other: each runs make src, which must not race)
+builds:
+	$(MAKE) XCOM.PRG
+	$(MAKE) build/host/xcomhost
+test: builds $(CARD)
 	@test -f data/packs/PACKS.VER || { echo "make test needs the packs: make data GAME=..."; exit 1; }
-	sh tests/check.sh $(HORIZON)
+	sh tests/check.sh $(HORIZON); a=$$?; sh tests/sound.sh $(HORIZON); b=$$?; \
+	  if [ $$a = 0 ] && [ $$b = 0 ]; then echo "make test: all passed"; else echo "make test: FAILED"; exit 1; fi
+# the longer runs (tests/runs-long): the screens walked through, the campaign soak
+test-long: builds $(CARD)
+	@test -f data/packs/PACKS.VER || { echo "make test-long needs the packs: make data GAME=..."; exit 1; }
+	RUNS=tests/runs-long O=build/test-long sh tests/check.sh $(HORIZON)
 
-refs: XCOM.PRG build/host/xcomhost $(CARD)
+# ---- speed (the speed helper's block): the felt figures with the real clock (tests/speed.sh)
+speed: XCOM.PRG $(CARD)
+	sh tests/speed.sh
+# ----
+refs: builds $(CARD)
 	sh tests/check.sh $(HORIZON) --refs
+refs-long: builds $(CARD)
+	RUNS=tests/runs-long O=build/test-long sh tests/check.sh $(HORIZON) --refs
 
 RUNFILES = $(foreach f,$(wildcard data/packs/*.PAK) data/packs/PACKS.VER,--file $(f):/GAMES/XCOM/$(notdir $(f))) \
            $(foreach f,$(wildcard data/packs/VGA/*),--file $(f):/GAMES/XCOM/VGA/$(notdir $(f))) \
@@ -178,9 +201,68 @@ run: XCOM.PRG $(CARD)
 	$(RUN816) XCOM.PRG --mode shell --dest /GAMES/XCOM/XCOM.PRG --cd /GAMES/XCOM --args "$(ARGS)" \
 	  $(RUNFILES) --out build/run $(RUNFLAGS)
 
+# ---------------------------------------------------------------- the music task (sound)
+# MUSD.PRG (mus/musd.c + upstream's music.c, hcc's small model): XCOM.PRG spawns it from
+# its own folder at the start; it owns the music timer and the OPL2 (horizon/hz_snd.c).
+# It goes next to XCOM.PRG (the app folder, the tests' card).
+MUSDSRC := mus/musd.c $(wildcard mus/inc/*.h)
+all: MUSD.PRG
+MUSD.PRG: build/src/.stamp FORCE
+	$(MAKE) build/mus/MUSD.PRG
+	cp build/mus/MUSD.PRG $@
+build/mus/MUSD.PRG: $(foreach f,$(MUSDSRC),build/sum/$(f).sum) build/src/.stamp build/sum/sdk.sum
+	@mkdir -p build/mus
+	$(HCC) -Imus/inc -Ibuild/src -DXCOM_MUSD -w -o $@ mus/musd.c build/src/music.c > build/mus/link.txt || { cat build/mus/link.txt; exit 1; }
+RUNFILES += --file MUSD.PRG:/GAMES/XCOM/MUSD.PRG
+run: MUSD.PRG
+builds: MUSD.PRG
+sound: builds $(CARD)
+	sh tests/sound.sh $(HORIZON)
+.PHONY: sound
+# ---------------------------------------------------------------- (sound end)
+
+# ---------------------------------------------------------------- the app
+# XCOM.HZA (make app): XCOM.PRG, MUSD.PRG, APP.INF, XCOM.ICN (app/XCOM-ICON.txt, drawn
+# for the port), README.TXT: no game data, the archive one may give away. The player puts
+# the packs made by XCOMCONV from their own copy into /APPS/XCOM/ (README.TXT); an update
+# keeps them (the Installer keeps the files the archive has not).
+# make app DATA=1: build/XCOM-DATA.HZA, the same app with the packs of data/packs in it
+# (one's own card only: never to give away). make card: build/card/APPS/XCOM/, the app's
+# folder with the packs, to copy onto one's card.
+APPFILES = XCOM.PRG MUSD.PRG build/XCOM.ICN app/APP.INF app/README.TXT
+PACKFILES = $(wildcard data/packs/*.PAK) data/packs/PACKS.VER
+build/XCOM.ICN: app/XCOM-ICON.txt
+	@mkdir -p build
+	$(PYTHON) $(HORIZON)/tools/mkicons.py $< $@ /dev/null
+build/app/XCOM/APP.INF: $(APPFILES) $(SDK)/tools/hzapp.py FORCE
+	rm -rf build/app && mkdir -p build/app/XCOM
+	cp XCOM.PRG MUSD.PRG build/XCOM.ICN app/README.TXT build/app/XCOM/
+	grep -v '^#' app/APP.INF > build/app/XCOM/APP.INF
+app: builds build/app/XCOM/APP.INF
+	$(PYTHON) $(SDK)/tools/hzapp.py pack build/app/XCOM -o XCOM.HZA --mtime 0
+	@if [ "$(DATA)" = 1 ]; then \
+	  test -f data/packs/PACKS.VER || { echo "make app DATA=1 needs the packs: make data GAME=..."; exit 1; }; \
+	  rm -rf build/appdata && mkdir -p build/appdata && cp -r build/app/XCOM build/appdata/ && \
+	  cp $(PACKFILES) build/appdata/XCOM/ && mkdir -p build/appdata/XCOM/VGA && \
+	  cp data/packs/VGA/* build/appdata/XCOM/VGA/ && \
+	  $(PYTHON) $(SDK)/tools/hzapp.py pack build/appdata/XCOM -o build/XCOM-DATA.HZA --mtime 0 && \
+	  echo "build/XCOM-DATA.HZA: the app with YOUR game data: for your own card only"; fi
+card: builds build/app/XCOM/APP.INF
+	@test -f data/packs/PACKS.VER || { echo "make card needs the packs: make data GAME=..."; exit 1; }
+	rm -rf build/card && mkdir -p build/card/APPS
+	cp -r build/app/XCOM build/card/APPS/ && cp $(PACKFILES) build/card/APPS/XCOM/
+	mkdir -p build/card/APPS/XCOM/VGA && cp data/packs/VGA/* build/card/APPS/XCOM/VGA/
+	@echo "build/card/APPS/XCOM: copy it to the card's /APPS (your own data: not to give away)"
+# the app in the emulator (tests/app.sh): XCOM.HZA installed by the Installer from the
+# Desktop and started from Programs > Games without data (the message), then with the
+# packs in its folder: the start menu, a new game, a save in the app's folder; installed
+# again (Replace): the data and the save kept
+test-app: app $(CARD)
+	sh tests/app.sh $(HORIZON)
+
 clean:
-	rm -rf build XCOM.PRG XCOM.map XCOM.lbl
+	rm -rf build XCOM.PRG MUSD.PRG XCOM.HZA XCOM.map XCOM.lbl
 
 .SECONDARY:
-.PHONY: all src data host host-run check-host refs-host test refs run clean FORCE
+.PHONY: all src data host host-run check-host refs-host builds test test-long refs refs-long run app card test-app speed clean FORCE
 FORCE:

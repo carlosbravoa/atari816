@@ -33,6 +33,8 @@
 #include <hgame.h>
 #include <horizon.h>
 #include "plat.h"
+#include "pak.h"
+#include "vga.h"
 
 #define BB_ROW0     205u                /* the buffer's first framebuffer row */
 #define BB_ROWS     144u
@@ -46,8 +48,10 @@
 #define ATL_MAX     6                   /* sheets at most (32 in the whole system) */
 #define HASH_N      2048u               /* pictures kept at most (a power of 2): 32 KB */
 
+/* a kept picture: 16 bytes (horizon/hz_bbs.s reads them by offset) */
 typedef struct {
-    unsigned long addr;                 /* the picture (24-bit address), 0 free */
+    unsigned short lo;                  /* the picture's address: offset, */
+    unsigned char bank, used;           /* bank; 1 (0: a free slot) */
     unsigned char sheet, key;
     unsigned short ax, ay;              /* its rectangle in the atlas */
     unsigned char x0, first;            /* its first column (sprite x), first row */
@@ -55,8 +59,10 @@ typedef struct {
     unsigned char rows;                 /* rows first .. first + rows - 1 */
     unsigned char kind;
 } Pic;
+HZ_STATIC_ASSERT(sizeof(Pic) == 16, pic16);
 
 static Pic *pics;                       /* HASH_N, in a bank of its own */
+unsigned hzb_picbank;                   /* its bank (hz_bbs.s) */
 static unsigned npics;
 static unsigned long lo_addr = 0xFFFFFFFFUL, hi_addr;   /* what the kept pictures span */
 
@@ -66,10 +72,18 @@ static unsigned natl;
 static unsigned shelf_x, shelf_y, shelf_h, cur;  /* the packing: sheet cur's shelf */
 
 static int bb_sheet;                    /* the buffer + box sheet */
-static int ready, failed;
-static hz_sheetrec q[128];
-static unsigned qn;
-static unsigned long qpx;               /* pixels in q (a call: 460,800 at most) */
+static int failed;
+/* the record path's state, shared with horizon/hz_bbs.s (plat_bb_sprite's
+   fast path: a kept picture's record, in assembly) */
+int hzb_ready;
+hz_sheetrec hzb_q[128];
+unsigned hzb_qn;
+unsigned long hzb_qpx;                  /* pixels in q (a call: 460,800 at most) */
+unsigned char hzb_yof[768];             /* buffer offset >> 6 -> its row (offset / 320) */
+#define ready hzb_ready
+#define q hzb_q
+#define qn hzb_qn
+#define qpx hzb_qpx
 static int pending;                     /* records sent and not waited for */
 
 unsigned long g_bb_draws, g_bb_unpacked, g_bb_flushes, g_bb_cpu;
@@ -98,7 +112,10 @@ void hz_bb_screen(int on)
 {
     hz_sheetnew sn;
     unsigned long a;
+    unsigned i;
 
+    for (i = 0; i < sizeof hzb_yof; i++)
+        hzb_yof[i] = (unsigned char)(i / 5u);   /* (64 i + r) / 320, r < 64 */
     ready = 0;
     qn = 0;
     qpx = 0;
@@ -130,11 +147,12 @@ void hz_bb_screen(int on)
             return;
         }
         memset(pics, 0, HASH_N * sizeof(Pic));
+        hzb_picbank = HZ_BANK(pics);
     }
     ready = !failed;
 }
 
-static void send(void)
+void hzb_send(void)
 {
     if (!qn)
         return;
@@ -158,6 +176,8 @@ static void send(void)
     qpx = 0;
     pending = 1;
 }
+
+#define send hzb_send
 
 static void wait_done(void)
 {
@@ -226,11 +246,14 @@ static void pos_of(unsigned o, int *x, int *y)
 /* ---------------------------------------------------------------- the atlas */
 
 static Pic arrow_pic;
+static int prepared, preloading, arrow_making;
+static unsigned long t_prep, t_view;    /* the battle's start (the console's line) */
 
 static void forget_all(void)
 {
     wait_done();
-    arrow_pic.addr = 0;
+    arrow_pic.used = 0;
+    prepared = 0;
     if (pics)
         memset(pics, 0, HASH_N * sizeof(Pic));
     npics = 0;
@@ -249,20 +272,23 @@ void plat_mem_changed(const void far *p, unsigned long n)
     forget_all();
 }
 
-static Pic *find(unsigned long a, int *fresh)
+/* the slot of picture s: kept (fresh 0) or the free one to fill (fresh 1);
+   NULL when the table is full. The hash is hz_bbs.s's. */
+static Pic *find(const unsigned char far *s, int *fresh)
 {
-    unsigned h = (unsigned)((a >> 4) ^ (a >> 13)) & (HASH_N - 1), k;
+    unsigned lo = HZ_OFF(s), bank = HZ_BANK(s), k;
+    unsigned h = ((lo >> 4) ^ (lo >> 13) ^ (bank << 3)) & (HASH_N - 1);
     Pic *p;
 
     for (k = 0; k < HASH_N; k++) {
         p = &pics[(h + k) & (HASH_N - 1)];
-        if (p->addr == a) {
-            *fresh = 0;
-            return p;
-        }
-        if (!p->addr) {
+        if (!p->used) {
             *fresh = 1;
             return npics < HASH_N * 3 / 4 ? p : NULL;
+        }
+        if (p->lo == lo && p->bank == (unsigned char)bank) {
+            *fresh = 0;
+            return p;
         }
     }
     return NULL;
@@ -312,58 +338,35 @@ static int place(unsigned w, unsigned h, unsigned *sh, unsigned *ax, unsigned *a
     }
 }
 
+unsigned hzb_scan(const unsigned char far *s, int kind);
+extern unsigned char hzb_used[256];
+extern unsigned hzb_x0, hzb_x1;
+
 /* Unpacks picture s into the atlas: its box, a key, the spans. */
 static Pic *unpack(Pic *p, const unsigned char far *s, int kind)
 {
     const unsigned char far *t = s + 2;
     unsigned first = s[0], rows = s[1], r, n, x, len, x0 = 0xFFFF, x1 = 0, key, sh, ax, ay;
-    unsigned char used[32];
     unsigned long len_all;
     unsigned char far *row;
 
     if (!rows)
         return NULL;
-    memset(used, 0, sizeof used);
-    /* pass 1: the box and the colours */
-    for (r = 0; r < rows; r++) {
-        if (kind == 0) {
-            for (n = *t++; n; n--) {
-                x = t[0];
-                len = t[1];
-                t += 2;
-                if (x & 0x80)
-                    t++;
-                x &= 0x7F;
-                if (len) {
-                    if (x < x0) x0 = x;
-                    if (x + len > x1) x1 = x + len;
-                }
-                for (; len; len--, t++)
-                    used[*t >> 3] |= (unsigned char)(1 << (*t & 7));
-            }
-        } else {
-            x = t[0];
-            len = (unsigned)t[1] * 2;
-            t += 2;
-            if (len) {
-                if (x < x0) x0 = x;
-                if (x + len > x1) x1 = x + len;
-            }
-            for (; len; len--, t++)
-                used[*t >> 3] |= (unsigned char)(1 << (*t & 7));
-        }
-    }
-    len_all = (unsigned long)(t - s);
+    /* pass 1: the box and the colours (horizon/hz_bbs.s) */
+    len_all = hzb_scan(s, kind);
+    x0 = hzb_x0;
+    x1 = hzb_x1;
     if (x0 >= x1)
         x0 = x1 = 0;
-    for (key = 0; key < 256 && (used[key >> 3] & (1 << (key & 7))); key++)
+    for (key = 0; key < 256 && hzb_used[key]; key++)
         ;
     if (key == 256) {
         note("a picture with every colour: drawn by the C");
         return NULL;
     }
     if (!place(x1 > x0 ? x1 - x0 : 1, rows, &sh, &ax, &ay)) {
-        forget_all();                   /* full: start again (the caller tries once more) */
+        if (!preloading)
+            forget_all();               /* full: start again (the caller tries once more) */
         return NULL;
     }
     /* pass 2: the rectangle in the key, the spans over it */
@@ -393,7 +396,9 @@ static Pic *unpack(Pic *p, const unsigned char far *s, int kind)
             t += len;
         }
     }
-    p->addr = (unsigned long)s;
+    p->lo = HZ_OFF(s);
+    p->bank = (unsigned char)HZ_BANK(s);
+    p->used = 1;
     p->sheet = atl_sheet[sh];
     p->key = (unsigned char)key;
     p->ax = (unsigned short)ax;
@@ -405,10 +410,12 @@ static Pic *unpack(Pic *p, const unsigned char far *s, int kind)
     p->kind = (unsigned char)kind;
     npics++;
     g_bb_unpacked++;
-    if (p->addr < lo_addr)
-        lo_addr = p->addr;
-    if (p->addr + len_all > hi_addr)
-        hi_addr = p->addr + len_all;
+    if (arrow_making)
+        ;                               /* (the arrow's static picture: never read into) */
+    else if ((unsigned long)s < lo_addr)
+        lo_addr = (unsigned long)s;
+    if ((unsigned long)s + len_all > hi_addr)
+        hi_addr = (unsigned long)s + len_all;
     return p;
 }
 
@@ -447,8 +454,11 @@ static void put_linear(unsigned sh, unsigned key, unsigned ax, unsigned ay, unsi
     put(sh, SH_KEY, key, ax, ay, w, h, x, y);
 }
 
-int plat_bb_sprite(const unsigned char far *spr, int kind, unsigned dest, unsigned top,
-                   unsigned bottom, unsigned lx, unsigned rx)
+/* plat_bb_sprite (plat.h) is horizon/hz_bbs.s: a kept picture's record in
+   assembly; a picture not kept yet, and every case it leaves (/S, a
+   destination above the buffer), comes here with the same arguments. */
+int hzb_sprite_c(const unsigned char far *spr, int kind, unsigned dest, unsigned top,
+                 unsigned bottom, unsigned lx, unsigned rx)
 {
     Pic *p;
     int fresh, bx, by;
@@ -456,17 +466,17 @@ int plat_bb_sprite(const unsigned char far *spr, int kind, unsigned dest, unsign
 
     if (!ready)
         return 0;
-    p = find((unsigned long)spr, &fresh);
+    p = find(spr, &fresh);
     if (!p) {
         forget_all();
-        p = find((unsigned long)spr, &fresh);
+        p = find(spr, &fresh);
         if (!p)
             return 0;
     }
     if (fresh) {
         Pic *u = unpack(p, spr, kind);
         if (!u && !npics) {             /* the atlas was full: once more, empty */
-            p = find((unsigned long)spr, &fresh);
+            p = find(spr, &fresh);
             u = p ? unpack(p, spr, kind) : NULL;
         }
         p = u;
@@ -552,6 +562,10 @@ int plat_bb_present(unsigned off, unsigned w, unsigned rows)
         r->y = (short)y;                /* the screen: framebuffer rows 0-199 */
     }
     wait_done();
+    if (t_view && w == BB_W && rows == BB_ROWS) {
+        printf("xcom: battle: the view shown at %lu ms\n", hz_uptime_us() / 1000);
+        t_view = 0;
+    }
     return 1;
 }
 
@@ -641,7 +655,7 @@ int plat_bb_arrow(const unsigned char *px, int x, int y, int qx, int qy, int qw,
 
     if (!ready)
         return 0;
-    if (!arrow_pic.addr) {
+    if (!arrow_pic.used) {
         /* the masked format: each row's runs of non-zero pixels (0 is clear) */
         static unsigned char spr[2 + 9 * (1 + 5 * 2 + 9)];
         unsigned k = 0, r, c, e, nk;
@@ -666,15 +680,18 @@ int plat_bb_arrow(const unsigned char *px, int x, int y, int qx, int qy, int qw,
                 }
             }
         }
-        p = find((unsigned long)(const unsigned char far *)spr, &fresh);
-        if (p && fresh)
+        p = find((const unsigned char far *)spr, &fresh);
+        if (p && fresh) {
+            arrow_making = 1;           /* (out of lo_addr..hi_addr: a read into the main
+                                           bank would forget the whole atlas) */
             p = unpack(p, spr, 0);
+            arrow_making = 0;
+        }
         if (!p) {
             plat_bb_sync();
             return 0;
         }
         arrow_pic = *p;
-        arrow_pic.addr = 1;
         arrow_pic.ax = (unsigned short)(p->ax - p->x0);     /* (column 0 of the 9) */
     }
     /* inside [qx, qx + qw) x [qy, qy + qh), the buffer */
@@ -693,4 +710,70 @@ int plat_bb_arrow(const unsigned char *px, int x, int y, int qx, int qy, int qw,
     if (g_bb_wait)
         wait_done();
     return 1;
+}
+
+/* ---------------------------------------------------------------- the battle's start
+   plat_bb_prepare (plat.h): every picture of the battle's pack unpacked into
+   the atlas now, with a bar on the screen moving, instead of during the
+   first redraws (which then took 0.4 s instead of 0.2 and the next ones a
+   hitch each time a new kind of tile came into view). The bar's pixels are
+   put back after: the screen is the model's (the test pictures). */
+#define BAR_X   80
+#define BAR_Y   96
+#define BAR_W   160
+#define BAR_H   6
+
+void plat_bb_prepare(void)
+{
+    /* (in the pictures' bank, after the table's 32 KB: the main bank is full) */
+    unsigned char far *isor = (unsigned char far *)pics + HASH_N * sizeof(Pic);    /* 512 bytes: */
+    unsigned char far *under = isor + 512;      /* the OR-format pictures; the bar's pixels */
+    unsigned char far *scr = (unsigned char far *)hz_farptr(hg_fb_bank, BAR_Y * BB_W + BAR_X);
+    unsigned n = g_pak.n_sprites, i, r, shown = 0, fill;
+    unsigned char lit = g_vmap[15], dim = g_vmap[8];
+    int fresh;
+
+    if (!ready || prepared || !g_pak.sprite || !n)
+        return;
+    t_prep = hz_uptime_us();
+    if (n > 512 * 8)
+        n = 512 * 8;
+    memset(isor, 0, 512);
+    for (i = 1; i < g_pak.n_mcd; i++) {
+        const Mcd *m = &g_pak.mcd[i];
+        unsigned k = OR_SPRITE(m);
+        if (MCD_PART(m) == PART_FLOOR && k != OR_NONE && k < n)
+            isor[k >> 3] |= (unsigned char)(1 << (k & 7));
+    }
+    wait_done();
+    for (r = 0; r < BAR_H; r++) {
+        hz_far_copy(under + r * BAR_W, scr + r * BB_W, BAR_W);
+        hz_far_set(scr + r * BB_W, r == 0 || r == BAR_H - 1 ? dim : 0, BAR_W);
+        scr[r * BB_W] = scr[r * BB_W + BAR_W - 1] = dim;
+    }
+    preloading = 1;
+    for (i = 0; i < n; i++) {
+        const unsigned char far *s = (const unsigned char far *)g_pak.sprite[i];
+        Pic *p;
+        if (!s)
+            continue;
+        p = find(s, &fresh);
+        if (!p)
+            break;                      /* the table is full: the rest as they come */
+        if (fresh && !unpack(p, s, isor[i >> 3] >> (i & 7) & 1) && natl == ATL_MAX)
+            break;                      /* the atlas is full: the same */
+        fill = (unsigned)((unsigned long)(i + 1) * (BAR_W - 4) / n);
+        if (fill > shown + 3 || i + 1 == n) {
+            for (r = 2; r < BAR_H - 2; r++)
+                hz_far_set(scr + r * BB_W + 2 + shown, lit, fill - shown);
+            shown = fill;
+        }
+    }
+    preloading = 0;
+    prepared = 1;
+    t_view = hz_uptime_us();
+    printf("xcom: battle: %u pictures ready at %lu ms (%lu ms)\n", npics, t_view / 1000,
+           (t_view - t_prep) / 1000);
+    for (r = 0; r < BAR_H; r++)
+        hz_far_copy(scr + r * BB_W, under + r * BAR_W, BAR_W);
 }

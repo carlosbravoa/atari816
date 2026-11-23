@@ -8,7 +8,8 @@
      3. the battle view's present (320 x 144 back buffer -> screen)
      4. sprites: a 32 x 40 masked sprite in C through far pointers (the
         battle view draws its floor, walls, objects and units so)
-   Each result: "bench: NAME N us". */
+   Each result: "bench: NAME N us". Build: hcc -o BENCH.PRG bench.c
+   ../../horizon/hz_vga.s (the port's geoscape rows). */
 #include <stdio.h>
 #include <string.h>
 #include <fcntl.h>
@@ -112,6 +113,35 @@ static void world(const unsigned char __far *map, unsigned vx, unsigned vy, unsi
     }
 }
 
+/* the same as the port does it now (plat/vga.c, horizon/hz_vga.s): a row once
+   (zoom 1, 2: each byte 2 or 4 times in assembly), the rows that repeat it copied */
+void hz_zoom_row(unsigned char __far *d, const unsigned char __far *s, unsigned n, unsigned zoom);
+
+static void part2(unsigned char __far *p, const unsigned char __far *s, unsigned n, unsigned zoom)
+{
+    if (!zoom)
+        hz_far_copy(p, s, n);
+    else
+        hz_zoom_row(p, s, n, zoom);
+}
+
+static void world2(const unsigned char __far *map, unsigned vx, unsigned vy, unsigned zoom)
+{
+    unsigned char __far *d = fb;
+    unsigned need = 256 >> zoom, n1 = 320 - vx < need ? 320 - vx : need, y;
+
+    for (y = 0; y < 160; y++, d += ROW) {
+        const unsigned char __far *s = map + ((y >> zoom) + vy) * 320u;
+        if (y && (y >> zoom) == ((y - 1) >> zoom)) {
+            hz_far_copy(d, d - ROW, 256);
+            continue;
+        }
+        part2(d, s + vx, n1, zoom);
+        if (need > n1)
+            part2(d + (n1 << zoom), s, need - n1, zoom);
+    }
+}
+
 static void worlds(unsigned char __far *map)
 {
     unsigned long t;
@@ -125,6 +155,11 @@ static void worlds(unsigned char __far *map)
         for (i = 0; i < 4; i++)
             world(map, 100, z ? 20 : 0, z);
         sprintf(name, "geoscape world view zoom %u", z);
+        report(name, now() - t, 4);
+        t = now();
+        for (i = 0; i < 4; i++)
+            world2(map, 100, z ? 20 : 0, z);
+        sprintf(name, "geoscape world view zoom %u (port now)", z);
         report(name, now() - t, 4);
     }
 }

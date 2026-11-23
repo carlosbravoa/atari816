@@ -19,5 +19,9 @@ void vga_pal(void);                     /* entry 8: g_vpal to the DAC */
 void vga_gfx_night(int night);          /* entry 24 (gfx.c gfx_night's VGA hook) */
 void vga_gfx_dot(int x, int y, int colour);     /* entry 25 */
 const int far *vga_pics_next(void);     /* entry 26: the rectangle to redraw, or NULL */
+void vga_smoke_load(void);              /* SMOKEV.PAK: DOS's smoke and fire pictures */
+int vga_pics_loaded(void);              /* (BENCH: the pictures' step) */
+void vga_pics_start(void);
+int vga_pics_over(void);
 
 #endif

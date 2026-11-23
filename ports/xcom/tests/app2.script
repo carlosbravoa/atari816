@@ -1,0 +1,32 @@
+# tests/app2.script (make test-app, tests/app.sh): the packs (and an old save) already in
+# /APPS/XCOM as the player copied them; XCOM.HZA installed (the Installer keeps them),
+# started from Programs > Games: the loading screen, the start menu, New Game, Beginner,
+# a base placed, then saved in slot 2 (XCOMXT2.SAV in the app's folder).
+1000 xcom\n
++0 wait install: asks:
++500 \n
++0 wait install:
++800 \n
++1500 {f10}
++400 {right}
++600 {end}
++400 \n
++400 \n
++0 wait xcom: start
++300 shot
++0 wait xcom: ready for input
++1000 shot
+# the intro (if it plays) skipped by a key; the start menu: N, the difficulty (Enter),
+# the base placed where the globe is (Enter, Enter), then Esc, Save, slot 2, a name
++1500 {space}
++6000 shot
++500 n
++5000 \n
++6000 \n
++6000 \n
++8000 shot
++500 {esc}
++3000 s
++3000 2
++3000 AP\n
++6000 shot

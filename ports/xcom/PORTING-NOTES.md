@@ -1,6 +1,6 @@
 # Porting notes: XCOM-XT on the Atari816
 
-Stage 1 (assessment and foundation), 23 November 2026.
+Stage 1 (assessment and foundation) to stage 5 (a playable app: section 4d), 23 November 2026.
 
 Upstream: <https://github.com/fmikowski/xcom-xt> at commit `a53918220c90` (18 November
 2026, alpha 0.5.1), GPL-3. Fetched by `tools/getsrc.sh` into `upstream/` (not in git);
@@ -393,6 +393,21 @@ What it says:
 | 9 | **hgame's full screen gets no pointer motion without a button**: `hg_screen_fb` opens its window without `WF_HOVER`, so `hg_mouse_x/y` move only while a button is held; a mouse-driven game's pointer does not follow the mouse. The port reads `ws_mouse` itself. Wanted: `WF_HOVER` for full-screen windows (or an `HG_MOUSE` flag) | hgame | `hg_screen(HG_320X180, "t"); while (hg_frame()) printf("%d\n", hg_mouse_x);` with the mouse moved, no button: the value never changes |
 | 10 | **No way to send a scroll/split without a frame**: a program that keeps its own time (a DOS port: `hg_poll`, never `hg_frame`) cannot make `hg_scroll`/`hg_split` take effect; the port calls `hz_fs_scroll(&hg__scr)` on hgame's internal block. Wanted: `hg_view_send()` (or `hg_poll` sending a changed scroll) | hgame | `hg_screen_fb(HG_320X180, "t", 320, 200); hg_scroll(0, 20); for (;;) hg_poll();`: the view never moves |
 | 11 | `read()` returns `int`: with 16-bit int a read of 32,768 bytes or more looks negative (`k < 0` taken for an error). The port tests `k == -1`. Wanted: a line in c-library.md (or `ssize_t` as `long`) | libc doc | `int k = read(fd, p, 40000u); if (k < 0) ...` |
+| 12 | **A far pointer plus an int that overflowed.** `cost + 4 * TILES` (an enum, 4 x 10,000 = 40,000: -25,536 in 16-bit int) wrapped back to offset 40,000 on DOS (Watcom adds to the offset alone); cc816's 24-bit far pointer goes 25 KB back into another block (here: the path search's bucket array over the walk tables, every alien path different from the host's). Documented as unsupported (reference.md, "Arithmetic"); `-Woverflow` finds it (2 sites in 49,000 lines), but the port builds with `-w`. Wanted: `-Woverflow` on even under `-w` (it is never harmless next to a far pointer), or an int addend added to the offset alone, as an element access already is | cc816 | `unsigned char __far *p = ...; enum { T = 10000 }; unsigned short __far *b = (unsigned short __far *)(p + 4 * T);` |
+| 13 | **Argument evaluation order.** cc816 evaluates a call's arguments left to right, gcc and Watcom right to left; `hurt(u, roll_damage(), rl_side())` (both call `rnd`) drew the random numbers in the other order: different damage than DOS. Unspecified in C, but every DOS port depends on it somewhere. Wanted: a warning when two arguments of one call both call functions (or an option for right-to-left) | cc816 | `int a(void), b(void); void f(int, int); f(a(), b());` |
+| 14 | Horizon: no bank can be shared by two tasks (a helper task reading the game's memory is killed, cause 02): the music task loads MUSIC.PAK itself (2 banks) | Horizon note | |
+| 15 | run816.py: the emulator always runs to `--seconds`, also after the program has ended: a test suite pays for the longest run's budget in every run (tests/check.sh gives each run its own `s=N`). Wanted: `--stop-on TEXT` (end the run when the console shows TEXT), or end at the program's exit in shell mode | tool wish | |
+| 16 | console.txt and `--log-lau` have no emulated-time stamps: a test cannot line up the program's phases (an alien turn) with `--log-opl-us` | tool wish | |
+| 17 | The Desktop leaves 3,136 KB free of 8 MB at a program's start (emu816, Files open): an app's `mem=` must fit that | note | `--needs mem=4096K` refused: "XCOM needs 4096 KB of free memory (3136 KB free)" |
+
+Items 9-11 are fixed in the SDK (not yet committed when this round was made; the port
+keeps its workarounds until it is): `hg_view_send()` and `hg_poll()` sending a changed
+view, full-screen pointer motion without a button in `hg_mouse_x/y`, and `read()`/`write()`
+moving at most 32,767 bytes a call. The port's switch, after the commit: in
+`horizon/hz_plat.c` replace `send_view()` (and `hg__scr`/`hg__scr_dirty`) by
+`hg_view_send()`; in `plat_poll` use `hg_mouse_x/y/b` instead of `hz_ws_mouse` (keep the
+port's own press counting; not `hg_mouse_clicked()`). The reads already loop
+(`plat/xdos.c read_all`/`write_all`: pieces of 32,767 bytes until n, the end or an error).
 
 ## 4b. Stage 3's gate: the far data model (done, 23 November 2026)
 
@@ -584,6 +599,273 @@ framebuffer, 1 for the pictures' table, 4 per atlas sheet (BENCH: 1 sheet). Atla
 a sheet, made from the packs in memory (no file, no load time of its own: about 2 ms of
 CPU a picture the first time it is drawn).
 
+## 4d. Stage 5: the playable app (23 November 2026)
+
+Done by the lead and three helper agents in parallel (sound, speed, screens), each in its
+own tree, merged three-way; the whole `make test` from a clean build at the end.
+
+### Faults found (port, upstream, compiler)
+
+| # | What | Where | Fix |
+| --- | --- | --- | --- |
+| 1 | Every path search on the 816 differed from the host's: `vbench.c path_search_c` takes `cost + 4 * TILES` (an enum: 40,000 overflows 16-bit int to -25,536); DOS's far pointer wrapped the offset back, cc816's 24-bit one went 25 KB back and `memset(bucket, 0xFF, 512)` trashed the walk tables (wc, wd): aliens that did not move, battles that went their own way after the first alien turn | upstream (int overflow) + cc816's far pointers (SDK 12) | `patches/src-0005-fixes.patch`: `4u * TILES` |
+| 2 | Damage drawn in another order: `hurt(u, roll_damage(), ..., rl_side())`, both call `rnd`; cc816 evaluates arguments left to right, Watcom/gcc right to left | upstream (unspecified order) + cc816 (SDK 13) | `src-0003`: a `HURT` macro, the side first (4 sites) |
+| 3 | A comrade's death cost no morale on DOS/816 (`rank_mod*200*(...)` overflows 16 bits), 10 on the host | upstream | `src-0003`: the product in `long` (DOS, OpenXcom, host and 816 agree) |
+| 4 | Plain `char` was signed in the port's build (Watcom: unsigned): the battle's Game Options screen indexed `"\x94..."` strings to y = -115 (host crash, 816 writes off screen) | port Makefile | `-funsigned-char` (host), `-fsigned-char` dropped (cc816's default is unsigned) |
+| 5 | The base screen black under windows: the VGA "clean screen" was the last picture only | port (`plat/vga.c`, upstream's VGA prototype) | a real 64,000-byte copy at E000 (`XD_CLEAN_SEG`, bank 14, outside DOS memory) |
+| 6 | The UFOpaedia list drawn over the article | upstream | `src-0003`: `uk_restore` after an article |
+| 7 | The end slides never shown: INT 21h seek (42h) missing; `read()` of 64,000 bytes | port | modelled; reads in pieces (below) |
+| 8 | The AdLib driver reads past a track's end (GMTACTIC's instrument 10): on the 816 a tempo of 1 from the memory after it, the music crawling after 75 s | upstream | `src-0002`: an instrument ends at the track's end, both builds |
+| 9 | Test runs on the 816 took 20 emulated s a virtual second: a KEYS `WAIT` polls 20,000 times a virtual second at 60 counts a clock reading, each poll about 1 ms | port (test clock) | `XD_TICK_STEP` 600 (plat.h): geo 230 → 45 s |
+| 10 | `plat_counts`: `d * 611` overflowed for a gap above 7 s (the first reading, a long load) | port | `plat_us_to_counts` in two parts |
+| 11 | The BIOS clock (0040:006C) fell back to 0 when the 32-bit PIT count wrapped (1 hour of play): every WAIT ending at once, `now > end` tests stuck | port | its high word counts the wraps |
+| 12 | The app started from the Desktop (no options) ran in EGA mode (no XMS in the model) | port | VGA unless the options name a mode |
+
+To report upstream: 1, 2, 3, 5, 6, 8 (and the converter's GOG HE types, voxcheck.py's offset).
+
+### Sound
+
+**Music: a task of its own, MUSD.PRG** (`mus/musd.c` + upstream's `music.c`, small model,
+21.7 KB). XCOM.PRG spawns it at priority 0 from its folder before the engine opens a
+file; it reads MUSIC.PAK whole (83 KB, 2 banks: a task cannot read another's memory, kill
+cause 02), owns the music timer (13,731 us = PIT 16,384, the driver's 72.8 Hz) and the
+OPL2, and runs the driver's ticks; late wake-ups catch up (8 ticks at most). Commands by
+port messages (play track/loop, stop, FM effect, sound on/off, quit); it quits when its
+parent is gone. The game's own `music.c` keeps running on the game's clock as on the host
+(its state and LOG unchanged); its OPL writes go nowhere while the task runs (without
+Lau or MUSD.PRG they go to the OPL2 as before). So the music keeps its tempo through
+battle loads, redraws and alien turns with no hook in the engine's loops.
+
+**Effects: a Sound Blaster model** (`plat/sb.c`): `BLASTER=A220 I7 D1 T3`, DSP 2.01 (reset,
+version, speaker, time constant, PCM 14h, 4-bit ADPCM 75h/74h, halt), the 8237's registers
+and pages; at a block's end, on the model's clock, the handler the engine set with
+`_dos_setvect` is called. The effects live in a 64 KB "UMB" of the sound's own at C000
+(the arena's bank 12, outside the DOS memory: the memory plan unchanged; the LOG says "all
+23 effects in the UMB"). SOUNDS.PAK's 23 effects are Creative 4-bit ADPCM at 6,000 or
+8,000 Hz; on the 816 each block is decoded once into signed 8-bit samples (cached by
+address and checksum in up to 3 far banks, about 82 KB for all) and played on Lau at
+volume 160, one at a time as on the card. The host logs each block (`-sb FILE`); with `/V`
+the 816 prints the same line. The LOG's "sound:" line is now "Sound Blaster at 220 IRQ 7
+DMA 1, DSP 2.01" on both. The PC speaker's effects stay silent (not needed).
+
+**Tested** (`tests/sound.sh`, part of `make test`, about 25 s): the geoscape music's OPL2
+writes (2,701, 1,456 ticks) and the battle's (load, redraws: 1,500) equal the host's
+(its `-opl` log: tick, ms, register, value), the ticks on the 13.731 ms beat (median
+lateness 0.1-0.2 ms, at most 8-17 ms once, while a screen loads); the aliens' turn run
+(sndai): 5,875 writes equal, beat 13.7310 ms, at most 0.92 ms late; the battle's Sound
+Blaster blocks equal the host's, each a Lau start of its samples at its rate; the
+recordings (`--wav`): geoscape RMS 312, battle 636, peaks about -19 dBFS, nothing
+clipped; effects 10-14 dB above the music (the driver's OPL levels are low and cannot
+change without leaving the host's stream). Broken on purpose: a period of 13,800 us and
+effect rates +500 failed all three.
+
+### Saves and files
+
+- Saves live in the program's folder (`hz_prog_dir`, then `hz_chdir`: the engine's
+  relative names): `/APPS/XCOM/XCOMXT0-9.SAV`, `XCOMXT.CFG`; never in the archive, kept
+  by updates.
+- **Geoscape save** (`save`) and **battle save/load** (`bsave`: a quick battle saved at
+  its start, two turns with an alien turn each, loaded, the same keys again) byte for byte
+  against the host (XCOMXT1.SAV 12,100 / 52,265 bytes); the loaded battle's state (the
+  engine's checksums of units, map, floor, fog, AI, random number) is the saved one's, and
+  the 19 LOG lines after the load are the ones after the save. `bsavebig` (test-long): the
+  abductor battle (11 sectoids), 78 KB. A campaign battle (CAMPAIGN.TMP + XCOMXT.TMP and a
+  rename) is in the soak.
+- Upstream's own: after a load the view level and the AI's choices of a *continued*
+  battle can differ from the uninterrupted one (seen with TAB and an abductor's aliens);
+  the same on host and 816: the engine's, not the port's.
+- **Open files** (Horizon: 4 for the whole system): the model counts them on both
+  builds, refuses a fifth as Horizon would (so both behave alike) and prints "xcom: files:
+  at most N open (...)"; compare.py fails on any refusal and on a different peak. Peaks
+  seen: 4 in tests (the KEYS file is one: UFOPAED.PAK + UIV.PAK + PALV.PAK in the
+  UFOpaedia; XCOMXT1.SAV + the mission pack + the LOG in a battle save), so 3 in play;
+  the music task opens nothing during play.
+- `read()`/`write()` in pieces of 32,767 bytes until n, the end or an error
+  (`read_all`/`write_all`): the SDK's read moves at most that much a call.
+- **A full card** (`check.sh`, emu816 `--card-free 8000`): the save is written short, the
+  engine says "Could not save the game!", the model removes the cut save (`xd_fclose`: a
+  cut slot would load as garbage), the game goes on to its end (no kill). emu816 counts
+  the bytes written in the run, so its card stays full after the removal: the LOG's later
+  lines are lost there (on a real card the removal gives the room back).
+- **No data** (an app installed without the packs): a screen "X-COM: the game's data is
+  missing ... /APPS/XCOM/ ... See README.TXT", a key ends it. **The engine stopping with
+  an error** (exit(n) with n != 0: "out of memory", "Packs are from another version", ...):
+  its last lines on the screen until a key (`xd_exit`), as DOS left them on the text
+  screen. A missing card while playing: not tested (the emulator cannot pull it).
+
+### Speed (BENCH and the profile, real clock, emu816)
+
+| What | Before (stage 4a) | Now |
+| --- | --- | --- |
+| full redraw, level 0 (view 20,20) | 233 ms | **137 ms** |
+| full redraw, levels 0-3 | 461 ms | 260 ms |
+| average full redraw (12 views) | 328 ms | 150 ms |
+| the first redraw of a battle | 396 ms | 153 ms (the atlas filled before it) |
+| the same without blits (the engine's own code) | 179 ms | 99 ms |
+| scroll by one tile / 3 tiles / edge across | 120 / 94 / 56 ms | 88 / 63 / 42 ms |
+| cursor step / unit step | 23 / 32 ms | 17 / 21 ms |
+| 100 masked / 100 OR sprites | 66 / 46 ms | 36 / 23 ms |
+| a view with 32 smoke + 16 fire tiles | 635 ms (dithered shapes, C) | 309 ms (DOS's pictures, blitter) |
+| night: level 0 / present / scroll | 580 / 366 / 474 ms | 241 / 115 / 193 ms |
+| path search, unit 0, 60 TU | 606 ms | 231 ms |
+| alien turn, abductor (FA5V, 11 sectoids, SEED 2) | 48.3 s (with fault 1 fixed) | **19.8 s** |
+| a soldier walking 3 tiles | 3.54 s | 3.29 s (paced by the animation) |
+| geoscape world view, zoom 0 / 1 / 2 | byte loop / 349 / 276 ms | 50 / 99 / 58 ms |
+| geoscape, CPU idle at 5 Sec / 1 Day | 50.2 / 76.8 % | 54.2 / 77.5 % (8 steps a second: never CPU-bound) |
+| text (glyphs), share of the geoscape's time | 7.8 % | 3.8 % |
+| 360 voxel lines / 8 aims | 3.3 / 1.68 s | unchanged (C) |
+
+How (`horizon/*.s`, ca65, built by hcc as ports/skyroads' are):
+- `hz_bbs.s`: a picture already in the atlas goes from its lookup straight to its blitter
+  record (the C, `hzb_sprite_c`, does the rest); the unpacking's colour scan.
+- the atlas is filled at the battle's start (`plat_bb_prepare`, called through
+  `src-0004` before the battle view and before BENCH; loaded saves too): a bar for 1.5 s
+  (285 pictures) with the hourglass, then no hitch while scrolling over new tiles.
+- `hz_rend.s`: the floor pass's column loop (`rd_level`; the host keeps `plat/rend.c`'s C,
+  the reference; the structure's offsets checked by `_Static_assert`).
+- DOS's smoke and fire pictures (`plat/vgabat.c` fxpic, pics_next: SMOKEV.PAK, as upstream
+  loads it), drawn through the atlas on the 816; BENCH's pictures check and a checksum of
+  the buffer added through `src-0004`, host = 816.
+- **Night: the single night shade kept** (decided: per-cell lights are about 900 lines of
+  OpenXcom's lighting for the picture only; sight at night is the engine's and unchanged;
+  on the 816 they would cost the same per-pixel remap with one table per light level, so
+  they can come later without a speed cost). Its present in assembly (366 → 115 ms).
+  Flares and fires do not light their area visibly. A `night` run in `make test`.
+- `hz_path.s`: the profile of a real alien turn put about 85 % in the path search (not the
+  voxel lines or the sight fan); an exact assembly twin of `path_search_c` with path.c's
+  step rules (`plat/way.c` sets it up; `src-0004` calls it from path.c). The LOG's alien
+  positions are the same with and without it; BENCH says "match".
+- `hz_vga.s`: each zoomed world row built once and copied for the rows that repeat it; the
+  glyphs.
+
+What the player feels: entering a battle is about 1 s longer than before (the bar), then
+smooth (scrolling and the cursor immediate); a soldier's step is paced by the animation
+(about 1.1 s a tile, as on DOS's default speed); the first alien turn of a small battle
+a few seconds, of an abductor about 20 s (upstream: about 20 s on an 8 MHz 286 for the
+first jungle turn in exact mode); the geoscape keeps its 8 steps a second at every speed.
+`make speed` (tests/speed.sh, 20 s): BENCH by day and at night and an alien turn, on the
+real clock (reports, fails only when a run does not finish or BENCH's checks fail).
+
+Not done: the A* goal search (DOS's pathasm.asm stops at the goal; the port searches all
+tiles within the TU, as the C reference does: the next big win for alien turns, with new
+references), the unpacking's second pass in assembly (the bar 1.5 → 0.8 s), the voxel line
+and sight fan in assembly, per-cell night lights.
+
+### The screens walked through (host vs Atari816)
+
+Every row passes `make test` (same LOG, the same pictures pixel for pixel, the same end
+time; 4 PASS lines a run):
+
+| Screens, features | Run |
+| --- | --- |
+| the intro (FLI), 10 s then skipped | `intro` |
+| the victory slides / the defeat slides | `endwin` / `endlose` (test-long) |
+| new game, geoscape time, base screen, UFOpaedia, graphs | `geo` |
+| base info, stores, monthly costs, transfers list, soldier list and info, rename, Select Armour, Equip Craft (craft, crew, equipment, armour list) | `base1` |
+| Build Facilities (a refused place and its notice, then built), research (new project, staff, start), manufacture, purchase (a soldier, scientists), sell/sack, transfer (destinations), a new base | `base2` |
+| the Intercept window, graphs, UFOpaedia (section, article, back), options, funding, soldiers, time buttons, pause, zoom, scroll, right-click centre | `geobtn` |
+| a UFO detected, an interceptor launched, stances, weapons toggled, the UFO shot down | `dogfight` |
+| a terror site, its window, the Skyranger sent, "Begin Mission?", briefing, pre-battle inventory, battle, abort, debriefing | `mission` |
+| battle: Options and Game Options windows, walk, inventory with the held item (mouse), a grenade primed and thrown, kneel, turn, end turn, alien turn, abort, debriefing | `bturn` |
+| battle: walk, an alien spotted, snap / auto / aimed shots, hits and misses, reaction fire, a soldier killed, end turn, abort | `bfire` |
+| a night battle | `night` |
+| Save Game / Load Game (geoscape), battle save and load | `save`, `bsave`, `bsavebig` (test-long) |
+| BENCH (upstream's renderer checks) | `bench` |
+
+Not covered: a transfer between two bases, fitting armour (none in stores at the start).
+The held item: heldasm.asm is EGA/CGA only; invscr.c's VGA path draws the item in C (the
+rifle, a clip, a grenade follow the pointer, placed in hand, leg, ground: the same on
+both). The FLI intro (`plat/fli.c`: COLOR, LC, BLACK, BRUN, COPY): 889 of 890 frames
+shown, 26 ms a frame on average (one due every 83 ms), 75 frames over 80 ms (the
+explosion, 249 ms at worst; 1.1 s behind at worst, caught up after): played, as upstream
+does; any key skips it, `NOINTRO` stays.
+
+### The app
+
+- `make app`: **XCOM.HZA** (about 900 KB): XCOM.PRG, MUSD.PRG, APP.INF (`name=X-COM UFO
+  Defense`, category Games; `needs=` copied from XCOM.PRG: `horizon=0.30,sprites,blitter,
+  mem=2304K`), XCOM.ICN (`app/XCOM-ICON.txt`: a saucer with a green beam over a night sky,
+  drawn for the port, not game art), README.TXT (`app/README.TXT`: the player's guide: the
+  data, the keys, what differs). **No game data**: it is the archive one may give away.
+- **The data**: the packs XCOMCONV made from the player's own copy go into `/APPS/XCOM/`
+  (PACKS.VER, the 5 `.PAK` files of 290 KB, the `VGA/` folder, 82 files, 18 MB; the EGA and
+  CGA folders are not needed). Copied by hand (README.TXT), or `make card` builds
+  `build/card/APPS/XCOM/` (the app with the packs) to copy onto one's card, or `make app
+  DATA=1` also builds `build/XCOM-DATA.HZA` (the same app with the packs: for one's own
+  card only). As ports/prince's data is made by `make data` from the user's own files and
+  packed by `make app`, only here the release package leaves it out (it is not free data).
+  An update with XCOM.HZA keeps the packs and the saves (the Installer keeps the files
+  the archive does not have; tested).
+- `mem=`: the needs check runs with the program loaded; the Desktop leaves about 3.1 MB
+  free (4096K was refused there); the game then takes the DOS arena (17 banks), the
+  framebuffer (2), the pictures' table, the atlas sheets (4 banks each, at most 6; fewer
+  when memory is short: the C draws the rest), the effects' cache (up to 3) and MUSD.PRG's
+  3. Measured: 44 banks held at most in the tests' battles, 32 at the start, 13 of them the
+  program's: 31 more + MUSD.PRG's 3 = 2,176 KB; `mem=2304K` (and the start fits beside
+  the Desktop).
+- `make test-app` (tests/app.sh, about 1 min): XCOM.HZA opened in Files, installed,
+  started from Programs > Games without the data (its message on the screen), then with
+  the packs and an old save already in /APPS/XCOM: the install keeps them, the game
+  starts (the loading screen, the intro skipped by a key, the start menu), a new game, a
+  base, Save in slot 2: `/APPS/XCOM/XCOMXT2.SAV`. Passes.
+- **Loading**: a first screen at once ("X-COM: UFO DEFENSE ... Loading..." with a bar,
+  in rows 205-384 of the framebuffer, shown until the engine first waits for input, so its
+  own black screen while it loads is not seen). Measured in the emulator (fast card):
+  the program's start to the start menu 3.1 s (NOINTRO; 70 KB read: the engine's
+  start-up is mostly CPU: the palette and picture loaders read byte by byte through
+  stdio, `__umul1632`), to the intro 1.9 s (46 KB). Before `main`, Horizon loads XCOM.PRG
+  (875 KB) and MUSD.PRG (22 KB): with emu816's slow card (`--card-kbps 170:100`) the
+  machine reached the menu 6.4 s later than with the fast one. On the board's card: about
+  2 s for the program at 450 KB/s, 5 s at 170 KB/s (the notes' 0.38 s a picture), so the
+  start menu 5-9 s after the double click; the loading screen shows after the program's
+  load. Read later, when needed: the mission and race packs at a battle's start (0.3-1 MB,
+  1-6 s on a slow card), UIV.PAK's pictures with each screen (64 KB a full screen: 0.15-0.38
+  s), the music task's MUSIC.PAK (83 KB) at its start, SOUNDS.PAK at the first geoscape.
+
+### Robustness
+
+- Allocation: the engine's own malloc is the DOS chain (its NULL answers are DOS's, which
+  the engine handles: "out of memory" ends it with its message on the screen, xd_exit);
+  the platform's banks (the arena: a message and the end; the pictures' table, atlas
+  sheets, the effects' cache: the C draws, the effect is silent) all fail cleanly.
+- Random memory and bankwrap: `EMU816_ARGS="--ram-random 1 --log-bankwrap" sh
+  tests/check.sh`: all 85 PASS lines as with cleared memory (every run's LOG, pictures and
+  saves the host's), and no bankwrap report at all. (emu816's report covers the indexed
+  modes on the data bank, `abs,X`, `(dp),Y`, `(sr,S),Y`; the far data model's `[dp],Y`
+  carries into the next bank by design and is not reported: fault 1 above was of that
+  kind and was found by the host comparison, not by this.)
+- The clock: the microsecond clock (`hg_us`, 32 bits) wraps every 71.6 minutes; the port
+  uses only differences of readings and converts them in two parts (no 32-bit overflow);
+  the PIT count's wrap (an hour of play) keeps the BIOS clock going. `/U n` adds n us to
+  the clock: `make test` runs the real-input session three times: as after the machine's
+  start, with the clock as after 5 minutes (`/U 300000000`), and with it wrapping about
+  25 s into the game (`/U 4264967296`: "xcom: the microsecond clock wrapped" checked): the
+  same LOG lines each time. Upstream's `sound.c` compares `now > sb_end` (not wrap-safe):
+  at the PIT count's wrap one effect may be cut; harmless.
+- **The soak** (`soak`, make test-long; `tests/soak.keys`, TERROR, OLDCLOCK): 1 January,
+  a terror site at London: the Skyranger sent, briefing, inventory, the terror battle
+  (UR0V): a walk under reaction fire, an alien turn (psi panic, a civilian killed, a
+  Cyberdisc hit), a **campaign battle save** in turn 2 (slot 2, the CAMPAIGN.TMP path),
+  abort, debriefing; a Small Scout intercepted and shot down; 1-25 January at 1 Hour (UFOs
+  3-8); a Large Scout landed: the second battle (FA3V, at night): walk, kneel, an alien
+  turn, abort, debriefing; to 26 January at 1 Day, a geoscape save (slot 1). On host and
+  816: 305 LOG lines the same, 62 pictures pixel for pixel, the same end time, both saves
+  byte for byte (11,928 and 90,811 bytes), at most 3 files open. 805 emulated seconds on
+  the 816 (2 min 45 s of wall time).
+
+### Sizes (stage 5)
+
+XCOM.PRG 875,182 bytes (12 code banks, 770,269 bytes of movable code; far data); the
+main bank 54,447 bytes without movable code (code that must stay 13,151: the speed's
+assembly is in it, constants 3,881, data 374, bss 37,041) + heap 2 KB + stack 8 KB =
+64,687 of 65,264: **about 600 bytes left** (four port arrays moved to `__far` statics to
+fit; the next changes need the SDK's far code segment for `.s` files, or hgame's queues
+out of the main bank). MUSD.PRG 21,699 bytes. XCOM.HZA about 910 KB. At run time 32 banks
+at the start (13 the program's, 17 the DOS arena, 2 the framebuffer), at most 44 in the
+tests' battles, + MUSD.PRG's 3. The port's own code: about 10,300 lines of C and assembly (plat/, horizon/
+with 4 assembly files, host/, mus/, compat/) besides the tests, 5 upstream patches of 369 added
+lines.
+
 ## 5. The plan
 
 Principle: **upstream's code runs unchanged** on a model of the machine it was written for;
@@ -624,25 +906,25 @@ Risks:
 - **The GOG data** is not exactly DOS 1.4 (fonts, texts, HE types): behaviour around the
   patched HE records differs from DOS (those parts do not explode).
 
-## What is next (after stage 4a)
+## What is next (after stage 5)
 
-| Stage | What | Estimate (agent time) |
+| What | Why | Estimate (agent time) |
 | --- | --- | --- |
-| 4b speed | the redraw to 0.15 s: profile the redraw alone, the floor pass (`plat/rend.c`) and `hz_bb.c`'s record path in assembly, the atlas filled at the battle's start; the smoke/fire overlay by Ali's EXPAND; the night present in assembly; the alien turn and voxel lines (BENCH: 360 voxel lines 3.3 s, path search 0.6 s, 8 aims 1.7 s) profiled and the hot ones in assembly; the geoscape's zoom 1-2 (assembly row doubler); UI text (`vga_uk_glyph`, 8 % of the geoscape) | 2-3 days |
-| 5 sound | music: `music.c` already writes the OPL2 (`hg_opl_write`) from the timer hook run at polls: move the hook to Horizon's music timer so it keeps time while the engine draws (as `ports/digger`), check with `--log-opl-us`; effects: SOUNDS.PAK's 4-bit samples to Lau (`hg_sound_from`, decoded at load), the PC speaker's tones to POKEY; `--wav` checks in `make test` | 1 day |
-| 5 files | saves next to the program (they are: the program's folder), battle saves (`bsave.c`) in a test; the 4-open-files limit counted (UIV.PAK held while a screen is up, a mission pack, the LOG reopened per line, a save) | 0.5 day |
-| 5 intro | the FLI intro and end slides (`cutasm.asm`'s VGA chunks in C), `NOINTRO` no longer needed | 0.5-1 day |
-| 5 app | `make app`/`make test-app` (APP.INF, `--needs horizon=0.30,blitter,mem=4096K`, icon, the packs: 18 MB of VGA packs in the app folder, or the user's own converted copy) | 0.5 day |
-| 2 rest | heldasm (the inventory's held item), DOS's smoke/fire pictures, the night lights | 1 day |
-
-Honest remaining work: about 6-8 agent days to a complete, playable app; the battle's speed
-(4b) is the one with risk (the engine's render and AI code in C through far pointers).
+| the A* goal search (C reference and `hz_path.s`), as DOS's pathasm.asm | the alien turn: the next big win (an abductor's first turn 20 s now); new references | 1 day |
+| the voxel line and the sight fan in assembly | 360 lines 3.3 s, 8 aims 1.7 s: the shots and the aliens' aiming | 1 day |
+| the start-up's CPU part (3 s: the palette and picture loaders read through stdio byte by byte) | the start menu sooner | 0.5 day |
+| the main bank (600 bytes left): the speed's `.s` code to a far code segment (SDK wish), `hgame`'s queues | room for the next changes | with the SDK |
+| per-cell night lights (OpenXcom's lighting, a table per level at the present) | flares and fires lighting their area | 1 day |
+| switch to the SDK's fixes of needs 9-11 (section 4) once committed | less port code | 15 min |
+| the FLI's runs in assembly | the intro's explosion scene (1.1 s behind at worst) | 0.5 day |
+| report upstream: faults 1, 2, 3, 5, 6, 8 above, the GOG data, voxcheck.py | | |
 
 ## What the user needs to provide or decide
 
-- Nothing to run stage 2 (the data is here).
-- A decision on the far data model (SDK need 1) before stage 3: build it into cc816, or
-  accept the farify fallback.
+- To play on the board: the packs on the card (`make card`, or copy data/packs as
+  app/README.TXT says) and XCOM.HZA installed. Nothing of this round was tried on the
+  board (the emulator only): the card's speed, the OPL2's and Lau's sound are its own.
+- Whether to release XCOM.HZA (GPL-3, no data) beside the other ports.
 - Whether the GOG edition is the one to support (the converter patch), or a DOS 1.4 copy.
 
 ## Time (stage 1)

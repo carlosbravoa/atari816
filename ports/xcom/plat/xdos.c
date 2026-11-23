@@ -4,6 +4,7 @@
    ports answered by C, files. Shared by both back ends. */
 #include "xcompat.h"
 #include "plat.h"
+#include "sb.h"
 
 #if defined(__CC816__)
 #include <horizon.h>
@@ -449,7 +450,8 @@ void *xd_realloc(void *p, size_t n)
 static void mouse_vector(void)
 {
 }
-static xd_isr vectors[256];
+static void files_report(void);
+static xd_isr __far vectors[256];      /* (__far: out of the full main bank) */
 
 /* The 8 x 8 font the BIOS keeps at F000:FA6E (hud.c reads it there): a
    public-domain 8x8 font (plat/font8x8.h). */
@@ -473,6 +475,7 @@ void xd_init(int argc, char **argv)
         *(unsigned char far *)MK_FP(0xF000, 0xFA6E + i) = font8x8[i];
     /* a mouse driver: INT 33h points at something that is not an IRET */
     vectors[0x33] = mouse_vector;
+    atexit(files_report);
 }
 
 /* ---------------------------------------------------------------- test pictures */
@@ -528,7 +531,15 @@ void xd_shot_point(unsigned gap_ms, const char *why)
 /* The BIOS clock at 0040:006C follows the model's clock (18.2065 Hz). */
 static void bios_clock(unsigned long c)
 {
-    *(unsigned long far *)MK_FP(0x40, 0x6C) = c >> 16;
+    /* the PIT counts (32 bits) wrap after an hour of play: the BIOS clock goes on
+       (its high word counts the wraps) instead of falling back to 0, which would end
+       every wait at once or make one wait an hour */
+    static unsigned long last_c, wraps;
+
+    if (c < last_c)
+        wraps++;
+    last_c = c;
+    *(unsigned long far *)MK_FP(0x40, 0x6C) = wraps << 16 | c >> 16;
 }
 
 void timer_run_hook_at(unsigned long now);
@@ -723,6 +734,19 @@ static void int21(union REGS *r, struct SREGS *s)
         if (r->h.al == 0 || r->h.al == 2)
             r->x.ax = 0;
         break;
+    case 0x42: {                        /* seek on a handle (cut.c's end slides): CX:DX from
+                                           AL's origin, the new position in DX:AX */
+        long pos = lseek(r->x.bx, (long)((unsigned long)r->x.cx << 16 | r->x.dx),
+                         r->h.al == 1 ? SEEK_CUR : r->h.al == 2 ? SEEK_END : SEEK_SET);
+        if (pos < 0) {
+            r->x.cflag = 1;
+            r->x.ax = 25;               /* seek error */
+        } else {
+            r->x.ax = (unsigned short)pos;
+            r->x.dx = (unsigned short)((unsigned long)pos >> 16);
+        }
+        break;
+    }
     default:
         r->x.cflag = 1;
         r->x.ax = 1;                    /* invalid function */
@@ -827,6 +851,10 @@ int intdosx(union REGS *in, union REGS *out, struct SREGS *s)
 
 static unsigned dac_w, dac_r, opl_reg;
 static unsigned char vsync_bit;
+/* the OPL2's status (an AdLib: music.c's opl_detect): register 4's bit 7
+   clears the timer flags, a timer started unmasked has overflowed by the
+   next read (the detection waits 80 us for it) */
+static unsigned char opl_stat;
 
 unsigned outp(unsigned port, unsigned v)
 {
@@ -841,8 +869,14 @@ unsigned outp(unsigned port, unsigned v)
         xd_dac_dirty = 1;
         break;
     case 0x388: opl_reg = v; break;
-    case 0x389: plat_opl((int)opl_reg, (int)v); break;
-    default: break;
+    case 0x389:
+        if (opl_reg == 4)
+            opl_stat = v & 0x80 ? 0 : (v & 1) && !(v & 0x40) ? 0xC0 : opl_stat;
+        plat_opl((int)opl_reg, (int)v);
+        break;
+    default:
+        sb_outp(port, v);               /* the Sound Blaster, the DMA (plat/sb.c) */
+        break;
     }
     return v;
 }
@@ -868,9 +902,10 @@ unsigned inp(unsigned port)
         vsync_bit ^= 8;
         return vsync_bit;
     case 0x388:                         /* OPL2 status: the timers' flags as an OPL2 */
-        return 0xC0;
+        return opl_stat;
     default:
-        return 0xFF;                    /* nothing there (Sound Blaster, ...) */
+        v = (unsigned)sb_inp(port);     /* the Sound Blaster (plat/sb.c) */
+        return v == 0xFFFFu ? 0xFF : v; /* nothing there */
     }
 }
 
@@ -955,35 +990,223 @@ static const char *dos_path(const char *name, int folder)
     return path_buf;
 }
 
+/* ---------------------------------------------------------------- open files
+   Horizon has 4 file handles for the whole system. The model gives the engine
+   the same 4 on both builds (the host refuses a fifth as the Atari816 would, so
+   both behave alike), counts them and reports at the end the most that were
+   open at once and which: "xcom: files: at most N open (A B C)", and every
+   refusal: "xcom: files: NAME refused: 4 files open (A B C D)" (tests/check.sh
+   fails on one). */
+#define XD_MAX_FILES 4
+int xd_files, xd_files_peak;
+unsigned xd_files_refused;
+static struct { const void *f; int fd; char name[16]; } open_tab[XD_MAX_FILES];
+static char peak_names[XD_MAX_FILES * 16 + 4];
+
+static void open_names(char *out)
+{
+    int i;
+
+    *out = 0;
+    for (i = 0; i < XD_MAX_FILES; i++)
+        if (open_tab[i].name[0]) {
+            if (*out)
+                strcat(out, " ");
+            strcat(out, open_tab[i].name);
+        }
+}
+
+/* the last part of the name, at most 15 characters */
+static void short_name(char *d, const char *name)
+{
+    const char *p = name, *q;
+
+    for (q = name; *q; q++)
+        if (*q == '/' || *q == '\\')
+            p = q + 1;
+    strncpy(d, p, 15);
+    d[15] = 0;
+}
+
+static int file_room(const char *name)
+{
+    char all[XD_MAX_FILES * 16 + 4], n[16];
+
+    if (xd_files < XD_MAX_FILES)
+        return 1;
+    xd_files_refused++;
+    open_names(all);
+    short_name(n, name);
+    if (xd_files_refused <= 8) {
+        char line[160];
+        sprintf(line, "xcom: files: %s refused: %d files open (%s)", n, xd_files, all);
+        plat_note(line);
+    }
+    return 0;
+}
+
+static void file_opened(const void *f, int fd, const char *name)
+{
+    int i;
+
+    for (i = 0; i < XD_MAX_FILES; i++)
+        if (!open_tab[i].name[0]) {
+            open_tab[i].f = f;
+            open_tab[i].fd = fd;
+            short_name(open_tab[i].name, name);
+            break;
+        }
+    if (++xd_files > xd_files_peak) {
+        xd_files_peak = xd_files;
+        open_names(peak_names);
+    }
+}
+
+static void file_closed(const void *f, int fd)
+{
+    int i;
+
+    for (i = 0; i < XD_MAX_FILES; i++)
+        if (open_tab[i].name[0] && (f ? open_tab[i].f == f : open_tab[i].fd == fd)) {
+            open_tab[i].name[0] = 0;
+            open_tab[i].f = NULL;
+            xd_files--;
+            return;
+        }
+}
+
+static void files_report(void)
+{
+    char line[160];
+
+    sprintf(line, "xcom: files: at most %d open (%s), %u refused", xd_files_peak,
+            peak_names, xd_files_refused);
+    plat_note(line);
+}
+
+static FILE *save_f;                    /* a save being written (xd_fclose) */
+static char save_path[160];
+
 #undef fopen
 FILE *xd_fopen(const char *name, const char *mode)
 {
     FILE *f = NULL;
 
+    if (!file_room(name))
+        return NULL;
     if (mode[0] == 'r' && !strchr(mode, '+') && rd_dir)
         f = fopen(dos_path(name, 1), mode);
     if (!f)
         f = fopen(dos_path(name, 0), mode);
+    if (f)
+        file_opened(f, -1, name);
+    if (f && mode[0] == 'w') {
+        size_t n = strlen(name);
+        if (n > 4 && !strcasecmp(name + n - 4, ".SAV")) {
+            save_f = f;
+            strncpy(save_path, dos_path(name, 0), sizeof save_path - 1);
+            save_path[sizeof save_path - 1] = 0;
+        }
+    }
     return f;
+}
+
+#undef fclose
+/* A save written short (a full card: the engine says "Could not save the game!") is
+   removed: a cut save in its slot would load as garbage. The engine's own battle saves
+   go through XCOMXT.TMP and a rename, and remove a failed one themselves. */
+int xd_fclose(FILE *f)
+{
+    int bad = 0, r;
+
+    if (f == save_f) {
+        bad = ferror(f) != 0 || fflush(f) != 0;
+        save_f = NULL;
+    }
+    file_closed(f, -1);
+    r = fclose(f);
+    if (save_path[0] && (bad || r)) {
+        char line[200];
+        remove(save_path);
+        sprintf(line, "xcom: files: %s written short (the card is full?): removed", save_path);
+        plat_note(line);
+        r = -1;
+    }
+    save_path[0] = 0;
+    return r;
+}
+
+#undef close
+int xd_close(int fd)
+{
+    file_closed(NULL, fd);
+    return close(fd);
 }
 
 /* reads into the engine's memory: the platform hears of them (plat_mem_changed) */
 #undef fread
 #undef read
+unsigned long xd_bytes_read;
+
 size_t xd_fread(void *p, size_t size, size_t n, FILE *f)
 {
     size_t k = fread(p, size, n, f);
 
     plat_mem_changed(p, (unsigned long)size * n);
+    xd_bytes_read += (unsigned long)size * k;
+    plat_progress();
     return k;
+}
+
+/* n bytes, or to the end of the file: read() moves at most 32,767 bytes a call
+   (the SDK's read returns a short count above that), so in pieces until n, the end
+   (0) or an error (-1: returned as 0xFFFFFFFF). DOS's read gave all of n at once. */
+static unsigned long read_all(int fd, void *p, unsigned n)
+{
+    unsigned long total = 0;
+    unsigned char *q = (unsigned char *)p;
+
+    while (n) {
+        unsigned want = n > 0x7FFFu ? 0x7FFFu : n;
+        int k = (int)read(fd, q, want);
+        if (k < 0)
+            return total ? total : 0xFFFFFFFFUL;
+        if (k == 0)
+            break;
+        total += (unsigned)k;
+        q += (unsigned)k;
+        n -= (unsigned)k;
+    }
+    xd_bytes_read += total;
+    plat_progress();
+    return total;
+}
+
+static unsigned long write_all(int fd, const void *p, unsigned n)
+{
+    unsigned long total = 0;
+    const unsigned char *q = (const unsigned char *)p;
+
+    while (n) {
+        unsigned want = n > 0x7FFFu ? 0x7FFFu : n;
+        int k = (int)write(fd, q, want);
+        if (k < 0)
+            return 0xFFFFFFFFUL;
+        if (k == 0)
+            break;
+        total += (unsigned)k;
+        q += (unsigned)k;
+        n -= (unsigned)k;
+    }
+    return total;
 }
 
 int xd_read(int fd, void *p, unsigned n)
 {
-    int k = (int)read(fd, p, n);
+    unsigned long k = read_all(fd, p, n);
 
     plat_mem_changed(p, n);
-    return k;
+    return k == 0xFFFFFFFFUL ? -1 : (int)(unsigned)k;
 }
 
 #undef open
@@ -991,6 +1214,8 @@ int xd_open(const char *name, int flags, ...)
 {
     int fd = -1;
 
+    if (!file_room(name))
+        return -1;
     if ((flags & 3) == O_RDONLY && rd_dir)
         fd = open(dos_path(name, 1), flags & ~O_BINARY);
     if (fd < 0)
@@ -999,6 +1224,8 @@ int xd_open(const char *name, int flags, ...)
 #else
         fd = open(dos_path(name, 0), flags & ~O_BINARY, 0644);
 #endif
+    if (fd >= 0)
+        file_opened(NULL, fd, name);
     return fd;
 }
 
@@ -1010,7 +1237,7 @@ int xd_access(const char *name, int mode)
     (void)mode;
     if (!f)
         return -1;
-    fclose(f);
+    xd_fclose(f);
     return 0;
 }
 
@@ -1032,8 +1259,12 @@ int xd_rename(const char *a, const char *b)
 #undef getenv
 char *xd_getenv(const char *name)
 {
-    (void)name;
-    return NULL;                        /* no BLASTER, XCV, XPIC, ... */
+    /* a Sound Blaster 2.0 (plat/sb.c); no XCV, XPIC, ... */
+    static char blaster[] = "A220 I7 D1 T3";
+
+    if (!strcmp(name, "BLASTER"))
+        return blaster;
+    return NULL;
 }
 
 char *strupr(char *s)
@@ -1077,32 +1308,30 @@ unsigned _dos_creat(const char *path, unsigned attr, int *handle)
 
 unsigned _dos_close(int handle)
 {
-    return close(handle) ? 6 : 0;
+    return xd_close(handle) ? 6 : 0;
 }
 
 #if defined(__CC816_FAR_DATA__)
 /* the far data model: read and write take the far buffer as it is (the card reads
    straight into the arena's bank) */
+/* (the C library's read and write move at most 32,767 bytes a call (ssize_t is
+   int): DOS's up to 65,535 in pieces, as the end slides' 64,000-byte pictures) */
 unsigned _dos_read(int handle, void *buf, unsigned n, unsigned *got)
 {
-    unsigned done = 0; int k;           /* (read() moves at most 32,767 bytes a call) */
+    unsigned long k = read_all(handle, buf, n);     /* (in pieces: read_all) */
 
-    while (done < n) {
-        k = read(handle, (char *)buf + done, n - done);
-        if (k < 0) return 5;
-        if (k == 0) break;
-        done += (unsigned)k;
-    }
     plat_mem_changed(buf, n);
-    *got = done;
+    if (k == 0xFFFFFFFFUL)
+        return 5;
+    *got = (unsigned)k;
     return 0;
 }
 
 unsigned _dos_write(int handle, const void *buf, unsigned n, unsigned *put)
 {
-    int k = write(handle, buf, n);
+    unsigned long k = write_all(handle, buf, n);
 
-    if (k == -1)
+    if (k == 0xFFFFFFFFUL)
         return 5;
     *put = (unsigned)k;
     return 0;
@@ -1158,6 +1387,7 @@ unsigned _dos_read(int handle, void *buf, unsigned n, unsigned *got)
     plat_mem_changed(buf, n);
     if (k < 0)
         return 5;
+    xd_bytes_read += (unsigned long)k;
     *got = (unsigned)k;
     return 0;
 }

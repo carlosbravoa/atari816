@@ -1,0 +1,18 @@
+# tests/app1.script (make test-app, tests/app.sh): XCOM.HZA installed from the Desktop
+# (--mode none: Files open at the card's root), started from Programs > Games WITHOUT the
+# game's data: the program must say so on its screen and end at a key.
+1000 xcom\n
++0 wait install: asks:
++800 shot
++500 \n
++0 wait install: installed /APPS/XCOM
++800 \n
++1500 {f10}
++400 {right}
++600 {end}
++400 \n
++600 shot
++400 \n
++0 wait xcom: message: Press a key
++1500 shot
++500 {space}

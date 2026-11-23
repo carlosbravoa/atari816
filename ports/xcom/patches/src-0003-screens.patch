@@ -1,0 +1,108 @@
+diff -ruN src/battle.c /tmp/claude-1000/-home-carlos-devel-fpga-atari-816/adcb2d20-7d3a-4500-868d-39800608853d/scratchpad/ed/src/battle.c
+--- a/src/battle.c	2026-11-23 14:13:43.791317856 -0300
++++ b/src/battle.c	2026-11-23 14:53:25.688050180 -0300
+@@ -393,8 +393,16 @@
+             if (!c->alive)
+                 continue;
+             if (born_faction(c) == v->faction)
++#if defined(XCOM_PORT)
++                /* (in long: 100 x 200 x 7 is past a 16-bit int, which wrapped on DOS and
++                   on the Atari816, so that a comrade's death cost no morale or gave some;
++                   the host build, whose arithmetic is 32-bit, lost it as OpenXcom does) */
++                morale_change(c, -(int)((long)rank_mod * 200 * ((110 - c->bravery) / 10)
++                                        / (v->faction == FACTION_ALIEN ? 100 : leader) / 100));
++#else
+                 morale_change(c, -(rank_mod * 200 * ((110 - c->bravery) / 10)
+                                    / (v->faction == FACTION_ALIEN ? 100 : leader) / 100));
++#endif
+             else
+                 morale_change(c, 10 * (v->faction == FACTION_ALIEN ? leader : 100) / 100);
+         }
+@@ -654,6 +662,15 @@
+     return vox_target_unit(o, t, v);
+ }
+ 
++#if defined(XCOM_PORT)
++/* The side before the roll: both call rnd, and C leaves the order of a call's
++   arguments open; DOS (Watcom) evaluates them right to left, as gcc does on
++   the host; cc816 left to right, which changed the damage roll */
++#define HURT(v, s, pw, dt, side, hc) do { int side_ = (side); hurt(v, s, roll_damage(pw, dt), dt, side_, hc); } while (0)
++#else
++#define HURT(v, s, pw, dt, side, hc) hurt(v, s, roll_damage(pw, dt), dt, side, hc)
++#endif
++
+ /* A unit hit at voxel h (TileEngine::hit): the side and height hit from
+    where the voxel is against the unit's middle (BattleUnit::damage). */
+ static void hit_unit_at(int victim, int s, const int *h, int power, int dtype)
+@@ -666,7 +683,7 @@
+         rz -= 24;           /* the head in the tile above (verticaloffset) */
+     if (RL_WOUNDABLE(&g_units[s]) && ALIEN_BORN(v))
+         g_units[s].hits++;  /* firing experience */
+-    hurt(victim, s, roll_damage(power, dtype), dtype,
++    HURT(victim, s, power, dtype,
+          rl_side(v, h[0] - v->x * 16 - c, h[1] - v->y * 16 - c),
+          rz >= body_height(v) ? 2 : rz > 4 ? 1 : 0);
+ }
+@@ -844,7 +861,7 @@
+         turn_unit(s, &u->dir, dir_towards(u->x, u->y, tx, ty));
+         if ((int)rnd(100) < unit_shot_acc(u, mode)) {
+             Unit *v = &g_units[occ - 1];
+-            hurt(occ - 1, s, roll_damage(w->power, DT_STUN), DT_STUN,
++            HURT(occ - 1, s, w->power, DT_STUN,
+                  rl_side(v, u->x - v->x, u->y - v->y), 1);
+         } else
+             msg(COL_INFO, "Missed");
+@@ -966,7 +983,7 @@
+                 }
+                 if (th && th->faction != v->faction && RL_WOUNDABLE(th))
+                     g_units[thrower].hits++;    /* firing experience */
+-                hurt(i, thrower, roll_damage(p, dtype), dtype,
++                HURT(i, thrower, p, dtype,
+                      dx > -2 && dx < 2 && dy > -2 && dy < 2 ? SIDE_UNDER : rl_side(v, -dx, -dy), 1);
+             }
+     }
+@@ -1430,7 +1447,7 @@
+     } else
+         log_msg(COL_BAD, text);
+     if ((int)rnd(100) < unit_xstat(al)->melee * unit_acc_mod(al, NO_ITEM) / 100)
+-        hurt(t, a, roll_damage(al->melee, DT_MELEE), DT_MELEE,
++        HURT(t, a, al->melee, DT_MELEE,
+              rl_side(v, al->x - v->x, al->y - v->y), 1);
+     else if (unit_visible(al) || unit_visible(v))
+         msg(COL_INFO, "Missed");
+diff -ruN src/cut.c /tmp/claude-1000/-home-carlos-devel-fpga-atari-816/adcb2d20-7d3a-4500-868d-39800608853d/scratchpad/ed/src/cut.c
+--- a/src/cut.c	2026-11-23 14:13:43.792223894 -0300
++++ b/src/cut.c	2026-11-23 14:24:32.138755917 -0300
+@@ -560,6 +560,12 @@
+         }
+         log_printf("END slide %d", i - first + 1);
+         hgc_flush(0);
++#if defined(XCOM_PORT)
++        {   /* a test run's picture of the slide (a scripted wait polls nothing) */
++            void xd_shot_point(unsigned gap_ms, const char *why);
++            xd_shot_point(0, "slide");
++        }
++#endif
+         t0 = timer_read();
+         for (;;) {
+             unsigned k = poll_skip();
+diff -ruN src/pedia.c /tmp/claude-1000/-home-carlos-devel-fpga-atari-816/adcb2d20-7d3a-4500-868d-39800608853d/scratchpad/ed/src/pedia.c
+--- a/src/pedia.c	2026-11-23 14:13:43.794826917 -0300
++++ b/src/pedia.c	2026-11-23 14:53:18.407593243 -0300
+@@ -392,6 +392,16 @@
+         if (sel < 0)
+             return;
+         show_page(map[sel]);
++#if defined(XCOM_PORT)
++        /* VGA: the screen under the list again (the clean screen the list saved:
++           the list over the geoscape), not the article's picture in the list's
++           palette (plat/vga.c keeps a real copy of the clean screen) */
++        {
++            extern int g_vga;
++            if (g_vga)
++                uk_restore(0, 0, 320, 200);
++        }
++#endif
+     }
+ }
+ 

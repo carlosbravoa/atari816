@@ -90,6 +90,53 @@ def main():
                 ok(f'{log}: {len([x for x in h if x])} lines as the host\'s'
                    + (f' ({len(allowed)} allowed: {", ".join(sorted(set(w[0] for *_, w in allowed)))})'
                       if allowed else ''))
+            # a battle loaded in the run: its state (the engine's checksums of the units,
+            # the map, the fog, the AI, the random number) as when it was saved
+            saved = [x.split(':', 1)[1] for x in a if x.startswith('bsave state:')]
+            loaded = [x.split(':', 1)[1] for x in a if x.startswith('bload state:')]
+            if loaded:
+                if all(x in saved for x in loaded):
+                    ok(f'{log}: {len(loaded)} battle(s) loaded back with the state they were '
+                       f'saved with ({loaded[0].strip()[:60]}...)')
+                else:
+                    fail(f'{log}: a battle loaded with another state than saved: '
+                         f'{[x for x in loaded if x not in saved][0].strip()}')
+            # tests/bsave.keys: the same keys after the save and after the load: the
+            # battle goes on the same way (the moves, the alien turns, the round's end)
+            if name == 'bsave':
+                b = [x for x in a if not x.startswith(('ARROW', 'MARKS'))]
+                try:
+                    s0 = next(i for i, x in enumerate(b) if x.startswith('bsave state:')) + 1
+                    s1 = next(i for i in range(s0, len(b)) if 'load slot' in b[i]) - 1
+                    l0 = next(i for i, x in enumerate(b) if x.startswith('bload state:'))
+                    l0 = next(i for i in range(l0, len(b)) if 'setup:' in b[i]) + 1
+                    l1 = next(i for i in range(l0, len(b)) if b[i] == 'script finished')
+                    one, two = b[s0:s1], b[l0:l1]
+                    while one and 'options window' in one[-1]:
+                        one.pop()
+                    if one == two and len(one) > 10:
+                        ok(f'{log}: after the load the battle went on as after the save '
+                           f'({len(one)} lines, two alien turns)')
+                    else:
+                        fail(f'{log}: after the load the battle went on otherwise than after '
+                             f'the save ({len(one)} / {len(two)} lines)')
+                except StopIteration:
+                    fail(f'{log}: no save and load in it')
+
+    # ---- the open files (Horizon: 4 in the whole system; plat/xdos.c refuses a fifth
+    # on both builds and says so)
+    FILES = re.compile(r'xcom: files: at most (\d+) open \((.*?)\), (\d+) refused')
+    hf = [m for m in map(FILES.search, host) if m]
+    af = [m for m in map(FILES.search, con) if m]
+    refused = [c.strip() for c in host + con if re.search(r'xcom: files: .* refused: ', c)]
+    if refused:
+        fail(f'a file was refused (4 open): {refused[0]}')
+    elif hf and af:
+        if hf[-1].group(1) == af[-1].group(1):
+            ok(f'at most {af[-1].group(1)} files open at once on both ({af[-1].group(2)}), none refused')
+        else:
+            fail(f'files open at once: host {hf[-1].group(1)} ({hf[-1].group(2)}), '
+                 f'Atari816 {af[-1].group(1)} ({af[-1].group(2)})')
 
     # ---- BENCH's report (upstream's own checks of the renderer; with the virtual clock
     # its times are the clock's readings, the same on both)

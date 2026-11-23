@@ -16,6 +16,11 @@ int plat_arena(void);
    a run is the same on every machine (PORTING-NOTES.md "Time"). */
 unsigned long plat_counts(void);
 extern int g_plat_virtual;              /* 1: the virtual clock */
+/* the virtual clock's step a reading (PIT counts: 600 = 0.5 ms). A KEYS script's WAIT
+   polls the mouse until the BIOS clock has moved on: 2,000 polls a virtual second at
+   this step (20,000 at the first one's 60, which made a test run on the Atari816 take
+   20 s a virtual second: its polls cost about 1 ms each) */
+#define XD_TICK_STEP 600
 void plat_wait_counts(unsigned long n); /* virtual: the clock moves on n */
 void plat_sleep_counts(unsigned long n);/* real: n counts pass, the CPU idle where it can */
 
@@ -39,6 +44,12 @@ extern unsigned char xd_dac[768];
 /* The OPL2 (ports 388h / 389h). */
 void plat_opl(int reg, int val);
 
+/* The bytes the engine has read from files so far (plat/xdos.c), and the
+   platform's hook after each read: the Atari816's loading screen moves its bar
+   (horizon/hz_plat.c); the host does nothing. */
+extern unsigned long xd_bytes_read;
+void plat_progress(void);
+
 /* Where the game's files are ("" or "dir/"). */
 extern char g_plat_dir[128];
 
@@ -54,6 +65,9 @@ void plat_note(const char *s);
    is the reference: the platform's result is the same bytes. Offsets are
    vgabat.c's: VGA offsets in the buffer, 16 bits. */
 #define XD_BB_SEG   0xD004u
+/* the interface's clean screen (plat/vga.c uk_save / uk_restore): a 64,000-byte copy
+   of the screen at E000:0000, the arena's bank 14, outside the DOS memory */
+#define XD_CLEAN_SEG 0xE000u
 /* a sprite (tools/vgasprite.py's formats: kind 0 masked spans, 1 OR rows)
    whose row r goes to offset (dest << 2) + r * 320, its rows [top, bottom)
    and columns [lx, rx) only (sprite coordinates; 0, 0xFFFF: all) */
@@ -79,6 +93,10 @@ void plat_bb_sync(void);
 /* the engine's memory at p (n bytes) was written by a file read or freed: a
    platform that keeps copies of pictures (the blitter's atlases) forgets them */
 void plat_mem_changed(const void far *p, unsigned long n);
+/* the battle's pack is loaded (the patch: main.c before BENCH, battle.c
+   battle_run before the first view): a platform that keeps copies of the
+   pictures makes them now, showing that it works (the host: nothing) */
+void plat_bb_prepare(void);
 
 /* ---------------------------------------------------------------- test runs
    The virtual clock's runs are the tests (tests/check.sh): the same input

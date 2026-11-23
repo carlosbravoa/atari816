@@ -34,7 +34,14 @@ extern unsigned g_occ_count;
 
 #define W16(p)      ((u16)((p)[0] | (p)[1] << 8))
 
-static struct {
+/* (the Atari816: horizon/hz_rend.s reads and writes it by offset: B_* there) */
+#if defined(__CC816__)
+#define b rd_b
+#define REND_ASM 1
+#else
+static
+#endif
+struct rd_bs {
     const unsigned char far *mcd;
     unsigned char **spr;
     unsigned *late;
@@ -63,7 +70,14 @@ static const signed char rq[18][2] = {
 };
 #define N_ROOF  13
 #define Q0      13              /* quad[] in rq[] */
+#if defined(REND_ASM)
+#define roofoff rd_roofoff
+u16 roofoff[18];
+int rd_rqx[18], rd_rqy[18];             /* rq[] for hz_rend.s */
+static u16 roofmx, rooflev;
+#else
 static u16 roofoff[18], roofmx, rooflev;
+#endif
 
 /* sar: the assembly's arithmetic shift of a 16-bit value. */
 static int sar(int v, int k)
@@ -113,6 +127,12 @@ void __cdecl rd_setup(int top, const void *mcd, unsigned char **spr, unsigned *l
         for (i = 0; i < 18; i++)
             roofoff[i] = (u16)(rq[i][1] * b.mx + rq[i][0] + mxy);
         roofoff[17] = (u16)(roofoff[17] + mxy);     /* two levels up */
+#if defined(REND_ASM)
+        for (i = 0; i < 18; i++) {
+            rd_rqx[i] = rq[i][0];
+            rd_rqy[i] = rq[i][1];
+        }
+#endif
     }
 }
 
@@ -366,6 +386,17 @@ static void col_late(void)
     b.idx = (u16)(b.idx);
 }
 
+#if defined(REND_ASM)
+#include <stddef.h>
+/* horizon/hz_rend.s: rd_level's columns (col_setup, slots, col_late with
+   scatter and roofed, col_floors with floor_draw) as the C below does them */
+void rd_cols(void);
+_Static_assert(offsetof(struct rd_bs, cov) == 12 && offsetof(struct rd_bs, mx) == 24
+               && offsetof(struct rd_bs, idx) == 66 && offsetof(struct rd_bs, orspr) == 76
+               && offsetof(struct rd_bs, xhi) == 102 && sizeof(struct rd_bs) == 104,
+               "hz_rend.s's B_* offsets");
+#endif
+
 int __cdecl rd_level(int z)
 {
     int a, t, c;
@@ -408,6 +439,12 @@ int __cdecl rd_level(int z)
     if (t < a)
         a = t;
     b.xhi = a;
+#if defined(REND_ASM)
+    if (!b.ega) {
+        rd_cols();                      /* the loop below, in assembly */
+        return b.nlate;
+    }
+#endif
     for (c = b.xlo; c <= b.xhi + b.look; c++) {
         b.c = c;
         if (c <= b.xhi && col_setup(c)) {

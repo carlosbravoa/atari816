@@ -38,6 +38,7 @@ char g_plat_dir[128];
 int g_plat_virtual;
 
 static unsigned long clock_counts, last_us, poll_us, key_us;
+static unsigned long load_t0;           /* the start (the loading screen), until the first input wait */
 static unsigned spare_a000, spare_d000; /* the arena's own banks 10 and 13 before mode 13h */
 static int screen_on, pan = -1, mx = 160, my = 100, mb;
 static int presses[2], press_x[2], press_y[2];
@@ -74,26 +75,44 @@ int plat_arena(void)
     return 0;
 }
 
-#define XD_TICK_STEP 60
 
-/* PIT counts (1.193182 a microsecond): d + d/8 + d/16 + d/256 + d/512 is
-   1.193359 d (0.015 % fast), in 16-bit steps for the usual short gaps. */
+/* The microsecond clock (hg_us: 32 bits, it wraps every 71.6 minutes the machine is
+   on). /U n adds n to it (tests: a machine on for a long time, its wrap a few seconds
+   after the start). Only differences of two readings are used, which the wrap does not
+   disturb (unsigned arithmetic). */
+static unsigned long us_offset;
+
+unsigned long plat_us(void)
+{
+    return (unsigned long)hg_us() + us_offset;
+}
+
+/* PIT counts (1.193182 a microsecond) from microseconds d: d + d/8 + d/16 + d/256 +
+   d/512 is 1.193359 d (0.015 % fast), in 16-bit steps for the usual short gaps; a
+   long gap (a load, the first reading) in two parts, so that no product passes 32
+   bits (d * 611 did from 7 s on). */
+unsigned long plat_us_to_counts(unsigned long d)
+{
+    if (d < 0x10000UL) {
+        unsigned w = (unsigned)d;
+        return d + (w >> 3) + (w >> 4) + (w >> 8) + (w >> 9);
+    }
+    return (d >> 9) * 611UL + (((unsigned)d & 511u) * 611UL >> 9);
+}
+
 unsigned long plat_counts(void)
 {
-    unsigned long us, d;
+    unsigned long us;
 
     if (g_plat_virtual) {
         clock_counts += XD_TICK_STEP;
         return clock_counts;
     }
-    us = (unsigned long)hg_us();
-    d = us - last_us;
+    us = plat_us();
+    if (us < last_us && last_us - us > 0x80000000UL)
+        printf("xcom: the microsecond clock wrapped (at %lu ms of play)\n", clock_counts / 1193UL);
+    clock_counts += plat_us_to_counts(us - last_us);
     last_us = us;
-    if (d < 0x10000UL) {
-        unsigned w = (unsigned)d;
-        clock_counts += d + (w >> 3) + (w >> 4) + (w >> 8) + (w >> 9);
-    } else
-        clock_counts += (d * 611UL) >> 9;
     return clock_counts;
 }
 
@@ -175,11 +194,13 @@ static int view_on, vtop;               /* the battle view shown split, its top 
    lines 124-179 (Marga's split) and lines 0-123 show 124 of the view's 144
    rows, following the pointer while it is over them. The virtual clock's
    runs follow the engine's pointer (the same pictures as the host's). */
+static int loading;
+
 static void show(void)
 {
     int i, k, t = vtop;
 
-    if (!screen_on)
+    if (!screen_on || loading)
         return;
     if (view_on) {
         if (g_plat_virtual) {
@@ -205,7 +226,7 @@ static void show(void)
         send_view();
     }
     if (xd_dac_dirty) {
-        static unsigned char rgb[768];
+        static unsigned char __far rgb[768];  /* (__far: out of the main bank, which is full) */
         xd_dac_dirty = 0;
         for (i = 0; i < 768; i++)
             rgb[i] = (unsigned char)(xd_dac[i] << 2 | xd_dac[i] >> 4);
@@ -288,6 +309,18 @@ unsigned plat_key(void)
 
     if (g_plat_virtual)
         return 0;
+    if (load_t0) {
+        /* the first wait for input: the start menu (how long the start took); the
+           loading screen ends, the engine's screen and palette are shown */
+        loading = 0;
+        pan = -1;
+        xd_dac_dirty = 1;
+        show();
+        printf("xcom: ready for input %lu ms after the start, %lu KB read (machine on %lu ms)\n",
+               (plat_us() - load_t0) / 1000UL, xd_bytes_read / 1024UL,
+               (unsigned long)hz_uptime());
+        load_t0 = 0;
+    }
     plat_poll();
     if (!keyn) {
         /* nothing: an engine that asks again within 2 ms is only waiting
@@ -335,16 +368,184 @@ static void at_end(void)
         xd_shot_point(0, "exit");
 }
 
+/* ---------------------------------------------------------------- the screen of the
+   program's own: loading, messages. The full screen (320 x 400: rows 0-199 mode 13h's
+   screen, 205-348 the battle view's back buffer, 349-388 its cursor box,
+   horizon/hz_bb.c) is opened at the start for the loading screen and kept for the
+   engine's mode 13h. */
+static int fb_open;
+static unsigned long load_drawn;
+static unsigned load_x;
+
+static int screen_fb(void)
+{
+    if (fb_open)
+        return 0;
+    if (hg_screen_fb(HG_320X180, "X-COM", 320, 400) < 0)
+        return -1;
+    fb_open = 1;
+    return 0;
+}
+
+static void text_centre(int y, const char *t, unsigned ink)
+{
+    hg_text((320 - (int)strlen(t) * HG_FONT_W) / 2, y, t, ink);
+}
+
+/* What is read before the start menu (measured: the engine's reads from the start to
+   its first wait for input, about 70 KB with NOINTRO); the bar is full there */
+#define LOAD_BYTES 72000UL
+#define BAR_X 60
+#define BAR_W 200
+#define LOAD_Y 205                      /* the loading screen's rows: 205-384 */
+#define BAR_Y (LOAD_Y + 112)
+
+/* The loading screen: in rows 205-384 (the battle view's, unused until a battle), shown
+   from the start until the engine first waits for input (its start menu, or the intro),
+   so that its own black screen while it loads is not seen; the engine's palette waits
+   till then. Not in test runs (/V: the screen is the model's from the start). */
+static void loading_screen(void)
+{
+    if (g_plat_virtual || screen_fb() < 0)
+        return;
+    hg_color(0, 0, 0, 0);
+    hg_color(1, 0xE0, 0xE0, 0xE0);
+    hg_color(2, 0x40, 0x60, 0xA0);
+    hg_color(3, 0x90, 0xB0, 0xF0);
+    hg_fill(0, LOAD_Y, 320, 180, 0);
+    text_centre(LOAD_Y + 60, "X-COM: UFO DEFENSE", 3);
+    text_centre(LOAD_Y + 76, "XCOM-XT on the Atari816", 1);
+    text_centre(LOAD_Y + 96, "Loading...", 1);
+    hg_rect(BAR_X - 2, BAR_Y - 2, BAR_W + 4, 12, 2);
+    hg_flush(0);
+    hg_scroll(0, LOAD_Y);
+    send_view();
+    loading = 1;
+    load_x = 0;
+    load_t0 = load_drawn = plat_us();
+}
+
+/* after each read: the bar, at most every 50 ms */
+void plat_progress(void)
+{
+    unsigned long now, b;
+    unsigned x;
+
+    if (!loading)
+        return;
+    now = plat_us();
+    if (now - load_drawn < 50000UL)
+        return;
+    load_drawn = now;
+    b = xd_bytes_read > LOAD_BYTES ? LOAD_BYTES : xd_bytes_read;
+    x = (unsigned)(b * BAR_W / LOAD_BYTES);
+    if (x > load_x) {
+        hg_fill(BAR_X + (int)load_x, BAR_Y, (int)(x - load_x), 8, 3);
+        hg_flush(0);
+        load_x = x;
+    }
+}
+
+/* A message the player must see (the data missing, the engine stopped): the screen
+   cleared, the lines centred, until a key or a click (2 minutes at most); also on the
+   console ("xcom: message: ..."). */
+static void message_screen(const char *const *lines, int n)
+{
+    int i, y;
+    unsigned long t0;
+
+    for (i = 0; i < n; i++)
+        printf("xcom: message: %s\n", lines[i]);
+    loading = 0;
+    if (screen_fb() < 0)
+        return;
+    if (screen_on) {
+        hz_bb_screen(0);
+        hg_split(0, 0, 0);
+        hg_scroll(0, 0);
+        send_view();
+    }
+    hg_color(0, 0, 0, 0);
+    hg_color(1, 0xE0, 0xE0, 0xE0);
+    hg_color(3, 0x90, 0xB0, 0xF0);
+    hg_fill(0, 0, 320, 200, 0);
+    y = (180 - n * 12) / 2;
+    for (i = 0; i < n; i++, y += 12)
+        text_centre(y, lines[i], i ? 1 : 3);
+    hg_flush(1);
+    t0 = plat_us();
+    while (hg_frame()) {
+        if (hg_key_next() || hg_mouse_b)
+            break;
+        if (plat_us() - t0 > 120000000UL)
+            break;
+    }
+}
+
+/* The engine's printf (compat/xdos.h): to the console as before, its last lines kept
+   for the message when it stops with an error (xd_exit) */
+#undef printf
+#undef exit
+static char said[3][48];
+static int nsaid;
+
+int xd_printf(const char *fmt, ...)
+{
+    char b[200], *p, *q;
+    va_list ap;
+    int n;
+
+    va_start(ap, fmt);
+    n = vsnprintf(b, sizeof b, fmt, ap);
+    va_end(ap);
+    fputs(b, stdout);
+    for (p = b; *p; p = q) {
+        q = strchr(p, '\n');
+        if (!q)
+            q = p + strlen(p);
+        if (q > p && strncmp(p, "xcom:", 5)) {
+            int k = nsaid < 3 ? nsaid++ : 2;
+            if (nsaid == 3 && k == 2) {
+                memmove(said[0], said[1], sizeof said[0]);
+                memmove(said[1], said[2], sizeof said[0]);
+            }
+            int m = (int)(q - p) < 47 ? (int)(q - p) : 47;
+            memcpy(said[k], p, (size_t)m);
+            said[k][m] = 0;
+        }
+        if (*q)
+            q++;
+    }
+    return n;
+}
+
+/* exit with an error: what the engine said, on the screen first */
+void xd_exit(int code)
+{
+    if (code) {
+        const char *l[6];
+        int n = 0, i;
+        l[n++] = "X-COM stopped:";
+        for (i = 0; i < nsaid; i++)
+            l[n++] = said[i];
+        if (!nsaid)
+            l[n++] = "(an error, see the console)";
+        l[n++] = "";
+        l[n++] = "Press a key.";
+        message_screen(l, n);
+    }
+    exit(code);
+}
+
 void plat_setmode(int m)
 {
     if (m == 0x13 && !screen_on) {
-        /* rows 0-199 mode 13h's screen, 205-348 the battle view's back buffer,
-           349-388 its cursor box (horizon/hz_bb.c) */
-        if (hg_screen_fb(HG_320X180, "X-COM", 320, 400) < 0) {
+        if (screen_fb() < 0) {
             printf("xcom: no full screen\n");
             exit(1);
         }
-        hg_palette_black();
+        if (!loading)
+            hg_palette_black();
         xd_banks[10] = (unsigned char)hg_fb_bank;   /* A000 is the framebuffer */
         xd_banks[13] = (unsigned char)(hg_fb_bank + 1); /* D004 its row 205 (plat.h) */
         hz_bb_screen(1);
@@ -359,6 +560,7 @@ void plat_setmode(int m)
         hz_bb_screen(0);
         view_on = 0;
         hg_close();
+        fb_open = 0;
         xd_banks[10] = (unsigned char)spare_a000;
         xd_banks[13] = (unsigned char)spare_d000;
         screen_on = 0;
@@ -370,9 +572,12 @@ void plat_present(int x0, int y0, int x1, int y1)
     (void)x0; (void)y0; (void)x1; (void)y1;
 }
 
+void hz_snd_opl(int reg, int val);
+void hz_snd_start(void);
+
 void plat_opl(int reg, int val)
 {
-    hg_opl_write((unsigned)reg, (unsigned)val);
+    hz_snd_opl(reg, val);               /* (horizon/hz_snd.c: the music task's, else the OPL2) */
 }
 
 void plat_note(const char *s)
@@ -396,17 +601,33 @@ void plat_shot(unsigned n, unsigned long ms, unsigned long sum, const char *why)
 
 void hz_bb_stats(void);
 
+/* the banks this program holds now (its code, the DOS memory, the framebuffer, the
+   atlas sheets, ...): what APP.INF's mem= must cover */
+static unsigned my_banks(void)
+{
+    hz_taskinfo t;
+    unsigned i, me = hz_getpid();
+
+    for (i = 0; i < 16; i++)
+        if (!hz_task_info(i, &t) && t.id == me)
+            return t.banks;
+    return 0;
+}
+
 void plat_end(void)
 {
     hz_bb_stats();
-    printf("xcom: end at %lu ms\n", clock_counts / 1193UL);
+    printf("xcom: %u banks held\n", my_banks());
+    /* (the machine's own time too: how long a test run takes in the emulator) */
+    printf("xcom: end at %lu ms (machine %lu s)\n", clock_counts / 1193UL,
+           (unsigned long)hz_uptime() / 1000UL);
     exit(0);
 }
 
 /* "@FILE" among the arguments: the words of FILE in its place (the shell's line holds
    about 70 characters; a test's options are longer: tests/*.args) */
 static char *more_argv[40];
-static char more_text[512];
+static char __far more_text[512];       /* (__far: out of the full main bank) */
 
 static int args_from_file(int argc, char **argv, char ***out)
 {
@@ -448,6 +669,9 @@ int main(int argc, char **argv)
         } else if (i + 1 < argc && !strcmp(argv[i], "/T")) {
             g_plat_idle = (unsigned)atoi(argv[i + 1]);
             i += 2;
+        } else if (i + 1 < argc && !strcmp(argv[i], "/U")) {
+            us_offset = strtoul(argv[i + 1], NULL, 10);
+            i += 2;
         } else
             break;
     }
@@ -455,13 +679,51 @@ int main(int argc, char **argv)
         g_plat_dir[0] = 0;
     if (g_plat_dir[0])
         hz_chdir(g_plat_dir);
+    {
+        /* the game's data: the packs XCOMCONV made from the player's own copy, in the
+           program's folder (README.TXT) */
+        hz_fileinfo st;
+        if (hz_stat_path("PACKS.VER", &st) < 0 || hz_stat_path("VGA/UIV.PAK", &st) < 0) {
+            static const char *l[10];
+            l[0] = "X-COM: the game's data is missing";
+            l[1] = "";
+            l[2] = "This program needs the packs made by";
+            l[3] = "XCOMCONV from your own copy of";
+            l[4] = "X-COM: UFO Defense, in its folder:";
+            l[5] = g_plat_dir[0] ? g_plat_dir : "(the program's folder)";
+            l[6] = "PACKS.VER, the .PAK files, VGA/.";
+            l[7] = "See README.TXT there.";
+            l[8] = "";
+            l[9] = "Press a key.";
+            message_screen(l, 10);
+            exit(1);
+        }
+    }
     g_plat_dir[0] = 0;                  /* names relative to the program's folder */
     if (plat_arena()) {
-        printf("xcom: not enough memory (17 banks for the DOS memory)\n");
+        static const char *l[4] = { "X-COM: not enough memory", "",
+                                    "It needs 17 free banks (1.1 MB) for", "the DOS machine's memory." };
+        message_screen(l, 4);
         return 1;
     }
+    loading_screen();
     argv[i - 1] = "XCOMXT";
+    {
+        /* the VGA mode unless the options name another: the engine would pick EGA (the
+           model has no XMS, its test for a VGA's memory), and the app starts with no
+           options at all */
+        int k, mode = 0;
+        for (k = i; k < argc; k++)
+            if (!stricmp(argv[k], "VGA") || !stricmp(argv[k], "EGA")
+                || !stricmp(argv[k], "CGA") || !stricmp(argv[k], "HERC"))
+                mode = 1;
+        if (!mode && argc < 39) {
+            argv[argc++] = "VGA";
+            argv[argc] = NULL;
+        }
+    }
     xd_init(argc - i + 1, argv + i - 1);
-    printf("xcom: start\n");
+    hz_snd_start();                     /* MUSD.PRG, before the engine opens files */
+    printf("xcom: start (%u banks)\n", my_banks());
     return xcom_main(argc - i + 1, argv + i - 1);
 }

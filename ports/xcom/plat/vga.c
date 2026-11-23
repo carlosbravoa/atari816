@@ -46,8 +46,16 @@ typedef struct {
     int x, y, w, h, fl;
 } Entry;
 
-static Entry last, clean[4], tmpe;
-static int nclean, sy0, sy1;
+static Entry tmpe;
+static int sy0, sy1;
+/* The clean screen (uk_save, uk_restore, uk_pic_clean): a copy of the screen in
+   the arena's E000 bank, as the EGA program keeps one in spare video memory.
+   (Upstream's VGA prototype had no room for one: it kept the last plain
+   picture and up to 4 pictures added to it, read again from the pack at a
+   restore, black where none covered the rectangle: the base's view under the
+   build cursor, a notice closed over it, went black.) */
+#define CLEAN       ((unsigned char far *)MK_FP(XD_CLEAN_SEG, 0))
+static unsigned char far *pbase;        /* where part() draws: the screen or CLEAN */
 static int qx, qy, qw, qh;              /* the rectangle drawn (V_QX ...) */
 static int opened;                      /* the pack opened here (V_OPEN) */
 static unsigned char rowbuf[ROW];
@@ -100,7 +108,7 @@ static void part(const Entry *e)
     if (rows <= 0)
         return;
     lseek(g_uk_fd, e->pos + (long)(r0 - e->y) * e->w + (t0 - e->x), SEEK_SET);
-    d = SCREEN + (unsigned)r0 * ROW + (unsigned)t0;
+    d = pbase + (unsigned)r0 * ROW + (unsigned)t0;
     if (!(e->fl & 1)) {
         if (t1 == ROW) {
             _dos_read(g_uk_fd, d, (unsigned)rows * ROW, &got);
@@ -127,13 +135,6 @@ static void part(const Entry *e)
         if (skip)
             lseek(g_uk_fd, skip, SEEK_CUR);
     }
-}
-
-static int covers(const Entry *e)
-{
-    int a = qx - e->x, b = qy - e->y;
-
-    return a >= 0 && a + qw <= e->w && b >= 0 && b + qh <= e->h;
 }
 
 /* Fills the rectangle q with c, clipped to the screen. */
@@ -271,25 +272,21 @@ void vga_uk_pic(const void *head, int x, int y, int to_save)
     tmpe.h = h->h;
     tmpe.fl = h->flags;
     tmpe.pos = lseek(g_uk_fd, 0, SEEK_CUR);
-    if (to_save) {
-        /* vx_pic's clean: into the clean screen's list, not drawn */
-        if (!(tmpe.fl & 1)) {
-            clean[0] = tmpe;
-            nclean = 1;
-            last = tmpe;
-        } else if (nclean < 4)
-            clean[nclean++] = tmpe;
-        return;
-    }
-    if (!(tmpe.fl & 1))
-        last = tmpe;
-    if (y < 144 && y + (int)h->h > 144 && h->w >= 64)
-        plat_view(0);                   /* a picture across the view's bottom (a window, the
-                                           inventory): the whole screen pans again */
     qx = x;
     qy = y;
     qw = h->w;
     qh = h->h;
+    if (to_save) {
+        /* vx_pic's clean: into the clean screen, not drawn */
+        pbase = CLEAN;
+        part(&tmpe);
+        pbase = SCREEN;
+        return;
+    }
+    if (y < 144 && y + (int)h->h > 144 && h->w >= 64)
+        plat_view(0);                   /* a picture across the view's bottom (a window, the
+                                           inventory): the whole screen pans again */
+    pbase = SCREEN;
     part(&tmpe);
 }
 
@@ -300,12 +297,21 @@ int vga_uk_cga_c(int c)
 }
 
 /* 11 uk_glyph_cga: h rows of bpr (1 or 2) bytes, the colour an index. */
+#if defined(__CC816__)
+/* horizon/hz_vga.s: the same loop in assembly */
+void hz_glyph(unsigned char far *d, const unsigned char far *g, int h, int bpr, int c, int right);
+#endif
 void vga_uk_glyph(int x, int y, const unsigned char far *g, int h, int bpr, int c)
 {
     unsigned char far *d = SCREEN + (unsigned)y * ROW + (unsigned)x;
     int right = ROW - x, n;
     unsigned bits;
 
+#if defined(__CC816__)
+    hz_glyph(d, g, h, bpr, c, right);
+    (void)n;
+    (void)bits;
+#else
     for (; h > 0; h--, g += bpr, d += ROW) {
         unsigned char far *p = d;
         bits = (unsigned)g[0] << 8;
@@ -315,6 +321,7 @@ void vga_uk_glyph(int x, int y, const unsigned char far *g, int h, int bpr, int 
             if (bits & 0x8000)
                 *p = (unsigned char)c;
     }
+#endif
 }
 
 /* 12 uk_pic_clean: entry id into the clean screen's list. */
@@ -341,31 +348,33 @@ int vga_uk_pic_clean(unsigned id)
     tmpe.w = b[4] | b[5] << 8;
     tmpe.h = b[6] | b[7] << 8;
     tmpe.fl = b[8];
-    if (!(tmpe.fl & 1)) {
-        clean[0] = tmpe;
-        nclean = 1;
-    } else if (nclean < 4)
-        clean[nclean++] = tmpe;
+    qx = tmpe.x;
+    qy = tmpe.y;
+    qw = tmpe.w;
+    qh = tmpe.h;
+    pbase = CLEAN;
+    part(&tmpe);
+    pbase = SCREEN;
     close_pack();
     return 1;
 }
 
-/* 13 uk_save: the last plain picture is the clean screen. */
+/* 13 uk_save: the screen's rows [y0, y1) are the clean screen (the pointer
+   hidden first, as uik.c's EGA and CGA copies). */
 void vga_uk_save(int y0, int y1)
 {
-    sy0 = y0;
-    sy1 = y1;
-    nclean = 0;
-    if (last.h) {
-        clean[0] = last;
-        nclean = 1;
-    }
+    sy0 = y0 < 0 ? 0 : y0;
+    sy1 = y1 > 200 ? 200 : y1;
+    if (sy1 <= sy0)
+        return;
+    hide(0, sy0, ROW, sy1);
+    _fmemcpy(CLEAN + (unsigned)sy0 * ROW, SCREEN + (unsigned)sy0 * ROW, (unsigned)(sy1 - sy0) * ROW);
 }
 
-/* 14 uk_restore: the clean screen's pictures again, black where none. */
+/* 14 uk_restore: the clean screen's rectangle back. */
 void vga_uk_restore(int x, int y, int w, int h)
 {
-    int i;
+    unsigned off;
 
     if (y < sy0) {
         h -= sy0 - y;
@@ -373,20 +382,21 @@ void vga_uk_restore(int x, int y, int w, int h)
     }
     if (y + h > sy1)
         h = sy1 - y;
+    if (x < 0) {
+        w += x;
+        x = 0;
+    }
+    if (x + w > ROW)
+        w = ROW - x;
     if (w <= 0 || h <= 0)
         return;
-    qx = x;
-    qy = y;
-    qw = w;
-    qh = h;
     hide(x, y, x + w, y + h);
-    if (!nclean || !covers(&clean[0]))
-        qfill(0);
-    if (!open_pack())
-        return;
-    for (i = 0; i < nclean; i++)
-        part(&clean[i]);
-    close_pack();
+    off = (unsigned)y * ROW + (unsigned)x;
+    if (w == ROW)
+        _fmemcpy(SCREEN + off, CLEAN + off, (unsigned)h * ROW);
+    else
+        for (; h > 0; h--, off += ROW)
+            _fmemcpy(SCREEN + off, CLEAN + off, (unsigned)w);
 }
 
 /* 15 uk_fill, with vx_fill in front: 16-255 is a palette index. */
@@ -513,24 +523,50 @@ void vga_ms_erase(int x, int y)
 
 static unsigned xsp = STACK0;           /* the markers' stack in the back buffer */
 
-/* 1: the 256 x 160 view from the 320 x 160 map, each pixel 1, 2 or 4 times. */
+/* 1: the 256 x 160 view from the 320 x 160 map, each pixel 1, 2 or 4 times.
+   A row is made once (zoom 0: copies; 1, 2: each byte 2 or 4 times, in
+   assembly on the Atari816: horizon/hz_vga.s) and copied for the rows that
+   repeat it. */
+#if defined(__CC816__)
+void hz_zoom_row(unsigned char far *d, const unsigned char far *s, unsigned n, unsigned zoom);
+#endif
+static void zoom_part(unsigned char far *p, const unsigned char far *s, unsigned n, unsigned zoom)
+{
+    unsigned i, k, rep = 1u << zoom;
+
+    if (!zoom) {
+        _fmemcpy(p, s, n);
+        return;
+    }
+#if defined(__CC816__)
+    hz_zoom_row(p, s, n, zoom);
+    (void)i;
+    (void)k;
+    (void)rep;
+#else
+    for (i = 0; i < n; i++)
+        for (k = 0; k < rep; k++)
+            *p++ = s[i];
+#endif
+}
+
 void vga_vx_world(const unsigned char far *map, unsigned vx, unsigned vy, unsigned zoom)
 {
     unsigned char far *d = SCREEN;
-    unsigned need = VIEW_W >> zoom, n1 = WMAP_W - vx < need ? WMAP_W - vx : need, y, i, k;
-    unsigned rep = 1u << zoom;
+    unsigned need = VIEW_W >> zoom, n1 = WMAP_W - vx < need ? WMAP_W - vx : need, y;
 
     plat_view(0);
 
     xsp = STACK0;
     for (y = 0; y < WMAP_H; y++, d += ROW) {
         const unsigned char far *s = map + ((y >> zoom) + vy) * WMAP_W;
-        unsigned char far *p = d;
-        for (i = 0; i < need; i++) {
-            unsigned char c = s[i < n1 ? vx + i : i - n1];
-            for (k = 0; k < rep; k++)
-                *p++ = c;
+        if (y && (y >> zoom) == ((y - 1) >> zoom)) {
+            _fmemcpy(d, d - ROW, VIEW_W);       /* the row above again */
+            continue;
         }
+        zoom_part(d, s + vx, n1, zoom);
+        if (need > n1)
+            zoom_part(d + (n1 << zoom), s, need - n1, zoom);
     }
 }
 
@@ -721,4 +757,5 @@ void vgx_init(unsigned vseg)
     (void)vseg;
     g_pakv = 'V';
     g_vgx = 1;
+    vga_smoke_load();                   /* (vgainit.c smoke_pics: DOS's smoke and fire pictures) */
 }
