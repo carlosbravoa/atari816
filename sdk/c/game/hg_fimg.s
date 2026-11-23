@@ -1,7 +1,7 @@
 ; hg_fimg.s - hgame's image hot paths for cc816 (ca65): hg_draw's and hg_draw_part's sheet
 ; path, hg__blitmem, hg__fillmem. Apart from hg_fast.s because only games that draw
-; images need them (hg_draw's C part pulls hg_image.c in). The same routines as
-; ../hg_fast.s (vbcc); the convention is in hg_fast.s's header.
+; images need them (hg_draw's C part pulls hg_image.c in). The convention is in
+; hg_fast.s's header.
 	.p816
 	.smart	-
 	.a16

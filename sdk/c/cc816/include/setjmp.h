@@ -1,4 +1,4 @@
-/* setjmp.h - cc816 (Horizon C SDK): setjmp and longjmp (rt/cc816/setjmp.s).
+/* setjmp.h - cc816 (Horizon C SDK): setjmp and longjmp (rt/setjmp.s).
  *
  * A jmp_buf keeps the hardware stack pointer, the return address, the software stack
  * pointer and the 48 bytes of callee-saved registers (__rg+48..95): 54 bytes. setjmp

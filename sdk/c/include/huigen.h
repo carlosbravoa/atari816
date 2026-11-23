@@ -260,12 +260,8 @@ struct ui_list_s {
     unsigned short indent;             /* LS_INDENT: pixels left of the text for an icon (0: none) */
     unsigned short click_;             /* LS_CLICK: (the library's) */
     ui_scroll sb_;                     /* LS_SB: (the library's: the list's scroll bar) */
-#ifdef __CC816__
     ui_rowfn rowfn;                    /* LS_SIZE: the C side: your row function */
     unsigned short rowfn_hi_;
-#else
-    ui_rowfn rowfn;                    /* LS_SIZE: the C side: your row function */
-#endif
 };
 HZ_STATIC_ASSERT(sizeof(ui_list) == 52, ui_list);
 

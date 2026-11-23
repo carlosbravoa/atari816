@@ -7,7 +7,7 @@
 #
 # Copy this folder to start a program of your own, change NAME and, if the copy is not two
 # levels below the sdk folder, SDK. The rules are in sdk/c/c.mk (its comment lists the
-# settings: HZ_CC, HCCFLAGS, ARGS, ...).
+# settings: HZ_CODE, HCCFLAGS, ARGS, ...).
 
 NAME := greet
 SDK  ?= ../..

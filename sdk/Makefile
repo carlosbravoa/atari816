@@ -6,7 +6,6 @@
 #   make test       make check, then every template and example: build, run in the
 #                   emulator with its input script, check its output (screenshots in
 #                   each project's build/test/); then the C SDK's tests (make -C c test)
-#                   when its toolchain is installed (c/tools/get-toolchain.sh)
 #   make probe      the performance probe (docs/reference/performance.md); REV=7: no blitter
 #   make clean
 #
@@ -34,8 +33,7 @@ test: check
 	@set -e; for p in $(PROJECTS); do \
 	  if [ -f $$p/Makefile ]; then echo "== $$p"; $(MAKE) --no-print-directory -C $$p test HORIZON=$(HORIZON); fi; \
 	done
-	@if [ -x c/toolchain/vbcc/bin/vbcc65816 ]; then $(MAKE) --no-print-directory -C c test HORIZON=$(HORIZON); \
-	  else echo "== c: skipped (no toolchain: c/tools/get-toolchain.sh)"; fi
+	$(MAKE) --no-print-directory -C c test HORIZON=$(HORIZON)
 	@echo "SDK TESTS PASSED"
 
 probe: $(HORIZON)/build/ulib.o

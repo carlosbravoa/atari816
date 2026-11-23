@@ -12,7 +12,7 @@
 #   make sdk             compile (not run) every C file of the SDK (tests/sdkcompile.py)
 #   make clean
 #
-# A program: sdk/c/bin/hcc -o PROG.PRG main.c (hcc's default compiler is cc816).
+# A program: sdk/c/bin/hcc -o PROG.PRG main.c.
 # The compiler alone: python3 cc816.py [-S|-c|-E] [-O0|-O1|-O2] [-I dir] [-D name] [-U name]
 #                     [-w|-Wall|-Werror|-Wno-NAME] [-fsigned-char] file.c
 # Needs Python 3 and ca65/ld65/ar65 (cc65); pycparser and pcpp are vendored in vendor/
@@ -36,6 +36,6 @@ diag:
 sdk:
 	$(PYTHON) tests/sdkcompile.py
 clean:
-	rm -rf ../build/cc816 ../build/cc816l
+	rm -rf ../build/cc816 ../build/cc816-large
 
 .PHONY: check quick diag sdk clean

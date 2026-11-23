@@ -4,15 +4,15 @@ then checked: its own PASS / FAIL lines (it reads the framebuffer back, compares
 expected console lines, the emulator's sound logs and WAV output, and its screenshots
 against the reference pictures in tests/ref/ (a few differing pixels allowed).
 
-    python3 sdk/c/game/tests/run.py [--horizon DIR] [--cc cc816|cc816l|vbcc] [--only NAME ...]
+    python3 sdk/c/game/tests/run.py [--horizon DIR] [--code small|large] [--only NAME ...]
                                     [--update-refs]
 
-Every test runs with both compilers (cc816, and vbcc's large model), and with cc816's large
-code model (cc816l: hcc --code large, every function that can move in another bank),
-against the SAME reference pictures; --cc chooses one. --update-refs writes the screenshots of this run as
-the new references (look at them first: build/game-tests/CC/NAME/shotN.png). Output: one
-line per check, PASS or FAIL, and a summary; exit code 1 when anything failed. Runs go to
-sdk/c/build/game-tests/<cc816|vbcc>/.
+Every test runs in both code models (small, and large: hcc --code large, every function
+that can move in another bank) against the SAME reference pictures; --code chooses one.
+--update-refs writes the screenshots of this run as the new references (look at them
+first: build/game-tests/CODE/NAME/shotN.png). Output: one line per check, PASS or FAIL,
+and a summary; exit code 1 when anything failed. Runs go to
+sdk/c/build/game-tests/<small|large>/.
 """
 import os
 import re
@@ -131,37 +131,9 @@ def make_files(name, run):
             print(out)
 
 
-CCS = {"cc816": ["--cc", "cc816"], "vbcc": ["--cc", "vbcc"],
-       # cc816's large code model: every function that can move in another bank
-       "cc816l": ["--cc", "cc816", "--code", "large", "--main-room", "0", "--bank-room",
-                  "16384"]}
-
-
-def vbcc_fault(horizon):
-    """vbcc 65816's structure-copy fault (games.md, "Limits and known faults"): the
-    memcpy form must work; the plain assignment is expected to be killed while the fault
-    is there (reported, not failed: when it stops being killed, the fault is gone)"""
-    run = os.path.join(OUT, "vbcc")
-    shutil.rmtree(run, ignore_errors=True)
-    os.makedirs(run)
-    for form, flag in (("memcpy", "-DSAFE=1"), ("assignment", "-DSAFE=0")):
-        prg = os.path.join(run, f"SC{flag[-1]}.PRG")
-        rc, out = sh([sys.executable, HCC, "--cc", "vbcc", flag, "-o", prg,
-                      os.path.join(HERE, "vbcc_structcopy.c")])
-        if rc:
-            report("vbcc/" + form, False, "build failed:\n" + out)
-            continue
-        rc, out = sh([sys.executable, RUN816, prg, "--horizon", horizon, "--mode", "shell",
-                      "--seconds", "2", "--out", os.path.join(run, form)])
-        con = open(os.path.join(run, form, "console.txt"), encoding="latin-1").read()
-        if form == "memcpy":
-            report("vbcc/" + form, "STRUCTCOPY: ok" in con, "a[i] = b[j] by memcpy")
-        else:
-            killed = "[kill]" in con
-            report("vbcc/" + form, True, "a[i] = b[j] by assignment: " +
-                   ("killed: the fault is still there (use memcpy)" if killed else
-                    "ran: the fault may be gone" if "STRUCTCOPY: ok" in con else
-                    "wrong result: the fault is still there"))
+CODES = {"small": [],
+         # the large code model: every function that can move in another bank
+         "large": ["--code", "large", "--main-room", "0", "--bank-room", "16384"]}
 
 
 def run_tests(cc, horizon, only, update):
@@ -173,7 +145,7 @@ def run_tests(cc, horizon, only, update):
         os.makedirs(run)
         make_files(name, run)
         prg = os.path.join(run, "GT" + name.upper()[:6] + ".PRG")
-        rc, out = sh([sys.executable, HCC] + CCS[cc] + ["-o", prg] +
+        rc, out = sh([sys.executable, HCC] + CODES[cc] + ["-o", prg] +
                      [os.path.join(HERE, s) for s in srcs])
         if rc:
             report(f"{cc}/{name}", False, "build failed:\n" + out)
@@ -230,13 +202,15 @@ def main():
     a = sys.argv[1:]
     horizon = os.environ.get("HORIZON") or os.path.join(os.path.dirname(SDK), "horizon")
     only, update = [], False
-    ccs = ["cc816", "cc816l", "vbcc"]
+    ccs = list(CODES)
     i = 0
     while i < len(a):
         if a[i] == "--horizon":
             horizon = a[i + 1]; i += 2
-        elif a[i] == "--cc":
+        elif a[i] == "--code":
             ccs = [a[i + 1]]; i += 2
+            if ccs[0] not in CODES:
+                sys.exit("run.py: --code is small or large")
         elif a[i] == "--only":
             only.append(a[i + 1]); i += 2
         elif a[i] == "--update-refs":
@@ -245,19 +219,9 @@ def main():
             sys.exit(f"run.py: unknown option {a[i]}")
     sys.path.insert(0, GAME)
     import hgbuild
-    import hzc
-    try:
-        hzc.vbcc_dir()
-    except hzc.HccError:
-        if "vbcc" in ccs:
-            print("run.py: the vbcc toolchain is not installed (tools/get-toolchain.sh): "
-                  "its tests are skipped")
-        ccs = [c for c in ccs if c != "vbcc"]
     for cc in ccs:
-        hgbuild.lib_for(cc if cc.startswith("cc816") else "large")
+        hgbuild.lib_for(cc)
         run_tests(cc, horizon, only, update)
-    if "vbcc" in ccs and (not only or "vbcc" in only):
-        vbcc_fault(horizon)
     bad = [n for n, ok in results if not ok]
     print(f"hgame tests: {len(results) - len(bad)} passed, {len(bad)} failed"
           + (": " + ", ".join(bad) if bad else ""))

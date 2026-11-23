@@ -1,6 +1,6 @@
 /* fmtll.c - printf's long long conversions for cc816: %lld %lli %llu %llo %llx %llX (and
  * j: intmax_t is long long), linked only into programs that use long long
- * (rt/cc816/ll_hookp.s installs __hz_fmtll as fmt.c's __hz_fmt_ll). The flags, width and
+ * (rt/ll_hookp.s installs __hz_fmtll as fmt.c's __hz_fmt_ll). The flags, width and
  * precision as fmt.c does them for the shorter sizes. */
 #include <stdarg.h>
 #include <string.h>

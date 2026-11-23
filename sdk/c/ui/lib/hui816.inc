@@ -1,4 +1,4 @@
-; hui816.inc - the cc816 binding's own symbols (ui/lib816/*.s, the generated shims of
+; hui816.inc - the cc816 binding's own symbols (ui/lib/*.s, the generated shims of
 ; tools/genhui.py --shims816). ca65 syntax, included after horizon.inc and ui.inc.
 ;
 ; With cc816 the controls library is linked straight into the program by ld65 (no block):

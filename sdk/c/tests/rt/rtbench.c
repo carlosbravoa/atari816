@@ -1,12 +1,12 @@
 /* rtbench.c - how fast the runtime is: milliseconds (hz_uptime) for many calls of each
- * routine, the empty loop's time taken off. Run it with and without fastrt/ to compare.
+ * routine, the empty loop's time taken off.
  */
 #include <stdio.h>
 #include <string.h>
 #include <horizon.h>
 
-static volatile unsigned va, vb, vr, vn = 1000, v6 = 6;  /* volatile sizes: vbcc
-                                                     inlines memcpy of a constant size */
+static volatile unsigned va, vb, vr, vn = 1000, v6 = 6;  /* volatile sizes: no memcpy
+                                                     of a constant size inlined */
 static volatile unsigned long la, lb, lr;
 static char a[1100], b[1100];
 static unsigned long t0, empty;

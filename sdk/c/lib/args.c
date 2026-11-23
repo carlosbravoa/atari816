@@ -6,8 +6,8 @@
  * kept ("two words" is one argument, the quotes removed; a"b c"d is "ab cd"). argv[0] is
  * the task's name as the menu bar shows it (the program file's name, "Greet"), since
  * Horizon does not pass the path. At most HZ_MAXARGS arguments; argv[argc] is NULL.
- * With cc816 the startup has copied the string into the code bank first (__hz_argbuf):
- * cc816's pointers are offsets in the code bank.
+ * The startup has copied the string into the code bank first (__hz_argbuf): C's
+ * pointers are offsets in the code bank.
  */
 #include <horizon.h>
 
@@ -16,9 +16,7 @@
 int __hz_argc;
 char **__hz_argv;
 extern unsigned __hz_argoff, __hz_arglen;
-#ifdef __CC816__
 extern char __hz_argbuf[];
-#endif
 
 static char *argv_[HZ_MAXARGS + 2];
 static char name_[17];
@@ -33,13 +31,7 @@ int __hz_mkargs(void)
         name_[0] = 0;
     name_[16] = 0;
     argv_[argc++] = name_;
-#ifdef __CC816__
     p = __hz_argbuf;
-#else
-    /* the argument string: window offset __hz_argoff, bank 0 (in the tiny model the
-     * window is the data bank, so a near pointer reaches it) */
-    p = (char *)HZ_FARPTR(0, __hz_argoff);
-#endif
     for (;;) {
         while (*p == ' ')
             ++p;

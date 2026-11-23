@@ -8,9 +8,7 @@
  *   conv     2000 conversions int -> float -> long, and a float division each
  *
  * Prints "NAME   N ms  check C" for each and "fbench done". The check is an integer made
- * from the results (the same with both compilers when their arithmetic rounds alike:
- * cc816 is IEEE, vbcc is not, so the checks may differ in the last bits; only the times
- * are compared). */
+ * from the results; only the times are compared. */
 #include <stdio.h>
 #include <math.h>
 #include <horizon.h>

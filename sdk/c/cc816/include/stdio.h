@@ -1,4 +1,4 @@
-/* stdio.h - cc816 (Horizon C SDK; lib/cc816/stdio.c, printf.c, scanf.c).
+/* stdio.h - cc816 (Horizon C SDK; lib/stdio.c, printf.c, scanf.c).
  * stdout and stderr: the console, line-buffered; stdin: a line typed at the keyboard;
  * files on the card, buffered (1 KB a file from the heap; a smaller buffer, or none, when
  * the heap has no room: fopen does not fail for want of it). Horizon has 4 file handles for the whole
@@ -26,7 +26,7 @@ typedef struct __hz_file {
     unsigned char *ptr;         /* the next byte in it */
     unsigned cnt;               /* reading: bytes left; writing: bytes room */
     unsigned size;              /* the buffer's size */
-    unsigned flags;             /* (lib/cc816/stdio.c) */
+    unsigned flags;             /* (lib/stdio.c) */
     int fh;                     /* the Horizon handle, -1 for the console */
     int ungot;                  /* ungetc's character, or EOF */
     long pos;                   /* the handle's position on the card */

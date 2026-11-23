@@ -5,8 +5,8 @@
     gensys.py --check [--horizon DIR]   fail (exit 1) if include/hzsys.h is not what
                                         horizon.inc + ABI.md + syscalls.tab give now, or
                                         if they disagree (count, numbers, names)
-    gensys.py --stubs FILE --model M    write the assembly stubs (the library build does)
-    gensys.py --stubs816 DIR            write cc816's stubs (ca65, one file a syscall)
+    gensys.py --stubs DIR [--large]     write the syscall stubs (ca65, one file a
+                                        syscall; the library build does this)
 
 Sources:
   HORIZON/user/horizon.inc  the SYS_* numbers and every other constant (read with
@@ -117,10 +117,12 @@ def check_consistency(entries, inc, abi):
     return errs
 
 
-def ctype_size(ctype, model):
+def ctype_size(ctype):
+    """a parameter's bytes on cc816's stack (a pointer: 2, an offset in the code bank,
+    unless it is __far)"""
     t = ctype.replace("const", "").strip()
     if "*" in t:
-        return 2 if model in ("tiny", "cc816") and "__far" not in t else 4
+        return 2 if "__far" not in t else 4
     if "long" in t:
         return 4
     return 2
@@ -186,160 +188,7 @@ def header_markers(path=HEADER):
     return out
 
 
-def stub(e, n, model):
-    """The assembly of one syscall function (vasm oldstyle)."""
-    name = "_" + e["c"]
-    L = [f'\tsection\t"DONTMERGE_text.far.{e["c"]}","acrx"', f"\tglobal\t{name}", f"{name}:"]
-    # where each parameter is: the first in A (A/X when 32-bit), the others on the stack
-    # above the 3-byte return address
-    locs = []
-    off = 4
-    for k, (t, p, r) in enumerate(e["params"]):
-        size = ctype_size(t, model)
-        if k == 0:
-            locs.append(("r0", size))
-        else:
-            locs.append((off, size))
-            off += size
-    if e["params"]:
-        L.append("\tsta\tr0")
-        if locs[0][1] == 4:
-            L.append("\tstx\tr1")
-
-    def word(loc, high=False):
-        if loc[0] == "r0":
-            return "r1" if high else "r0"
-        return f"{loc[0] + (2 if high else 0)},s"
-
-    contrib = {"A": [], "X": [], "Y": []}
-    for (t, p, r), loc in zip(e["params"], locs):
-        if r in ("A", "X", "Y"):
-            contrib[r].append(("w", loc))
-        elif r.endswith(".lo") or r.endswith(".hi"):
-            contrib[r[0]].append((r[2:], loc))
-        elif r == "XY" and model == "tiny" and "__far" not in t:
-            contrib["X"].append(("w", loc))
-            contrib["Y"].append(("zero", None))
-        elif r in ("XY", "XY32"):
-            contrib["X"].append(("w", loc))
-            contrib["Y"].append(("w2", loc))
-        elif r == "AX32":
-            contrib["A"].append(("w", loc))
-            contrib["X"].append(("w2", loc))
-    for k, r, v in e["consts"]:
-        contrib[r].append(("set" if k == "=" else "or", v))
-
-    def value(items):
-        """Code leaving the register's value in A."""
-        kinds = {k: v for k, v in items}
-        code = []
-        if "w" in kinds:
-            code.append(f"\tlda\t{word(kinds['w'])}")
-        elif "w2" in kinds:
-            code.append(f"\tlda\t{word(kinds['w2'], True)}")
-        elif "set" in kinds:
-            code.append(f"\tlda\t#${kinds['set']:X}")
-        elif "hi" in kinds:
-            code += [f"\tlda\t{word(kinds['hi'])}", "\txba", "\tand\t#$FF00"]
-            if "lo" in kinds:
-                code += ["\tsta\tr2", f"\tlda\t{word(kinds['lo'])}", "\tand\t#$00FF",
-                         "\tora\tr2"]
-        elif "lo" in kinds:
-            code += [f"\tlda\t{word(kinds['lo'])}", "\tand\t#$00FF"]
-        if "or" in kinds:
-            code.append(f"\tora\t#${kinds['or']:X}")
-        return code
-
-    for reg in ("Y", "X", "A"):
-        items = contrib[reg]
-        if not items:
-            continue
-        kinds = [k for k, _ in items]
-        if reg != "A" and kinds == ["zero"]:
-            L.append(f"\tld{reg.lower()}\t#0")
-            continue
-        if reg != "A" and len(items) == 1 and items[0][0] in ("w", "w2") and items[0][1][0] == "r0":
-            L.append(f"\tld{reg.lower()}\t{word(items[0][1], items[0][0] == 'w2')}")
-            continue
-        L += value(items)
-        if reg != "A":
-            L.append(f"\tta{reg.lower()}")
-    L.append(f"\tcop\t#${n:02X}")
-    if e["ret"] == "noreturn":
-        L.append(f"\tbra\t{name}")
-        return "\n".join(L) + "\n"
-    if "x" in e["outs"]:
-        L.append("\tstx\t!_hz_x")
-    if "y" in e["outs"]:
-        L.append("\tsty\t!_hz_y")
-    L.append("\tbcs\t.fail")
-    if e["ret"] in ("ok", "void"):
-        L += ["\tlda\t#0", "\tsta\t>_hz_errno"]
-    else:
-        L += ["\ttay", "\tlda\t#0", "\tsta\t>_hz_errno", "\ttya"]
-    L.append("\trtl")
-    L.append(".fail:\tjml\t>___hz_fail")
-    return "\n".join(L) + "\n"
-
-
-def write_stubs(path, model, header=HEADER, table=TABLE):
-    entries = parse_table(table)
-    marks = header_markers(header)
-    o = [f"; hzsys.s - Horizon syscall stubs, {model} model. GENERATED by tools/gensys.py.",
-         "; One function per syscall: the C arguments into A, X, Y, COP #n, the result;",
-         "; carry set: hz_errno = A and -1 (___hz_fail).", "",
-         "\tzpage\tr0,r1,r2", "\ta16", "\tx16", ""]
-    for e in entries:
-        if e["abi"] not in marks:
-            raise GenError(f"{header} has no {e['abi']}: run make -C sdk/c gen")
-        o.append(stub(e, marks[e["abi"]][1], model))
-    # hz_syscall(n, a, x, y): any syscall by number, through a table of "COP #n; RTS"
-    o += ['\tsection\t"DONTMERGE_text.far.hz_syscall","acrx"',
-          "\tglobal\t_hz_syscall",
-          "_hz_syscall:",
-          "\tand\t#$00FF",
-          "\tsta\tr0",
-          "\tasl\ta",
-          "\tadc\tr0",
-          "\tadc\t#<(.tab-1)",
-          "\tsta\tr0",
-          "\tpea\t#<(.back-1)",
-          "\tpei\t(r0)",
-          "\tlda\t12,s",
-          "\ttay",
-          "\tlda\t10,s",
-          "\ttax",
-          "\tlda\t8,s",
-          "\trts",
-          ".back:\tstx\t!_hz_x",
-          "\tsty\t!_hz_y",
-          "\tbcs\t.fail",
-          "\ttay",
-          "\tlda\t#0",
-          "\tsta\t>_hz_errno",
-          "\ttya",
-          "\trtl",
-          ".fail:\tjml\t>___hz_fail",
-          ".tab:"]
-    for k in range(256):
-        o.append(f"\tcop\t#${k:02X}\n\trts")
-    o.append("")
-    o += ['\tsection\t"DONTMERGE_text.far.hzfail","acrx"',
-          "\tglobal\t___hz_fail",
-          "___hz_fail:",
-          "\tsta\t>_hz_errno",
-          "\tlda\t#$FFFF",
-          "\ttax",
-          "\trtl",
-          "",
-          '\tsection\t"DONTMERGE_bss.near.hzsys","aurw"',
-          "\tglobal\t_hz_errno", "\tglobal\t_hz_x", "\tglobal\t_hz_y",
-          "_hz_errno:\treserve\t2", "_hz_x:\treserve\t2", "_hz_y:\treserve\t2", ""]
-    with open(path, "w") as f:
-        f.write("\n".join(o))
-
-
-# ---- cc816 (ca65): JSR, every argument on the stack from 3,s (pushed last first; a
+# ---- the stubs (ca65): JSR, every argument on the stack from 3,s (pushed last first; a
 # pointer is 2 bytes, an offset in the code bank, unless it is __far), the result in A
 # (32 bits: A low, X high). A near pointer for a syscall is X = offset, Y = the code bank
 # (__cbank). One file a syscall: ld65 links only the ones a program uses.
@@ -355,7 +204,7 @@ def stub816(e, n, large=False):
     locs = []
     off = 4 if large else 3
     for t, p, r in e["params"]:
-        size = ctype_size(t, "cc816")
+        size = ctype_size(t)
         locs.append((off, size, t))
         off += size
 
@@ -431,7 +280,7 @@ def stub816(e, n, large=False):
 
 
 def write_stubs816(outdir, header=HEADER, table=TABLE, large=False):
-    """cc816's stubs: one ca65 file a syscall, plus hzsys.s (hz_errno, hz_x, hz_y, the
+    """the stubs: one ca65 file a syscall, plus hzsys.s (hz_errno, hz_x, hz_y, the
     failure path, hz_syscall). -> the files written. large: for the large code model"""
     ret = "\trtl" if large else "\trts"
     a0 = 1 if large else 0
@@ -498,7 +347,8 @@ def main():
     a = sys.argv[1:]
     hz = default_horizon()
     check = False
-    stubs = model = None
+    stubs = None
+    large = False
     i = 0
     while i < len(a):
         if a[i] == "--horizon":
@@ -507,16 +357,13 @@ def main():
             check = True; i += 1
         elif a[i] == "--stubs":
             stubs = a[i + 1]; i += 2
-        elif a[i] == "--model":
-            model = a[i + 1]; i += 2
-        elif a[i] == "--stubs816":
-            write_stubs816(a[i + 1])
-            return 0
+        elif a[i] == "--large":
+            large = True; i += 1
         else:
             sys.exit(__doc__)
     try:
         if stubs:
-            write_stubs(stubs, model or "large")
+            write_stubs816(stubs, large=large)
             return 0
         entries = parse_table()
         inc, abi, order = horizon_data(hz)

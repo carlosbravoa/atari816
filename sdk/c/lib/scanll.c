@@ -1,6 +1,6 @@
 /* scanll.c - scanf's long long conversions for cc816: %lld %lli %llu %llo %llx (and j:
  * intmax_t is long long), linked only into programs that use long long
- * (rt/cc816/ll_hooks.s installs __hz_scanll as scan.c's __hz_scan_ll). A sign, 0x for %x and %i, a leading 0 for %i's
+ * (rt/ll_hooks.s installs __hz_scanll as scan.c's __hz_scan_ll). A sign, 0x for %x and %i, a leading 0 for %i's
  * octal, as scan.c reads the shorter sizes. */
 
 typedef int (*hz_getfn)(void *ctx);

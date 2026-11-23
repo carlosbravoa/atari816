@@ -154,11 +154,10 @@ The needs:
 | `mem=1024K` | So much free memory when the program starts (`mem=2M` is 2048 KB). |
 | `joystick` | Not checked (a joystick cannot be detected). The Installer shows it. |
 
-**In C:** `hcc --needs horizon=0.29,opl2,mem=1024K` (cc816; the option may be given more
-than once). hcc adds a small check that runs before `main`. A program built with
+**In C:** `hcc --needs horizon=0.29,opl2,mem=1024K` (the option may be given more than
+once). hcc adds a small check that runs before `main`. A program built with
 `--code large` needs Horizon 0.28 anyway: with `--needs`, hcc raises `horizon` to 0.28 at
-least. Without `--needs` nothing is added and nothing is checked. (vbcc: not supported;
-call `hz_sys_info()` yourself.)
+least. Without `--needs` nothing is added and nothing is checked.
 
 **In assembly:** include `needs.inc` and put `HZ_NEEDS` first at the start:
 

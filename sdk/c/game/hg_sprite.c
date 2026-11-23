@@ -14,7 +14,6 @@ static void end(void)
     unsigned i, ns = 0, nm = 0;
     for (i = 0; i < count; i++) {
         if (dset[i]) {
-            /* (memcpy: vbcc 65816 miscompiles "a[i] = b[j]" for structures at -O1) */
             memcpy(&sprset[ns++], &tab[i], sizeof(hz_sprite));
             dset[i] = dmove[i] = 0;
         } else if (dmove[i]) {

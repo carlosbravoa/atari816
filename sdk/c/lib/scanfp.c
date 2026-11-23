@@ -1,7 +1,7 @@
 /* scanfp.c - scanf's floating-point conversions for cc816: %f %F %e %E %g %G %a %A (with
  * l and L: double and long double, the same 32-bit format as float).
  *
- * scan.c calls __hz_scanfp through the hook rt/cc816/fp_hooks.s installs in programs that
+ * scan.c calls __hz_scanfp through the hook rt/fp_hooks.s installs in programs that
  * use floating point. It reads the longest beginning of a number the input has (at most
  * the width; a sign, digits with one '.', an exponent, 0x hexadecimal with a p exponent,
  * inf, infinity, nan), as C's scanf does, and converts it with strtod (exact). When what

@@ -6,7 +6,7 @@
  *   int main(void)
  *   {
  *       int x = 150;
- *       if (hg_screen(HG_320X180, "Demo") < 0)
+ *       if (hg_screen(HG_320X180 | HG_DOUBLE, "Demo") < 0)  // two pages: all redrawn
  *           return 1;
  *       while (hg_frame()) {                    // one frame: 60 a second
  *           if (hg_key(HG_KEY_ESC)) break;
@@ -18,7 +18,7 @@
  *       return 0;                               // hg_close() runs at exit by itself
  *   }
  *
- * The guide and the reference: sdk/docs/c/games.md. Large model only (hcc's default).
+ * The guide and the reference: sdk/docs/c/games.md. Both code models (hcc --code large too).
  *
  * Conventions. Every name starts with hg_ (HG_ for constants). Coordinates are pixels,
  * (0, 0) the top left, x right, y down; ints may be negative (the blitter clips). Colours are
@@ -37,10 +37,6 @@
 #define HGAME_H
 
 #include <horizon.h>
-
-#ifdef HZ_TINY
-#error "hgame.h: the game library is for the large model (hcc's default)"
-#endif
 
 /* ================================================================ the screen */
 

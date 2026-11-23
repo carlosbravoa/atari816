@@ -249,7 +249,6 @@ static void t_files(void)
     check(fopen("/X", "q") == 0 && errno == EINVAL, "bad mode");
 }
 
-#ifdef __CC816__
 #include <fcntl.h>
 #include <unistd.h>
 /* POSIX descriptors (fcntl.h, unistd.h: DOS and Unix programs' open/read/write/lseek;
@@ -372,7 +371,6 @@ static void t_fullheap(void)
     remove("/CFULL.TXT");
     check(strstr(strerror(ENOMEM), "heap") != 0, "strerror(ENOMEM) names the heap");
 }
-#endif
 
 static void t_dir(void)
 {
@@ -453,13 +451,9 @@ int main(int argc, char **argv)
     t_string();
     t_stdlib();
     t_malloc();
-#ifdef __CC816__
     t_fullheap();
-#endif
     t_files();
-#ifdef __CC816__
     t_posix();
-#endif
     t_dir();
     t_time();
     t_far();

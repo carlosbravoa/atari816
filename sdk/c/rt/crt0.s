@@ -26,7 +26,7 @@
 ;
 ; The large code model (hcc --code large, ca65 -D __CC816_LARGE__): C functions are called
 ; with JSL and return with RTL (model.inc), wherever they are. Before the constructors,
-; __hz_xload (lib/cc816/xload.c) loads the program's other code banks from its own file;
+; __hz_xload (lib/xload.c) loads the program's other code banks from its own file;
 ; then the constructors, main and the exit functions are called as JSL calls. __icall is
 ; the call through a function pointer: JSL __icall with the pointer in __fpt (a 16-bit
 ; address in this bank: the function, or its thunk JML in the main bank).
@@ -51,7 +51,7 @@
 .if LARGE
 	.export	__icall, __cc816_large
 	.import	___hz_xload
-__cc816_large = 1		; (every object cc816 makes for the large model imports it)
+__cc816_large = 1		; (every object cc816 makes for the large code model imports it)
 .else
 	.export	__cc816_small
 __cc816_small = 1
@@ -75,7 +75,7 @@ __h2:	.res	4
 __h3:	.res	4
 __cbank: .res	2		; the code bank's number (far pointers to near data)
 __hz_zpend:			; (the end of cc816's direct page: the controls library's
-				; zero page follows, ui/lib816/hui816.inc)
+				; zero page follows, ui/lib/hui816.inc)
 
 	.segment "STARTUP"
 __start:
@@ -152,7 +152,7 @@ __start:
 	bcc	@sg
 	; the constructors (functions named _INIT_n_...: cc816 lists them for ld65)
 .if LARGE
-	jsl	___hz_xload	; the other code banks (lib/cc816/xload.c)
+	jsl	___hz_xload	; the other code banks (lib/xload.c)
 .endif
 	ldx	#0
 @ct:	cpx	#__CONSTRUCTOR_COUNT__ * 2
@@ -272,7 +272,7 @@ __icall:
 .endif
 
 	.segment "RODATA"
-; the heap: from the end of bss to the software stack's guard zone (lib/cc816/malloc.c)
+; the heap: from the end of bss to the software stack's guard zone (lib/malloc.c)
 ___hz_heapstart:
 	.addr	heap0
 ___hz_paintflag:		; nonzero with hcc --debug (lib/exitchk.c's report)
@@ -290,7 +290,7 @@ inexit:	.res	2
 exitcode: .res	2
 nexit:	.res	2
 exittab: .res	MAXEXIT * 2
-___hz_heapuse:	.res	2	; the heap's bytes in use (lib/cc816/malloc.c), and the most
+___hz_heapuse:	.res	2	; the heap's bytes in use (lib/malloc.c), and the most
 ___hz_heappeak:	.res	2	; since the start (hz_heap_peak, --debug's report)
 
 	.segment "HEAPSTART"		; (hzprog.cfg: after every module's bss)

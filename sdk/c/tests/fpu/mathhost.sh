@@ -1,9 +1,9 @@
 #!/bin/sh
-# mathhost.sh - build cc816's math library (lib/cc816/math_*.c) for the host in single
+# mathhost.sh - build cc816's math library (lib/math_*.c) for the host in single
 # precision and measure it (mathacc.c): sh mathhost.sh [N arguments a function]
 set -e
 HERE=$(cd "$(dirname "$0")" && pwd)
-LIB=$HERE/../../lib/cc816
+LIB=$HERE/../../lib
 T=$(mktemp -d)
 trap 'rm -rf "$T"' EXIT
 ln -s "$HERE/../../cc816/include/math.h" "$T/math.h"

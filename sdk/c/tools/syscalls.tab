@@ -14,7 +14,7 @@
 #          noreturn  never returns
 # params   C parameters in order, each "type name:REG". REG: A X Y (16-bit), A.lo A.hi
 #          X.lo X.hi Y.lo Y.hi (one byte of the register), XY (a data pointer: X = offset,
-#          Y = bank; in the tiny model Y = 0), XY32 (a 32-bit value: X low, Y high),
+#          Y = bank: the code bank for a near pointer), XY32 (a 32-bit value: X low, Y high),
 #          AX32 (A low, X high). A constant: "=A:0" (A = 0), "+A:0x8000" (A |= $8000).
 # outs     x, y: X / Y after the call are also kept in hz_x / hz_y (also after an error)
 #

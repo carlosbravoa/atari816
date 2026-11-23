@@ -1,25 +1,18 @@
-/* rttest.c - the runtime (fastrt/: 16- and 32-bit multiply, divide, modulo; memcpy,
- * memmove, memset, strlen, strcpy, memcmp) against the tables of tools/genrt.py.
+/* rttest.c - the runtime (rt/rt_*.s, rt/mem.s: 16- and 32-bit multiply, divide, modulo;
+ * memcpy, memmove, memset, strlen, strcpy, memcmp) against the tables of tools/genrt.py.
  *
  *   rttest [TABLE]          (default /RTTAB.BIN)
  *
  * Prints "rt NAME: N cases, F failures" per operation (and the first failures in hex),
  * then "RT PASS" or "RT FAIL". The checks use no multiply or divide (the expected values
  * come from the table; numbers are printed by subtraction), and the memory checks fill
- * and sum the buffer with byte loops, not with the functions under test. In the large
- * model the memory cases run twice: in a buffer in the code bank, and in a bank of its
- * own (hz_far_alloc), plus copies between the two. (cc816's runtime is rt/cc816; its
- * pointers reach the code bank only: one pass, as the tiny model.)
+ * and sum the buffer with byte loops, not with the functions under test. The memory
+ * cases run in a buffer in the code bank (C's pointers reach the code bank).
  */
 #include <string.h>
 #include <horizon.h>
 
 #define BUF 4096
-/* vbcc -mtiny defines __MNEAR (not __MTINY, which its manual names). cc816's pointers
- * are 16-bit too (the code bank): no far pass, as the tiny model */
-#if defined(__MTINY) || defined(__MNEAR) || defined(__CC816__)
-#define RT_TINY 1
-#endif
 #define MAXSHOW 4
 
 static int fh;
@@ -300,59 +293,16 @@ static int run_table(const char *path, const char *where)
     return 0;
 }
 
-#ifndef RT_TINY
-/* copies between the code bank and another bank */
-static void crossbank(char *far)
-{
-    unsigned i, c1, c2, fails = 0;
-    char *save = buf;
-    for (i = 0; i < 1000; ++i)
-        staticbuf[i] = (char)(i * 7 + 3);
-    memcpy(far + 100, staticbuf, 1000);
-    memmove(staticbuf + 1001, far + 100, 1000);
-    buf = staticbuf; c1 = cksum(0, 1000); c2 = cksum(1001, 2001);
-    if (c1 != c2) ++fails;
-    buf = far; c2 = cksum(100, 1100);
-    if (c1 != c2) ++fails;
-    memset(far + 5000, 'x', 3000);
-    for (i = 5000; i < 8000; ++i)
-        if (far[i] != 'x') { ++fails; break; }
-    if (memcmp(far + 100, staticbuf, 1000) != 0) ++fails;
-    buf = save;
-    out("rt crossbank: 4 checks, "); outu(fails); out(" failures\n");
-    total_fail += fails;
-}
-#endif
-
 int main(int argc, char **argv)
 {
     const char *path = argc > 1 ? argv[1] : "/RTTAB.BIN";
     unsigned long t_start = hz_uptime();
     out("rt: the runtime against ");
     out(path);
-#if defined(__CC816__)
-    out(" (cc816)\n");
-#elif defined(RT_TINY)
-    out(" (tiny model)\n");
-#else
-    out(" (large model)\n");
-#endif
+    out("\n");
     buf = staticbuf;
     if (run_table(path, ""))
         return 2;
-#ifndef RT_TINY
-    {
-        char *far = (char *)hz_far_alloc();
-        if (!far) {
-            out("rt: no bank for the far pass\n");
-            total_fail++;
-        } else {
-            buf = far;
-            run_table(path, " (far bank)");
-            crossbank(far);
-        }
-    }
-#endif
     out("rt: ");
     outu(hz_uptime() - t_start);
     out(" ms in all\n");

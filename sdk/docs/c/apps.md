@@ -17,7 +17,7 @@ cd mywin && make && make run              # HELLOWIN.PRG; the Desktop starts it
 | --- | --- |
 | Header | `#include <hui.h>` (after `horizon.h`; it includes it if needed) |
 | Linking | automatic: `hcc` links the library when the program uses a name of `hui.h` (`--ui` forces it) |
-| Compilers | cc816 (the default: the library is linked straight into the program) and vbcc's large model (as a block); vbcc's tiny model is refused with a message |
+| Code models | both (small and large): the library is linked straight into the program |
 | Needs | cc65's `ca65`, `ld65` and `ar65` (the library is assembly), the Horizon tree (its sources) |
 | Template | [sdk/templates/c-window-app](../../templates/c-window-app): the C twin of [window-app](../../templates/window-app), the same window pixel for pixel |
 | Examples | [sdk/c/examples/guests](../../c/examples/guests) (this tutorial's steps), [sdk/c/examples/viewer](../../c/examples/viewer) (a text viewer: a list, scroll bars, resizing, drag and drop) |
@@ -76,7 +76,7 @@ int main(void)
 
 ```
 $ sdk/c/bin/hcc --map -o STEP1.PRG step1.c
-hcc: building the controls library for cc816 (.../sdk/c/build/ui/cc816)
+hcc: building the controls library (.../sdk/c/build/ui/small)
 STEP1.PRG: 16,825 bytes on the card, 22 relocations
   code bank: code+constants 16,521 + data 78 + bss 2,680 = 19,279 of 57,072; heap 37,793; software stack 8,192
   window:    stack about 32,000 (from $7F7F down to $0100); direct page 206 bytes
@@ -291,47 +291,29 @@ static void show_clock(void)
 ```
 
 - `ui_filedlg(0 open / 1 save, path, title)` returns 0 with the full path in `path` (128
-  bytes), or -1 when cancelled. `path` is a local here: with cc816 a local is in the code
-  bank like everything else; with vbcc, buffers given straight to a function may be
-  anywhere (they are copied in and out). The dialog changes the task's current
+  bytes), or -1 when cancelled. `path` is a local here: a local is in the code bank like
+  everything else. The dialog changes the task's current
   folder as the user moves; Save asks before replacing a file.
 - A timer: `hz_win_timer(win, ticks)` sends `WE_TICK` every ticks x 10 ms (0 stops it).
 - The whole program: [step5.c](../../c/examples/guests/step5.c), 174 lines; 26,390 bytes
-  on the card with cc816 (33,674 with vbcc, the library's block 17,407 for 15 names of
-  `hui.h`).
+  on the card.
 
 ## The rule: what must be in the code bank
 
 The controls library uses 16-bit pointers into the program's **code bank** (where its
 globals, string constants and `malloc` blocks are).
 
-**With cc816 there is nothing to watch**: every C data pointer is an offset in the code
+**There is nothing to watch**: every C data pointer is an offset in the code
 bank, locals included (arrays, structures and locals whose address is taken live on the
 software stack, in the code bank). A control may be a local of a function that does not
 return while the control is in use (`main`'s), a string anything. Only memory of other
 banks (`__far` pointers) has to be copied in first: a `const char *` cannot hold a far
-address at all with cc816 (see [porting.md](porting.md)).
-
-**With vbcc** a large-model C pointer is 32 bits and reaches every bank, so:
-
-| | Where it may be (vbcc) |
-| --- | --- |
-| controls, control lists, `ui_alertblk`, `ui_dlgblk`, `ui_askblk`, a field's buffer, the strings their fields point to, a menu or pop-up item list | **global or static** variables, string constants, `malloc` blocks: not locals (vbcc's stack is in bank 0) |
-| a string given straight to a function (`ui_text`, `ui_fdset`, a path, `ui_twidth`, ...) | anywhere: copied to one of three 256-byte buffers for the call (at most 255 characters) |
-| a buffer a function writes (`ui_filedlg`'s path, `ui_clkfmt`, `ui_fit`, `ui_urlname`) | anywhere: copied in and back |
-| the text a row function returns | anywhere (a far bank too): the library copies it |
-| out-pointers (`ui_event`'s `ctl`, `ui_prog`'s `icon`) | anywhere |
+address at all (see [porting.md](porting.md)).
 
 The structures' pointer fields are `__near` (16 bits), so a static initialiser takes a
 string constant or a static array directly (`UI_LABEL(..., "Name:")`, `UI_FIELD(...,
-name, sizeof name)`). With vbcc a function given a structure that is not in the code bank
-stops the program with a message (on stderr: the console log):
-
-```
-hui: ui_draw: ctl: not in the code bank: give the controls library a global, static or malloc'd object or a string constant, not a local variable (sdk/docs/c/apps.md, "The rule")
-```
-
-(`tests/ui/badhui.c ptr` checks both: vbcc stops it, cc816 draws the local control.)
+name, sizeof name)`). The text a row function returns may be anywhere, a far bank too:
+the library copies it. (`tests/ui/badhui.c ptr` checks that a local control works.)
 
 ## Events
 
@@ -449,15 +431,15 @@ function).
 
 The controls library is assembly (ca65), linked by ld65.
 
-**cc816** links it straight into the program, as Horizon's own assembly programs have it:
+hcc links it straight into the program, as Horizon's own assembly programs have it:
 
 1. **The SDK build** (the first `hcc` of a program using `hui.h`): `tools/hui816.py`
    assembles the Horizon tree's current sources (`horizon/user/ui*.s` into `ui.lib`,
    `ulib.s` into `ulib.lib`, as Horizon's Makefile does), and a binding library
    `hui816.lib`: one generated shim per function and one alias per variable
-   (`tools/genhui.py --shims816` from `sdk/c/ui/hui.tab`), the SDK's helpers
-   (`sdk/c/ui/lib816`: the row and copy callbacks, the failure exit) and `ui/huirt.c`.
-   All in `sdk/c/build/ui/cc816/`, built again whenever one of those files changes.
+   (`tools/genhui.py --shims` from `sdk/c/ui/hui.tab`), the SDK's helpers
+   (`sdk/c/ui/lib`: the row and copy callbacks, the failure exit) and `ui/huirt.c`.
+   All in `sdk/c/build/ui/small/` (and `large/` for the large code model), built again whenever one of those files changes.
 2. **A program's link**: when ld65 reports a `hui.h` name undefined (or with `--ui`), hcc
    links again with the three libraries; ld65 takes the shims the program calls and the
    library's modules they need, and places the library's zero page after cc816's registers
@@ -470,49 +452,19 @@ The controls library is assembly (ca65), linked by ld65.
    library's direct page and calls the C function (a list's row function through
    `HUI_ROWCB`, `hui_rowtramp`).
 
-**vbcc** (its objects are another format than ld65's) gets the library as a block that
-goes first in the C program:
+Measured (`hcc --map`):
 
-1. **The SDK build** (`make -C sdk/c`, or the first `hcc --cc vbcc` of a program using
-   `hui.h`): `tools/hzc.py build_ui` assembles the Horizon tree's current sources
-   (`horizon/user/ui*.s`, `ulib.s`), the SDK's helpers (`sdk/c/ui/lib`: the header, the
-   row and copy callbacks, the string copies, the failure exit) and one generated shim
-   per function (`tools/genhui.py` from `sdk/c/ui/hui.tab`) into an ar65 archive
-   (`sdk/c/build/ui/hui.lib`). It is built again whenever one of those files changes, so
-   it tracks `horizon/`.
-2. **A program's link**: when vlink reports a `hui.h` name undefined (or with `--ui`),
-   hcc runs ld65 on the archive with exactly the shims the program uses
-   (`--force-import`): ld65 takes them and the parts of the library they need, linked at
-   `$0100` with the zero page at `$50-$EF`. `hzc.o65_block` turns ld65's o65 output into
-   the raw block and the list of its bank bytes. A small generated vasm file puts the
-   block first in the program's text (the `*_text.blob` section of `rt/horizon.cmd`),
-   fills its 12-byte header (the program's entry `JMP _start`, a `JML` to the C side's
-   `__hui_fatal`, the address of `hz_errno`, the list row callback's `JMP`) and gives
-   every C name its address in the block. `mko65` adds the block's bank bytes to the
-   program's relocations.
-3. **A call**: C calls a shim with JSL (the first argument in A or A/X, the others on the
-   stack); the shim checks what it must (a structure in the code bank, not inside a
-   callback), copies strings that are elsewhere, loads A, X, Y and the library's
-   direct-page arguments, JSRs the routine, and turns its registers and carry into the C
-   result. A callback goes the other way: the library JSRs a small routine that saves the
-   block's direct page and JSLs the C function.
-
-Measured (`hcc --map`; vbcc's block is part of its program):
-
-| Program | Names of hui.h | cc816: program on the card | vbcc: block | vbcc: program on the card |
-| --- | --- | --- | --- | --- |
-| a program calling `ui_beep` only | 1 | 10,903 | 9,884 | 18,996 |
-| `step1.c` (a window, `ui_getev`) | 3 | 16,821 | 11,006 | 20,529 |
-| the c-window-app template | 10 | 25,168 | 15,750 | 32,531 |
-| `step5.c`; the viewer | 15; 13 | 26,390; 26,214 | 17,407; 15,937 | 33,674; 33,815 |
-| tests/ui/uitest.c (nearly everything) | 66 | 38,471 | 27,795 | 50,791 |
+| Program | Names of hui.h | Program on the card |
+| --- | --- | --- |
+| a program calling `ui_beep` only | 1 | 10,903 |
+| `step1.c` (a window, `ui_getev`) | 3 | 16,821 |
+| the c-window-app template | 10 | 25,168 |
+| `step5.c`; the viewer | 15; 13 | 26,390; 26,214 |
+| tests/ui/uitest.c (nearly everything) | 66 | 38,471 |
 
 The library's granularity is its source files: `ui_beep` alone brings `ui.s`, the core
-every control needs. With vbcc, of the 27.8 KB block of the last line: the library and
-ulib 23.8 KB (of which 5.4 KB zeroed data), the shims 2.8 KB (about 50 bytes each), the
-SDK's helpers 1.2 KB (768 bytes of it the string buffers). cc816's programs are smaller:
-its shims have no checks or copies to make, its code is denser, and its library is linked
-by the function. The same template in assembly (`sdk/templates/window-app`) is 16,744
+every control needs. The shims have no checks or copies to make (the pointers are in the
+code bank already), and the C library is linked by the function. The same template in assembly (`sdk/templates/window-app`) is 16,744
 bytes: C's own library (printf, files) is most of the difference.
 
 `make -C sdk/c check` runs `genhui.py --check`: it fails when a public routine or
@@ -523,36 +475,14 @@ sources give now (`make -C sdk/c gen` writes it again).
 
 ## Limits
 
-- **cc816 or vbcc's large model**: the library runs with DBR = the code bank. `hui.h` in
-  vbcc's tiny model is an `#error`; `hcc --cc vbcc --ui --model tiny`, and a tiny-model
-  link that needs a `hui.h` name, are refused with a message.
-- **The direct page**: with cc816 the library's variables follow cc816's registers
+- **The data bank**: the library runs with DBR = the code bank, as every C program does.
+- **The direct page**: the library's variables follow cc816's registers
   ($00-$77; ld65 places them: 196 bytes in all for uitest); your own assembly declares
-  its zero page in a `ZEROPAGE` segment and ld65 places it too. With vbcc the block's
-  variables are at `$50` and up (`$50+96` for a typical program, at most `$EF`); vbcc's
-  registers are `$00-$4F`, the float library's `$F0-$FF`: assembly of your own linked
-  with a `hui.h` program must not use `$50-$EF`.
-- **Program size**: the library is 9-25 KB of the code bank (table above), its zeroed
-  data included in the file with vbcc. Big data belongs in other banks (`hz_far_alloc`):
+  its zero page in a `ZEROPAGE` segment and ld65 places it too.
+- **Program size**: the library is 9-25 KB of the code bank (table above). Big data belongs in other banks (`hz_far_alloc`):
   the viewer keeps the file in one.
-- With vbcc, strings copied for a call: at most 255 characters (`ui_text` of a longer
-  string draws 255).
 - A callback must not call a control routine; the library is not reentrant.
 - Nothing of this runs on the real board yet: it was built and tested in the emulator.
-
-## Two compiler faults this work found (vbcc)
-
-Both are repaired by hcc in vbcc's output (`hzc.fix_nearoff`, `hzc.fix_neardw`) and
-checked by `tests/codegen` ([reference.md](reference.md), "Compiler notes", 5 and 6):
-
-- a pointer member of a static structure, dereferenced at offset 0 (`s.p[0]`,
-  `s.next->first`), was read at the member's offset instead (both models: the tiny
-  model's pointers, the large model's `__near` ones, as the controls' structures have);
-- a `__near` pointer in initialised data (`static ui_label l = UI_LABEL(..., "Name:")`)
-  did not link (vlink: "doesn't fit into relocation type R_ABS").
-
-And the linker scripts: a static variable whose name contained "text" (`ntext`,
-`context`) was placed in the code instead of the data (the tiny model failed to link).
 
 ## Files
 
@@ -561,10 +491,8 @@ And the linker scripts: a static variable whose name contained "text" (`ntext`,
 | `sdk/c/include/hui.h` | the header: the rule, the types, the initialisers |
 | `sdk/c/include/huigen.h` | generated: the constants, the structures, the prototypes |
 | `sdk/c/ui/hui.tab` | the signature table (its header explains the format) |
-| `sdk/c/ui/lib816/` | the SDK's assembly helpers for cc816 (ca65): `hui816.inc`, `core.s`, `row.s`, `cpcb.s`, `setwin.s` |
-| `sdk/c/ui/lib/` | the SDK's assembly helpers for vbcc's block (ca65) |
-| `sdk/c/ui/huirt.c`, `sdk/c/ui/blob.cfg` | the C side's failure exit (both), ld65's configuration of vbcc's block |
-| `sdk/c/tools/genhui.py` | huigen.h, the shims (`--shims816` for cc816), the check |
-| `sdk/c/tools/hui816.py` | cc816: the three libraries, `link_inputs()` |
-| `sdk/c/tools/hzc.py` | vbcc: `build_ui`, `ui_block`, `o65_block`; `link(..., ui=)` |
+| `sdk/c/ui/lib/` | the SDK's assembly helpers (ca65): `hui816.inc`, `core.s`, `row.s`, `cpcb.s`, `setwin.s` |
+| `sdk/c/ui/huirt.c` | the C side's failure exit |
+| `sdk/c/tools/genhui.py` | huigen.h, the shims (`--shims`), the check |
+| `sdk/c/tools/hui816.py` | the three libraries, `link_inputs()` |
 | `sdk/c/tests/ui/` | `uitest.c` (+ script), `badhui.c` |

@@ -17,9 +17,9 @@ from cc816.ctypes816 import CError, Unsupported       # noqa: E402
 RUN816 = os.path.join(SDK, 'tools', 'run816.py')
 HORIZON = os.path.abspath(os.environ.get('HORIZON') or os.path.join(SDK, '..', 'horizon'))
 # the code model ($HZ_CODE: check.py --code large sets it): the large one's results go to
-# build/cc816l (the random programs' sources stay in build/cc816, SRCBUILD)
+# build/cc816-large (the random programs' sources stay in build/cc816, SRCBUILD)
 CODE = os.environ.get('HZ_CODE') or 'small'
-BUILD = os.path.join(SDKC, 'build', 'cc816l' if CODE == 'large' else 'cc816')
+BUILD = os.path.join(SDKC, 'build', 'cc816-large' if CODE == 'large' else 'cc816')
 SRCBUILD = os.path.join(SDKC, 'build', 'cc816')
 
 

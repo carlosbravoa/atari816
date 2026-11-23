@@ -1,4 +1,4 @@
-/* time.h - cc816 (Horizon C SDK; lib/time.c, lib/cc816/timeconv.c). time() counts seconds
+/* time.h - cc816 (Horizon C SDK; lib/time.c, lib/timeconv.c). time() counts seconds
  * since 1970 (Horizon's clock, no time zones); clock() counts 50 a second. */
 #ifndef _TIME_H
 #define _TIME_H

@@ -3,11 +3,11 @@
  * %d %i %u %o %x %X %c %s %p %n %%; the sizes hh h l (and z t: int); flags - + space # 0;
  * width and precision, * for either.
  * ll and j (intmax_t is long long) with d i u o x X go to __hz_fmt_ll (fmtll.c), which a
- * program that uses long long has installed (rt/cc816/ll_hookp.s); without it they are
+ * program that uses long long has installed (rt/ll_hookp.s); without it they are
  * read as l.
  * %f %F %e %E %g %G %a %A (a float, double or long double: one 32-bit format) go to
  * __hz_fmt_float (fmtfp.c), which a program that uses floating point has installed
- * (rt/cc816/fp_hookp.s); without it they print as they are written.
+ * (rt/fp_hookp.s); without it they print as they are written.
  */
 #include <stdio.h>
 #include <stdarg.h>

@@ -1,4 +1,4 @@
-/* mathacc.c - the accuracy of cc816's math library (lib/cc816/math_*.c), measured on the host:
+/* mathacc.c - the accuracy of cc816's math library (lib/math_*.c), measured on the host:
  * mathhost.sh builds those files for the host in single precision (double = float, as
  * cc816) with their names prefixed t_, and this program compares each function with
  * glibc's double-precision one rounded to float (the correctly rounded result, nearly

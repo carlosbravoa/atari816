@@ -1,7 +1,7 @@
 /* unistd.h - POSIX's file descriptor calls (cc816): read, write, lseek, close, unlink,
  * isatty. Descriptors 0, 1 and 2 are the console (stdin, stdout, stderr, through
  * stdio); open (fcntl.h) gives 3 and up, one for each of Horizon's file handles.
- * lib/cc816/posixio.c. */
+ * lib/posixio.c. */
 #ifndef _UNISTD_H
 #define _UNISTD_H
 #include <stddef.h>

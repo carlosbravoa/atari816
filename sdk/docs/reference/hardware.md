@@ -30,9 +30,8 @@ Revisions (SYS_REV; `ws_config` with A = 0 returns it in X):
 | $0A | Lau, the sample player |
 | $0B | Marga's 16 sprites and fine scrolling |
 | $0C | the OPL2 (YM3812); one POKEY, mono: POKEY 2 and the DACs are gone, native sound uses POKEY's second register bank |
-| $0B | Marga's 16 sprites and fine scrolling (scroll registers, wrap, split) |
 
-**emu816 models REV $0B by default**; `--rev 10`, `9`, `8` or `7` (also `run816.py --rev N`)
+**emu816 models REV $0C by default**; `--rev 11`, `10`, `9`, `8` or `7` (also `run816.py --rev N`)
 emulate the older ones. Test your program on the revisions you care about: without sprites
 or scrolling (before $0B) the calls give ENODEV; without the blitter Horizon draws with the
 CPU, 5-15 times slower. The board's own revision is whatever its FPGA build is: ask SYS_REV

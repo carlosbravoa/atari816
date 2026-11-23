@@ -16,7 +16,7 @@ from .regalloc import SCR, CS
 DP_NAMES = ('__rg', '__sp', '__rv', '__h0', '__h1', '__h2', '__h3', '__cbank')
 INV = {'beq': 'bne', 'bne': 'beq', 'bcc': 'bcs', 'bcs': 'bcc', 'bmi': 'bpl', 'bpl': 'bmi',
        'bvc': 'bvs', 'bvs': 'bvc'}
-# floating point (rt/cc816/fp_*.s): operands in __h0 (and __h1), the result in __h0 (__fcmp:
+# floating point (rt/fp_*.s): operands in __h0 (and __h1), the result in __h0 (__fcmp:
 # A). The ...r entries take the operands the other way round (__h0 = b, __h1 = a).
 FBIN = {'fadd': '__fadd', 'fsub': '__fsub', 'fmul': '__fmul', 'fdiv': '__fdiv',
         'fcmp': '__fcmp'}
@@ -780,7 +780,7 @@ class Gen:
             return self.call64('__smod64', i)
         self.call32('__smod32', i)
 
-    # --- floating point (rt/cc816/fp_*.s): the operands in __h0 (and __h1), the result
+    # --- floating point (rt/fp_*.s): the operands in __h0 (and __h1), the result
     # in __h0 (__fcmp: A), as the 32-bit helpers. A chain of float operations keeps its
     # value in __h0: an operand __h0 already holds is not loaded again (the previous
     # result as the second operand: the ...r entry), and a result only the next

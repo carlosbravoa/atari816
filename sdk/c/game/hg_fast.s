@@ -1,15 +1,18 @@
 ; hg_fast.s - hgame's hot paths in assembly for cc816 (ca65): the draw record (clip, count,
 ; append: hg__rec), hg_fill, the text strip, hg__umul. hg_draw, hg_draw_part, hg__blitmem
 ; and hg__fillmem are in hg_fimg.s (only games that draw images link them, and they pull
-; hg_image.c in). The same routines as ../hg_fast.s (vbcc), ported: see its comments for
-; why they are in assembly.
+; hg_image.c in).
+;
+; Why assembly: in C one hg_fill or hg_draw took 190-270 us (runtime multiplies, a
+; pointer computed for every field), about as much as the kernel's own work for a sheet
+; record (21 us). Here they take a few dozen.
 ;
 ; cc816's convention: JSR/RTS, A X Y 16-bit, D = 0, DBR = PBR = the code bank (where the
 ; library's globals are: absolute addresses); every argument on the stack from 3,s (2
 ; bytes, a long or __far pointer 4); data pointers are 16-bit offsets in the code bank;
 ; the result in A (32 bits: A low, X high). __rg+0..+47, __h0-__h3, __rv may be changed.
 ;
-; vbcc's registers here: r0-r15 -> __rg+0..+30, r28-r31 -> __rg+32..+38 (all scratch).
+; The names r0-r15 and r28-r31 below are scratch words: __rg+0..+30 and __rg+32..+38.
 	.p816
 	.smart	-
 	.a16

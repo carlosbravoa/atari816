@@ -1,14 +1,16 @@
-# Games on Horizon
+# Games on Horizon in assembly
+
+Read this when writing a game in 65816 assembly (for a game in C: references/hgame.md).
 
 Three starting points (all tested):
-- `SDK/examples/deepdive` - **full screen** (Horizon 0.18): own framebuffer in two banks,
+- `sdk/examples/deepdive` - **full screen** (Horizon 0.18): own framebuffer in two banks,
   fine scrolling with wrap and a split panel, one draw list a frame (LS_VBL), 15 hardware
   sprites with one spr_set a frame, own palette + raster table, Lau samples made at run
   time, pause on WE_UNFOCUS. Start here for a scrolling or full-screen game.
-- `SDK/templates/game` (Gem Run) - a game **in a window** on any revision: tile map, keyed-blit
+- `sdk/templates/game` (Gem Run) - a game **in a window** on any revision: tile map, keyed-blit
   sprites with dirty rectangles, timer loop, keys + mouse, POKEY sound, title / play / game over.
-- `SDK/examples/lantern` - a finished arcade game in a window.
-Long version: `SDK/docs/reference/game-patterns.md`; the calls: `SDK/docs/reference/games.md`.
+- `sdk/examples/lantern` - a finished arcade game in a window.
+Long version: `sdk/docs/reference/game-patterns.md`; the calls: `sdk/docs/reference/games.md`.
 
 ## Constraints that shape the design
 

@@ -2,11 +2,11 @@
  *
  * %d %i %u %o %x %X %p %c %s %[set] %[^set] %n %%; the sizes hh h l (z t: int); ll and j
  * (intmax_t is long long) go to __hz_scan_ll (scanll.c), which a program that uses long
- * long has installed (rt/cc816/ll_hooks.s); without it they are read as l; * (no
+ * long has installed (rt/ll_hooks.s); without it they are read as l; * (no
  * assignment) and widths. White space in the format skips any white space.
  * %f %F %e %E %g %G %a %A (float *, and with l or L double * and long double *: the same
  * 32-bit format) go to __hz_scan_float (scanfp.c), which a program that uses floating
- * point has installed (rt/cc816/fp_hooks.s); without it they fail. The result: the number
+ * point has installed (rt/fp_hooks.s); without it they fail. The result: the number
  * of assignments, or EOF when the input ended before the first conversion.
  */
 #include <stdio.h>

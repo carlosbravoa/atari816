@@ -1,88 +1,231 @@
-# Testing recipes
+# Testing programs in the emulator
+
+Purpose: how to run, drive and check a Horizon program in emu816 (`sdk/tools/run816.py`),
+and how to write a `make test` whose PASS means something. `SDK` = the `sdk` folder,
+`HORIZON` = the Horizon tree (`SDK/../horizon`) with a built card.
 
 ## run816.py
 
 ```
-python3 SDK/tools/run816.py PROG.PRG [--horizon DIR] [--mode desktop|shell] [--args TEXT]
-        [--script FILE] [--shot SECONDS]... [--seconds N] [--out DIR] [--file SRC[:DEST]]...
-        [--rev 7..11] [--log-sound] [--log-lau] [--expect TEXT]... [--window]
+python3 SDK/tools/run816.py PROG.PRG [options]      # PROG '-' with --mode none: no program
 ```
-- Copies `HORIZON/build/sd` to `OUT/card`, puts the program at `/APPS/NAME.PRG`, boots
-  emu816 headless, starts the program, plays the script, takes the shots.
-- `--mode desktop` (default): the Desktop starts it from its Programs menu (F10, Right,
-  Enter at 4.0-4.8 s; time 0 = 5.0 s). No arguments. Console output only in console.txt.
-- `--mode shell`: the text shell types `/APPS/NAME.PRG args`; console programs show their
-  output on the screen; window programs start the window system themselves.
-- Writes `OUT/shotN.png` (1280 x 720), `OUT/console.txt` (the kernel console, escapes
-  removed), `OUT/emu.err`, and leaves `OUT/card` (files the program wrote are there).
-- Exit 1 on a `[kill]`, a missing `--expect` text, or a blitter rule broken.
-- At most 16 shots per run. A run of 20 emulated seconds takes about a second.
-- `--window` opens the SDL window for playing by hand (emu816 built with `make SDL=1`).
 
-## Scripts
+It copies `HORIZON/build/sd` to `OUT/card`, puts the program on it (default
+`/APPS/NAME.PRG`), boots emu816 headless, starts the program, plays the script, and writes:
+
+| File | What |
+| --- | --- |
+| `OUT/console.txt` | the kernel console: every `printf`/`hz_puts` line, the shell's echo, `[kill]` lines |
+| `OUT/emu.err` | emu816's log: `--log-sound`/`--log-lau` writes, blitter rule reports |
+| `OUT/shotN.png` | screenshots from `--shot` and script `shot` lines (1280 x 720, each screen pixel 2 x 2) |
+| `OUT/autoN.png` | screenshots from `--shot-on` |
+| `OUT/card/` | the card after the run: files the program wrote are here |
+
+Options worth knowing (all from `run816.py --help`):
+
+| Option | Use |
+| --- | --- |
+| `--mode desktop` | default. The Desktop boots and starts the program from its Programs menu (time 0 = 5 s). No arguments. Console output only in `console.txt` |
+| `--mode shell` | the text shell types the path and `--args`; console output on the screen too. Time 0 about 3-4 s |
+| `--mode none` | the Desktop boots, nothing is started (time 0 = Desktop up): installing an app, opening menus. Program `-` puts nothing on the card |
+| `--args TEXT` | argument string (shell mode) |
+| `--dest PATH`, `--cd DIR` | where the program goes; `--cd` types `cd DIR` first (shell) |
+| `--script FILE` | input script (below) |
+| `--shot S` | screenshot at S seconds after the start (repeatable; at most 16 with the script's `shot` lines) |
+| `--shot-on TEXT` | `autoN.png` two frames after each console line holding TEXT |
+| `--seconds N` | run length after the start (default: last event + 2 s, + 20 s per `wait`) |
+| `--out DIR` | output folder (default `run-NAME`); old shots in it are deleted |
+| `--file SRC[:DEST]` | copy a file onto the card (default: the root, its name in capitals: `main.c` → `/MAIN.C`; repeatable) |
+| `--expect TEXT` | fail unless `console.txt` contains TEXT (repeatable) |
+| `--log-sound` / `--log-sound-us` | POKEY writes in `emu.err`: `sound $DB08 = $78` / `sound 149861 $DB01 = $00` (µs) |
+| `--log-lau` | Lau writes: `lau $DBxx = $yy` |
+| `--wav FILE` | record Lau + OPL2 (48 kHz stereo, as the board mixes; no POKEY) |
+| `--rev N` | hardware: 12 default (OPL2), 11 no OPL2, 10 no sprites/scrolling, 9 no Lau, 8 no command lists, 7 no blitter |
+| `--kbd-release MS` | release held keys MS ms after the last key change (the board's old firmware: 1000) |
+| `--prof FILE --prof-from S --prof-to S` | cycle profile (`references/performance.md`) |
+| `--net`, `--net-root DIR` | internet through an emulated PC link |
+| `--window` | SDL window, real time, play by hand (emu816 built with `make SDL=1`) |
+
+Exit code 1 when the program was killed (`[kill]`), an `--expect` text is missing, a
+`wait` never ended, or emu816 reported a blitter rule broken. A run of 20 emulated seconds
+takes about a second. Facts: emu816 runs at the board's speed (`--ideal-timing`: the old,
+faster model); joysticks read "nothing pressed" (they cannot be scripted); POKEY is not
+heard (only logged); `SYS_UPTIME` is the same at the same point of every run, so a random
+seed from it repeats.
+
+## Input scripts (sdk/tools/inputscript.py)
+
+One event per line; `#` comments and blank lines ignored. Each line starts with a time in
+ms after the program's start: absolute (`2000`) or relative to the previous line (`+500`).
+
+| Line | Does |
+| --- | --- |
+| `T text` | type text: a key every 50 ms, held 20 ms; capitals and symbols hold left Shift |
+| `T key NAME MS` | hold one key MS ms (game controls) |
+| `T down NAME` / `T up NAME` | press and keep / release (also `lshift lctrl lalt rshift rctrl ralt`) |
+| `T move X Y` | pointer to screen pixel (640 x 360 space), steps of 100 px every 20 ms; starts at 320, 180 |
+| `T click [left\|right\|middle]` | press and release (80 ms) where the pointer is |
+| `T dclick` | double click (left) |
+| `T press [btn]` / `T release` | hold / let go of a button |
+| `T drag X Y` | move with the button held, 16 px every 30 ms (after `press`; `release` after the drag's time) |
+| `T wheel N` | wheel steps, positive = up |
+| `T M dx:dy:wheel:buttons` | one raw relative mouse event |
+| `T shot` | screenshot |
+| `T wait TEXT` | nothing more happens until the program prints a console line holding TEXT (or at once if it printed one since the step before); every later time moves by as long as the wait took. Shots after a wait move with it |
+
+Escapes in typed text: `\n` Enter, `\b` Backspace, `\t` Tab, `\\` backslash, `^A`..`^Z`
+ctrl+letter, `{esc} {up} {down} {left} {right} {home} {end} {pgup} {pgdn} {ins} {del}
+{tab} {enter} {space} {bksp} {f1}`..`{f12}`, `{alt-x}`, `{ctrl-x}`, `{dXX}`/`{uXX}` raw
+key down/up by HID usage in hex.
+
+A script that follows the program (verified, `make test` of a scratch console program):
 
 ```
-# comments
-1000 shot                   absolute ms after the start
-+200 key space 100          hold Space 100 ms
-+300 key right 900          hold Right
-+50 {up}{up}x\n             taps: arrows, 'x', Enter (each key 20 ms, every 50 ms)
-+100 ^S                     ctrl+S; {alt-f} Alt+F; {f10}; {esc}; {tab}; {del}
-+200 move 200 150           pointer to screen (200, 150) (it starts at 320, 180 at boot)
-+100 click                  also: click right, dclick, press, release, wheel -3 (down)
-+100 press                  a drag: press, drag X Y (16 px every 30 ms), then release
-+100 drag 300 200
-+1000 release
-+100 down lshift            hold a key until `up lshift`
-+800 shot
+# wait for the program's line, then type
+0 wait t1: ready
++300 shot
++200 Ada\n
++1000 shot
 ```
-- Keys typed while a menu is open go to the menu.
-- In desktop mode Files is open at (24, 24) and has the focus until your window opens;
-  your menus come after "Horizon" and "Programs" in the bar.
-- `SYS_UPTIME` gives the same value at the same point of every run: random seeds from it
-  repeat, which keeps tests reproducible.
-- A Makefile with a shell run and a desktop run: the templates put `--mode $(RUNMODE)`
-  inside `RUN816`; call run816.py directly for the other mode.
-- A shot can catch a sprite between its erase and its redraw (a frame without it): if
-  that happens often, the drawing order flickers on the board too.
-- Give the program time: a window opens in < 0.5 s; a file dialog ~1 s; typing takes
-  50 ms per character.
-- Screen coordinates: the content of a window opened at (x, y) starts at (x + 1, y + 16).
-  Read positions off a contact sheet (`contact.py`, half size = screen pixels).
 
-## Looking at shots
+`python3 SDK/tools/inputscript.py FILE --keys` (or `--mouse`, `--shots`) prints the
+emu816 lists: a quick check of a script's timing.
 
-`python3 SDK/tools/contact.py OUT/sheet.png OUT/shot*.png` (half size; each shot is
-labelled with the number in its file name, so shot10 sorted before shot2 is still right) or
-`--full --crop X,Y,W,H` to zoom into a window (screen coordinates). Look for: text cut or
-overlapping, controls off the grid, leftovers of erased sprites (trails), wrong colours
-(img2inc's nearest-colour choice), something not redrawn after a dialog closed.
+Script rules:
 
-## Test targets
+- **Wait for the program, do not guess times.** Let the program print a line at each
+  state a test needs (Digger: `digger: title`, `digger: play`, `digger: dead`, `digger:
+  initials`) and write `+0 wait digger: play`. Digger's fixed-time script broke when
+  Horizon 0.29's Desktop started programs a little later.
+- **A line printed while the previous line's keys are still being sent is lost to the
+  next `wait`.** Each key event clears the remembered lines; typed text releases its last
+  key 22 ms after pressing it. Observed: `+300 Ada\n` then `+0 wait t1: saved` never
+  ended although the program printed `t1: saved Ada` at once. Wait only for lines that
+  come later than that (a state reached after work), and check instant replies with
+  `--expect`. The same for a `wait` at time 0 in shell mode: the shell's own Enter
+  release can clear a line the program prints in its first 20 ms.
+- Give a `move` time before the `click` (`+100 click`): the click does not wait for the
+  move's steps.
+- **A `wait` at a click's own time holds back the click's release** (sent 80 ms after the
+  press): `+200 click` then `+0 wait CLICKS: 1` never ends, because the button never sees
+  the release. Write `+200 wait ...` after a click. Two clicks at one place less than about
+  a second apart are a double click: a button counts one (`examples/window/test.script`).
+- Keys typed while a menu is open go to the menu. In desktop mode Files is open at
+  (24, 24) and has the focus until your window opens; your menus come after "Horizon"
+  and "Programs".
+- A window opened at (x, y) has its content at (x + 1, y + 16).
 
-- Console program: `--mode shell --args ... --expect 'exact output line'`.
-- Window program: `print` a line per event worth checking and `--expect` it (under the
-  Desktop console output goes only to the log = console.txt); shots; a file the program
-  wrote (`test "$(cat build/test/card/F.TXT)" =
-  "..."`), or a self-test mode printing PASS lines (`prog -t`, as Calculator, Sheet,
-  Solitaire do) checked with `--expect`.
-- Game: a script that plays (start, move, a state change), `--log-sound` and
-  `grep -q 'DB01' build/test/emu.err`.
-- BASIC: `basic -t FILE` runs a script file and copies the console to the log;
-  `-r FILE` runs a program (`SDK/templates/basic-game`).
-- Revisions: the emulator is REV $0B by default (sprites, scrolling, Lau, command lists);
-  `--rev 10` no sprites / scrolling, `--rev 8` no command lists, `--rev 7` no blitter (shows
-  what is slow).
+## Screenshots: --shot, shot lines, --shot-on
 
-## make check
+- `--shot S` and `shot` lines: at a time. Good for windows and still screens; fragile for
+  games (a frame earlier or later is another picture).
+- `--shot-on TEXT`: the program decides. It prints a line when the screen shows the state
+  to check, and keeps the picture still for a few frames (the shot is taken two frames
+  after the line). Digger stops at given game frames of a replay, waits two vertical
+  blanks, prints `digger: shot N frame F`, then holds six blanks.
+- A shot can catch a sprite between erase and redraw: if that happens often, the board
+  flickers too.
 
-`make -C SDK check`: the reference against horizon.inc / the kernel, and all reference
-examples assembled. Run it after changing the reference or when Horizon changes.
+## Looking at screenshots
 
-## On the board (by the user; needs the PC link)
+Open every PNG you take and look at it (an agent can read PNG files as images). For
+many, one sheet:
 
-`python3 SDK/tools/deploy816.py PROG.PRG --dest /BIN/PROG.PRG` copies it to the SD card
-over USB (`core/tools/atari.py send`); `--shot out.png` takes a screenshot of the native
-screen (`atari.py shot816`). Start the program from the Desktop (Files, or a Programs menu
-entry) or the Terminal. The board is about 2 x slower than the emulator on CPU work. Do not
-use the board unless the user asks.
+```
+python3 SDK/tools/contact.py build/test/sheet.png build/test/shot*.png
+python3 SDK/tools/contact.py build/test/crop.png build/test/shot2.png --full --crop 150,80,340,220
+```
+
+Half size (default): one sheet pixel = one screen pixel, so coordinates read off the sheet
+are `move X Y` coordinates. `--full --crop X,Y,W,H` zooms into a part (screen pixels).
+Each shot is labelled with the number in its file name: `shot1` and `auto1` both show "1",
+so put them on separate sheets. Look for: text cut or overlapping, controls off the grid,
+trails of erased sprites, wrong colours, things not redrawn after a dialog closed.
+
+## Checks
+
+| What | How |
+| --- | --- |
+| Console output | `--expect 'exact text'`; or grep `OUT/console.txt` in a check script |
+| Crashes | `[kill] task 4 KILL cause 03 addr 7F0000 pc 070237` in `console.txt`, run816 exit 1. Low 16 bits of `pc` in `NAME.lbl` (`hcc --map`) name the function (`references/pitfalls.md`, "Faults") |
+| Files written | the card is `OUT/card/` (shell mode starts programs in `/`): `grep -q '^name=Ada' build/test/card/RESULT.TXT` |
+| POKEY | `--log-sound`; `grep -q 'DB01' OUT/emu.err` (any write) or a specific one: Digger checks `sound $DB08 = $78` (16-bit voices on) and more than 500 writes to `$DB04-$DB07` |
+| Lau | `--log-lau`; count `^lau ` lines (Xargon wants more than 100) |
+| Music / samples heard | `--wav FILE`: Xargon's `tests/wavcheck.py` wants RMS above 500 in the title and the game and under 0.05 % clipped samples; hgame's tests want a peak above 1000 |
+| Program self-test | the program prints `PASS ...` / `FAIL ...` lines; the checker counts them and fails on any FAIL **or on no PASS at all** (`sdk/c/game/tests/run.py`) |
+
+## Reference pictures
+
+- **Pixel for pixel** (Digger, `tests/cmpshots.py RUN REFDIR NAME [--prefix auto]
+  [--update]`): PIL `ImageChops.difference(a, b).getbbox()` must be `None`.
+- **MD5 of the RGB pixels** (Xargon, `tests/shots.py RUN SUMS [--update]`): when the
+  pictures may not be committed (game data). `hashlib.md5(Image.open(p).convert('RGB').tobytes())`.
+- **A small share allowed** (hgame, `sdk/c/game/tests/run.py`): fail above 0.2 % of
+  differing pixels, write `NAME-diff.png`.
+- New references (`make refs`, `--update`, `--update-refs`) only after looking at the
+  pictures. A reference made from a work-in-progress Horizon build differs on a clean
+  checkout (Digger's frames 3, 4, 7 once did).
+- Pictures at times move with any timing change (`make refs` again); pictures at game
+  frames of a replay do not.
+
+## make test with c.mk
+
+`sdk/c/c.mk` targets: `make` (NAME.PRG), `make run` (`build/run/`), `make test`
+(`build/test/`), `make clean`. `make test` runs run816 with `RUNFLAGS` + `TESTFLAGS`, then
+the shell command `TESTCHECK`, which fails the test when it fails. Settings: `NAME`, `SDK`,
+`SRCS`, `HZ_CODE`, `HCCFLAGS`, `RUNMODE` (shell default, or desktop), `ARGS`, `SCRIPT`
+(default `test.script`), `RUNFLAGS`, `TESTFLAGS`, `TESTCHECK`, `HORIZON`.
+
+```make
+NAME      := t1
+SDK       ?= ../../sdk
+TESTFLAGS := --expect 't1: saved Ada' --shot-on 't1: snap'
+TESTCHECK := grep -q '^name=Ada' build/test/card/RESULT.TXT && echo "PASS  RESULT.TXT holds the name" || \
+             { echo "FAIL  RESULT.TXT (build/test/card)"; exit 1; }
+include $(SDK)/c/c.mk
+```
+
+The templates' tests (all pass): `sdk/templates/c-console` (`--expect` of three lines,
+shell mode with `ARGS`), `c-window-app` (desktop, shots, `TESTCHECK` on
+`build/test/card/NAME.TXT`), `c-game` (desktop, `--log-sound`, four `--expect`s,
+`TESTCHECK` greps `DB01` in `emu.err`). Replace their checks with your program's own.
+Bigger tests: a `tests/check.sh` with `ok`/`bad` helpers printing `PASS`/`FAIL` and an
+exit code (both ports), called from `TESTCHECK` or a `test` target.
+
+## Timing in tests
+
+- Use `wait` lines, not long fixed delays. A `wait` gives the run 20 s more.
+- Prove it: Digger's program reads `DELAY.TXT` (ms) and delays its start; the scripted game
+  must still pass with 1.5 and 3 s. Xargon runs its demo a second time with `/BUSY:30` (30
+  ms more CPU each frame) and wants the same state line.
+- `--seconds` must cover a whole replay (Digger's `drf.sh` gives 1500).
+- Run independent emulator runs in parallel (`&` and `wait` in sh: Digger's `drf.sh`).
+
+## What passes must mean
+
+- **A test that checks nothing is not a test.** A run that ends without a `[kill]` only
+  proves the program did not crash. Every test checks something the program produced.
+- **Check the program's own output**: its console lines (`--expect` exact text with the
+  values: `score=125 level=1`, not just `score=`), the files it wrote (contents, not
+  existence), its pictures against references you looked at, its sound writes.
+- **Check the end state, not the path**: the high-score file has `HZD 125`; the saved
+  recording plays back to the same score; the loaded game is where it was saved.
+- **Deterministic input**: scripts and recordings, never the clock. Same input, same
+  result, run after run.
+- **A test must be able to fail.** Break the program on purpose once (Digger drew an
+  emerald two rows short: 7 of 9 pictures failed) and see it fail.
+- **Self-tests**: zero PASS lines is a failure, not a pass.
+- **Report honestly** what was verified by running and what was not (sound on the board,
+  joysticks, the real card's speed: emu816's own `--card-kbps 170:100` models it, but
+  run816.py does not pass it).
+
+## Assembly, BASIC, the board
+
+- `make -C SDK check`: the assembly reference checked against `horizon.inc` and the
+  kernel, every reference example assembled. Run it after changing the reference.
+- BASIC (`SDK/templates/basic-game`): `--args "-r /APPS/GAME.BAS"` runs a program;
+  `--args "-t /APPS/TEST.BAS"` runs a test file and copies the console to the log.
+- On the board (only when the user asks): `python3 SDK/tools/deploy816.py PROG.PRG --dest
+  /BIN/PROG.PRG [--shot out.png]` over the PC link. emu816 models the board's timing
+  within a few per cent (Xargon's notes); things only the board shows: POKEY's sound,
+  joysticks, the keyboard adapter's firmware (Digger's held-key fault), the card's speed.

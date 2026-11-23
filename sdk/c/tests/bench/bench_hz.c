@@ -1,5 +1,5 @@
-/* bench_hz.c - the two hooks bench.c needs, and main() (bench.c is the compiler trials'
- * benchmark, unchanged: sdk/c-spike/vbcc/bench/bench.c). */
+/* bench_hz.c - the two hooks bench.c needs, and main() (bench.c is the benchmark the
+ * compiler trials used, unchanged). */
 #include <stdio.h>
 #include <horizon.h>
 
@@ -14,7 +14,7 @@ void bench_out(const char *name, unsigned long ms, unsigned long check)
 
 int main(void)
 {
-    puts("vbcc 65816 bench");
+    puts("bench");
     bench_all();
     puts("bench done");
     return 0;

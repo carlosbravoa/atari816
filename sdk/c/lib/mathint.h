@@ -17,6 +17,7 @@
 #define GETW(i, x) ((i) = __builtin_fbits(x))
 #define SETW(x, i) ((x) = __builtin_bitsf((uint32_t)(i)))
 #else
+/* the same on the PC (tests/fpu/mathhost.sh builds this library with the PC's compiler) */
 typedef union { float f; uint32_t u; } __fw;
 #define GETW(i, x) do { __fw t_; t_.f = (x); (i) = t_.u; } while (0)
 #define SETW(x, i) do { __fw t_; t_.u = (uint32_t)(i); (x) = t_.f; } while (0)

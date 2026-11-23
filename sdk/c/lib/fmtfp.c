@@ -1,6 +1,6 @@
 /* fmtfp.c - printf's floating-point conversions for cc816: %f %F %e %E %g %G %a %A.
  *
- * fmt.c calls __hz_fmtfp through the hook rt/cc816/fp_hookp.s installs in programs that
+ * fmt.c calls __hz_fmtfp through the hook rt/fp_hookp.s installs in programs that
  * use floating point. A float (and a double: the same 32-bit format) is printed from its
  * exact decimal value (every float is m * 2^e: a finite decimal fraction), rounded to the
  * precision with ties to even, as glibc does: printf("%.1f", 0.25) gives 0.2, and

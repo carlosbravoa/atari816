@@ -18,8 +18,7 @@
  *   at exit                   _EXIT_1_hzstdio (a destructor: cc816 lists it for the
  *                             startup): stdout and stderr flushed, every file closed
  *
- * The same behaviour as lib/vbcc/stdio.c gives vbcc's library. Horizon has 4 file
- * handles for the whole system: fopen fails with errno ENFILE when none is left.
+ * Horizon has 4 file handles for the whole system: fopen fails with errno ENFILE when none is left.
  */
 #include <stdio.h>
 #include <stdlib.h>

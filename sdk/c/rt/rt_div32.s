@@ -1,7 +1,7 @@
 ; rt_div32.s - part of cc816's arithmetic helpers (ld65 links a module only when a
 ; program uses one of its names). The contract, for all of them:
-; cc816's arithmetic helpers, tuned for the 65816 as sdk/c/fastrt is for vbcc (the same
-; algorithms; tests/rt checks them against host-made tables).
+; cc816's arithmetic helpers, tuned for the 65816 (tests/rt checks them against
+; host-made tables).
 ;
 ; The code generator calls them with JSR; A, X, Y 16-bit. They keep the __rg registers
 ; and __sp; they may change A, X, Y, __h0-__h3 and __rv.
@@ -10,7 +10,7 @@
 ;   __udiv16 __sdiv16      A / X -> A (__udiv16 leaves the remainder in X)
 ;   __umod16 __smod16      A % X -> A
 ;   __mul32                __h0 * __h1 -> __h0 (the low 32 bits; its 16 x 16 -> 32 part
-;                          unrolled: about 80 cycles less than fastrt's loop)
+;                          unrolled: about 80 cycles less than a shift-and-add loop)
 ;   __udiv32 __sdiv32      __h0 / __h1 -> __h0 (__udiv32 leaves the remainder in __h2)
 ;   __umod32 __smod32      __h0 % __h1 -> __h0
 ;   __shl32 __shr32 __sar32   __h0 shifted by X (0-31 used) -> __h0

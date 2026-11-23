@@ -1,6 +1,6 @@
 /* fcntl.h - POSIX's open() and its flags (cc816), for programs written for Unix or DOS
  * that use file descriptors instead of FILE: open, creat (here), read, write, lseek,
- * close (unistd.h). Implemented over Horizon's file calls (lib/cc816/posixio.c), without a
+ * close (unistd.h). Implemented over Horizon's file calls (lib/posixio.c), without a
  * buffer: each read or write is one call to the card, so read and write in blocks.
  * Horizon has 4 file handles for the whole system (as for fopen). */
 #ifndef _FCNTL_H

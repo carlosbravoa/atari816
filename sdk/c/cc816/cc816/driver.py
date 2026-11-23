@@ -18,7 +18,7 @@
 
 Errors and warnings are printed as gcc does: file.c:LINE:COL: error: message.
 
-A whole program: hcc -o PROG.PRG main.c (hcc --cc cc816 is the default).
+A whole program: hcc -o PROG.PRG main.c (sdk/c/bin/hcc).
 """
 import io
 import os
@@ -582,9 +582,9 @@ def _declared_function(src, a, b):
     return None
 
 
-# a function named _INIT_<n>_name / _EXIT_<n>_name (vbcc's convention) is a constructor
+# a function named _INIT_<n>_name / _EXIT_<n>_name is a constructor
 # (run before main) / destructor (run at exit, after the atexit functions): ld65 lists them
-# for the startup (rt/cc816/crt0.s); n is the order (smaller first)
+# for the startup (rt/crt0.s); n is the order (smaller first)
 _CONDES = re.compile(r'^_(INIT|EXIT)_(\d+)_')
 
 
@@ -744,13 +744,13 @@ def emit(unit, funcs, helpers, path='?', far=False, large=False):
     out.append('\t.forceimport __cc816_' + ('large' if large else 'small'))
     # a unit with floating point that calls a printf (or gives a float to any variadic
     # function: a printf wrapper) links printf's float conversions, one that calls a scanf
-    # scanf's (rt/cc816/fp_hookp.s, fp_hooks.s: a constructor installs them); the
+    # scanf's (rt/fp_hookp.s, fp_hooks.s: a constructor installs them); the
     # library's own units (split) do not
     if getattr(unit, 'float_printf', False):
         out.append('\t.forceimport __cc816_fmtf')
     if getattr(unit, 'float_scanf', False):
         out.append('\t.forceimport __cc816_scanf')
-    # the same for long long: printf's and scanf's %lld (rt/cc816/ll_hookp.s, ll_hooks.s)
+    # the same for long long: printf's and scanf's %lld (rt/ll_hookp.s, ll_hooks.s)
     if getattr(unit, 'll_printf', False):
         out.append('\t.forceimport __cc816_fmtll')
     if getattr(unit, 'll_scanf', False):

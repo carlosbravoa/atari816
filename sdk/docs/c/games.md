@@ -9,8 +9,8 @@ games written for cc65.
 | | |
 | --- | --- |
 | Header | `sdk/c/include/hgame.h` (every function documented there); `conio.h`, `joystick.h` |
-| Library | `sdk/c/game/` (C, and assembly for the hot paths: `game/cc816/*.s` for cc816, `game/hg_fast.s` for vbcc); built into `sdk/c/build/game/cc816/libhgame.lib` (one module a function: a game links what it uses) and `sdk/c/build/game/large/libhgame.a` |
-| Linking | by itself: hcc links the library when a C source includes `hgame.h`, `conio.h` or `joystick.h` (or with `hcc --game`). cc816 (hcc's default) or vbcc's large model |
+| Library | `sdk/c/game/` (C, and assembly for the hot paths: `game/*.s`); built into `sdk/c/build/game/small/libhgame.lib` and `sdk/c/build/game/large/libhgame.lib` (the two code models; one module a function: a game links what it uses) |
+| Linking | by itself: hcc links the library when a C source includes `hgame.h`, `conio.h` or `joystick.h` (or with `hcc --game`), in either code model |
 | Examples | the tutorial (`sdk/c/examples/tutorial`), Gem Run in C (`sdk/templates/c-game`), Glimmer (`sdk/c/examples/glimmer`, full screen, scrolling), Catch (`sdk/c/examples/catch`, conio only) |
 | Tools | `sdk/tools/img2c.py` (pictures to C arrays or `.HGI` files) |
 | Tests | `make -C sdk/c/game test` |
@@ -176,9 +176,9 @@ blits at all), and a panel stays at the top.
 - The sprites' images must use colour 0 for transparency (`img2c.py --key 0`); positions
   are on the screen, so world positions go through `hg_screen_x` / `hg_screen_y`.
 - No `HG_DOUBLE` and no `hg_clear`: nothing is redrawn each frame, the frame is a camera
-  move, sprite moves and, now and then, a panel update. Measured: with cc816 4.4 ms of CPU a frame, with vbcc 6.3 ms
+  move, sprite moves and, now and then, a panel update. Measured: 4.4 ms of CPU a frame
   (`hg_stats` at the end of its test.script run: "STEP4: 335 frames, 6 missed, CPU 4.41 ms
-  a frame", vbcc "328 frames, 6 missed, CPU 6.34 ms a frame").
+  a frame").
 
 ### Step 5: a small game
 
@@ -356,8 +356,7 @@ good size for effects (16 KB a second).
 
 **Music.** `hg_music_play("/Music/X.MOD", 1)` starts the music engine with a module, a WAV
 file or (REV $0C: the OPL2) a MIDI file. The replayer library (`horizon/build/modplay.o`) is
-a ca65 object: vlink (vbcc) cannot link it, and with cc816 (ld65) hgame has no binding for
-it: the engine is the way from C. It loads the file at priority 0, which holds the game up while
+a ca65 object, and hgame has no binding for it: the engine is the way from C. It loads the file at priority 0, which holds the game up while
 it loads (about 0.2 s for a 31 KB module in the emulator): start the music before play.
 
 **AdLib music.** A DOS game's FM music (AdLib, Sound Blaster: IMF, DRO, CMF, ROL, ...) is
@@ -408,33 +407,32 @@ some room):
   left for everything else; at 640 x 360 a full clear takes four times as long. Clear only
   the part that changes, or use one page and sprites.
 
-Measured programs (emulator, the scripted runs of their tests, both compilers; "hg_stats"
+Measured programs (emulator, the scripted runs of their tests; "hg_stats"
 is the program's own line at the end, "busy" emu816 --stats over the whole run against
 13.5 % for an idle desktop over the same time):
 
-| | cc816 | vbcc |
-| --- | --- | --- |
-| Glimmer (full screen 320 x 180, scrolling, 16 sprites, panel, music playing; 17.1 s run) | 429 frames, 3 missed; hg_stats 4.53 ms a frame; busy 37.3 %; 37,900 bytes on the card | 408 frames, 7 missed; 5.16 ms a frame; busy 39.7 %; 44,649 bytes |
-| Gem Run in C (a window, 2 bobs, a background image; 50 steps a second, 60 frames; 13.8 s run) | 354 frames, 19 missed; 1.73 ms a frame; busy 29.8 %; 28,935 bytes | 349 frames, 21 missed; 2.69 ms a frame; busy 33.2 %; 33,357 bytes |
-| Tutorial step 4 (full screen, scrolling, 13 sprites; test.script) | 335 frames, 6 missed; 4.41 ms a frame; 27,262 bytes | 328 frames, 6 missed; 6.34 ms a frame; 32,173 bytes |
+| | |
+| --- | --- |
+| Glimmer (full screen 320 x 180, scrolling, 16 sprites, panel, music playing; 17.1 s run) | 429 frames, 3 missed; hg_stats 4.53 ms a frame; busy 37.3 %; 37,900 bytes on the card |
+| Gem Run in C (a window, 2 bobs, a background image; 50 steps a second, 60 frames; 13.8 s run) | 354 frames, 19 missed; 1.73 ms a frame; busy 29.8 %; 28,935 bytes |
+| Tutorial step 4 (full screen, scrolling, 13 sprites; test.script) | 335 frames, 6 missed; 4.41 ms a frame; 27,262 bytes |
 
 Gem Run's missed frames come mostly while a level is composed (240 tiles by the CPU, about
 112 ms, three times in the test; the assembly Gem Run does the same), Glimmer's at a
 pick-up or a hit (a sample started, the panel redrawn, a console line). For comparison,
 Gem Run in assembly (`sdk/templates/game`, 50 Hz, win_draw) was measured at 23.4 % busy
-over the same run before cc816 (it is not built with a C compiler).
+over the same run (it is not built with a C compiler).
 
 
 `hg_stats` prints the CPU time from `hg_begin` to the sending (10 ms clock steps, averaged
-over the frames; the kernel's sending is not in it): 5.2 ms a frame for Glimmer, 2.7 ms for
+over the frames; the kernel's sending is not in it): 4.5 ms a frame for Glimmer, 1.7 ms for
 Gem Run (whose title screen frames do nothing).
 
 Gem Run in C against the assembly original: the same rules, art, sounds and test; the C one
 draws 60 frames a second (the assembly one at most 50) with bobs in the vertical blank (no
-flicker; the assembly one erases and draws each sprite with two `win_draw` calls); it uses
-about twice the CPU time (2.66 s against 1.31 s over the test, the desktop's own share
-taken off); its program is 33,259 bytes against 7,636 (hgame about 18 KB, printf 2.7 KB, the
-C library), and its source 404 lines against 1,332.
+flicker; the assembly one erases and draws each sprite with two `win_draw` calls); it keeps
+the CPU busier (29.8 % against 23.4 % over the test); its program is 28,935 bytes against
+7,636 (hgame, printf and the C library), and its source 404 lines against 1,332.
 
 **Advice.**
 
@@ -447,30 +445,30 @@ C library), and its source 404 lines against 1,332.
 - Keep a frame's records of one kind together: each change between sheet records (images,
   fills) and list records (text, moves) is one more send (0.5 ms).
 - `int` and `unsigned` in game logic; no `long` multiplies in the frame (about 100 us each in
-  the C runtime), no `float`. A multiply by a constant that is not a power of two is a call
-  (`fastmul16`): Glimmer spends 5 % of its time there.
+  the C runtime), no `float`. A multiply by a constant is inlined (shifts and adds); a divide by a
+  constant that is not a power of two is a call (`__udiv16`).
 - Console output is slow (`printf`: about 2 ms a line on the debug console): no `printf` in
   the frame loop of a finished game.
 - Profile: `run816.py --prof FILE` makes the emulator count the CPU's cycles by
   instruction address, syscall, kernel and idle (`--prof-from S --prof-to S`: only that
-  stretch, in seconds after the program's start, as `--shot`'s); `sdk/c/game/tests/tools/
-  prof816.py` turns the counts into a table of the program's functions. It reads hcc
+  stretch, in seconds after the program's start, as `--shot`'s); `sdk/tools/prof816.py`
+  turns the counts into a table of the program's functions. It reads hcc
   `--map`'s map and the label file beside it, in both code models (the large model's code
-  banks are matched by their bytes with the banks the program got), and vbcc's maps:
+  banks are matched by their bytes with the banks the program got):
 
 ```
 cd ports/digger && make          # (hcc --map: DIGGER.map and DIGGER.lbl)
 python3 ../../sdk/tools/run816.py DIGGER.PRG --mode shell --args "/Q /S:0 /E:THEVOIDS.DRF" \
   --file DIGGER.DAT:/APPS/DIGGER.DAT --file tests/drf/thevoids.drf:/APPS/THEVOIDS.DRF \
   --seconds 120 --prof prof.txt --prof-from 20 --prof-to 120 --out build/prof
-python3 ../../sdk/c/game/tests/tools/prof816.py --counts prof.txt --map DIGGER.map --top 20
+python3 ../../sdk/tools/prof816.py --counts prof.txt --map DIGGER.map --top 20
 ```
 
   100 s of play take about 10 s. The table: cycles and share for each function (an
   assembly routine by its label), each syscall (with its calls), the kernel and idle.
-  (`emu-prof.sh` still pipes `emu816 --trace` through it, for a short stretch.)
+  (`sdk/tools/emu-prof.sh` still pipes `emu816 --trace` through it, for a short stretch.)
 
-**What is in assembly inside the library** (`sdk/c/game/hg_fast.s`, vasm syntax; a game never
+**What is in assembly inside the library** (`sdk/c/game/hg_fast.s` and `hg_fimg.s`, ca65 syntax; a game never
 sees it): the record builder (clipping, the queue, the runs), `hg_fill`, `hg_draw` and
 `hg_draw_part` from sheets, the text strip (a string's 1 bpp picture), the CPU's memory blit
 and fill, and a 16 x 16 multiply. In C one `hg_fill` or `hg_draw` took 190-270 us; the
@@ -495,7 +493,7 @@ differences:
   tees are drawn as `-`, `|`, `+`; there is no PETSCII or ATASCII graphics set.
 - `cgetc` returns ASCII, `\n` for Enter, `CH_CURS_*` for the arrows, 8 for Backspace.
   Closing the window ends the program.
-- `int` is 16 bits and `char` unsigned in both compilers: game arithmetic ports as it is.
+- `int` is 16 bits and `char` unsigned: game arithmetic ports as it is.
   Remove `__fastcall__` (`#define __fastcall__`), zero-page pragmas and `<peekpoke.h>`
   writes to hardware (not allowed: use hgame's calls).
 - `joy_read` reads the DB9 ports; there is no keyboard joystick driver: a game that should
@@ -534,11 +532,11 @@ where the game allows.
 
 ## Limits and known faults
 
-- A game whose code does not fit in one bank builds with `hcc --code large` (cc816: the
+- A game whose code does not fit in one bank builds with `hcc --code large` (the
   code fills several banks, still one file GAME.PRG; hgame is built for it too and its tests
   run in it): reference.md, "The two code models". The images, sounds and big tables
   belong in files and far memory anyway, since constants and data stay in the main bank.
-- cc816 or vbcc's large model; at most 32 bobs, 16 hardware sprites, 128 records a send (more are sent
+- At most 32 bobs, 16 hardware sprites, 128 records a send (more are sent
   in pieces), 460,800 pixels a send (the kernel's limit; hgame splits), 2 KB of text a frame
   before it is sent early.
 - Images are frames one under the other, at most 4096 wide and 1024 rows in all (the sheet
@@ -548,13 +546,6 @@ where the game allows.
   pixels in that mode are drawn by the CPU.
 - No collision report from the hardware (boxes only), no scaling, rotation or blending.
 - The emulator has no joystick; `hg_joy` reads 0 there.
-- **vbcc 65816 miscompiles a structure assignment between elements found by an index or
-  a computed pointer** (`a[i] = b[j]`, `*p = s[i]` with `p = &a[i]`; at -O1, its default,
-  and -O0): the copy uses addresses it never loaded and writes into a wrong bank (the
-  program is killed, or memory is damaged). Constant indexes, copies through pointers
-  that are incremented (`*p++ = *q++`) and `memcpy` are right. With vbcc use
-  `memcpy(&a[i], &b[j], sizeof a[0])` (hgame's own code does). cc816 copies them right
-  (`tests/vbcc_structcopy.c` passes with it).
 
 ## Tests
 
@@ -562,15 +553,14 @@ where the game allows.
 make -C sdk/c/game test
 ```
 
-runs `sdk/c/game/tests/run.py` once for each compiler (cc816, vbcc; `CCS=cc816` for one),
-then the scripted tests of Glimmer, Catch, the tutorial and Gem Run in C with each. run.py
+runs `sdk/c/game/tests/run.py` in both code models (`small`, `large`), then the scripted
+tests of Glimmer, Catch, the tutorial and Gem Run in C. run.py
 builds nine test programs (`tests/gt_*.c`: drawing, the screen modes and the pause,
 a framebuffer taller than the screen with a split view, the key queue and the 16-bit voices,
 a window with bobs and its menu, hardware sprites, scrolling maps, input, sound and music,
 the helpers and `.HGI` files with bad arguments) and runs each in the emulator with a script;
 it checks the program's own PASS / FAIL lines (each reads the framebuffer back), the
-screenshots against `tests/ref/` (the same pictures for both compilers: every shot is
+screenshots against `tests/ref/` (the same pictures for both code models: every shot is
 taken while nothing moves, or of what the program draws for a given frame), the POKEY and Lau writes
-the emulator logs and the sound it records (Lau and the OPL2), and reports whether vbcc's
-structure-copy fault is still there (`tests/vbcc_structcopy.c`). `make -C sdk/c/game refs`
+the emulator logs and the sound it records (Lau and the OPL2). `make -C sdk/c/game refs`
 writes new reference pictures after a change that is meant to show.

@@ -38,7 +38,7 @@
 - **Animation**: 2 frames are enough for walking or wobbling at 4-8 steps per frame; move
   sprites 1-2 pixels per step (at 50 steps a second = 50-100 pixels a second).
 - Text in games: the fixed font (8 x 12) for status lines; for a title, letters spaced
-  ("G E M   R U N") or your own big 1 bpp font (SDK/tools/font2inc.py).
+  ("G E M   R U N") or your own big 1 bpp font (sdk/tools/font2inc.py).
 - Avoid 1-pixel checkerboards over large areas (they shimmer on some monitors at 2 x) and
   pure 0-255 full-saturation pairs next to each other (red on blue vibrates).
 
@@ -69,7 +69,7 @@ kyyyyyyk
 ..k..k..
 ..kk.kk.
 ```
-`python3 SDK/tools/img2inc.py player.txt -o player.inc --name player --preview p.png`
+`python3 sdk/tools/img2inc.py player.txt -o player.inc --name player --preview p.png`
 gives `player_W = 8`, `player_H = 8`, `player_N = 2`, `player_SIZE = 64` and the bytes at
 `player` (frame k at `player + k * player_SIZE`). Blit with WD_KBLIT, c2 = 231.
 Every row of a frame must have the same length; frames are separated by an empty line;

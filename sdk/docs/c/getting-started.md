@@ -2,9 +2,8 @@
 
 From nothing to a C program running in the emulator and on the Atari816. The SDK's C
 compiler is **cc816**, the SDK's own (`sdk/c/cc816`, in Python); `hcc`, the SDK's driver,
-turns `.c` files into a Horizon program in one command. A second compiler, vbcc 65816, is
-there for the one thing cc816 does not do (a tiny memory model): section 10.
-Floating point is section 8. Every command below was
+turns `.c` files into a Horizon program in one command. Floating point is section 8.
+Every command below was
 run on Linux (x86-64) for this guide; the output is what you should see, apart from paths,
 timings and sizes.
 
@@ -14,11 +13,18 @@ timings and sizes.
 | --- | --- |
 | python3 3.8+ | `hcc` and cc816, the SDK's tools |
 | cc65's ca65, ld65 and ar65 | assembling and linking (cc65 2.19; Horizon's own programs are built with them) |
-| make | the templates' and examples' Makefiles |
-| the emulator and Horizon, built | running programs: `make -C emu` and `make -C horizon` (sdk/docs/getting-started.md, section 2) |
+| make, a C compiler for the PC | the Makefiles; building the emulator |
+| this repository | the SDK, Horizon and the emulator |
 
-Nothing is downloaded: cc816 and its C library are in the SDK (it vendors pycparser and
-pcpp, both BSD-licensed).
+Build the emulator and Horizon once, from the repository's top folder (sdk/docs/getting-started.md, section 2):
+
+```
+$ make -C emu
+$ make -C horizon
+```
+
+Nothing else is needed and nothing is downloaded: cc816 and its C library are in the SDK
+(it vendors pycparser and pcpp, both BSD-licensed).
 
 ## 2. Check the tools
 
@@ -27,7 +33,7 @@ $ python3 --version; ca65 --version
 Python 3.14.4
 ca65 V2.19 - Git 547d923
 $ sdk/c/bin/hcc --version
-hcc 2.0 (Horizon C SDK: cc816 and vbcc 65816)
+hcc 3.0 (Horizon C SDK: cc816)
 ```
 
 ## 3. Hello in five minutes
@@ -48,9 +54,9 @@ int main(int argc, char **argv)
 
 ```
 $ sdk/c/bin/hcc -o HELLO.PRG hello.c
-hcc: building the C library for cc816 (/.../sdk/c/build/lib/cc816)
+hcc: building the C library for the small code model (/.../sdk/c/build/lib/small)
 $ ls -l HELLO.PRG
--rw-rw-r-- 1 carlos carlos 8282 Nov 22 13:10 HELLO.PRG
+-rw-rw-r-- 1 carlos carlos 8561 Nov 22 21:52 HELLO.PRG
 ```
 
 The first build also builds the SDK's C library (a few seconds); after that `hcc`
@@ -58,8 +64,8 @@ compiles, links and writes the program at once. `--map` adds the sizes:
 
 ```
 $ sdk/c/bin/hcc --map -o HELLO.PRG hello.c
-HELLO.PRG: 8,282 bytes on the card, 8 relocations
-  code bank: code+constants 8,062 + data 78 + bss 828 = 8,968 of 57,072; heap 48,104; software stack 8,192
+HELLO.PRG: 8,561 bytes on the card, 8 relocations
+  code bank: code+constants 8,335 + data 84 + bss 942 = 9,361 of 57,072; heap 47,711; software stack 8,192
   window:    stack about 32,000 (from $7F7F down to $0100); direct page 120 bytes
 ```
 
@@ -115,24 +121,27 @@ run816: PASS (3 expected texts found)
 
 `make run` runs it with `test.script` (it types "Ada" and Enter) and leaves the console
 and a screenshot in `build/run/`. Every `.c` and `.s` in the folder is part of the
-program; `sdk/c/c.mk` lists the settings (HZ_CC, HCCFLAGS, RUNMODE, ARGS, ...).
+program; `sdk/c/c.mk` lists the settings (HZ_CODE, HCCFLAGS, RUNMODE, ARGS, ...).
 
 ## 6. When something is wrong
 
-Compiler messages come with the file and the line:
+Compiler messages come with the file, the line and the column (here `bad.c` misses the
+`;` at the end of its line 5, `int x = 1`):
 
 ```
 $ sdk/c/bin/hcc -o BAD.PRG bad.c
-bad.c:6: error: syntax error, before: printf
+bad.c:6:5: error: expected ';' before 'printf' (at the end of line 5)
 hcc: 1 file(s) did not compile
 ```
 
-A program too big for its memory is stopped with the sizes:
+A program too big for its memory is stopped with the sizes (here the SDK's test program
+of 180 KB of code: `python3 sdk/c/tests/bigprog/genbig.py big` writes it into `big/`;
+then `cd big`):
 
 ```
-$ sdk/c/bin/hcc -o GAME.PRG big*.c
-hcc: GAME.PRG: program too big by 133,096 bytes: build with --code large. It does not fit
-in its code bank: code and constants 189,260 + data 78 + bss 830 = 190,168 bytes; the
+$ ../sdk/c/bin/hcc -o GAME.PRG big*.c
+hcc: GAME.PRG: program too big by 138,358 bytes: build with --code large. It does not fit
+in its code bank: code and constants 194,404 + data 84 + bss 942 = 195,430 bytes; the
 biggest part: code and constants. A code bank holds 65,264 bytes ($0100-$FFF0) and the
 software stack takes 8,192 of them (hcc --stack N), so 57,072 are left. Build it with hcc
 --code large: its code then goes in several banks (docs/c/porting.md). ...
@@ -143,12 +152,13 @@ several banks. It still writes one file, `GAME.PRG`: the other code banks follow
 bank in it. Copy it to the card, into any folder (it needs Horizon 0.28 or later):
 
 ```
-$ sdk/c/bin/hcc --code large --map -o GAME.PRG big*.c
-GAME.PRG: 210,710 bytes on the card, 415 relocations
-  code bank: code+constants 43,957 + data 78 + bss 1,754 = 45,789 of 57,072; heap 11,283; software stack 8,192
+$ ../sdk/c/bin/hcc --code large --map -o GAME.PRG big*.c
+GAME.PRG: 213,679 bytes on the card, 317 relocations
+  code bank: code+constants 43,678 + data 84 + bss 1,866 = 45,628 of 57,072; heap 11,444; software stack 8,192
   window:    stack about 32,000 (from $7F7F down to $0100); direct page 120 bytes
-  code model large: 23,038 bytes of movable code in the main bank, 156,494 in 3 other bank(s) (65,475, 65,417, 25,602); 1403 thunks
-  one file: the o65 45,036 bytes, then the other banks 165,674 bytes; 4543 bank bytes patched at the start
+  code model large: 28,231 bytes of movable code in the main bank, 161,112 in 3 other bank(s) (65,523, 65,535, 30,054); 1364 thunks
+  one file: the o65 44,581 bytes, then the other banks 169,098 bytes; 3946 bank bytes patched at the start
+  the main bank without its movable code: 17,397 bytes (code that must stay 11,038, constants 4,409, data 84, bss 1,866)
 ```
 
 Data, constants and the stacks still share the first bank; when they are what does not
@@ -172,12 +182,12 @@ were run in the emulator only so far (it models the board's timing within about 
 
 ## 8. Floating point
 
-`float` and `double` work with cc816. Both are IEEE 754 single precision: 32 bits, about
+`float` and `double` work. Both are IEEE 754 single precision: 32 bits, about
 7 decimal digits (`double` is not 64 bits, as on a PC). `math.h` has the usual functions,
 and printf prints floats with `%f`, `%e` and `%g`:
 
 ```c
-/* circle.c - floating point with cc816 */
+/* circle.c - floating point */
 #include <stdio.h>
 #include <math.h>
 
@@ -215,7 +225,7 @@ point".
 - `sdk/c/examples/`: `hello`, `window` (a window with text, shapes, mouse clicks and the
   close box, on the raw window calls), `wc` (a file tool). Each has `make`, `make run`,
   `make test`.
-- [reference.md](reference.md): the two compilers, memory (where code, data, heap and the
+- [reference.md](reference.md): the compiler, memory (where code, data, heap and the
   stacks live, the limits), int and pointer sizes, far memory, the calling convention for
   assembly, the C library on Horizon, floating point, syscalls from C, speed.
 - [apps.md](apps.md): window applications with Horizon's controls library (`hui.h`:
@@ -227,23 +237,3 @@ point".
   with a double click: one folder in `/APPS` with APP.INF, an `.HZA` archive made with
   `sdk/tools/hzapp.py`, and `hcc --needs` (the program checks what it needs at its start).
 - `make -C sdk/c test`: the SDK's own tests in the emulator.
-
-## 10. vbcc, the second compiler
-
-vbcc 65816 (Volker Barthelmann's) has what cc816 has not: a tiny memory model (16-bit
-pointers into the window, for programs whose data fits in 32 KB). Everything else
-(floating point, `long long`, `setjmp`, inline assembly) is in cc816, so most programs
-never need vbcc. It is free for non-commercial use and may be redistributed only
-unmodified, so a script downloads the official archive:
-
-```
-$ sdk/c/tools/get-toolchain.sh
-get-toolchain: downloading http://www.ibaug.de/vbcc/vbcc65816_r2.zip
-get-toolchain: vbcc65816_r2.zip OK (sha256 e8950454d55327e50f6a5f98dc22ac020ee3d6084a17c92d37e088d3c63a922c)
-get-toolchain: installed vbcc65816_r2 in /.../sdk/c/toolchain/vbcc
-get-toolchain: hcc (sdk/c/bin/hcc) finds it there; nothing to add to PATH
-```
-
-It needs Linux on x86-64 (or WSL), sh, curl or wget, unzip and sha256sum. Then `hcc --cc
-vbcc --model tiny ...` (or `HZ_CC=vbcc` in the environment, `make HZ_CC=vbcc` for a
-project) builds with it; every file of a program must come from the same compiler.

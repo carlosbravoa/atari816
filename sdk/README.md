@@ -50,9 +50,11 @@ sprites, scrolling, draw lists) and the classic machine.
   colours, blitter blocks, samples made or loaded and played by note name.
 
 Programs are written in 65816 assembly with ca65 / ld65 from the cc65 suite, or in **C**
-with the C SDK ([c/](c), with its own compiler, cc816 (vbcc 65816 for floating point): one
-command, `hcc`, builds a program; [docs/c/getting-started.md](docs/c/getting-started.md)), and run in **emu816**, the
-machine's emulator, with scripted input and screenshots.
+with the C SDK ([c/](c): its own compiler, cc816; one command, `hcc`, builds a program;
+[docs/c/getting-started.md](docs/c/getting-started.md)), and run in **emu816**, the
+machine's emulator, with scripted input and screenshots. A program can be packed as an
+app that users install with a double click ([docs/apps.md](docs/apps.md)). Two games were
+ported to Horizon in C with this SDK: Digger and Xargon (`ports/` at the repository's top).
 
 ## The SDK
 
@@ -60,10 +62,11 @@ machine's emulator, with scripted input and screenshots.
 | --- | --- |
 | [docs/getting-started.md](docs/getting-started.md) | Install, build the emulator and Horizon, hello as a console and a window program, run, screenshot, script input, the real machine |
 | [docs/reference/](docs/reference/README.md) | The programmer's reference: program format and memory, every syscall with an example, the window system, drawing, the controls library, sound, the internet ([internet.md](docs/reference/internet.md)), the games calls (full screen, sprites, scrolling, draw lists, palette entries, frame sync: [games.md](docs/reference/games.md)), the classic machine, the hardware, performance, game patterns, limits |
-| [c/](c) | The C SDK: `hcc` (one command from .c files to a program), cc816 (the SDK's C compiler, [c/cc816](c/cc816)) and vbcc 65816 (`hcc --cc vbcc`), the C library on Horizon (stdio with files, argc/argv, time, far memory), every syscall as a C function (`horizon.h`), examples, tests; [docs/c/](docs/c/getting-started.md): getting started, the reference (the compilers, memory, calling convention, speed), porting |
+| [c/](c) | The C SDK: `hcc` (one command from .c files to a program), cc816 (the SDK's C compiler, [c/cc816](c/cc816): Python 3 and cc65's ca65/ld65/ar65, nothing to download), two code models (small: one bank; large: code in several banks), the C library on Horizon (stdio with files, argc/argv, time, far memory, floating point, `long long`), every syscall as a C function (`horizon.h`), examples, tests; [docs/c/](docs/c/getting-started.md): getting started, the reference (memory, the code models, calling convention, speed), porting |
 | [c/ (applications)](docs/c/apps.md) | Desktop applications in C: the controls library as `hui.h` (windows with menus, buttons, fields, lists, scroll bars, the file dialog, alerts, dialogs; callbacks into C), linked by hcc when used; a tutorial in five steps ([c/examples/guests](c/examples/guests)), a text viewer ([c/examples/viewer](c/examples/viewer)) |
 | [c/ (games)](docs/c/games.md) | Games in C: `hgame.h` (full screen or a window, the blitter, images, sprites, scrolling maps, input, sound, music), `conio.h`, `joystick.h`; a tutorial in five steps, Glimmer, Catch, Gem Run in C ([templates/c-game](templates/c-game)) |
-| [docs/roadmap-notes.md](docs/roadmap-notes.md) | The C compiler candidates (vbcc 65816 was chosen first; the SDK's own cc816 is now the default: [c/](c)) |
+| [docs/apps.md](docs/apps.md) | Apps (Horizon 0.29): a program in its own folder in `/APPS` with APP.INF, packed into an `.HZA` archive (`tools/hzapp.py`) and installed with a double click; `hcc --needs` |
+| [docs/roadmap-notes.md](docs/roadmap-notes.md) | Notes on what is done and what could come later |
 | [templates/console](templates/console) | Arguments, output, a line of input, a file |
 | [templates/c-console](templates/c-console) | The same in C (hcc, `make` with sdk/c/c.mk) |
 | [templates/c-window-app](templates/c-window-app) | The window-app template in C (`hui.h`): the same window, menus, field, buttons, file dialog and alert |
@@ -77,8 +80,8 @@ machine's emulator, with scripted input and screenshots.
 | [examples/echo](examples/echo) | Echo (Horizon 0.22): a TCP client; connect, send a line, poll for the answer |
 | [examples/tune](examples/tune) | Tune (Horizon 0.26): play a ProTracker module with the replayer library and the music timer |
 | [examples/deepdive](examples/deepdive) | Deep Dive, a full-screen scrolling game skeleton (Horizon 0.18): its own framebuffer in two banks, fine scrolling with wrap and a split panel, one draw list a frame, 15 hardware sprites, its own palette and a raster table, Lau samples, pause on focus loss |
-| [tools/](tools) | `run816.py` (run in the emulator: input scripts, screenshots, checks, sound logs), `inputscript.py`, `contact.py` (screenshots on one sheet), `img2inc.py` (PNG or text art to sprites / tiles / palettes), `font2inc.py` (1 bpp fonts), `deploy816.py` (the real machine over the PC link), `abicheck.py` and `snippets.py` (`make check`), `probe/` (the performance measurements) |
-| [skill/atari-816-dev](skill/atari-816-dev/SKILL.md) | A Claude skill: the workflow and condensed references for writing Atari816 programs |
+| [tools/](tools) | `run816.py` (run in the emulator: input scripts, screenshots, checks, sound logs), `inputscript.py`, `contact.py` (screenshots on one sheet), `img2inc.py` (PNG or text art to sprites / tiles / palettes), `font2inc.py` (1 bpp fonts), `img2c.py` (pictures to C arrays or `.HGI` files), `hzapp.py` (apps: check, pack, list `.HZA` archives), `prof816.py` (the profiler's table of functions), `deploy816.py` (the real machine over the PC link), `abicheck.py` and `snippets.py` (`make check`), `probe/` (the performance measurements) |
+| [skill/atari-816-dev](skill/atari-816-dev/SKILL.md) | A skill for AI coding agents: how to write, port, test and package programs for the Atari816 in C or assembly, with condensed references |
 
 Each template and example builds with `make`, runs with `make run` and checks itself with
 `make test` (screenshots in its `build/` folder). `HORIZON=path` selects the Horizon tree
@@ -89,7 +92,8 @@ Each template and example builds with `make`, runs with `make run` and checks it
 ```
 make check      # the reference against Horizon's sources (syscall numbers, names,
                 # constants) and every example of the reference assembled and linked
-make test       # make check, then make test in every template and example
+make test       # make check, then make test in every template and example, then the
+                # C SDK's tests (make -C c test)
 make probe      # the performance figures of docs/reference/performance.md (REV=7: no blitter)
 ```
 
@@ -101,6 +105,6 @@ passes its scripted test, every reference example assembles and links, and the r
 matches horizon.inc and the kernel's syscall tables. Not verified: the real board (no access
 while writing), sound (the emulator logs it, and writes Lau's and, since Horizon 0.27, the
 OPL2's output to a WAV file; POKEY is only logged), the PC link scripts. The C SDK
-(November 2026) is tested in the emulator only (`make -C c test`, both compilers). The internet examples (Fetch, Echo, Horizon 0.22) are tested in the emulator only
+(November 2026) is tested in the emulator only (`make -C c test`, both code models). The internet examples (Fetch, Echo, Horizon 0.22) are tested in the emulator only
 (`--net-root` stands in for the web, a local echo server for TCP), not yet through the real gateway. Where a document states something that was not checked,
 it says so.

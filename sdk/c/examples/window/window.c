@@ -6,8 +6,8 @@
  *
  * The calls (ABI.md, "Window system"): ws_start (the window system: already running on
  * the Desktop), win_open with a hz_winopen block, win_draw with hz_windraw blocks,
- * win_event into a hz_event, win_close. Their blocks may be anywhere: globals (in the
- * code bank) or locals (on the stack, in the window bank 0): the stubs pass the bank.
+ * win_event into a hz_event, win_close. Their blocks may be globals or locals: both are
+ * in the code bank, and the stubs pass its bank.
  * The program's console output (printf) goes to the console log.
  */
 #include <stdio.h>

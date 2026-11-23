@@ -1,4 +1,4 @@
-/* bench.c - the same file for every compiler tried. The port supplies:
+/* bench.c - the benchmark of the compiler trials, kept unchanged. The port supplies:
  *   unsigned long bench_ms(void);        milliseconds (Horizon uptime, 32 bits)
  *   void bench_out(const char *name, unsigned long ms, unsigned long check);
  * Call bench_all() from main. Do not change this file; report if it needs a change.

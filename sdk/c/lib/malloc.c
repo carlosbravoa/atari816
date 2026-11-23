@@ -1,5 +1,5 @@
 /* malloc.c - malloc, free, calloc, realloc for cc816: the heap is the code bank from the
- * end of bss to the software stack's guard zone (rt/cc816/crt0.s: __hz_heapstart,
+ * end of bss to the software stack's guard zone (rt/crt0.s: __hz_heapstart,
  * __hz_heapend). First fit on a free list kept in address order; free joins neighbours.
  * A block has a 4-byte header (the next free block, the size); sizes are even.
  * hz_heap_free, hz_heap_largest, hz_heap_peak (horizon.h): what is free now, and the most

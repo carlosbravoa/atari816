@@ -1,140 +1,133 @@
 ---
 name: atari-816-dev
-description: Write, build, run and test programs for the Atari816 (a 65C816 computer on an FPGA) and its OS Horizon - console tools, desktop window apps, games and BASIC programs - in 65816 assembly (ca65/ld65), C (the SDK's hcc: its own compiler cc816, or vbcc) or Horizon BASIC, checked in the emu816 emulator with scripted input and screenshots. Use when asked to "write an Atari816 program", "make a Horizon app / window program / game", "write 65816 code for Horizon", "port X to the Atari816", "a .PRG for Horizon", "a Horizon BASIC game", or to fix, test or deploy such a program.
+description: Write, port, build, test and package software for the Atari816 (a 65C816 computer on an FPGA) and its operating system Horizon 0.29, in C (the SDK's hcc and its compiler cc816) or 65816 assembly (ca65/ld65), checked in the emu816 emulator with scripted input, screenshots, sound logs and the profiler, and packed as installable apps (.HZA). Use when asked to write or fix an Atari816 / Horizon program, window app or game, to port a C program or game (for example a DOS game) to the Atari816, to test a .PRG in the emulator, or to package it as an app.
 ---
 
-# Atari816 development
+# Atari816 development (Horizon 0.29)
 
-The Atari816: a 65C816 at 14.3 MHz, 8 MB RAM, a 640 x 360 x 8 bpp desktop shown 2 x 2 on
-720p by Marga, the video chip, Ali, the blitter, POKEY sound and Lau, the sample player
-(Horizon 0.17), an OPL2 FM synthesizer (REV $0C, Horizon 0.27), an Atari 8-bit inside. Horizon 0.18 adds full-screen mode with fine
-scrolling, 16 hardware sprites, draw lists and frame sync. Horizon is its preemptive,
-memory-protected OS with a window system. Programs are `.PRG` files: 65816 assembly
-built with ca65/ld65 against Horizon's `horizon.inc`, run in user mode; **all hardware
-access goes through syscalls** (`COP #n`).
+## The machine
 
-## Find the SDK
+| | |
+| --- | --- |
+| CPU | 65C816 at 14.34 MHz (14,343,750 cycles a second), 16-bit registers in programs |
+| Memory | 8 MB in 64 KB banks. A program gets its code bank (code, data, bss, heap: 64 KB, one o65 file below 64 KB; C's large code model adds more code banks), a private window in bank 0 ($0000-$7FFF: hardware stack, direct page) and banks it asks for (`hz_far_alloc`, SYS_BALLOC) |
+| Screen | the desktop: 640 x 360, 8 bpp (256 colours), each pixel 2 x 2 on a 1280 x 720 monitor, 60.03 frames a second (238,944 cycles a frame). Full screen: 640 x 360 x 8, 640 x 360 x 4 or 320 x 180 x 8, own palette, fine scrolling, 16 hardware sprites |
+| Blitter | Ali: fill, copy, keyed copy, 1-to-8 bpp expand; command lists |
+| Sound | POKEY (4 voices), Lau (8-voice sample player), OPL2 (YM3812 FM, hardware REV $0C) |
+| Storage | SD card, FAT32. 4 open files in the whole system; paths at most 127 characters |
+| OS | Horizon: preemptive, memory-protected, a window system. Programs run in user mode and reach all hardware through syscalls (`COP #n`): touching $00:Dxxx kills the task |
+| Emulator | emu816 (`emu/emu816`), board speed, REV $0C by default (`--rev 7..11` for older boards). Driven by `sdk/tools/run816.py` |
 
-The SDK is the folder with `tools/run816.py`, `templates/`, `docs/reference/` (in the
-Atari816 repository: `sdk/`, next to `horizon/` and `emu/`). If unsure:
-`find / -name run816.py -path '*sdk/tools*' 2>/dev/null | head -1`. Below, `SDK` is that
-folder and `HORIZON` the Horizon tree (`SDK/../horizon`).
+## Where things are
 
-Prerequisites (check once): `ca65 --version`, `python3 -c 'import PIL'`, a built emulator
-(`HORIZON/../emu/emu816`, else `make -C HORIZON/../emu`) and a built card
-(`HORIZON/build/sd/SYSTEM/HORIZON.SYS`, else `make -C HORIZON`). If other people work in
-the Horizon tree, copy `horizon/` and `emu/` somewhere private, build there, and pass
+The repository: `sdk/` (the SDK), `horizon/` (the OS; its card is `horizon/build/sd`),
+`emu/` (the emulator), `ports/` (two finished ports: `ports/digger`, `ports/xargon`).
+Requirements: Python 3 (Pillow for screenshots as PNG), cc65's `ca65`, `ld65`, `ar65`,
+make and a PC C compiler. Before the first build: `make -C emu` and `make -C horizon -j8`.
+If other people use the tree, build in a copy of `horizon/` and `emu/` and pass
 `HORIZON=<copy>` to every make.
 
-## Workflow
+## C or assembly
 
-1. **Choose a template** and copy it to the program's own folder:
-   - `SDK/templates/console` - text in / text out (shell or Terminal).
-   - `SDK/templates/window-app` - a desktop app: window, menus, controls (ui.lib), file
-     dialog, alert.
-   - `SDK/templates/game` - action game in a window: timer loop, tile map, keyed-blit
-     sprites, dirty rectangles, keys + mouse, POKEY sound effects, title / play / game over.
-   - `SDK/examples/deepdive` - a full-screen scrolling game (Horizon 0.18): own framebuffer,
-     fine scrolling with wrap and a split panel, one draw list a frame, hardware sprites,
-     own palette and raster table, Lau samples. Copy it for anything full screen.
-   - `SDK/templates/basic-game` - a Horizon BASIC program (no assembler).
-   - `SDK/examples/fetch`, `SDK/examples/echo` - (Horizon 0.22) the internet through the PC
-     link: a URL read as a file, a TCP connection polled with sleep. Rules in the
-     cheat sheet's "The internet" and `SDK/docs/reference/internet.md`.
-   **In C** (the C SDK, `SDK/c`: `SDK/c/bin/hcc -o X.PRG x.c` builds a program with
-   cc816, the SDK's compiler: 16-bit `int`, unsigned `char`, 16-bit pointers into the
-   code bank, `__far` pointers for other banks (`hz_far_alloc`), IEEE `float` with
-   `double` the same 32 bits, math.h; `hcc --cc vbcc` (or `make HZ_CC=vbcc`) for setjmp
-   and the tiny model; docs in `SDK/docs/c/`):
-   - `SDK/templates/c-console` - the console template in C (`horizon.h`: every syscall).
-   - `SDK/templates/c-window-app` - the window-app template in C with the controls
-     library (`hui.h`: same names as ui.inc, `ui_event`/`ui_getev` loop, `UI_BUTTON` ...
-     initialisers). Rules: with cc816 every pointer is in the code bank, so controls may
-     be anywhere (with vbcc: static or global, never locals); a list's row function or
-     the copy callback may only draw. `SDK/docs/c/apps.md` (tutorial in
-     `SDK/c/examples/guests`, a viewer in `SDK/c/examples/viewer`).
-   - `SDK/templates/c-game` - Gem Run in C with `hgame.h` (frames, images, bobs, sound,
-     input). `SDK/docs/c/games.md` (a tutorial, Glimmer: full screen and scrolling).
-   Set `NAME` in the Makefile. If the folder is not two levels below SDK, pass both
-   paths on every make command: `make HORIZON=/abs/horizon SDK=/abs/sdk` (run816 is
-   found through `SDK`). Replace the template's `test` target with checks for your
-   program (the window-app one checks the template's own NAME.TXT). No template fits
-   "a window with an animation" exactly: take `game` for anything that moves (its loop
-   and timer), `window-app` for controls.
-2. **Read before writing**: `references/abi-cheatsheet.md` (syscalls, blocks, events),
-   `references/pitfalls.md` (the mistakes that kill tasks or garble code). For a window
-   app also `references/look-and-feel.md`; for a game `references/games.md` and
-   `references/pixel-art.md`. Full reference: `SDK/docs/reference/` (one page per topic,
-   an example for every call).
-3. **Write** `main.s` starting from the template's code. Keep its skeleton (WSSTART /
-   ui_init / event loop / clean exit). Art for games: text art in `art/*.txt`, converted
-   by `SDK/tools/img2inc.py` at build time.
-4. **Build**: `make` (or `make HORIZON=... SDK=...`). Fix every ca65 error and warning:
-   "Range error" on a branch = use `jmp`/`jne`/`jeq`/`jcc`/`jcs`; "Didn't use zeropage
-   addressing" = a symbol defined after its use (move constants up) or a missing `z:`.
-5. **Run and look**: `make run` (one screenshot after 1 s), or
-   `python3 SDK/tools/run816.py NAME.PRG --horizon HORIZON --script my.script --out build/try`
-   then **open every `build/try/shotN.png` and look at it** (or make one sheet:
-   `python3 SDK/tools/contact.py build/try/sheet.png build/try/shot*.png`; on the sheet,
-   one pixel = one screen pixel, so you can read coordinates for mouse moves).
-   Check: is it drawn where you meant, nothing left over, text not clipped, colours right?
-   Also read `build/try/console.txt` (crashes show as `[kill] task N NAME cause CC ...`;
-   run816 then exits 1). Under the Desktop, Files is open at the top left and the menu
-   bar shows Horizon and Programs before your menus.
-6. **Fix and repeat** until the pictures are right. A crash: see "Faults" in
-   `references/pitfalls.md`.
-7. **Test script**: write `test.script` (input + `shot` lines) that drives the program
-   through its main features, and a `test` target (`make test`) that runs it with
-   `--expect TEXT` checks or file checks on `build/test/card/`. The simplest check for a
-   window program: `print` a line on each event worth testing ("bounce 3", "solved in 2
-   moves"): under the Desktop it goes only to the log, which is `console.txt`. A program
-   that takes an argument (a test or demo mode) needs `--mode shell --args ...`.
-   Games: `--log-sound` / `--log-lau` and check `emu.err` for `sound $DB..` / `lau $DB..` writes.
-8. Report what you verified by running and what you did not (sound is never audible in
-   the emulator; the emulator's joysticks read 0; emu816 runs at the board's speed since Horizon 0.19
-   (`--ideal-timing`: the old, ~2x faster model); the
-   emulator is REV $0C by default: `--rev 11/10/9/8/7` for older boards).
+| Write it in | When |
+| --- | --- |
+| C (`sdk/c/bin/hcc`, the compiler cc816) | the default: tools, window apps, games, and every port of C code. One file NAME.PRG, the whole C library, floating point, `long long` |
+| 65816 assembly (ca65) | a small or very hot program, a routine called from C (`.s` files next to the C files: hcc assembles them), or when the user asks for it |
+| Horizon BASIC | only when the user asks (`sdk/templates/basic-game`) |
 
-## Input scripts (run816.py --script)
+C on this machine: `int` is 16 bits, plain `char` is unsigned, data pointers are 16 bits
+(the code bank), `__far` pointers reach other banks, `float` and `double` are both IEEE
+single precision. Read `references/c-language.md` before writing C.
 
-One event per line, time in ms after the program started (`+N` = after the previous line):
+## Start from a template
+
+| Program | C | Assembly |
+| --- | --- | --- |
+| text in, text out (shell, Terminal) | `sdk/templates/c-console` | `sdk/templates/console` |
+| a desktop app: window, menus, controls, dialogs | `sdk/templates/c-window-app` | `sdk/templates/window-app` |
+| a game (hgame: full screen or a window, sprites, maps, sound) | `sdk/templates/c-game` | `sdk/templates/game`, `sdk/examples/deepdive` (full screen) |
+| a port of existing C code | `ports/digger` (its `horizon/` platform layer and Makefile) | |
+
+Copy the template folder, then set `NAME` in its Makefile. A copy two levels below `sdk/`
+builds as it is; anywhere else pass the SDK: `make SDK=/abs/path/to/sdk` (C) or
+`make SDK=/abs/sdk HORIZON=/abs/horizon` (assembly). Small complete examples that pass
+their tests: `examples/console`, `examples/window`, `examples/game` (beside this file).
+
+## The loop
+
 ```
-800 hello\n          type text (\n Enter, \b Backspace, ^S ctrl+S, {esc} {up} {f10} {alt-f})
-+500 key right 700   hold a key 700 ms (game controls)
-+200 move 320 180    move the pointer to screen pixel (640 x 360 space)
-+100 click           left click (click right / dclick / press / release / drag X Y / wheel N)
-+500 shot            take a screenshot
+make                    # NAME.PRG (C: hcc; errors as file:line:col)
+make run                # the emulator: output in build/run/ (console.txt, shot1.png ...)
+make test               # the same with test.script and the checks (TESTFLAGS, TESTCHECK)
 ```
-Window content position = outer window x + 1, y + 16 (for a window opened at x, y).
-Desktop mode (default) needs ~5 s to boot and launch; shell mode (`--mode shell`, needed
-for `--args` and console programs) ~4 s; time 0 in the script is after that.
 
-## Rules of thumb
+One-off runs (any program, any options):
 
-- A16/I16 everywhere (`rep #$30`); 8-bit only locally, with `sep #$20` + `.a8` and back
-  with `rep #$20` + `.a16`.
-- Syscall results: **only carry and A (X, Y where documented) are meaningful.** N and Z
-  are NOT set from A: test with `cmp #0`, `tax`, etc. after `sys`.
-- Pointers: X = offset, Y = bank: `ptr label`. Blocks hold u24 = `.faraddr label`.
-- Data and BSS are in the code bank (DBR); zero page is a private direct page in bank 0
-  (`lda z:var`). Big buffers: `SYS_BALLOC` banks + long addressing (`[ptr],y`).
-- Draw with few, large `win_draw` calls (~0.2 ms each, ~0.4 ms on the board); never
-  redraw what did not change. Text with paper colour to overwrite without flicker. Many
-  blits a frame: one `draw_list` (its sources stay in use until `list_wait` / `vsync`), or,
-  from art registered once as a sheet (Horizon 0.19), one `sheet_draw`: four times cheaper.
-- A multi-file program: `main.s` must be linked first (the templates' Makefiles do it):
-  execution starts at the first byte of CODE.
-- `SYS_UPTIME` is the same at every emulator run: a random seed from it repeats (good for
-  tests).
-- Exit through `exit n`; if `SYS_WSSTART` returned 1, `SYS_WSSTOP` first; silence sound
-  (`SYS_BEEP` with X = 0) before exit.
-- Under the Desktop, console output only reaches the log (`console.txt`), not the screen.
+```
+python3 sdk/tools/run816.py NAME.PRG --mode desktop --script my.script --out build/try
+python3 sdk/tools/run816.py NAME.PRG --mode shell --args '2 40' --expect 'sum of 2'
+```
 
-## References
+`--mode desktop` starts a window program from the Desktop's Programs menu; `--mode shell`
+types the path and `--args` at the text shell (console programs). Script lines: `800 text\n`
+(type at 800 ms), `+300 key right 500` (hold), `+200 move X Y` / `click`, `+0 wait TEXT` (until
+the program prints a line holding TEXT: use it instead of guessing times), `+200 shot`.
+Details: `references/testing.md`.
 
-- `references/abi-cheatsheet.md` - syscalls by topic, blocks, events, colours, keys.
-- `references/pitfalls.md` - 65C816 / ca65 traps seen in this code base; faults.
-- `references/look-and-feel.md` - grid, fonts, colours, standard menus, shortcuts, dialogs.
-- `references/pixel-art.md` - art that reads at 2 x, the palette, img2inc text art.
-- `references/games.md` - game loop, input, dirty rectangles with the blitter, sound.
-- `references/testing.md` - run816, scripts, screenshots, test targets, the board.
+Every round: build, run, then LOOK.
+- `build/.../console.txt`: everything the program printed (under the Desktop `printf` goes
+  only there). `[kill] task N NAME cause CC ...` = the kernel killed it (run816 exits 1);
+  causes in `references/pitfalls.md`, "Faults".
+- `shotN.png`: open each picture and look at it (1280 x 720, each screen pixel 2 x 2).
+  `--shot-on TEXT` takes a picture each time the program prints TEXT (pictures at game
+  frames, not at guessed times).
+- Sound: `--log-sound`, `--log-lau` write the chip writes to `emu.err`; `--wav FILE`
+  records Lau and the OPL2.
+- Speed: `--prof FILE --prof-from S --prof-to S`, then `python3 sdk/tools/prof816.py
+  --counts FILE --map NAME.map` (build with `hcc --map`): `references/performance.md`.
+
+A test passes only when it checked something real: the program's own output lines
+(`--expect`), files it wrote (`build/test/card/`), pictures against references, input
+that is the same every run. Report what you ran and saw, and what you could not check
+(sound is never heard; the emulator's joysticks read 0).
+
+## Package it as an app
+
+An app is a folder `/APPS/NAME/` with NAME.PRG, its data and `APP.INF`. Build with
+`hcc --needs horizon=0.29,opl2,mem=1024K` (the program refuses to start, with a message,
+where something is missing), then `python3 sdk/tools/hzapp.py check FOLDER` and
+`python3 sdk/tools/hzapp.py pack FOLDER -o NAME.HZA`. Users install the .HZA with a double
+click. `references/packaging.md`.
+
+## Rules that save hours
+
+- 16-bit `int`: `32767 + 1` is negative, `40000` needs `long`/`unsigned`, `%ld` for long.
+- The main bank is small: big tables, pictures, levels go to other banks (`__far`) or
+  files; a program too big for its bank: `hcc --code large` (code), `__far` (data).
+- Keep the 4-files limit in mind: close files soon.
+- Under the Desktop, console output reaches only the log (`console.txt`), not the screen.
+- Tests follow the program (`wait`, `--shot-on`), not the clock.
+- hgame: a game that clears and redraws the whole frame needs `HG_DOUBLE` (two pages);
+  without it the text and pictures drawn after `hg_clear` can be lost from the screen.
+- Never write to hardware addresses: every device is a syscall (or hgame / hui call).
+
+## References: read when
+
+| File | Read it when |
+| --- | --- |
+| `references/c-language.md` | writing any C: types, code models, far data, stacks, what cc816 does not support, hcc's options, the warnings that matter |
+| `references/c-library.md` | using the C library or Horizon from C: stdio and files, `horizon.h`'s hz_ calls, errors |
+| `references/hgame.md` | writing a game in C: screens, the frame loop, drawing, sprites, maps, sound (POKEY, Lau, OPL2), input, timing |
+| `references/hui.md` | writing a window app in C: windows, controls, menus, dialogs, events |
+| `references/porting.md` | porting existing code (a DOS game): the platform layer, 16-bit traps, memory, timing, deterministic tests |
+| `references/testing.md` | writing input scripts and tests, checking pictures, sound and files |
+| `references/packaging.md` | making an app: APP.INF, `--needs`, hzapp.py, installing, where saves go |
+| `references/pitfalls.md` | something fails in a way you do not understand, or before a port: the traps that cost hours; assembly traps; kill causes |
+| `references/performance.md` | the program is slow: the profiler, what costs what |
+| `references/abi-cheatsheet.md` | writing assembly: syscalls, blocks, events, keys, colours, ulib, ui.lib |
+| `references/asm-games.md` | a game in assembly |
+| `references/look-and-feel.md` | any window app: grid, fonts, colours, menus, shortcuts, dialogs |
+| `references/pixel-art.md` | drawing art for the screen: the palette, text art, img2c.py / img2inc.py |
+
+The full documentation: `sdk/docs/c/` (C: reference, apps, games, porting),
+`sdk/docs/reference/` (assembly: one page per topic), `sdk/docs/apps.md` (apps).

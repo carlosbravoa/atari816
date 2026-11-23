@@ -1,7 +1,6 @@
-/* float.c - floating point, for both compilers: arithmetic, conversions, math.h, printf
- * %f %e %g, strtod, sscanf and scanf %f, atof of an argument (cc816's IEEE 754 edges:
- * ieee.c). vbcc's float (MS BASIC's format, about 7 digits) rounds differently in the last
- * digit, so the checks allow for it. Prints FLOAT PASS or FLOAT FAIL.
+/* float.c - floating point: arithmetic, conversions, math.h, printf %f %e %g, strtod,
+ * sscanf and scanf %f, atof of an argument (IEEE 754's edges: ieee.c). Some checks allow
+ * a last digit rounded either way. Prints FLOAT PASS or FLOAT FAIL.
  *
  *   float 2.5 -1e3          (the arguments; the keyboard types 0.125 and -7.5e-2)
  */
@@ -103,7 +102,7 @@ int main(int argc, char **argv)
     sprintf(buf, "%e %g", 12345.678, 0.0001);
     printf("printf %%e %%g: %s\n", buf);
     check(!strcmp(buf, "1.234568e+04 0.0001") || !strcmp(buf, "1.234567e+04 0.0001"),
-          "printf %e %g", 0);                   /* (vbcc: ...67) */
+          "printf %e %g", 0);
     sprintf(buf, "%8.2f|%-8.1f|%+.0f", 2.5, -0.25, 7.0);
     check(!strcmp(buf, "    2.50|-0.2    |+7") || !strcmp(buf, "    2.50|-0.3    |+7"),
           "printf width and flags", 0);

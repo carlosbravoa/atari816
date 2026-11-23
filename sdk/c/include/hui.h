@@ -4,19 +4,18 @@
  *   #include <horizon.h>
  *   #include <hui.h>
  *
- * hcc links the library (an assembly block built from horizon/user/ui*.s and ulib) into a
- * program that uses it, and only the routines it uses. The large model only (hcc's
- * default). Tutorial and reference: sdk/docs/c/apps.md. The library's own documentation:
+ * hcc links the library (horizon/user/ui*.s and ulib, assembled by the SDK) into a
+ * program that uses it, and only the routines it uses; both code models. Tutorial and
+ * reference: sdk/docs/c/apps.md. The library's own documentation:
  * sdk/docs/reference/controls.md and horizon/user/ui.inc (every C name here is the
  * assembly name).
  *
  * THE RULE: what the library keeps or reads through its own 16-bit pointers must be in
  * the program's code bank: the controls, control lists, alert / dialog / ask blocks, the
- * buffers of fields and the strings they point to. That is every global or static
- * variable, every string constant and every malloc'd block, but NOT a local variable
- * (locals are on the stack, in bank 0). A function given such an object as a local stops
- * the program with a message saying so. Strings passed straight to a function (ui_text,
- * ui_fdset, a path) may be anywhere: they are copied for the call (at most 255 chars).
+ * buffers of fields and the strings they point to. Every near C object is there (globals,
+ * statics, string constants, malloc'd blocks, locals): only __far data is not. Strings
+ * passed straight to a function (ui_text, ui_fdset, a path) are copied for the call (at
+ * most 255 chars). A control should live as long as its window: make it global or static.
  *
  * Events: read them with ui_getev(), not hz_win_event(): the library needs to see them.
  * The loop:
@@ -44,10 +43,6 @@
 #include <horizon.h>
 #endif
 
-#ifdef HZ_TINY
-#error "hui.h: the controls library needs the large model (hcc's default): build without --model tiny"
-#endif
-
 #include "huigen.h"         /* the constants */
 
 /* ---- values */
@@ -62,15 +57,10 @@
 #define UI_DITHER(c1, c2)   ((unsigned long)(WD_DITHER | (unsigned)(c1) << 8) | \
                              (unsigned long)(c2) << 16)
 
-/* where every C list's row callback goes in. vbcc: the block's header
- * (sdk/c/ui/lib/huidefs.inc) is at the code bank's $0100, so this is the same in every
- * program; cc816: the binding's routine (ui/lib816/row.s), linked into the program */
-#ifdef __CC816__
+/* where every C list's row callback goes in: the binding's routine (ui/lib/row.s),
+ * linked into the program */
 void hui_rowtramp(void);
 #define HUI_ROWCB   ((unsigned short)hui_rowtramp)
-#else
-#define HUI_ROWCB   0x0109
-#endif
 
 #define HUI_FORWARD
 #include "huigen.h"         /* the structures' names: ui_ctl, ui_button, ui_list, ... */

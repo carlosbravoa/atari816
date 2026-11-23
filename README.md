@@ -52,7 +52,8 @@ active development; interfaces can still change.
 | [`core/`](core/) | The hardware: the FPGA design for the Tang Nano 20K (the Atari 8-bit core, the 65C816 native machine in `core/src/a816/`), the I/O processor firmware and PC-side tools |
 | [`horizon/`](horizon/) | Horizon, the operating system, and its programs (65816 assembly, ca65/ld65) |
 | [`emu/`](emu/) | emu816, a C emulator of the native machine, for developing on a PC |
-| [`sdk/`](sdk/) | The SDK: getting-started guide, programmer's reference, templates, examples, tools |
+| [`sdk/`](sdk/) | The SDK: getting-started guide, programmer's reference, templates, examples, tools; the C SDK with its own compiler, cc816 ([`sdk/c/`](sdk/c/)); apps that users install from one `.HZA` file ([`sdk/docs/apps.md`](sdk/docs/apps.md)) |
+| [`ports/`](ports/) | Games ported to Horizon in C with the SDK: Digger and Xargon (each with its porting notes and tests) |
 | [`tools/`](tools/) | `atari816-link`, the PC side of the PC link (shares a folder of the PC with the Atari816, and connects it to the internet) |
 | [`Docs/`](Docs/) | Design documents: architecture, register specification, bring-up log, the PC link |
 

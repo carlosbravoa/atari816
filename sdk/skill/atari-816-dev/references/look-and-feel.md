@@ -1,7 +1,7 @@
 # Look and feel of Horizon programs
 
 Horizon's own programs (Files, Edit, Write, Paint, Sheet, BASIC, Calculator, Settings)
-follow these rules; a new program should too. Source: `HORIZON/user/ui.inc` ("the look"),
+follow these rules; a new program should too. Source: `horizon/user/ui.inc` ("the look"),
 the programs themselves.
 
 ## Screen and grid
@@ -21,7 +21,7 @@ the programs themselves.
 - The fixed font (font 1): 8 x 12 cells; code, numbers in columns, terminals, hex dumps,
   game status lines.
 - Only those two (printable ASCII 32-126). Bigger text: your own 1 bpp glyphs expanded and
-  blitted (SDK/tools/font2inc.py).
+  blitted (sdk/tools/font2inc.py).
 
 ## Colours
 

@@ -11,13 +11,11 @@ or run816.py --prof FILE [--prof-from S --prof-to S]. The trace (one line per in
 slow, for short stretches) from emu816 --trace on stderr; emu-prof.sh runs it through
 this.
 
-The functions' addresses:
-  cc816 (hcc --map: NAME.map, ld65's map, and NAME.lbl beside it, every label): both code
-        models. The large one's other code banks are matched with the banks the program
-        got when it ran by their bytes (the program file, NAME.PRG beside the map, or
-        --prg: the o65 for the main bank, the banks after it for the others)
-  vbcc  (hcc --cc vbcc --map: vlink's map, NNN_text.name addr(size)): the code bank is
-        the user-mode bank seen most
+The functions' addresses come from hcc --map's files: NAME.map (ld65's map) and NAME.lbl
+beside it (every label), in both code models. The large one's other code banks are
+matched with the banks the program got when it ran by their bytes (the program file,
+NAME.PRG beside the map, or --prg: the o65 for the main bank, the banks after it for the
+others).
 Rows: a function (or an assembly routine: the label before the address), "syscall $NN"
 (the kernel's cycles for the program's COP #NN, with the calls), "kernel" (interrupts,
 other tasks), "idle (WAI)", "(user bank $BB)" (code of no image: Horizon's ulib, ...).
@@ -33,18 +31,6 @@ CPS = 14_343_750            # emu816's cycles a second (machine.h CPU_HZ)
 
 
 # ---- the functions' addresses ---------------------------------------------------------
-
-def load_vbcc_map(path):
-    funcs = []
-    pat = re.compile(r"\d+_text\.(?:far\.|near\.)?([A-Za-z_][\w.]*?)(?:\.\d+)? "
-                     r"([0-9a-f]+)\(([0-9a-f]+)\)")
-    for ln in open(path, encoding="latin-1"):
-        for m in pat.finditer(ln):
-            name, start, size = m.group(1), int(m.group(2), 16), int(m.group(3), 16)
-            funcs.append((start, start + size, name))
-    funcs.sort()
-    return funcs
-
 
 def is_ld65_map(path):
     try:
@@ -292,12 +278,7 @@ def main():
         note = ", ".join(f"${rb:02X} = " + ("the main bank" if k == 0 else f"code bank {k}")
                          for rb, k in sorted(where.items()))
     elif mp:
-        funcs = load_vbcc_map(mp)
-        if banks:
-            rb = banks.most_common(1)[0][0]
-            tables[rb] = ([f[0] for f in funcs], [f[2] for f in funcs])
-            ends = {f[0]: f[1] for f in funcs}
-            note = f"${rb:02X} = the code bank"
+        sys.exit(f"prof816: {mp} is not ld65's map (build with hcc --map)")
     byf = collections.Counter()
     for addr, c in upc.items():
         rb, pc = addr >> 16, addr & 0xFFFF

@@ -6,7 +6,7 @@
 
 --code large: every program built with hcc's large code model (--code large), every
 function that can move placed in another bank, in turn in three banks (--main-room 0
---spread 3: the same programs, results in build/cc816l).
+--spread 3: the same programs, results in build/cc816-large).
 
   diag      tests/diag/*.c: the compiler's error and warning messages (tests/diag.py: each
             file says the messages it must give; no emulator)
@@ -104,7 +104,7 @@ def main():
         # cross banks even in small programs (each one file: its other banks after the o65)
         os.environ.update(HZ_CODE='large', HZ_MAIN_ROOM='0', HZ_SPREAD='3')
         prog.CODE = prog.hzc816.CODE = 'large'
-        prog.BUILD = os.path.join(prog.SDKC, 'build', 'cc816l')
+        prog.BUILD = os.path.join(prog.SDKC, 'build', 'cc816-large')
         print('(the large code model: hcc --code large --main-room 0 --spread 3)')
     bad = 0
     print('== diag')

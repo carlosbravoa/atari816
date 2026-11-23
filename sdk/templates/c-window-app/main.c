@@ -11,9 +11,9 @@
  * make run (the Desktop starts it). Tutorial and reference: sdk/docs/c/apps.md.
  *
  * The rule of the controls library: what it keeps (the controls, the control list, the
- * field's buffer, the alert's block and their strings) must be global or static, not
- * local variables. Strings given straight to a function (a path, ui_fdset's text) may be
- * anywhere.
+ * field's buffer, the alert's block and their strings) must live as long as the window:
+ * make them global or static. Strings given straight to a function (a path, ui_fdset's
+ * text) are copied for the call.
  */
 #include <stdio.h>
 #include <string.h>

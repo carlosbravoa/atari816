@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""genfp.py - the table that proves cc816's floating point (rt/cc816/fp_*.s and the
+"""genfp.py - the table that proves cc816's floating point (rt/fp_*.s and the
 compiler's conversions) bit for bit.
 
     genfp.py OUT.BIN [--cases N] [--seed S] [--no-host]

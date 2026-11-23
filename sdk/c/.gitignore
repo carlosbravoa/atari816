@@ -1,5 +1,4 @@
-# the vbcc toolchain (tools/get-toolchain.sh) and everything built
-toolchain/
+# everything built
 build/
 *.PRG
 *.PRX

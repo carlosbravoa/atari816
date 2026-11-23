@@ -1,5 +1,5 @@
-/* stack.c - the stack guard: recursion deeper than the stack. Run in the tiny model
- * (about 4 KB of stack): the program must end with the overflow message. With the
+/* stack.c - the stack guard: recursion deeper than the stack (the 8 KB software stack:
+ * the array is there): the program must end with the overflow message. With the
  * argument "ok" it recurses only a little (built with --debug: the usage report). */
 #include <stdio.h>
 #include <string.h>

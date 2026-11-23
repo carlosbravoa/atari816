@@ -41,9 +41,10 @@ Options:
   --seconds N     how long to run after the start (default: the last event + 2 s)
   --out DIR       output folder (default: run-NAME)
   --file SRC[:DEST]  copy a file onto the card too (DEST default /SRC-NAME; repeatable)
-  --rev N         hardware revision to emulate (default: emu816's, REV $0B: the blitter
-                  with command lists, Lau, sprites, fine scrolling); 10 no sprites or
-                  scrolling, 9 no Lau, 8 no command lists / raster / NV_FRAME, 7 no blitter
+  --rev N         hardware revision to emulate (default: emu816's, REV $0C: the blitter
+                  with command lists, Lau, sprites, fine scrolling, the OPL2); 11 no OPL2
+                  (POKEY 2 and the DACs instead), 10 no sprites or scrolling, 9 no Lau,
+                  8 no command lists / raster / NV_FRAME, 7 no blitter
   --log-sound     log every write to POKEY 2 / the DACs in emu.err
   --log-sound-us  the same with the emulated time in microseconds ("sound US $DBxx = $yy")
   --log-lau       log every write to Lau, the sample player, in emu.err ("lau $DBxx = $yy")
@@ -59,7 +60,7 @@ Options:
   --net-root DIR  (Horizon 0.22) http://, https://, ftp:// URLs are served from the
                   files DIR/host/path (a missing file is HTTP status 404)
   --prof FILE     a profile: emu816's cycles by instruction address, syscall, kernel
-                  and idle in FILE (sdk/c/game/tests/tools/prof816.py makes it a table of
+                  and idle in FILE (sdk/tools/prof816.py makes it a table of
                   the program's functions); --prof-from S --prof-to S: only from S to S
                   seconds after the program's start (as --shot's times)
   --expect TEXT   fail unless console.txt contains TEXT (repeatable)

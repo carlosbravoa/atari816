@@ -1,14 +1,13 @@
 #!/usr/bin/env python3
 """run.py - build and run the runtime tests (tests/rt/rttest.c) in emu816.
 
-    run.py [--model cc816|cc816l|large|tiny|both|all] [--horizon DIR] [--out DIR] [--quick]
-           [--seconds N]
+    run.py [--code small|large] [--horizon DIR] [--out DIR] [--quick] [--seconds N]
 
-Generates the table (tools/genrt.py), builds RTTEST.PRG with bin/hcc for each
-configuration (cc816: its runtime, rt/cc816; large and tiny: vbcc's, fastrt/)
-(HZ_BUILD in the environment is honoured, as hcc does), runs it in the text shell with the
-table on the card, prints its "rt ..." lines and "RT PASS"/"RT FAIL" per model.
-Exit 0 when every model passed. --quick: fewer cases (for a fast check). --seconds: how
+Generates the table (tools/genrt.py), builds RTTEST.PRG with bin/hcc in each code model
+(default: both; large: every function that can move in another bank) (HZ_BUILD in the
+environment is honoured, as hcc does), runs it in the text shell with the table on the
+card, prints its "rt ..." lines and "RT PASS"/"RT FAIL" per code model.
+Exit 0 when every code model passed. --quick: fewer cases (for a fast check). --seconds: how
 long the emulator runs (emulated seconds; the default leaves room for the whole table).
 """
 import os
@@ -22,15 +21,15 @@ SDK = os.path.dirname(SDKC)
 
 def main():
     a = sys.argv[1:]
-    models = ["cc816", "large", "tiny"]
+    models = ["small", "large"]
     hz = os.environ.get("HORIZON") or os.path.join(SDK, "..", "horizon")
     out = os.path.join(os.environ.get("HZ_BUILD") or os.path.join(SDKC, "build"), "test", "rt")
     quick = False
     seconds = None
     i = 0
     while i < len(a):
-        if a[i] == "--model":
-            models = ["cc816", "large", "tiny"] if a[i + 1] == "both" else [a[i + 1]]; i += 2
+        if a[i] == "--code" and i + 1 < len(a) and a[i + 1] in ("small", "large"):
+            models = [a[i + 1]]; i += 2
         elif a[i] == "--horizon":
             hz = a[i + 1]; i += 2
         elif a[i] == "--out":
@@ -49,10 +48,9 @@ def main():
     subprocess.run(gen, check=True)
     ok = True
     for m in models:
-        prg = os.path.join(out, f"RTTEST{ {'tiny': 'T', 'cc816': 'C', 'cc816l': 'L'}.get(m, '') }.PRG")
-        cc = ["--cc", "cc816"] if m == "cc816" else \
-            ["--cc", "cc816", "--code", "large", "--main-room", "0", "--bank-room", "8192"] \
-            if m == "cc816l" else ["--cc", "vbcc", "--model", m]
+        prg = os.path.join(out, f"RTTEST{'L' if m == 'large' else 'S'}.PRG")
+        cc = [] if m == "small" else \
+            ["--code", "large", "--main-room", "0", "--bank-room", "8192"]
         r = subprocess.run([os.path.join(SDKC, "bin", "hcc")] + cc + ["-o", prg,
                             os.path.join(HERE, "rttest.c")])
         if r.returncode:
@@ -60,7 +58,7 @@ def main():
             ok = False
             continue
         run = os.path.join(out, "run-" + m)
-        secs = seconds or (40 if quick else (130 if m == "tiny" else 260))
+        secs = seconds or (40 if quick else 260)
         subprocess.run([sys.executable, os.path.join(SDK, "tools", "run816.py"), prg,
                         "--horizon", hz, "--mode", "shell", "--seconds", str(secs),
                         "--file", table + ":/RTTAB.BIN", "--out", run],
@@ -68,7 +66,7 @@ def main():
         con = open(os.path.join(run, "console.txt"), encoding="latin-1").read()
         lines = [ln for ln in con.splitlines()
                  if ln.startswith(("rt", "  ", "RT ", "[kill]")) or "[kill]" in ln]
-        print(f"== rt, {m} model")
+        print(f"== rt, {m} code model")
         print("\n".join(lines))
         if "RT PASS" not in con:
             ok = False

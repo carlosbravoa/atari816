@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""genrt.py - the tables that prove the runtime (fastrt/) against Python's arithmetic.
+"""genrt.py - the tables that prove the runtime (rt/) against Python's arithmetic.
 
     genrt.py OUT.BIN [--cases N] [--memcases M] [--seed S]
 

@@ -1,6 +1,6 @@
-; mem.s - memcpy, memmove, memset, strlen, strcpy, memcmp for cc816 (ca65), tuned as
-; sdk/c/fastrt/mem.s is for vbcc's tiny model: every near pointer is an offset in the
-; code bank (DBR), so MVN/MVP run in place on the code bank.
+; mem.s - memcpy, memmove, memset, strlen, strcpy, memcmp for cc816 (ca65), tuned for the
+; 65816: every near pointer is an offset in the code bank (DBR), so MVN/MVP run in place
+; on the code bank.
 ;
 ; cc816's convention: JSR, the arguments at 3,s 5,s 7,s (above the return address), the
 ; result in A. They use A, X, Y and __h0-__h3 and keep DBR.

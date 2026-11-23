@@ -3,49 +3,35 @@
 
     hcc -o GAME.PRG main.c other.c [more.s] [options]
 
-Compiles every .c, assembles every .s, links them with the Horizon C library and writes
-GAME.PRG, ready for the SD card or the emulator (sdk/tools/run816.py). Two compilers:
-
-  cc816 (the SDK's own, sdk/c/cc816): one memory model, IEEE floating point (float =
-        double = 32 bits), ca65 assembly (.s files in ca65 syntax), linked with ld65.
-        Needs Python 3 and cc65's ca65/ld65/ar65.
-  vbcc  (vbcc 65816, tools/get-toolchain.sh): the large and tiny models, floating point
-        (--float), setjmp, vasm assembly (.s files in vasm oldstyle syntax).
+Compiles every .c with cc816 (the SDK's C compiler, sdk/c/cc816), assembles every .s
+(ca65 syntax), links them with ld65 and the Horizon C library and writes GAME.PRG, ready
+for the SD card or the emulator (sdk/tools/run816.py). Needs Python 3 and cc65's ca65,
+ld65 and ar65. float and double are IEEE 754 single precision (32 bits); long long is 64.
 
 Options:
-  --cc cc816|vbcc   the compiler (default: $HZ_CC, else cc816); every file of
-                    a program is built with the same one (hcc refuses to mix objects)
   -o FILE           the program (default: the first source's name in capitals, .PRG)
   -c                compile/assemble only: one .o per source (with -o: that name)
   -S                write the compiler's assembly (.s) next to each .c, then go on
   -I DIR            look for #include files in DIR too
   -D NAME[=VALUE]   define a macro         -U NAME   undefine one
-  -include FILE     cc816: include FILE before each source
-  -w                cc816: no warnings
-  -Wall             cc816: more warnings (unused variables and labels, x <= 32767 with an
+  -include FILE     include FILE before each source
+  -w                no warnings
+  -Wall             more warnings (unused variables and labels, x <= 32767 with an
                     int x, if (a = b), a far pointer cast to a near one)
-  -Werror           cc816: warnings are errors;  -Wno-NAME: one warning off (the NAME
-                    is the one printed in [-W...] after the warning)
-  -fsigned-char     cc816: plain char is signed (-128 to 127); the default is unsigned
+  -Werror           warnings are errors;  -Wno-NAME: one warning off (the NAME is the
+                    one printed in [-W...] after the warning)
+  -fsigned-char     plain char is signed (-128 to 127); the default is unsigned
   -O0 -O1 -O2 -O3 -Os
-                    optimisation. cc816: -O2 (the default) and -O3, -Os are the same;
-                    -O1 no loop optimisations, -O0 none. vbcc: default -O1 (its local
-                    optimisations; -O2 and -O3 add the global ones, which miscompile
-                    some code: see docs/c/reference.md, "Compiler notes"; -O3 also
-                    -speed, -Os -size)
-  --model large     vbcc only (cc816 has one model): 32-bit pointers that reach every
-                    bank; globals in the code bank, the stack in the window (32 KB)
-  --model tiny      vbcc only: 16-bit pointers, all data in the window: faster, but
-                    data + bss + heap are limited to 28,416 bytes (docs/c/reference.md)
-  --stack N         cc816: bytes for the software stack (arrays, structures and locals
-                    whose address is taken; default 8192, taken from the code bank);
-                    vbcc tiny model: bytes for the stack (default 3968)
+                    optimisation: -O2 (the default); -O3 and -Os are the same as -O2;
+                    -O1 no loop optimisations, -O0 none
   --code small|large
-                    cc816: the code model (default: $HZ_CODE, else small). small: the
-                    whole program in one 64 KB bank (JSR/RTS). large: code in several
-                    banks (JSL/RTL; data, constants and stacks stay in the main bank):
-                    still one file, NAME.PRG: the other code banks follow its o65 (it needs
+                    the code model (default: $HZ_CODE, else small). small: the whole
+                    program in one 64 KB bank (JSR/RTS). large: code in several banks
+                    (JSL/RTL; data, constants and stacks stay in the main bank): still
+                    one file, NAME.PRG: the other code banks follow its o65 (it needs
                     Horizon 0.28 then; docs/c/reference.md, "The two code models")
+  --stack N         bytes for the software stack (arrays, structures and locals whose
+                    address is taken; default 8192, taken from the main bank)
   --heap N          --code large: bytes of the main bank kept free for malloc (and
                     fopen's 1 KB buffers) when hcc fills it with code (default 4096)
   --bank-room N, --main-room N, --spread N
@@ -53,46 +39,42 @@ Options:
                     and in the main bank (--main-room 0: every function that can move
                     goes to another bank); --spread N: the functions in turn in N banks
                     (also $HZ_BANK_ROOM, $HZ_MAIN_ROOM, $HZ_SPREAD)
-  --float           vbcc: link the floating-point library (printf %f, math.h); hcc
-                    also adds it by itself when the link needs it. cc816: nothing to do
-                    (its floating point is in its library, linked when used)
   --ui              link Horizon's controls library (hui.h: windows with buttons,
-                    fields, lists, dialogs; large model only); hcc also adds it by
-                    itself when the program uses a name of hui.h (docs/c/apps.md)
-  --map             write FILE.map (the link map) and print the sizes; cc816 also
-                    FILE.lbl (every label's address: the profiler, prof816.py, reads it)
-  --debug           paint the stack; at exit the program prints how much it used (cc816:
-                    both stacks, and the most of the heap in use at once)
-  -l FILE           link an extra object or library (.o, .a)
-  --needs LIST      cc816: what the program needs, checked when it starts (Horizon 0.29's
+                    fields, lists, dialogs); hcc also adds it by itself when the program
+                    uses a name of hui.h (docs/c/apps.md)
+  --game            link hgame, the game library (sdk/c/game); hcc also does it by
+                    itself when a C source includes <hgame.h>, <conio.h> or <joystick.h>
+  --needs LIST      what the program needs, checked when it starts (Horizon 0.29's
                     HZ_NEEDS, sdk/docs/apps.md): comma-separated horizon=0.29, rev=11,
                     lau, opl2, sprites, blitter, joystick, mem=1024K (or 2M); repeatable.
                     Missing -> one line on the console, the same in a small window when
                     the window system runs, exit 1 ("GAME needs the OPL2 sound chip
                     (hardware revision $0C)."); this works on older Horizons too. With
                     --code large, horizon is at least 0.28. Without --needs: no check
-  --game            link hgame, the game library (sdk/c/game); hcc also does it by
-                    itself when a C source includes <hgame.h>, <conio.h> or <joystick.h>
+  --map             write FILE.map (the link map) and FILE.lbl (every label's address:
+                    the profiler, prof816.py, reads it) and print the sizes
+  --debug           paint the stacks; at exit the program prints how much of both
+                    stacks it used, and the most of the heap in use at once
+  -l FILE           link an extra object or library (.o, .lib)
+  -lm               accepted and ignored (math.h's functions are in the C library)
   -v                show the commands
   --keep DIR        keep the intermediate links in DIR
   --version, -h
 
-Sizes are checked: a program too big for its code bank (or, tiny model, data too big
-for the window) is an error that gives the sizes.
+Sizes are checked: a program too big for its code bank is an error that gives the sizes
+and what to do.
 """
 import os
 import sys
 
 HERE = os.path.dirname(os.path.realpath(__file__))
 sys.path.insert(0, os.path.join(os.path.dirname(HERE), "tools"))
-import hzc  # noqa: E402
 import hzc816  # noqa: E402
+from hzc816 import HccError  # noqa: E402
 sys.path.insert(0, os.path.join(os.path.dirname(HERE), "game"))
 import hgbuild  # noqa: E402
 
-VERSION = "hcc 2.0 (Horizon C SDK: cc816 and vbcc 65816)"
-DEFAULT_CC = "cc816"
-COMPILERS = ("cc816", "vbcc")
+VERSION = "hcc 3.0 (Horizon C SDK: cc816)"
 
 
 def die(msg, code=1):
@@ -109,26 +91,16 @@ def main(argv):
         return 0
     if argv[0] == "--build-lib":            # the SDK's Makefile: (re)build the library
         try:
-            for m in argv[1:] or ("cc816", "cc816l") + hzc.MODELS:
-                if m == "cc816":
-                    hzc816.build_lib(code="small")
-                elif m == "cc816l":             # cc816's large code model
-                    hzc816.build_lib(code="large")
-                else:
-                    hzc.build_lib(m)
-        except hzc.HccError as e:
-            die(str(e))
-        return 0
-    if argv[0] == "--build-ui":             # the SDK's Makefile: the controls library
-        try:
-            hzc.build_ui()
-        except hzc.HccError as e:
+            for m in argv[1:] or hzc816.CODES:  # the code models: small, large
+                if m not in hzc816.CODES:
+                    die(f"--build-lib takes the code models small and large, not {m}")
+                hzc816.build_lib(code=m)
+        except HccError as e:
             die(str(e))
         return 0
     o = {"out": None, "srcs": [], "incs": [], "defs": [], "libs": [], "opt": None,
-         "model": None, "compile_only": False, "asm_too": False, "want_map": False,
-         "debug": False, "float": False, "ui": False, "game": False, "stack": None,
-         "keep": None, "cc": os.environ.get("HZ_CC") or DEFAULT_CC,
+         "compile_only": False, "asm_too": False, "want_map": False,
+         "debug": False, "ui": False, "game": False, "stack": None, "keep": None,
          "code": os.environ.get("HZ_CODE") or "small", "heap": None,
          "bank_room": _env_int("HZ_BANK_ROOM"), "main_room": _env_int("HZ_MAIN_ROOM"),
          "spread": _env_int("HZ_SPREAD"), "needs": [],
@@ -168,15 +140,9 @@ def main(argv):
             _drv.parse_warning_flag(a, o["ccopts"])
         elif a.startswith("-O"):
             v = a[2:] or "2"
-            if v not in hzc.OPTS:
+            if v not in hzc816.OPTS:
                 die(f"unknown optimisation {a} (use -O0, -O1, -O2, -O3 or -Os)")
             o["opt"] = v
-        elif a == "--cc" or a.startswith("--cc="):
-            o["cc"] = a.split("=", 1)[1] if "=" in a else val("--cc")
-        elif a == "--model" or a.startswith("--model="):
-            o["model"] = a.split("=", 1)[1] if "=" in a else val("--model")
-            if o["model"] not in hzc.MODELS:
-                die(f"--model is large or tiny, not {o['model']}")
         elif a == "--stack" or a.startswith("--stack="):
             v = a.split("=", 1)[1] if "=" in a else val("--stack")
             try:
@@ -185,7 +151,6 @@ def main(argv):
                 die(f"--stack needs a number of bytes, not {v}")
         elif a == "--code" or a.startswith("--code="):
             o["code"] = a.split("=", 1)[1] if "=" in a else val("--code")
-            o["code_given"] = True
             if o["code"] not in hzc816.CODES:
                 die(f"--code is small or large, not {o['code']}")
         elif a in ("--heap", "--bank-room", "--main-room", "--spread") or \
@@ -196,8 +161,8 @@ def main(argv):
                 o[k[2:].replace("-", "_")] = int(v, 0)
             except ValueError:
                 die(f"{k} needs a number of bytes, not {v}")
-        elif a == "--float" or a == "-lm":
-            o["float"] = True
+        elif a == "-lm":
+            pass                            # (math.h is in the C library)
         elif a == "--ui":
             o["ui"] = True
         elif a == "--map":
@@ -211,7 +176,7 @@ def main(argv):
         elif a == "--needs" or a.startswith("--needs="):
             o["needs"].append(a.split("=", 1)[1] if a.startswith("--needs=") else val("--needs"))
         elif a == "-v":
-            hzc.VERBOSE = True
+            hzc816.VERBOSE = True
         elif a == "--keep":
             o["keep"] = os.path.abspath(val("--keep"))
         elif a.startswith("-"):
@@ -220,8 +185,8 @@ def main(argv):
             o["srcs"].append(a)
         i += 1
 
-    if o["cc"] not in COMPILERS:
-        die(f"--cc is cc816 or vbcc, not {o['cc']}")
+    if o["code"] not in hzc816.CODES:
+        die(f"$HZ_CODE is small or large, not {o['code']}")
     srcs = o["srcs"]
     if not srcs:
         die("no source files")
@@ -229,7 +194,7 @@ def main(argv):
         if not os.path.exists(s):
             die(f"{s}: no such file")
         if os.path.splitext(s)[1].lower() not in (".c", ".s", ".o", ".a", ".lib"):
-            die(f"{s}: hcc takes .c, .s, .o, .a and .lib files")
+            die(f"{s}: hcc takes .c, .s, .o and .lib (or .a) files")
     if o["compile_only"] and o["out"] and \
             len([s for s in srcs if not s.endswith((".o", ".a", ".lib"))]) > 1:
         die("-c with -o takes one source")
@@ -238,12 +203,7 @@ def main(argv):
             o["needs"] = parse_needs(",".join(o["needs"]))
         except ValueError as e:
             die(f"--needs: {e}")
-    if o["cc"] == "cc816":
-        return main_cc816(o)
-    if o["needs"]:
-        die("--needs is for cc816 (hcc --cc cc816); in a vbcc program, check with "
-            "hz_sys_info() yourself")
-    return main_vbcc(o)
+    return build(o)
 
 
 NEED_FLAGS = {"lau": 0x01, "opl2": 0x02, "sprites": 0x04, "blitter": 0x08, "joystick": 0x10}
@@ -340,7 +300,7 @@ def compile_all(o, comp, asm):
                 comp(s, obj, (os.path.basename(base) + ".s") if o["asm_too"] else None)
             else:
                 asm(s, obj)
-        except hzc.HccError as e:
+        except HccError as e:
             print(str(e), file=sys.stderr)
             errors += 1
             continue
@@ -352,16 +312,12 @@ def compile_all(o, comp, asm):
     return objs, tmp
 
 
-def main_cc816(o):
-    if o["model"]:
-        die(f"--model {o['model']} is for vbcc (hcc --cc vbcc): cc816 has one memory model "
-            f"(docs/c/reference.md, \"Memory\")")
-    # (--float: nothing to do; cc816's floating point is linked from its library when used)
+def build(o):
     stack = o["stack"]
     if stack is None:
         stack = hzc816.SSTACK
     if not 512 <= stack <= 0x8000 or stack & 1:
-        die("--stack: cc816's software stack is an even number of bytes, 512 to 32768")
+        die("--stack: the software stack is an even number of bytes, 512 to 32768")
     opt = o["opt"] or "2"
     incs = o["incs"]
     code = o["code"]
@@ -373,8 +329,8 @@ def main_cc816(o):
         objs, tmp = compile_all(
             o, lambda s, obj, a: hzc816.compile_c(s, obj, opt, incs=incs, defs=o["defs"],
                                                   asm_out=a, opts=o["ccopts"], code=code),
-            lambda s, obj: hzc816.assemble(s, obj, incs=incs + [os.path.join(hzc.SDKC,
-                                                                            "include")],
+            lambda s, obj: hzc816.assemble(s, obj, incs=incs + [os.path.join(hzc816.SDKC,
+                                                                               "include")],
                                            code=code))
         if o["compile_only"]:
             return 0
@@ -383,7 +339,7 @@ def main_cc816(o):
             objs = objs + [nobj]
         libs = list(o["libs"])
         if o["game"] or hgbuild.uses_game(o["srcs"]):
-            libs.insert(0, hgbuild.lib_for("cc816l" if code == "large" else "cc816"))
+            libs.insert(0, hgbuild.lib_for(code))
         out = o["out"] or os.path.basename(os.path.splitext(o["srcs"][0])[0]).upper() + ".PRG"
         mapfile = os.path.splitext(out)[0] + ".map" if o["want_map"] else None
         ui = o["ui"]
@@ -394,92 +350,15 @@ def main_cc816(o):
                                     heap=o["heap"], bank_room=o["bank_room"],
                                     main_room=o["main_room"], spread=o["spread"])
                 break
-            except hzc.HccError as e:
-                undef = hzc.undefined_names(str(e))
-                if ui or not undef or not undef <= hzc.ui_names() | {"hui_rowtramp"}:
+            except HccError as e:
+                undef = hzc816.undefined_names(str(e))
+                if ui or not undef or not undef <= hzc816.ui_names() | {"hui_rowtramp"}:
                     raise
                 ui = True               # only hui.h names missing: the controls library
         if o["want_map"]:
             print(hzc816.size_report(out, sizes))
         return 0
-    except hzc.HccError as e:
-        die(str(e))
-    finally:
-        if tmp:
-            import shutil
-            shutil.rmtree(tmp, ignore_errors=True)
-
-
-def main_vbcc(o):
-    if o.get("code_given") and o["code"] == "large":
-        die("--code large is cc816's (hcc --cc cc816); vbcc has its own --model large, whose "
-            "code is limited to one bank")
-    out = o["out"]
-    srcs, incs, libs = o["srcs"], o["incs"], list(o["libs"])
-    defs = [d for d in o["defs"] if not d.startswith("-U")]     # (vbcc has no -U)
-    opt = o["opt"] or hzc.DEFAULT_OPT
-    model = o["model"] or "large"
-    want_map, debug, float_, ui = o["want_map"], o["debug"], o["float"], o["ui"]
-    stack, keep = o["stack"], o["keep"]
-    wend = 0x7000
-    if stack is not None:
-        if model != "tiny":
-            die("--stack is for the tiny model (the large model's stack is the whole "
-                "window, about 32 KB)")
-        if not 256 <= stack <= 0x7000:
-            die("--stack: between 256 and 28672 bytes")
-        wend = (0x7F80 - stack) & ~15
-    if ui and model == "tiny":
-        die(hzc.UI_TINY)
-    for s in srcs:
-        if s.lower().endswith((".o", ".a", ".lib")) and hzc816.object_kind(s) in ("cc816", "lib"):
-            die(f"{s}: an object or library made by cc816 (ca65); this program is built with "
-                f"vbcc (--cc vbcc): build every file with the same compiler")
-    tmp = None
-    try:
-        hzc.vbcc_dir()
-        hzc.ensure_lib(model)
-        objs, tmp = compile_all(
-            o, lambda s, obj, a: hzc.compile_c(s, obj, model, opt=opt, incs=incs, defs=defs,
-                                               asm_out=a),
-            lambda s, obj: hzc.assemble(s, obj, model,
-                                        incs=incs + [os.path.join(hzc.SDKC, "include")]))
-        if o["compile_only"]:
-            return 0
-        if o["game"] or hgbuild.uses_game(srcs):     # the game library (sdk/c/game)
-            libs.append(hgbuild.lib_for(model))
-        if not out:
-            out = os.path.basename(os.path.splitext(srcs[0])[0]).upper() + ".PRG"
-        mapfile = os.path.splitext(out)[0] + ".map" if want_map else None
-        uinames = set() if ui else None     # the hui.h names used (None: no block)
-        while True:
-            # a link that misses only floating-point names or hui.h names is done again
-            # with the float library or the controls library's block (made for the names)
-            try:
-                sizes = hzc.link(objs, out, model, float_=float_, wend=wend, debug=debug,
-                                 mapfile=mapfile, extra_libs=libs, keep=keep, ui=uinames)
-                break
-            except hzc.HccError as e:
-                msg = str(e)
-                undef = hzc.undefined_names(msg)
-                huin = undef & hzc.ui_names()
-                fl = {n for n in undef if hzc.is_float_name(n)}
-                if not undef or undef - huin - fl:
-                    raise
-                if huin and model == "tiny":
-                    die(hzc.UI_TINY)
-                if (fl and float_) or (huin and uinames is not None and huin <= uinames):
-                    raise
-                if fl and not float_:
-                    print("hcc: the program uses floating point: linking the float library",
-                          file=sys.stderr)
-                    float_ = True
-                if huin:
-                    uinames = (uinames or set()) | huin
-        if want_map:
-            print(hzc.size_report(out, model, sizes, wend))
-        return 0
-    except hzc.HccError as e:
+    except HccError as e:
         die(str(e))
     finally:
         if tmp:

@@ -3113,7 +3113,7 @@ class Front:
             v = self.wrap(FV(op.val), t)
             return self.to_dst(RV(Imm(v, vsz(t)), t), dst)
         if t.is_float and op.size == 8:
-            # a long long -> float: lib/cc816/llconv.c
+            # a long long -> float: lib/llconv.c
             return self.ll_helper('__ulltof' if not st.signed else '__lltof', op, 4, t, dst)
         if t.is_int and t.size == 8:
             return self.ll_helper('__ftoll' if t.signed else '__ftoull', op, 8, t, dst)
@@ -3144,7 +3144,7 @@ class Front:
 
     def ll_helper(self, name, op, size, t, dst):
         """a conversion between long long and float: a call of the library's C function
-        (lib/cc816/llconv.c)"""
+        (lib/llconv.c)"""
         asm = mangle(name)
         self.unit.externs.add(asm)
         d = dst if dst is not None and dst.size == size else self.newv(size)

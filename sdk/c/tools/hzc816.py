@@ -1,11 +1,11 @@
-"""hzc816.py - hcc's cc816 back end: compile (cc816, in this process), assemble (ca65),
-build the C library, link (ld65) and check the sizes.
+"""hzc816.py - the machinery behind bin/hcc: compile (cc816, in this process), assemble
+(ca65), build the C library, link (ld65) and check the sizes.
 
-    build/lib/cc816/      crt0.o, libc816.lib (rt/cc816/*.s, the syscall stubs from
-                          tools/gensys.py, lib/*.c, lib/cc816/*.c), rebuilt whenever a
-                          source is newer than it
-    build/lib/cc816l/     the same for the large code model (hcc --code large)
-    rt/cc816/hzprog.cfg   the ld65 configuration: an o65 program at $0100 of its code bank
+    build/lib/small/      crt0.o, libc816.lib (rt/*.s, the syscall stubs from
+                          tools/gensys.py, lib/*.c), rebuilt whenever a source is newer
+                          than it
+    build/lib/large/      the same for the large code model (hcc --code large)
+    rt/hzprog.cfg         the ld65 configuration: an o65 program at $0100 of its code bank
                           (the small code model; the large one's is made for each link:
                           tools/hzlarge.py)
 
@@ -13,6 +13,7 @@ One memory model: every data pointer is a 16-bit offset in the code bank (DBR), 
 pointers reach other banks; the software stack (arrays, structures, locals whose address
 is taken) is the top of the code bank (--stack N bytes, default 8192), the hardware stack
 the window (sdk/docs/c/reference.md).
+$HZ_BUILD (default sdk/c/build) is where the libraries are built.
 """
 import os
 import re
@@ -24,12 +25,67 @@ import tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 SDKC = os.path.dirname(HERE)
 CC816 = os.path.join(SDKC, "cc816")
-RT = os.path.join(SDKC, "rt", "cc816")
+RT = os.path.join(SDKC, "rt")
 CFG = os.path.join(RT, "hzprog.cfg")
 sys.path.insert(0, HERE)
 sys.path.insert(0, CC816)
-import hzc  # noqa: E402
-from hzc import HccError  # noqa: E402
+
+
+class HccError(Exception):
+    pass
+
+
+VERBOSE = False
+OPTS = ("0", "1", "2", "3", "s")        # -O levels hcc takes (3 and s are 2)
+
+
+def run(cmd, what, filter_out=None, cwd=None):
+    """Run a tool; on failure raise HccError with its (cleaned) output."""
+    if VERBOSE:
+        print("  " + " ".join(cmd), file=sys.stderr)
+    r = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, cwd=cwd)
+    out = r.stdout.decode("latin-1")
+    if filter_out:
+        out = filter_out(out)
+    if r.returncode != 0:
+        raise HccError(out.rstrip() or f"{what} failed (exit {r.returncode})")
+    return out
+
+
+def horizon_dir():
+    """the Horizon tree: $HORIZON, else the repository's"""
+    return os.path.abspath(os.environ.get("HORIZON") or os.path.join(SDKC, "..", "..", "horizon"))
+
+
+def cc65_tool(name):
+    """ca65, ld65 or ar65 ($CA65, $LD65, $AR65, else on the PATH)"""
+    t = os.environ.get(name.upper()) or shutil.which(name)
+    if not t:
+        raise HccError(f"{name} (cc65) is not installed: hcc assembles and links with cc65's "
+                       f"ca65, ld65 and ar65 (sdk/docs/c/getting-started.md)")
+    return t
+
+
+def ui_names():
+    """The C names hui.h defines (functions, variables): a program using one gets the
+    controls library linked."""
+    import genhui
+    return set(genhui.c_names())
+
+
+MATHFUNCS = set("""acos asin atan atan2 ceil cos cosh exp fabs floor fmod frexp ldexp log
+log10 modf pow sin sinh sqrt tan tanh strtod atof cbrt exp2 log2 hypot round trunc fmin fmax
+copysign nan expm1 log1p erf erfc lgamma tgamma rint lrint lround nearbyint remainder
+acosh asinh atanh scalbn logb ilogb fdim fma""".split())
+
+
+def undefined_names(msg):
+    """The C names of a failed link's undefined symbols."""
+    return set(re.findall(r"undefined: (\S+)", msg))
+
+
+def is_float_name(s):
+    return "flt" in s or s.rstrip("f") in MATHFUNCS or s in MATHFUNCS
 
 SSTACK = 8192                   # the software stack's default size
 # the code model: "small" (one bank, JSR/RTS) or "large" (hcc --code large: code in
@@ -41,7 +97,6 @@ ZONE = 256                      # its guard zone
 CODE_ROOM = SSTOP - 0x100       # the code bank from $0100 to the software stack's top
 O65_MAGIC = b"\x01\x00o65"
 CA65_MAGIC = b"\x55\x7a\x6e\x61"    # ca65's object files
-VOBJ_MAGIC = b"VOBJ"                # vasm's (vbcc's)
 
 _cc = None
 ASM_OF = {}                     # an assembly file's name -> the C file it was made from
@@ -58,7 +113,7 @@ def cc():
 
 def libdir(code=None):
     return os.path.join(os.environ.get("HZ_BUILD") or os.path.join(SDKC, "build"), "lib",
-                        "cc816l" if (code or CODE) == "large" else "cc816")
+                        "large" if (code or CODE) == "large" else "small")
 
 
 def is_large(code=None):
@@ -66,7 +121,7 @@ def is_large(code=None):
 
 
 def tool(name):
-    return hzc.cc65_tool(name)
+    return cc65_tool(name)
 
 
 def includes(incs=()):
@@ -82,7 +137,7 @@ def compile_c(src, obj, opt="2", incs=(), defs=(), asm_out=None, opts=None, code
     opts = dict(opts or {})
     if is_large(code):
         opts["large"] = True
-    if hzc.VERBOSE:
+    if VERBOSE:
         print(f"  cc816 -O{level} {src}", file=sys.stderr)
     try:
         asm, warns = cc().compile_c(src, list(incs) + [os.path.join(SDKC, "include")], defs,
@@ -139,9 +194,9 @@ def _where(msg, src):
 
 
 def assemble(src, obj, incs=(), defs=(), src_name=None, code=None):
-    """ca65; the large code model: -D __CC816_LARGE__ (rt/cc816/model.inc: ARGS, RET,
+    """ca65; the large code model: -D __CC816_LARGE__ (rt/model.inc: ARGS, RET,
     CALL, LARGE, which any .s file may include)"""
-    cmd = [tool("ca65"), "--cpu", "65816", "-g", "-I", os.path.join(hzc.horizon_dir(), "user")]
+    cmd = [tool("ca65"), "--cpu", "65816", "-g", "-I", os.path.join(horizon_dir(), "user")]
     for i in incs:
         cmd += ["-I", i]
     cmd += ["-I", RT]
@@ -150,11 +205,11 @@ def assemble(src, obj, incs=(), defs=(), src_name=None, code=None):
     for d in defs:
         cmd += ["-D", d]
     cmd += ["-o", obj, src]
-    hzc.run(cmd, f"assembling {src_name or src}")
+    run(cmd, f"assembling {src_name or src}")
 
 
 def object_kind(path):
-    """'cc816' (ca65), 'vbcc' (vasm), 'lib' (an archive) or '?'"""
+    """'cc816' (a ca65 object), 'lib' (an ar65 library) or '?'"""
     try:
         with open(path, "rb") as f:
             head = f.read(8)
@@ -162,10 +217,6 @@ def object_kind(path):
         return "?"
     if head.startswith(CA65_MAGIC):
         return "cc816"
-    if head.startswith(VOBJ_MAGIC):
-        return "vbcc"
-    if head.startswith(b"!<arch>"):
-        return "vbcc"                   # hcc --cc vbcc's libraries are ar archives
     if head[:4] == b"\x6e\x61\x55\x7a" or head[:4] == b"\x61\x55\x7a\x6e":
         return "lib"
     return "?"
@@ -174,15 +225,15 @@ def object_kind(path):
 # ---- the library -------------------------------------------------------------------
 
 def lib_sources():
-    """(kind, path): rt/cc816/*.s (not the startup), lib/*.c, lib/cc816/*.c"""
+    """(kind, path): rt/*.s (not the startup), lib/*.c"""
     out = []
     for f in sorted(os.listdir(RT)):
         if f.endswith(".s") and f != "crt0.s":
             out.append(("s", os.path.join(RT, f)))
-    for d in (os.path.join(SDKC, "lib"), os.path.join(SDKC, "lib", "cc816")):
-        for f in sorted(os.listdir(d)):
-            if f.endswith(".c"):
-                out.append(("c", os.path.join(d, f)))
+    d = os.path.join(SDKC, "lib")
+    for f in sorted(os.listdir(d)):
+        if f.endswith(".c"):
+            out.append(("c", os.path.join(d, f)))
     return out
 
 
@@ -198,7 +249,7 @@ def lib_inputs():
               os.path.join(HERE, "syscalls.tab"), os.path.abspath(__file__)]
     files += compiler_files()
     for d in (os.path.join(SDKC, "include"), os.path.join(CC816, "include"),
-              os.path.join(SDKC, "lib", "cc816")):
+              os.path.join(SDKC, "lib")):
         files += [os.path.join(d, f) for f in os.listdir(d) if f.endswith(".h")]
     return files
 
@@ -224,8 +275,8 @@ def build_lib(quiet=False, code=None):
         shutil.rmtree(od)
     os.makedirs(od)
     if not quiet:
-        print(f"hcc: building the C library for cc816"
-              f"{' (large code model)' if is_large(code) else ''} ({d})", file=sys.stderr)
+        print(f"hcc: building the C library for the {'large' if is_large(code) else 'small'} "
+              f"code model ({d})", file=sys.stderr)
     objs = []
     for s in gensys.write_stubs816(os.path.join(d, "stubs"), large=is_large(code)):
         o = os.path.join(od, os.path.splitext(os.path.basename(s))[0] + ".o")
@@ -244,7 +295,7 @@ def build_lib(quiet=False, code=None):
     lib = lib_path(code)
     if os.path.exists(lib):
         os.remove(lib)
-    hzc.run([tool("ar65"), "a", lib] + objs, "ar65")
+    run([tool("ar65"), "a", lib] + objs, "ar65")
 
 
 class locked:
@@ -270,7 +321,7 @@ class locked:
 def ensure_lib(code=None):
     code = code or CODE
     if lib_stale(code):
-        with locked("libc816" + ("l" if is_large(code) else "")):
+        with locked("lib-" + ("large" if is_large(code) else "small")):
             if lib_stale(code):
                 build_lib(code=code)
 
@@ -284,18 +335,16 @@ _OVER = re.compile(r"Segment [‘'](\w+)[’'] overflows memory area [‘'](\w+)
 def link(objs, out, sstack=SSTACK, debug=False, mapfile=None, extra_libs=(), keep=None,
          ui=False, code=None, heap=None, bank_room=None, main_room=None, spread=None):
     """ld65 -> out (an o65 program). Returns the sizes dict. ui: link Horizon's controls
-    library (the hui.h binding: build/ui/cc816/). code: the code model; the large one
+    library (the hui.h binding: build/ui/<code model>/). code: the code model; the large one
     (tools/hzlarge.py) also writes the other code banks after the o65, in the same file, when
     code goes to other banks: heap (the main bank's room kept for malloc), bank_room,
     main_room (the tests: how much code a bank, and the main bank, may take)"""
     code = code or CODE
     ensure_lib(code)
     for o in objs:
-        k = object_kind(o)
-        if k == "vbcc":
-            raise HccError(f"{o}: an object or library made by vbcc (hcc --cc vbcc); this "
-                           f"program is built with cc816: build every file with the same "
-                           f"compiler (hcc --cc cc816)")
+        if object_kind(o) == "?":
+            raise HccError(f"{o}: not an object (.o) or library (.lib, .a) made by hcc, "
+                           f"ca65 or ar65")
     if is_large(code):
         import hzlarge
 
@@ -330,7 +379,7 @@ def link(objs, out, sstack=SSTACK, debug=False, mapfile=None, extra_libs=(), kee
         cmd = [tool("ld65"), "-C", CFG, "-o", out, "-m", mp, "-Ln", lbl,
                "-D", f"__HZ_SSTACK__={sstack}", "-D", f"__HZ_PAINT__={1 if debug else 0}",
                os.path.join(d, "crt0.o")] + list(objs) + libs + [lib_path()]
-        if hzc.VERBOSE:
+        if VERBOSE:
             print("  " + " ".join(cmd), file=sys.stderr)
         r = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
         msg = r.stdout.decode("utf-8", "replace")
@@ -384,7 +433,7 @@ def link_error(msg, name, sstack, objs, libs, tmp, mapfile=None):
     if undef:
         lines = sorted(set(undef))
         names = {u.split()[1] for u in lines}
-        if any(hzc.is_float_name(n) for n in names):
+        if any(is_float_name(n) for n in names):
             lines.append("(cc816's math.h has the functions docs/c/reference.md lists, "
                          "\"Floating point\"; not this one)")
         lines.append("(no file of the program defines " + ("these" if len(names) > 1 else "it")

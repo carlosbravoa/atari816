@@ -4,7 +4,7 @@ The program's data, constants, bss, heap and software stack stay in the main ban
 Horizon loads as it loads any program (an o65 file, NAME.PRG). Its code may fill several
 banks: cc816 puts each function that can move in a segment of its own (F_name, or
 FS<tag>_name for a static one); hcc places them, and writes the banks other than the
-main one after the o65 in the same file, where the startup reads them (lib/cc816/xload.c).
+main one after the o65 in the same file, where the startup reads them (lib/xload.c).
 Horizon 0.28 and later load such a file and ignore what follows the o65. The libraries'
 functions move as the program's (cc816 splits them, one segment a function; only the loader
 of the banks, xload.c and misc.c, is resident). The program's __far objects (segment
@@ -34,7 +34,7 @@ The steps (ld65 runs four to six times; each is quick):
      link (hand-written assembly naming a bank in a movable function).
   6. NAME.PRG is link A's o65 file (o65strip), then the block of the other banks' images and
      their relocations, then an 8-byte trailer: the block's offset (u32) and "HZPX"
-     (lib/cc816/xload.c has the layout). The o65 must stay below 64 KB (Horizon's loader reads
+     (lib/xload.c has the layout). The o65 must stay below 64 KB (Horizon's loader reads
      only the first 65,535 bytes of a larger file); the whole file has no such limit.
 """
 import os
@@ -46,10 +46,9 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-import hzc  # noqa: E402
 import hzc816  # noqa: E402
 import ca65obj  # noqa: E402
-from hzc import HccError  # noqa: E402
+from hzc816 import HccError  # noqa: E402
 
 BANK = 0xFFFF                   # a bank's code at most (link C has the banks at offset 1)
 # the link-time banks of bank k (1..64) in the three links: A k, B k + $40, C $80 + 2(k - 1).
@@ -155,7 +154,7 @@ def run_ld65(cfg_text, tmp, name, inputs, defs, out, mp, lbl=None):
     for d in defs:
         cmd += ["-D", d]
     cmd += inputs
-    if hzc.VERBOSE:
+    if hzc816.VERBOSE:
         print("  " + " ".join(cmd), file=sys.stderr)
     r = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     return r.returncode, r.stdout.decode("utf-8", "replace")
@@ -564,7 +563,7 @@ def append_banks(path, imgs, rel, stamp):
 
 
 def link_error(msg, name, sstack, mp):
-    """ld65's complaint in plain words (hzc816's, with the large model's sizes)"""
+    """ld65's complaint in plain words (hzc816's, with the large code model's sizes)"""
     m = re.search(r"Range error in module [‘'`](\S+?)[’'], line (\d+)", msg)
     if m and "Range" in msg:
         return (f"{msg.strip()}\n(in the large code model a function in another bank has "

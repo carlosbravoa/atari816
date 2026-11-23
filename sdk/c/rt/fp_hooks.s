@@ -3,8 +3,8 @@
 ; The compiler writes ".forceimport __cc816_scanf" into a unit that uses floating point
 ; and calls a scanf function (or gives a float pointer to any variadic function), so ld65
 ; links this module into those programs only. Its constructor (run by crt0.s before main)
-; installs the float conversions in scanf (lib/cc816/scan.c: %f %e %g %a, done by
-; lib/cc816/scanfp.c with strtod). Without it they fail. (fp_hookp.s is printf's.)
+; installs the float conversions in scanf (lib/scan.c: %f %e %g %a, done by
+; lib/scanfp.c with strtod). Without it they fail. (fp_hookp.s is printf's.)
 	.p816
 	.smart	-
 	.a16

@@ -1,7 +1,6 @@
-/* codegen.c - the compiler's known trouble spots (docs/c/reference.md, "Compiler
- * notes"): 32-bit values loaded from arrays and through pointers, in both models. hcc
- * repairs the large model's pattern (hzc.fix_asm) and compiles the tiny model with -nox.
- * Prints CODEGEN PASS or CODEGEN FAIL. */
+/* codegen.c - code generation trouble spots found while the C SDK was built: 32-bit
+ * values loaded from arrays and through pointers, near pointers in structures. Prints
+ * CODEGEN PASS or CODEGEN FAIL. */
 #include <stdio.h>
 #include <string.h>
 
@@ -31,8 +30,7 @@ long chain(struct node *n) { return n->next->w; }
 int deref(int **pp, int i) { return *pp[i]; }
 long sum(void) { long s = 0; int i; for (i = 0; i < 4; i++) s += ltbl[i]; return s; }
 
-/* lib/stdio.c's pattern: two long arrays, one index, += then a compare (vbcc saved X in Y
- * and then indexed [r0],y with it: hzc.fix_ysave) */
+/* lib/stdio.c's pattern: two long arrays, one index, += then a compare */
 static long posa[8], sizea[8];
 int grow(int h, unsigned r)
 {
@@ -44,14 +42,9 @@ int grow(int h, unsigned r)
     return 0;
 }
 
-/* a pointer member of a static structure, read and written at offset 0 (vbcc read the
- * member's offset there: hzc.fix_nearoff). Tiny model: every pointer is 16 bits; large
- * model: __near ones (the controls library's structures, hui.h). */
-#ifdef __MNEAR
-#define NEARP
-#else
+/* a pointer member of a static structure, read and written at offset 0 (__near, as in
+ * the controls library's structures, hui.h) */
 #define NEARP __near
-#endif
 struct nrec { int a; int b; char NEARP *s; struct nnode NEARP *n; };
 struct nnode { int v0; int v1; };
 static struct nnode nn = {11, 22};

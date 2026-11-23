@@ -3,18 +3,17 @@
  *
  *   #include <horizon.h>
  *
- * Pointers. In the large model (hcc's default) a data pointer is 32 bits (offset, bank)
- * and reaches everything: the code bank (globals, strings), the window (bank 0: locals,
- * the stack) and banks from hz_far_alloc. In the tiny model (hcc --model tiny) it is 16
- * bits and points into the window, where all the program's data lives; other banks need
- * __far pointers. A syscall takes a pointer as X = offset, Y = bank: the stubs do that.
+ * Pointers. A data pointer is 16 bits: an offset in the program's code bank (the main
+ * bank), where its globals, strings, locals and malloc's heap all are. Memory in other
+ * banks (hz_far_alloc, __far objects) needs __far pointers (32 bits). A syscall takes a
+ * pointer as X = offset, Y = bank: the stubs do that (the code bank for a near pointer).
  *
  * Errors. Every hz_ function sets hz_errno: 0 when the call worked, else Horizon's error
  * code (HZ_EINVAL, HZ_ENOMEM, ..., HZ_EIO + n for the card: HZ_ENOFILE ...). It returns -1
  * (or $FFFF for unsigned results) on an error. The C library (stdio.h, ...) sets errno
  * (errno.h) instead; hz_strerror() says a Horizon code in words.
  *
- * The blocks below have the exact byte layout of ABI.md (vbcc packs structures: no
+ * The blocks below have the exact byte layout of ABI.md (cc816 packs structures: no
  * padding); each has a compile-time size check.
  */
 #ifndef HORIZON_H
@@ -22,11 +21,7 @@
 
 #ifndef __SIZE_T
 #define __SIZE_T 1
-#ifdef __SIZE_T_INT
 typedef unsigned int size_t;
-#else
-typedef unsigned long size_t;
-#endif
 #endif
 
 /* ---- basics */
@@ -34,13 +29,7 @@ typedef unsigned long size_t;
 /* a compile-time check: HZ_STATIC_ASSERT(sizeof(hz_io) == 6, io) */
 #define HZ_STATIC_ASSERT(cond, name) typedef char hz_assert_##name[(cond) ? 1 : -1]
 
-/* HZ_TINY: defined in the tiny model (vbcc defines __MNEAR there; its manual says
- * __MTINY, which hcc defines too) */
-#if defined(__MTINY) || defined(__MNEAR)
-#define HZ_TINY 1
-#endif
-
-/* the offset and the bank of a data pointer (any model, near or far) */
+/* the offset and the bank of a data pointer (near or far) */
 #define HZ_OFF(p)  ((unsigned)(unsigned long)(p))
 #define HZ_BANK(p) ((unsigned char)((unsigned long)(p) >> 16))
 
@@ -308,24 +297,22 @@ int hz_stat_path(const char *path, hz_fileinfo *st);
  * hz_task_path gives the whole path */
 int hz_prog_dir(char *buf, unsigned size);
 
-/* ---- memory in other banks (64 KB each). The large model's pointers reach them as
- * they are; in the tiny model use __far pointers. Objects must not cross a bank. */
+/* ---- memory in other banks (64 KB each), through __far pointers. Objects must not
+ * cross a bank. */
 void __far *hz_far_alloc(void);             /* a fresh bank (its offset 0), NULL if none */
 void hz_far_free(void __far *bank);         /* give it back */
-/* copies of n bytes (n <= 65535) between any banks, with MVN (about 7 cycles a byte) */
+/* copies of n bytes (n <= 65535) between any banks, with MVN (about 12 cycles a byte) */
 void hz_far_copy(void __far *dst, const void __far *src, unsigned n);
 void hz_far_set(void __far *dst, int c, unsigned n);
-/* a far pointer to bank:offset (a function: vbcc would turn a cast integer into a
- * pointer in the data bank) */
+/* a far pointer to bank:offset */
 void __far *hz_farptr(unsigned bank, unsigned off);
 #define HZ_FARPTR(bank, off) hz_farptr((bank), (off))
 
 /* the stack: how many bytes are free below S now */
 unsigned hz_stack_free(void);
-/* 0 if the stack's guard zone is intact (cc816: both stacks'), -1 if a stack overflowed */
+/* 0 if both stacks' guard zones are intact, -1 if a stack overflowed */
 int hz_stack_check(void);
-#ifdef __CC816__
-/* cc816's software stack (arrays, structures, locals whose address is taken): how many
+/* the software stack (arrays, structures, locals whose address is taken): how many
  * bytes are free below its pointer now */
 unsigned hz_sstack_free(void);
 /* the heap (malloc: the main bank from the end of bss to the software stack): its free
@@ -335,7 +322,6 @@ unsigned hz_sstack_free(void);
 unsigned hz_heap_free(void);
 unsigned hz_heap_largest(void);
 unsigned hz_heap_peak(void);
-#endif
 
 /* ---- console */
 /* read a line from the keyboard with echo and editing (Backspace, Left, Right): at most

@@ -3,8 +3,8 @@
 ; The compiler writes ".forceimport __cc816_scanll" into a unit that uses long long and
 ; calls a scanf function (or gives a long long pointer to any variadic function), so ld65
 ; links this module into those programs only. Its constructor (run by crt0.s before main)
-; installs the conversions in scanf (lib/cc816/scan.c: %lld %llu %llx ..., done by
-; lib/cc816/scanll.c). Without it ll is read as l. (ll_hookp.s is printf's.)
+; installs the conversions in scanf (lib/scan.c: %lld %llu %llx ..., done by
+; lib/scanll.c). Without it ll is read as l. (ll_hookp.s is printf's.)
 	.p816
 	.smart	-
 	.a16

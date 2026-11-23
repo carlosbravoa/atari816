@@ -1,7 +1,7 @@
 """IEEE 754 single precision for the compiler: constants, constant folding, conversions.
 
 A float value is its 32-bit pattern (an int). The arithmetic here gives what cc816's
-runtime (sdk/c/rt/cc816/fp_*.s) gives at run time, bit for bit: round to nearest even,
+runtime (sdk/c/rt/fp_*.s) gives at run time, bit for bit: round to nearest even,
 gradual underflow, and x86's NaN rules (a NaN operand comes back quieted, the first one
 when both are; an invalid operation, such as 0/0 or inf - inf, gives the default NaN
 0xFFC00000).

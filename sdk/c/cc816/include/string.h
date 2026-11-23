@@ -1,5 +1,5 @@
 /* string.h - cc816 (Horizon C SDK). memcpy, memmove, memset, strlen, strcpy, memcmp:
- * tuned assembly (rt/cc816/mem.s); the rest lib/cc816/string.c. */
+ * tuned assembly (rt/mem.s); the rest lib/string.c. */
 #ifndef _STRING_H
 #define _STRING_H
 #include <stddef.h>

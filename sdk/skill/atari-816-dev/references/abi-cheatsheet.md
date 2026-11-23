@@ -1,7 +1,9 @@
-# Horizon ABI cheat sheet (0.18)
+# Horizon ABI cheat sheet for assembly (Horizon 0.29)
 
-Full text: `SDK/docs/reference/*.md`, `HORIZON/ABI.md`, `HORIZON/user/horizon.inc`,
-`HORIZON/user/ui.inc`.
+Read this when writing 65816 assembly for Horizon (a whole program, or a .s file next to
+C: then also references/c-language.md, "Assembly called from C"). Full text:
+`sdk/docs/reference/*.md`, `horizon/ABI.md`, `horizon/user/horizon.inc`,
+`horizon/user/ui.inc`, `horizon/user/needs.inc`.
 
 ## Calling
 
@@ -21,8 +23,12 @@ A = argument length, X = argument address (bank 0). End: `exit n` (flushes ulib 
 Segments CODE, RODATA, DATA, BSS (code bank, BSS cleared) + ZEROPAGE (direct page,
 cleared, 256 bytes minus ulib's 38 and ui.lib's 38). The o65 < 64 KB (0.28: data may
 follow it in the file; it is not loaded; SYS_TPATH gives the file's path).
-Build: `ca65 -I HORIZON/user -o x.o x.s`; `ld65 -C HORIZON/user/prog.cfg -o X.PRG x.o
-HORIZON/build/ulib.o [HORIZON/build/ui.lib]`.
+Build: `ca65 -I horizon/user -o x.o x.s`; `ld65 -C horizon/user/prog.cfg -o X.PRG x.o
+horizon/build/ulib.o [horizon/build/ui.lib]` (the assembly templates' Makefiles do it).
+What the program needs (0.29): `.include "needs.inc"` and, first at `start:`,
+`HZ_NEEDS "NAME", 0, 29, 0, NEED_OPL2, 1024` (name, Horizon major, minor, lowest REV, NEED_*
+flags: NEED_LAU $01, NEED_OPL2 $02, NEED_SPRITES $04, NEED_BLITTER $08, NEED_JOY $10; free
+KB). Missing: one line on the console (and a small window), exit 1. references/packaging.md.
 
 ## Macros and ulib
 
@@ -33,7 +39,7 @@ HORIZON/build/ulib.o [HORIZON/build/ui.lib]`.
 `read_char`, `getline` (X,Y buf, A size -> A len, C = ctrl-C), `args_init` (X), `next_arg`
 (X,Y buf, A size -> A len, zero-terminated; C none), `parse_dec` (-> A, C none), `spawn`,
 `exit_a` (A). ulib prints numbers only to the console: for a number in a window, convert
-it yourself (`dec5` / `digit` in `SDK/templates/game/main.s`: A -> ASCII digits).
+it yourself (`dec5` / `digit` in `sdk/templates/game/main.s`: A -> ASCII digits).
 
 ## Syscalls
 
@@ -75,14 +81,15 @@ it yourself (`dec5` / `digit` in `SDK/templates/game/main.s`: A -> ASCII digits)
 | $34 | SYS_SINGLE | | C set: already running (exit) |
 | $35 | SYS_TPATH | X,Y buf, A size (128 fits) | A length; the program file's absolute path (0.28) |
 | $36 | SYS_INFO | - | A version (major<<8\|minor, $001D = 0.29), X REV (0.29; ENOSYS before). Apps and HZ_NEEDS: sdk/docs/apps.md |
-| $40-$43 | SYS_PCREATE / SEND / RECV / PCLOSE | ports, 16-byte messages | |
+| $40-$43 | SYS_PCREATE / SYS_SEND / SYS_RECV / SYS_PCLOSE | ports, 16-byte messages | |
 | $50 | SYS_ICLAIM | | |
 | $51 | SYS_IREAD | (blocks) | A usage, X mods\|down<<8 |
 | $52 | SYS_IRELEASE | | |
 | $53 | SYS_ILEND | A id, X 1 = ctrl-C kills | |
 | $54 | SYS_IPOLL | | as IREAD; C+EAGAIN if none |
 | $55 | SYS_JOY | A 0 (0.15) | A dirs (port 1 bits 0-3: 1 up 2 down 4 left 8 right; port 2 4-7), X triggers |
-| $60-$64 | SYS_CLASSIC / CMOUNT / CEJECT / CBOOT / CQUERY | the classic Atari | |
+| $5F | SYS_MINJECT | (test aid: mouse events) | |
+| $60-$64 | SYS_CLASSIC / SYS_CMOUNT / SYS_CEJECT / SYS_CBOOT / SYS_CQUERY | the classic Atari | |
 | $65 | SYS_BEEP | A pitch, X ticks (0 = silence channel 1), Y vol | |
 | $66 | SYS_SNDW | A reg $00-$13 (POKEY 2, DACs), X value (0.15: silenced at exit) | |
 | $67 | SYS_CHIME | A CH_INFO/WARN/QUESTION/ERROR, X vol ($FFFF setting) (0.15) | |
@@ -91,6 +98,7 @@ it yourself (`dec5` / `digit` in `SDK/templates/game/main.s`: A -> ASCII digits)
 | $6A | SYS_SSTAT | - (0.17) | A own voices playing, X all |
 | $6B | SYS_SSET | A voice, X pitch, Y vol L \| R << 8 (0.17) | |
 | $6C | SYS_STIMER | A own port ($FFFF off), X/Y period us (0.26 music timer) | A generation; port gets {$FF, gen, u16 count} each period |
+| $6D | SYS_OPLW | A OPL2 register $00-$F5 ($FFFE probe, $FFFF reset, $FFFD release), X value (0.27, REV $0C; one owner: EAGAIN; ENODEV before $0C) | A OPL status |
 | $70 | SYS_WSSTART | | A 1 started (stop it at the end) / 0 running |
 | $71 | SYS_WSSTOP | | |
 | $72 | SYS_WOPEN | X,Y {i16 x, y, u16 w, h, u24 title, u8 flags} | A window |
@@ -119,7 +127,7 @@ it yourself (`dec5` / `digit` in `SDK/templates/game/main.s`: A -> ASCII digits)
 | $8E | SYS_WGEOM | A win, X,Y {i16 x ($8000 stays), y, u16 w, h} | |
 | $8F | SYS_TNAME | A id (0 me; \| $8000: read into X,Y 16 bytes), X,Y name | |
 | $90 | SYS_WPOPUP | A win, X,Y {u24 items, i16 x ($8000 pointer), y, u8 flags (1 keyboard)} (0.15; blocks) | A item / $FFFF |
-| $79-$7B, $87, $8D, $5F | ws_redraw, ws_stats, ws_config, setting, ws_closeall, mouse_inject | measurements / system (setting 4 = the sound volume, Lau's master, 0.18; 0.24: 5 the screen saver's delay in s, 6 the seconds without input, read only) | |
+| $79-$7B, $87, $8D | SYS_WSREDRAW, SYS_WSSTATS, SYS_WSCONFIG, SYS_SETTING, SYS_WSCLOSEALL | measurements / system (setting 4 = the sound volume, Lau's master, 0.18; 0.24: 5 the screen saver's delay in s, 6 the seconds without input, read only; ws_config A = 0: X = REV) | |
 | $91 | SYS_SPRALLOC | A count 1-16, X own window (0.18, REV $0B) | A first sprite (lower = in front) |
 | $92 | SYS_SPRFREE | A first, X count; A $FFFF all of yours | |
 | $93 | SYS_SPRSET | A count, X,Y entries {u8 sprite, u8 ctrl SPR_*, i16 x, y, u24 image, u8 pal} | all from the next frame |
@@ -135,11 +143,12 @@ it yourself (`dec5` / `digit` in `SDK/templates/game/main.s`: A -> ASCII digits)
 | $9D | SYS_LISTWAIT | A 0 wait / 1 ask | A 1 = still running |
 | $9E | SYS_FRAME | | A frame counter |
 | $9F | SYS_WINVBL | A own win, X 1/0 (REV $09) | WE_VBL each blank |
+| $A0 | SYS_WFRONT | A own window: back if minimized, raised, the focus (full screen: shown again) | |
 | $A1 | SYS_SHEETNEW | X,Y {u24 address, u8 0, u16 stride, u16 width 1-4096, u16 height 1-1024} (0.19; own memory, else EFAULT) | A sheet 1-32 (EAGAIN: 32 sheets / 4096 rows in all) |
 | $A2 | SYS_SHEETFREE | A sheet / $FFFF all of yours (stops your running list) | |
 | $A3 | SYS_SHEETDRAW | A win \| count<<8 (1-128), X,Y 16-byte records SD_* {u8 sheet, u8 op SH_FILL/COPY/KEY (+SH_VBL $80), u8 colour/key, 0, sx, sy, w, h, x, y} | A drawn; returns at once; ~300 cycles a record |
 
-## Games round (0.18): `SDK/docs/reference/games.md`
+## Games round (0.18): `sdk/docs/reference/games.md`
 
 - Every address for Marga / Ali / Lau (framebuffer, sprite images, list sources, samples)
   must be your memory: window (bank 0 $0000-$7FFF), code bank, your banks (a range may span
@@ -199,7 +208,7 @@ Left $50, Down $51, Up $52. Mods: bit 0 lctrl, 1 lshift, 2 lalt, 3 lgui, 4-7 rig
 (ctrl = `and #$11`, shift = `and #$22`). Programs never get F10, Alt alone, Alt+menu
 letter, Alt+Tab, Alt+F4, ctrl+W (= WE_CLOSE), F12.
 
-## The internet (0.22): `SDK/docs/reference/internet.md`
+## The internet (0.22): `sdk/docs/reference/internet.md`
 
 Through the PC link; the PC must run the gateway `tools/atari816-link` (`--no-net`: E_NOSVC).
 No new syscalls: **a URL is a path** (127 characters with the scheme), on handles 4-7.
@@ -214,10 +223,10 @@ No new syscalls: **a URL is a path** (127 characters with the scheme), on handle
   E_TIMEOUT $CE, E_HTTP $CF, E_CLOSED $D0, E_TLS $D1, E_PCBUSY $D2, E_NET $D3, E_NSTREAM $52.
 - Programs reach whatever the PC can reach, including the home network.
 - emu816 / run816.py: `--net` (tcp:// = real connections of the PC), `--net-root DIR`
-  (http://host/path = the file DIR/host/path; missing: 404). Examples: `SDK/examples/fetch`,
-  `SDK/examples/echo`.
+  (http://host/path = the file DIR/host/path; missing: 404). Examples: `sdk/examples/fetch`,
+  `sdk/examples/echo`.
 
-## Printing, Run in Atari, the folder disk (0.23): `SDK/docs/reference/printing.md`, `classic.md`
+## Printing, Run in Atari, the folder disk (0.23): `sdk/docs/reference/printing.md`, `classic.md`
 
 No new syscalls. **Print:** open `/PRN:NAME` (any mode), write plain text (LF lines, FF a new
 page), close: the job appears as `/Printouts/YYYY-MM-DD HH.MM.SS NAME.txt` (a `.` in front while
@@ -235,7 +244,7 @@ emu816: `--classic-print FILE@SECONDS`, `--no-pc-print`.
 5 C_TITLE_OFF (grey), 6 C_BODY (light beige-grey 228 226 216, window backgrounds), 7 C_DARK
 (76 80 90), 8 C_MID, 9 C_LIGHT, 10 C_SELECT (blue 52 100 204), 11 C_RED, 12 C_YELLOW,
 13 C_GREEN, 14 C_ORANGE, 15 C_SHADOW (near black); the full table with RGB:
-`SDK/docs/reference/drawing.md`; 16 + 36 r + 6 g + b (r, g, b 0-5) cube;
+`sdk/docs/reference/drawing.md`; 16 + 36 r + 6 g + b (r, g, b 0-5) cube;
 232-255 greys (8 ... 238).
 
 ## ui.lib (window apps, `UI := 1`)

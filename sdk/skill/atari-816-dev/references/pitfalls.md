@@ -1,153 +1,210 @@
-# 65C816 / ca65 pitfalls on Horizon
+# Pitfalls on Horizon (C with cc816, and 65C816 / ca65)
 
-Each of these has bitten real code. Check new code against the list before running it.
+Purpose: the mistakes that cost real time here, each with its symptom, cause and fix.
+Check new code against this list before running it. Language details:
+`references/c-language.md`; library: `references/c-library.md`; assembly ABI:
+`references/abi-cheatsheet.md`; tests: `references/testing.md`; porting:
+`references/porting.md`.
 
-## Register widths
+## Things that cost the port agents hours
 
-- Programs run with A, X, Y 16-bit. horizon.inc sets `.smart -`: **ca65 does not follow
-  REP/SEP**. After `sep #$20` write `.a8`, after `rep #$20` write `.a16` (same for X/Y with
-  `.i8`/`.i16`). Otherwise `lda #5` is assembled with the wrong operand size and the CPU
-  runs off into the data. Symptom: a crash or nonsense right after an 8-bit section.
-- Keep 8-bit sections short and local; every routine starts and ends A16/I16.
-- `.a8` / `.a16` are assembler state, in source order, not control flow: a label that is
-  reached by a branch from an 8-bit section needs its own `.a8` (and the code after the
-  section's `rep` its `.a16`).
-- Filling a byte array with 16-bit stores writes one byte past each end (a `sta buf-1,x`
-  loop writes before `buf`): give buffers a spare byte, or use 8-bit stores.
-- A 16-bit `sta` writes two bytes: storing a byte into a table with A16 also overwrites
-  the next byte. Use `sep #$20` / `.a8` ... `rep #$20` / `.a16` for single bytes, or plan
-  the order (write the low field last). The same for `stz`.
-- A 16-bit `lda` of a byte reads the next byte too: `and #$00FF` after it.
-- `inc`/`dec` on memory are 16-bit with A16: a byte counter needs 8-bit mode.
-- `xba` swaps the bytes of A (handy for `value * 256` and for `op | colour << 8`).
+From `ports/digger/PORTING-NOTES.md` and `ports/xargon/PORTING-NOTES.md`. Times are the
+agents' own. "Fixed" means the SDK changed since; the lesson still holds.
 
-## Addressing
+| Symptom | Cause | Fix | Cost |
+| --- | --- | --- | --- |
+| Link fails "does not fit in its code bank (the main bank)" even with `--code large` (Digger by 8.5 KB; Xargon by 1.8 KB) | code moves to other banks, but constants, data, bss, heap, stack and all assembly stay in the main bank | big tables `__far`, big buffers from `hz_far_alloc`, no `sscanf` (it pulled 7.6 KB of scanf + float), `--stack 4096`; read `hcc --map` | 30 min each |
+| Every `malloc` after start-up fails; text drawn from address 0 (Xargon) | one early `malloc` of 900 names (8.5 KB) took the whole heap | do not keep what the port does not need; check every `malloc` for NULL; `hz_heap_free()` | in the 30 min above |
+| The second `fopen` fails, ENOMEM (Digger) | `--heap 1024`: each `fopen` wanted 1 KB of heap | `--heap 4096` (default). Fixed: `fopen` now falls back to 128 bytes or none | 10 min |
+| Sound effects do not load; a 32 KB read "fails" (Xargon) | `hz_read` returns an `int`: 32,768 bytes read is -32,768 | read in 16 KB pieces, or compare with `(int)len` | 20 min, still open |
+| Title takes 3 s (Xargon) | 3,600 `read` calls of 1-2 bytes, each a card request (~1 ms) | fixed: read-only descriptors read ahead 512 bytes. Still: read big blocks | 20 min |
+| Game logic 13 % in `__mul16`/`__sdiv16` (Xargon) | `x * 31` and signed `x / 16` were calls | fixed in cc816 (inline). Profile before guessing | 30 min |
+| A `__far` 2-D array very slow (Xargon `bd[x][y]`) | 32-bit address arithmetic at every access | fixed in cc816 (16-bit index in Y) | 45 min |
+| "redefinition of 'struct bag'" on `static struct bag {...} a[7], b[7];` | cc816 bug with several declarators | fixed. Valid C refused = make a minimal case, report it | 15 min |
+| "Bad macro definition" on `#define scan_f1= 0x3B` | no space after the name | fixed: a warning, as gcc | 15 min |
+| internal compiler error (UnicodeDecodeError) on a header | CP437 bytes in a string | fixed: sources read byte for byte. `CC816_TRACE=1 hcc ...` shows where | 10 min |
+| "variable-length arrays" for `a[numobjkinds]` | the size's name was undeclared (missing header) | fixed: now "'numobjkinds' undeclared" | 10 min |
+| "Invalid declarator" on `static char huge *a, huge *b;` | Borland's qualifier before a declarator's `*` | one declaration each | minutes |
+| A large program: "not a Horizon program, or its file is damaged" | `--code large` needs Horizon 0.28+ | a 0.28+ card; `hcc --needs` says so on old cards | 5 min |
+| Board records read wrong (Xargon) | Turbo C's 4-byte far pointer inside a 31-byte file record; here pointers are 2 bytes | pad the struct by hand (`int inside_hi;`); cc816 never pads structures | in the port |
+| 1 screenshot in 7 shows a half-drawn sprite (Digger) | the CPU drew into the shown framebuffer during the frame | draw into a buffer; copy changed rectangles right after the vertical blank | in 35 min |
+| Reference pictures fail on a fresh checkout (Digger) | made with a card built from someone's work in progress; `git archive` files keep old times, so `make -C horizon` did not rebuild | rebuild the card from a clean tree before writing references | in 35 min |
+| Scripted test broke on Horizon 0.29 ("no recording HZD50.DRF saved") | keys at fixed seconds; the Desktop now starts programs later; "up" fell during level drawing | `wait TEXT` lines on the program's own console lines | round 4 |
+| `+0 wait X` never ends although X is in `console.txt` | X was printed while the previous script line's keys were still being sent (typed text releases its last key 22 ms later); each key event clears the remembered lines | wait for a later line; check instant replies with `--expect` (found writing these notes) | - |
+| A held key stops acting after 1 s on the board, not in the emulator (Digger) | the board's keyboard firmware cleared keys after 1 s without a report | fixed in firmware; `run816.py --kbd-release 1000` reproduces the old board | round 2 |
+| Choppy effects while the game draws (board) | the 72.8 Hz sound steps ran from the frame loop: at 60 Hz, and none during 100 ms of drawing | the music timer: `hz_sample_timer(port, us)` + `hz_recv`, polled from the drawing code (`ports/digger/horizon/hz_timer.c`) | round 2 |
+| Scrolling in jumps (board) | the view moved only while the game waited | move the view at every vertical blank, also mid-work | round 2 |
+| No keys, music stops when frames run late (Xargon) | a late game never waits, never calls `hg_frame` | `hg_poll()` once a game frame | 20 min |
+| Music clips (1-2 % of samples) | the board mixes the OPL2 3x louder than a Lau voice | convert songs 13.5 dB quieter | 20 min |
+| No sound in the emulator from POKEY | emu816 only logs POKEY | `--log-sound` checks; listen on the board | - |
+| Needed emulator options not reachable (`--card-kbps`, `--log-opl`) | run816.py does not pass them | the game's own `/BUSY:ms` for slow runs; call emu816 yourself | still open |
 
-- **Direct page is not the data bank.** ZEROPAGE variables are in bank 0 (your window);
-  DATA/BSS/RODATA are in the code bank (DBR). Write `lda z:var` for zero page. Without
-  `z:`, ca65 chooses absolute addressing for a symbol it has not seen yet (defined later
-  in the file) and reads the code bank instead. Warning to heed: "Didn't use zeropage
-  addressing for 'X'". Put the ZEROPAGE segment at the end and always write `z:`
-  (except inside brackets: `lda [ptr],y` / `lda (ptr),y` are always direct page, and
-  `[z:ptr]` is a syntax error).
-- Names of instructions cannot be labels or constants either (`sty:`, `STY = 8`): the
-  error ("Expected an expression") does not say why.
-- **Long pointers** live in zero page as 3 bytes (+1 spare): `ptr: .res 4`. Fill offset
-  and bank (`sta z:ptr` / `lda #bank` / `sta z:ptr+2`), then `lda [ptr],y`. Forgetting
-  the bank byte = reading bank 0 or garbage = a kill (cause $06 / $04).
-- `lda f:$xxxxxx` / `lda f:label,x` for long absolute; `lda label` is DBR (code bank).
-- Pointers to syscalls: `ptr label` (X = `.loword`, Y = `^label`). Do not pass Y = 0 for a
-  label in the code bank. Bank 0 means "my window".
-- Negative immediates are range errors in ca65 (`adc #-4`, `adc #BS / 2 - 8`): write
-  `sbc #4`, or `#.loword(-4)` / `#$FFFC`.
-- A constant may not have the name of a mnemonic (`STY = 8`, `BIT`, `INC`, `STA`): ca65
-  says only "Expected an expression but found '='".
-- Arithmetic on relocated addresses: write the whole expression inside:
-  `lda #.loword(table + 3 * 16)`, not `lda #.loword(table) + 48` (ld65 "Expression too
-  complex" for o65). `^label` gives the bank byte; `.faraddr label` the 3-byte pointer.
-- `jmp (table,x)` reads the table in the program bank (fine: code bank); `jmp (addr)` reads
-  bank 0 (your window), not the code bank.
-- MVN/MVP take banks as operands: `mvn #^src, #^dst` with known labels; for a bank from
-  SYS_BALLOC patch the operand at run time (the code bank is writable) or copy with
-  `lda [src],y` / `sta [dst],y`. MVN changes DBR to the destination bank: restore it
-  (`phb` before, `plb` after).
-- Do not change DBR (PLB) without restoring it before touching your variables or calling
-  ulib / ui.lib (they assume DBR = code bank).
+## C pitfalls of cc816 on this machine
 
-## Syscalls
+- **`int` is 16 bits** (`size_t`, pointers too). `printf("%d", a_long)` prints garbage:
+  `%ld`/`%lu` and a cast. `a * b` of ints is 16 bits: `(long)a * b`. `1 << 20` shifts
+  an `int` past its width: `1L << 20`. Counters of frames, ms, bytes, scores: `long`.
+  Build with `-Wall`; cc816 says it plainly:
 
-- Only carry and the documented registers are results. **N and Z keep the values from
-  before the COP**: `sys SYS_READ` / `beq @eof` is wrong; write `tay` / `beq` or `cmp #0`.
-- Call syscalls with A16/I16 (`rep #$30`): arguments are always taken as 16-bit.
-- `print` puts its text inline in the code: branches across a few `print`s go out of
-  range ("Range error"): use `jmp`, `jeq`, `jne`, `jcc`, `jcs`, `bra` only for short hops.
-- `print` and every ulib / ui.lib routine clobber A, X, Y: save what you need first
-  (`print` then `lda z:x` / `jsr put_dec`, not the other way round).
-- ulib output is line-buffered: `jsr out_flush` before waiting for input after a prompt
-  without a line end.
-- Blocks with u24 fields: `.faraddr`; at run time the bank byte needs an 8-bit store or a
-  16-bit store into a field whose next byte you rewrite afterwards. Keep blocks a byte
-  longer than the last u24 (win_draw: 16 bytes for 15 used).
-- `SYS_WEVENT` / `ui_getev` with A = 0 blocks; with A = 1 returns C set when empty.
-  Programs using ui.lib must use `ui_getev`, never `SYS_WEVENT`.
+  ```
+  w.c:6:13: warning: the conversion to int changes the value 40000 to -25536 (int is 16 bits in cc816: use long) [-Woverflow]
+  w.c:8:14: warning: shift count (20) is negative or not less than the width of int (16 bits in cc816) [-Wshift-count-overflow]
+  w.c:12:36: warning: printf: '%d' takes an int (16 bits in cc816; use %ld for a long), but argument 2 is long [-Wformat]
+  w.c:13:9: warning: comparison is always false: 'c' is char, 0 to 255 (plain char is unsigned in cc816: use int, or signed char) [-Wtype-limits]
+  w.c:11:15: warning: initialising char * with void __far *: a far pointer given to a near one loses its bank (only the offset is kept: declare the target __far too) [-Wfar-pointer]
+  ```
+- **Plain `char` is unsigned.** `char c = getc(f); if (c == EOF)` never matches (cc816
+  warns): keep it `int`. `-fsigned-char` for PC code that needs signed `char`.
+- **`double` is 32-bit `float`** (about 7 digits). Whole numbers above 16,777,216, sums of
+  many small values, seconds since 1970 in a double: wrong. Use `long` or fixed point.
+- **Structures are packed** (no padding). Binary files written by a PC program with
+  padded structs, or with 4-byte pointers inside, do not match: read fields by hand or pad
+  explicitly.
+- **One object at most 65,535 bytes**, and it must not cross a bank. Bigger: a bank from
+  `hz_far_alloc()` and a `__far` pointer.
+- **Near vs far**: a plain pointer is an offset in the main bank. `(char *)hz_far_alloc()`
+  points into the main bank, not the new bank (`-Wfar-pointer` warns; `-Wall` adds
+  `-Wfar-cast`): say `__far`. A far string passed to `printf` or a `hui.h` call must be
+  copied to a near buffer first (`hz_far_copy`). `(unsigned long)p` keeps the bank.
+- **The main bank is shared** by code (small model), constants, data, bss, heap and the
+  software stack. `hcc` prints what does not fit, with sizes.
+- **Local arrays live on the 8 KB software stack** (`--stack N`). Big arrays: `static` or
+  `malloc`. An overflow is reported only at exit ("stack overflow: ... guard zone ...
+  was written"); `hcc --debug` prints what each stack and the heap used.
+- **4 file handles for the whole system.** Close files at once; `fopen` returns NULL
+  with `errno == ENFILE` when none is left. Each open `FILE` takes 1 KB of heap.
+- **The current folder is not the program's folder.** Use `hz_prog_dir`
+  (`references/packaging.md`). No `\`, no drive letters; FAT names ignore case.
+- **stdout is line-buffered**: end debug `printf`s with `\n`. Under the Desktop console
+  output goes only to the log (`console.txt` in the emulator).
+- **Not there**: `system()`, `getenv()`, signals, time zones (they return failure);
+  variable-length arrays, `__int128`, `_Complex`, `&&label`, nested functions,
+  `__builtin_*`, `#include_next`. `aligned(N>1)`, `constructor`, `section`, `weak` are
+  ignored with a warning.
+- **`sscanf` brings all of scanf**; a non-constant format brings `%f`. For one number,
+  `strtol`. `long long` works but a 64-bit divide is about 1 ms.
+- **Inline assembly** is ca65 text; C variables as `%[name]`; scratch is `__rg+0` ..
+  `__rg+47` (no cc65 `sp`/`ptr1`/`tmp1`). With `--code large` a function with inline asm
+  stays in the main bank, and `.addr _func` in a `.s` file for a function in another bank
+  stops the build. `__CC816_LARGE__` tells the models apart.
+- **No code runs in interrupts.** Fine timing comes from the music timer
+  (`hz_sample_timer`), frames from `hz_frame()`/`hg_frame()`, `hz_uptime()` in 10 ms.
+- **A file misbehaves after compiling**: try `-O1`, `-O0`, and the other code model; a
+  difference is a compiler fault worth a minimal case.
+- **cc65 habits**: `__fastcall__`, `<conio.h>`/`<atari.h>`/`<peekpoke.h>` POKEs and zero
+  page pragmas do not apply; hardware is reached only through syscalls (a POKE to $Dxxx
+  kills the task).
 
-## Program structure
+## Register widths (assembly)
 
-- The entry point must be the first byte of CODE (the loader starts at $0100). Put
-  RODATA / DATA in their segments, not in the middle of CODE before `start`. With
-  several modules, `main.o` must come first on the ld65 line (a wildcard sorts
-  `bigtext.s` before `main.s`: the program then starts in the wrong routine and seems to
-  hang).
-- win_draw blits (WD_BLIT / KBLIT / SBLIT / EXPAND / KSBLIT) return when the blitter has
-  read your picture (Horizon 0.15): you may rewrite it right after. **`draw_list` does not**:
-  it returns at once and Ali reads the sources and writes the target while you go on.
-  Leave every source (and the target) alone until `list_wait` (A = 0), `vsync` or the next
-  `draw_list`, which wait for it. Reading a full-screen framebuffer Ali drew into: `list_wait`
-  first (it also flushes the CPU's cache).
-- Sprites erased early and drawn late in a frame can be missing from a video frame
-  (flicker; the emulator's screenshots show it too): erase and redraw each sprite in
-  consecutive calls.
-- End with `exit n`; never RTS from `start`.
-- `win_close` of a window you do not own returns EINVAL (it does not close another
-  program's window), so a `quit` path that closes `win` = 0 after a failed open is safe.
-- `SYS_WSSTART` returns A = 1 when you started the window system (text shell): then
-  `SYS_WSSTOP` before exit, or the screen stays a dead desktop. A = 0 under the Desktop:
-  do not stop it.
-- Controls (ui.lib) are in DATA and you must store the window number into each control's
-  CT_WIN byte before drawing them.
-- Sound kept playing after exit before Horizon 0.15; since 0.15 the kernel silences the
-  program's channels when it ends.
-- Focus (Horizon 0.15): WE_UNFOCUS comes when another window takes the keyboard; the keys
-  the window held got their releases just before. A full-screen program gets it when the
-  user leaves with Alt+Tab, Alt+Esc or F12.
-- Zero page: ulib uses 38 bytes and ui.lib 38; about 180 are yours. ld65 fails with
-  "Memory area ZP overflow" if you take more.
-- Code + data + bss over 65,280 bytes: ld65 "MAIN overflow". Move tables / pictures to a
-  file loaded into a SYS_BALLOC bank.
+- Programs run with A, X, Y 16-bit. `horizon.inc` sets `.smart -`: **ca65 does not follow
+  REP/SEP**. After `sep #$20` write `.a8`, after `rep #$20` write `.a16` (`.i8`/`.i16` for
+  X/Y). Otherwise `lda #5` gets the wrong operand size and the CPU runs into data.
+- Keep 8-bit sections short; every routine starts and ends A16/I16.
+- `.a8`/`.a16` are assembler state in source order, not control flow: a label reached by
+  a branch from an 8-bit section needs its own `.a8`.
+- A 16-bit `sta`/`stz` writes two bytes (it overwrites the next byte); a 16-bit `lda` of
+  a byte needs `and #$00FF`; `inc`/`dec` on memory are 16-bit with A16. Filling a byte
+  array with 16-bit stores writes one byte past an end: a spare byte, or 8-bit stores.
+- `xba` swaps the bytes of A (`value * 256`, `op | colour << 8`).
 
-## The games round (Horizon 0.18)
+## Addressing (assembly)
 
-- **EFAULT** from spr_set, fs_enter, draw_list, sample_play: the image / framebuffer /
-  source / sample is not wholly in your memory (window bank 0 $0000-$7FFF, code bank, banks
-  you allocated). Bank 0 above $7FFF is the kernel. A range may run across two of your banks
-  only if they are consecutive: `bank_alloc` does not promise that, check (deepdive `getfb`).
-- **Sprite images 16-byte aligned** (else EINVAL): ca65 cannot align inside the o65 segments;
-  copy images to an aligned address in the window (`sta f:$001000,x`) or a bank. They must
-  stay there, unchanged, while shown; freeing their bank hides the sprites.
-- **Window sprites are hidden** while the window is not focused, anything covers its content
-  (another window, an open menu), or a sprite is not wholly inside the content. That is not
-  a bug in your positions. In full-screen mode positions are screen coordinates (320 x 180
-  units in FS_320X8).
-- **Palette entries show only while you have the focus** (and in full screen only while your
-  screen is shown). A screenshot of the desktop with another window in front shows the system
-  colours there. pal_set / ws_palette of an entry another program holds: EAGAIN.
-- **Full screen is one program at a time** (EAGAIN, also while the other is in the
-  background). The user can always leave (Alt+Tab, Alt+Esc, F12): handle WE_UNFOCUS (pause,
-  stop samples) and WE_FOCUS (re-read `frame` so the pause is not counted as missed frames).
-- fs_scroll / fs_enter EINVAL: Marga could read outside the framebuffer (check: x bytes + a
-  line <= stride without HWRAP; x < stride with it; y + rows shown <= rows unless y < vheight),
-  a split line odd in 320 x 180 or outside 1-359, stride not a multiple of 16, base not
-  256-byte aligned.
-- The split line counts 360 lines in every mode: in 320 x 180 a panel of 16 rows is split 32.
-- fs_raster lines must be ascending and, with the split on, at or after the split line.
-- Draw list records: A = window | count << 8 (count 1-128, not 0); LS_KEY's key is c2 (offset
-  3), LS_FILL's colour c1 (offset 2); stride 0 = the width. LS_VBL goes on the first record
-  of the frame's list (a later one makes Ali wait there).
-- `vsync` also waits for your running list: a list started late in a frame delays the loop.
+- **Direct page is not the data bank.** ZEROPAGE is in bank 0 (your window); DATA, BSS,
+  RODATA are in the code bank (DBR). Write `lda z:var`. Without `z:` ca65 picks absolute
+  for a symbol defined later in the file and reads the code bank ("Didn't use zeropage
+  addressing for 'X'"). Inside brackets (`lda [ptr],y`, `lda (ptr),y`) it is always
+  direct page; `[z:ptr]` is a syntax error.
+- **Long pointers**: 3 bytes in zero page (+1 spare: `ptr: .res 4`); set the bank byte
+  (`sta z:ptr+2`) or you read bank 0 or garbage (a kill).
+- `lda f:label,x` is long; `lda label` uses DBR. `ptr label` for syscalls (X = offset,
+  Y = bank); never Y = 0 for a label in the code bank (bank 0 means your window).
+- Negative immediates are range errors (`adc #-4`): `sbc #4` or `#.loword(-4)`.
+- A constant may not be named like a mnemonic (`STY = 8`): ca65 says only "Expected an
+  expression".
+- Relocated arithmetic: `lda #.loword(table + 3 * 16)`, not `.loword(table) + 48` (ld65
+  "Expression too complex" for o65). `^label` = bank byte; `.faraddr label` = 3 bytes.
+- `jmp (table,x)` reads the program bank; `jmp (addr)` reads bank 0.
+- MVN/MVP: `mvn #^src, #^dst` for known labels; for a run-time bank patch the operand or
+  copy with `[src],y`. MVN sets DBR to the destination: `phb` before, `plb` after. Never
+  leave DBR changed when touching your variables or calling ulib / ui.lib.
+
+## Syscalls (assembly)
+
+- Only carry and the documented registers are results. **N and Z are from before the
+  COP**: `sys SYS_READ` / `beq @eof` is wrong; `tay`/`beq` or `cmp #0`.
+- Call with A16/I16 (`rep #$30`).
+- `print` puts text inline: branches across several go out of range ("Range error"): use
+  `jmp`, `jeq`, `jne`, `jcc`, `jcs`.
+- `print` and ulib / ui.lib routines clobber A, X, Y. ulib output is line-buffered:
+  `jsr out_flush` before waiting for input after a prompt.
+- u24 fields: `.faraddr`; at run time an 8-bit store for the bank byte; keep blocks a
+  byte longer than the last u24.
+- `SYS_WEVENT` / `ui_getev`: A = 0 blocks, A = 1 returns C set when empty. ui.lib
+  programs use `ui_getev`, never `SYS_WEVENT`.
+
+## Program structure (assembly)
+
+- The entry point is the first byte of CODE (loaded at $0100). `main.o` first on the
+  ld65 line (a wildcard may put another module first: the program starts in the wrong
+  routine). (0.29) With `HZ_NEEDS`, it is the first thing at `start`
+  (`references/packaging.md`).
+- End with `exit n`; never RTS from `start`. If `SYS_WSSTART` returned 1 (text shell),
+  `SYS_WSSTOP` first; under the Desktop it returns 0: do not stop it.
+- Sound: since Horizon 0.15 the kernel silences a program's POKEY channels and DACs when
+  it ends (kernel `task.s`: `snd_task_exit`). Still silence it yourself when the game
+  pauses or loses the focus.
+- win_draw blits return when the blitter has read your picture. **`draw_list` does not**:
+  leave sources and target alone until `list_wait` (A = 0), `vsync` or the next
+  `draw_list`. `list_wait` before reading a framebuffer Ali drew into.
+- Erase and redraw each sprite in consecutive calls, or a video frame can miss it.
+- `win_close` of a window you do not own returns EINVAL.
+- ui.lib controls are in DATA; store the window number into each control's CT_WIN
+  before drawing.
+- Focus: WE_UNFOCUS comes when another window takes the keyboard (the keys held got their
+  releases first); a full-screen program gets it on Alt+Tab, Alt+Esc, F12.
+- Zero page: ulib takes 38 bytes, ui.lib 38; ld65 "Memory area ZP overflow" past 256.
+- CODE + RODATA + DATA + BSS at most 65,280 bytes ("MAIN overflow"): tables and pictures
+  to a file loaded into a `SYS_BALLOC` bank.
+
+## Full screen, sprites, draw lists (Horizon 0.18+)
+
+- **EFAULT** from spr_set, fs_enter, draw_list, sample_play: the data is not wholly in
+  your memory (window $0000-$7FFF, code bank, your banks). A range may cross two banks
+  only if they are consecutive; `bank_alloc` does not promise that.
+- **Sprite images 16-byte aligned** (else EINVAL); ca65 cannot align inside o65 segments:
+  copy them to an aligned address. They must stay unchanged while shown.
+- **Window sprites are hidden** while the window is not focused, covered, or a sprite is
+  not wholly inside the content. Full-screen positions are screen coordinates.
+- **Palette entries show only while you have the focus**; another program's entry: EAGAIN.
+- **Full screen is one program at a time** (EAGAIN). Handle WE_UNFOCUS (pause, stop
+  samples) and WE_FOCUS (re-read `frame`).
+- fs_scroll / fs_enter EINVAL: Marga could read outside the framebuffer, a split line odd
+  in 320 x 180 or outside 1-359, stride not a multiple of 16, base not 256-byte aligned.
+  The split line counts 360 lines in every mode.
+- fs_raster lines ascending, at or after the split line.
+- Draw list records: A = window | count << 8 (count 1-128); LS_KEY's key is c2 (offset 3),
+  LS_FILL's colour c1 (offset 2); stride 0 = the width; LS_VBL on the frame's first
+  record. `vsync` also waits for your running list.
 
 ## Faults
 
-`[kill] task N NAME cause CC addr AAAAAA pc PPPPPP` in console.txt:
+`[kill] task N NAME cause CC addr AAAAAA pc PPPPPP` in `console.txt`; run816 exits 1; the
+exit code is $FF00 + cause. Example (a C write through `(unsigned char __far *)0x7F0000L`):
 
-| Cause | Usually |
+```
+[kill] task 4 KILL cause 03 addr 7F0000 pc 070237
+```
+
+| Cause | Meaning, usually |
 | --- | --- |
-| $02 / $03 (not the owner: read / write) | a long pointer with a wrong bank byte, an address in bank 0 at $8000 or above (the kernel), a stray store through a garbage pointer |
-| $04 / $05 (bank not valid: read / write) | a pointer into a bank that was never allocated (bank byte not initialised) |
-| $08 / $09 (the I/O page) | code touching $00:Dxxx: the hardware is syscall-only |
-| $20 BRK | executing data: a wrong `.a8/.a16`, a bad `jmp`/`rts` (stack imbalance), falling off the end of a routine |
+| $01-$1F | protection, by bits: 0 a write, 1 not the owner, 2 bank not valid, 3 the I/O page, 4 the vectors. $02/$03: a wrong bank byte, bank 0 at $8000+ (the kernel), a stray pointer; $04-$07: a bank never allocated (bank byte not set); $08/$09: touching $00:Dxxx (hardware is syscall-only) |
+| $20 | BRK: executing data (a wrong `.a8`/`.a16`, a stack imbalance, falling off a routine) |
+| $21 | the stack pointer was bad when the kernel was entered |
 | $22 | XCE to emulation mode (copied 6502 code) |
-| $23 | interrupts off (SEI) in a long loop |
+| $23 | interrupts off for 2 s (SEI in a long loop) |
 
-`pc` = bank:offset; the offset is the address in the ld65 map (`ld65 -m build/x.map ...`,
-CODE starts at $0100). EFAULT (A = 4, C set) from a syscall instead of a kill = a pointer
-range you may not access or one crossing a bank.
+Find the function: `pc`'s bank is the code bank, its low 16 bits an address in the map.
+C: `hcc --map` writes `NAME.lbl` (`al 000228 ._poke`: pc $0237 is inside `poke`).
+Assembly: `ld65 -m build/x.map ...` (CODE starts at $0100). EFAULT (A = 4, C set) from a
+syscall instead of a kill: a pointer range you may not access, or one crossing a bank.

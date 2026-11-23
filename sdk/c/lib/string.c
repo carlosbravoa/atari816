@@ -1,5 +1,5 @@
 /* string.c - string.h for cc816 (memcpy, memmove, memset, strlen, strcpy and memcmp are
- * rt/cc816/mem.s). */
+ * rt/mem.s). */
 #include <string.h>
 #include <stdlib.h>
 

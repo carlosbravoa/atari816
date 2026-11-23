@@ -1,0 +1,7 @@
+# make test: hold Right for 0.5 s (about 30 frames, 2 pixels each), a picture, then Esc
+# (no `wait` right after a key: a line printed within about 20 ms of a key event can be
+# missed by it; the --expect lines of the Makefile check the output instead)
+0 wait DOT: start
++500 key right 500
++800 shot
++200 {esc}
