@@ -147,9 +147,25 @@ def now2000():
     return calendar.timegm(lt[:6] + (0, 0, 0)) - EPOCH2000
 
 
+def other_boards():
+    """Serial numbers of USB debuggers that are NOT an Atari816 (another project's board on
+    the same PC): one a line in ~/.config/atari816/not-my-boards, and/or separated by commas
+    in $ATARI816_SKIP_SERIALS. Their ports are never listed, so never opened."""
+    out = set(x.strip() for x in os.environ.get("ATARI816_SKIP_SERIALS", "").split(",") if x.strip())
+    try:
+        with open(os.path.expanduser("~/.config/atari816/not-my-boards")) as f:
+            out |= set(ln.split("#")[0].strip() for ln in f) - {""}
+    except OSError:
+        pass
+    return out
+
+
 def list_ports():
     import serial.tools.list_ports
-    return sorted(serial.tools.list_ports.comports(), key=lambda p: p.device)
+    skip = other_boards()
+    return sorted((p for p in serial.tools.list_ports.comports()
+                   if not (skip and p.serial_number and p.serial_number in skip)),
+                  key=lambda p: p.device)
 
 
 def auto_port():
