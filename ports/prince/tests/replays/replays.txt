@@ -1,0 +1,73 @@
+Test replays for the Prince of Persia port, recorded with upstream SDLPoP (prince-ref,
+headless) from the scripted input in the .txt next to each .p1r. 12 ticks a second.
+Recorded with:  rec.sh NAME.txt NAME.p1r "LEVEL seed=1"
+(seed=1 is passed to prince-ref as "seed=1"; the .p1r stores the seed. It only matters for
+fight: the guard AI uses the random generator. The level-1 runs give the same kid trace
+with any seed.)
+Every replay was checked with "prince-ref validate": the per-tick kid/guard state of the
+validate run is identical to the recording run, at every tick.
+
+Room numbers are the level's room numbers (as in the ref: status lines).
+
+------------------------------------------------------------------------------------------
+loose     level 1, 180 ticks
+  t=1-20    kid drops in from above (level 1 intro), room 1 middle row
+  t=40-46   runs right off the ledge, drops to the bottom row of room 1
+  t=60-76   runs right across the loose floor (room 1, bottom row, column 6)
+  t=76-80   the loose floor shakes and falls into room 2 (gap visible from t=80)
+  t=100-116 turns, runs back left, falls through the hole
+  t=117     room 2; lands crouching beside the rubble at t=124 (hp 3 -> 2, a 2-row fall)
+  t=164     stands up; ends t=180 alive in room 2
+  validate: Replay ended in level 1, room 2. / Kid is alive. /
+            Play duration matches replay length. (180 ticks)
+  pictures: 72, 78, 80, 118, 130
+
+fight     level 2 (record 2: the kid has the sword), 122 ticks
+  t=1-25    runs left from the start door, room 5 -> room 4 at t=25 (guard waits at x=72)
+  t=30-50   two loose floors behind the kid fall (room 4 middle row)
+  t=40-48   kid draws the sword, en garde; the guard advances
+  t=66      strike -> guard hit at t=70 (guard hp 3 -> 2)
+  t=81      strike -> guard hit at t=84 (hp 2 -> 1)
+  t=96      strike -> guard hit at t=100 (hp 1 -> 0), guard dying frames 179..185
+  t=~105    guard dead (guard alive 0 from t=110); kid sheathes; ends t=122, kid hp 3/3
+  validate: Replay ended in level 2, room 4. / Kid is alive. /
+            Play duration matches replay length. (122 ticks)
+            (validate trace at t=110: guard 4 103 118 185 alive 0 hp 0/3)
+  pictures: 44, 70, 84, 100, 110
+
+l1sword   level 1, 969 ticks (start of level 1 until the sword is picked up)
+  rooms: 1 (t=1) 2 (t=117) 6 (t=256) 8 (t=395) 7 (t=631) 20 (t=696) 12 (t=768) 15 (t=804)
+  t=76-80   loose floor in room 1 falls (as in loose)
+  t=117     falls into room 2 (hp 3 -> 2 at t=124)
+  t=232-256 jumps up, climbs onto the ledge into room 6 (top row)
+  t=276-286 running jump over the spike pit (room 6)
+  t=~350    careful steps onto the raise button (room 6): the gate to room 8 rises
+  t=395     through the gate into room 8; t=420-430 drops to the middle row
+  t=~490    careful step onto the raise button (room 8 middle row): the gate to room 7 rises
+  t=556-566 standing jump over the gap (room 8)
+  t=595-631 jumps up, climbs through the open gate into room 7 (top row)
+  t=650-670 runs over two loose floors in room 7, both fall; t=664 drops to the middle row
+  t=704-716 running jump over a loose floor and a closer button (room 20)
+  t=734-768 jumps up, climbs through the open gate into room 12 (top row)
+  t=780-790 running jump over the 2-tile gap (room 12), then over its loose floors
+  t=862-871 climbs down to the middle row, t=892-901 down to the bottom row (room 15)
+  t=939     picks up the sword (frame 229; the sword is gone from the floor), flourish
+            until ~956; ends t=969 alive, hp 2/3
+  validate: Replay ended in level 1, room 15. / Kid is alive. /
+            Play duration matches replay length. (969 ticks)
+  pictures: 80, 285, 660, 790, 940, 950
+
+l1run     level 1, 1207 ticks (l1sword, then on through rooms 10, 19, 4)
+  rooms: 1 (t=1) 2 (117) 6 (256) 8 (395) 7 (631) 20 (696) 12 (768) 15 (804) 10 (996)
+         19 (1044) 4 (1161)
+  t=1-969   identical to l1sword
+  t=970-996 turns right, runs off the ledge in room 15, falls one row into room 10
+  t=1016-1026 runs off the next ledge to room 10's middle row
+  t=1044    room 19; t=1060-1142 careful steps across the spikes (spikes up from ~t=1108),
+            kid unhurt
+  t=1161    room 4; t=1180-1186 runs off the ledge, drops to the bottom row
+  ends t=1207 alive, hp 2/3 (does not reach the level door: the exit in room 9 is past
+  the room-3 guard, far back to the right)
+  validate: Replay ended in level 1, room 4. / Kid is alive. /
+            Play duration matches replay length. (1207 ticks)
+  pictures: 285, 660, 940, 1110, 1186

@@ -393,6 +393,8 @@ def hcc_messages(only, models):
     big = W("big.c", "char big[70000u / 2], big2[70000u / 2];\n"
                      "int main(void) { big[1] = big2[2]; return 0; }\n")
     undef = W("undef.c", "void nosuch(void);\nint main(void) { nosuch(); return 0; }\n")
+    undef2 = W("undef2.c", "void nosuch(void);\nstatic int helper(int x) { return x + 1; }\n"
+               "int (*fp)(int) = helper;\nint main(void) { nosuch(); return fp(1); }\n")
     for m in models:
         # a compile error: file:line
         rc, out = hcc(os.path.join(b, "BAD.PRG"), [bad], m)
@@ -407,6 +409,12 @@ def hcc_messages(only, models):
         rc, out = hcc(os.path.join(b, "UNDEF.PRG"), [undef], m)
         ok = rc != 0 and "undefined: nosuch" in out
         report("hcc", m, ok, "undefined function reported as 'undefined: nosuch'" if ok
+               else out.strip()[:200])
+        # ... and only it, also beside functions whose address is taken (the large model's
+        # thunks: they were all listed as undefined; the Prince of Persia port)
+        rc, out = hcc(os.path.join(b, "UNDEF2.PRG"), [undef2], m)
+        ok = rc != 0 and "undefined: nosuch" in out and "helper" not in out
+        report("hcc", m, ok, "undefined beside address-taken functions: only 'nosuch'" if ok
                else out.strip()[:200])
     if "small" in models:
         # options hcc does not have: one plain line; long long and float are built (-lm

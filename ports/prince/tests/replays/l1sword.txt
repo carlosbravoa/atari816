@@ -1,0 +1,94 @@
+# l1sword: level 1 from the start until the kid has picked up the sword. 969 ticks.
+# Recorded with: rec.sh l1sword.txt l1sword.p1r "1 seed=1"
+# t=1-20    kid drops in from above (level 1 intro), room 1
+# t=76-80   loose floor in room 1 (bottom row) falls behind the running kid
+# t=117     kid walks back into the hole, falls 2 rows into room 2 (hp 3 -> 2 at t=124)
+# t=232-256 jumps up and climbs onto the ledge, into room 6 (top row)
+# t=276-286 running jump over the spike pit (room 6)
+# t=~350    careful steps back onto the raise button (room 6): gate to room 8 rises
+# t=395     through the gate into room 8; t=420-430 drops to the middle row
+# t=~490    careful step onto the raise button (room 8 middle row): gate to room 7 rises
+# t=556-566 standing jump over the gap (room 8)
+# t=595-631 jumps up, climbs through the open gate into room 7 (top row)
+# t=650-670 runs over two loose floors in room 7, they fall; t=664 drops to the middle row
+# t=696     room 20; t=704-716 running jump over a loose floor and a closer button
+# t=734-768 jumps up, climbs through the open gate into room 12 (top row)
+# t=780-790 running jump over the 2-tile gap (room 12), runs over loose floors
+# t=804     room 15; t=862-871 climbs down to the middle row, t=892-901 down to the bottom row
+# t=939     picks up the sword (frame 229), flourish until ~956; ends t=969 alive, hp 2/3
+40 R
+18 -
+30 R
+10 -
+110 L
+10 -
+20 U
+15 -
+22 L
+4 LU
+10 -
+4 R
+8 -
+12 RS
+12 -
+12 RS
+10 -
+12 RS
+5 -
+40 L
+10 -
+10 L
+10 -
+4 R
+6 -
+12 RS
+2 -
+12 RS
+2 -
+12 RS
+2 -
+12 RS
+4 -
+4 L
+6 -
+12 LS
+2 -
+12 LS
+2 -
+12 LS
+2 -
+4 LU
+14 -
+15 L
+5 -
+30 U
+6 -
+50 L
+6 -
+19 L
+4 LU
+20 L
+4 -
+30 U
+4 -
+14 L
+4 LU
+30 L
+8 -
+12 LS
+2 -
+12 LS
+2 -
+4 R
+8 -
+10 D
+20 -
+10 D
+12 -
+4 L
+4 -
+6 L
+8 -
+12 LS
+2 -
+20 -

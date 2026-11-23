@@ -1,0 +1,6 @@
+# tests/save.script - started with "megahit 3" (level 3 at once): save with Ctrl+G
+0 wait prince: level 3
++0 wait prince: text LEVEL 3
++3000 ^G
++0 wait prince: text GAME SAVED
++1000 shot

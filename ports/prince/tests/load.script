@@ -1,0 +1,7 @@
+# tests/load.script - PRINCE.SAV on the card: the first screen, the title, Ctrl+L loads it
+0 wait prince: start
++800 {space}
++0 wait prince: title
++2500 ^L
++0 wait prince: level 3
++3000 shot

@@ -776,6 +776,21 @@ class Front:
         return t.size
 
     # ------------------------------------------------------------------ expr types
+    def far_lvalue(self, e):
+        """the lvalue e lies in far memory reached through a far pointer"""
+        if isinstance(e, c_ast.StructRef):
+            if e.type == '->':
+                return decay(self.expr_type(e.name)).isfar
+            return self.far_lvalue(e.name)
+        if isinstance(e, c_ast.ArrayRef):
+            bt = decay(self.expr_type(e.name))
+            if not bt.is_ptr:
+                bt = decay(self.expr_type(e.subscript))
+            return bt.is_ptr and bt.isfar
+        if isinstance(e, c_ast.UnaryOp) and e.op == '*':
+            return decay(self.expr_type(e.expr)).isfar
+        return False
+
     def expr_type(self, e):
         """the type of an expression without generating code"""
         if isinstance(e, c_ast.Constant):
@@ -796,7 +811,7 @@ class Front:
                 return UINT
             t = self.expr_type(e.expr)
             if e.op == '&':
-                return PtrT(t)
+                return PtrT(t, far=self.far_lvalue(e.expr))
             if e.op == '*':
                 t = decay(t)
                 if t.is_ptr:
@@ -2515,11 +2530,17 @@ class Front:
         size = el.size if not el.is_void else 1
         # constant part of the index: a[i + 3] -> base + i*size, offset 3*size
         koff = 0
+        whole = idx
         while isinstance(idx, c_ast.BinaryOp) and idx.op in ('+', '-') and self.const_eval(idx.right) is not None:
             k = self.const_eval(idx.right)
             koff += k if idx.op == '+' else -k
             idx = idx.left
         kv = self.const_eval(idx)
+        if kv is None and koff > 0 and self.expr_type(idx).signed:
+            # a[d + 1] with a signed d: d alone may be negative (d = -1: a[0]), and a
+            # negative index register carries into the next bank (abs,x and (dp),y add
+            # 24 bits): keep the constant in the index (the Prince of Persia port)
+            idx, koff = whole, 0
         # the base address: an array (a variable, an element of an array of arrays, a
         # member) as an lvalue, its element's index added to its own (a[i][j]: one 16-bit
         # index); else a pointer's value
@@ -2966,7 +2987,11 @@ class Front:
                     self.unit.externs.add(s.asm)
                     return RV(Sym(s.asm), PtrT(s.t))
             lv = self.lval(e.expr)
-            return self.to_dst(RV(self.addr_of(lv), PtrT(t)), dst)
+            # an object reached through a far pointer (&p->m, &p[i].m, &(*p).m): its
+            # address is far (4 bytes) and its type says so (a near parameter or variable
+            # given it now gets -Wfar-pointer; it lost the bank silently before)
+            far = self.far_lvalue(e.expr) or (isinstance(lv.base, V) and lv.base.size == 4)
+            return self.to_dst(RV(self.addr_of(lv), PtrT(t, far=far)), dst)
         if op == '*':
             pt = decay(self.expr_type(e.expr))
             if pt.is_ptr and pt.to.is_func:

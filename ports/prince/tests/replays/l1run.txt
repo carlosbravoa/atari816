@@ -1,0 +1,106 @@
+# l1run: level 1 through 11 rooms: the l1sword run, then on through rooms 10, 19, 4. 1207 ticks.
+# Recorded with: rec.sh l1run.txt l1run.p1r "1 seed=1"
+# Rooms: 1 (t=1) 2 (117) 6 (256) 8 (395) 7 (631) 20 (696) 12 (768) 15 (804) 10 (996) 19 (1044) 4 (1161)
+# t=1-969   same as l1sword.txt (loose floor t=76-80, spike pit jump t=276-286, gates,
+#           room 7 loose floors t=650-670, climbs, sword picked up at t=939)
+# t=970-994 turns right, runs off the ledge in room 15, falls one row into room 10 (t=996)
+# t=1016-1026 runs off the next ledge, down to room 10 middle row
+# t=1044    room 19; t=1060-1142 careful steps across the spikes (spikes up from ~t=1108), unhurt
+# t=1161    room 4; t=1180-1186 runs off the ledge, drops to the bottom row; ends t=1207 alive, hp 2/3
+40 R
+18 -
+30 R
+10 -
+110 L
+10 -
+20 U
+15 -
+22 L
+4 LU
+10 -
+4 R
+8 -
+12 RS
+12 -
+12 RS
+10 -
+12 RS
+5 -
+40 L
+10 -
+10 L
+10 -
+4 R
+6 -
+12 RS
+2 -
+12 RS
+2 -
+12 RS
+2 -
+12 RS
+4 -
+4 L
+6 -
+12 LS
+2 -
+12 LS
+2 -
+12 LS
+2 -
+4 LU
+14 -
+15 L
+5 -
+30 U
+6 -
+50 L
+6 -
+19 L
+4 LU
+20 L
+4 -
+30 U
+4 -
+14 L
+4 LU
+30 L
+8 -
+12 LS
+2 -
+12 LS
+2 -
+4 R
+8 -
+10 D
+20 -
+10 D
+12 -
+4 L
+4 -
+6 L
+8 -
+12 LS
+2 -
+20 -
+4 R
+4 -
+40 R
+16 -
+20 R
+6 -
+12 RS
+2 -
+12 RS
+2 -
+12 RS
+2 -
+12 RS
+2 -
+12 RS
+2 -
+12 RS
+2 -
+4 -
+30 R
+30 -

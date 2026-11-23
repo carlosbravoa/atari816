@@ -1,0 +1,15 @@
+# loose: level 1 start, a loose floor falls and the kid follows it down. 180 ticks.
+# Recorded with: rec.sh loose.txt loose.p1r "1 seed=1"
+# t=1-20    kid drops in from above (level 1 intro), room 1 middle row
+# t=40-46   runs right off the ledge, drops to the bottom row of room 1
+# t=60-76   runs right across the loose floor (room 1 bottom row, col 6)
+# t=76-80   the loose floor shakes and falls into room 2 (gap visible from t=80)
+# t=100-116 kid turns, runs back left and falls through the hole
+# t=117     room 2; lands crouching next to the rubble at t=124 (hp 3 -> 2)
+# t=164     stands up; ends t=180 alive in room 2
+40 R
+18 -
+30 R
+10 -
+22 L
+60 -

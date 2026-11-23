@@ -1,0 +1,7 @@
+data/
+build/
+*.PRG
+*.map
+*.lbl
+*.HZA
+tests/out/

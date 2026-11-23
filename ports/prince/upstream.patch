@@ -1,0 +1,798 @@
+diff -ruN a/config.h b/config.h
+--- upstream/src/config.h
++++ src/config.h
+@@ -27,8 +27,16 @@
+ #define strcasecmp _stricmp
+ #endif
+ 
++#if defined(_HORIZON)
++#define POP_MAX_PATH 128 // Horizon: paths are at most 127 characters
++#else
+ #define POP_MAX_PATH 256
++#endif
++#if defined(_HORIZON)
++#define POP_MAX_OPTIONS_SIZE 160 // Horizon: the main bank is small (the biggest section is 147 bytes)
++#else
+ #define POP_MAX_OPTIONS_SIZE 256
++#endif
+ 
+ #define SDLPOP_VERSION "1.24 RC"
+ #define WINDOW_TITLE "Prince of Persia (SDLPoP) v" SDLPOP_VERSION
+@@ -345,10 +353,14 @@
+ 
+ 
+ // Darken those parts of the screen which are not near a torch.
++#if !defined(_HORIZON) // Horizon: not in the port
+ #define USE_LIGHTING
++#endif
+ 
+ // Enable screenshot features.
++#if !defined(_HORIZON) // Horizon: not in the port
+ #define USE_SCREENSHOT
++#endif
+ 
+ // Automatically switch to keyboard or joystick/gamepad mode if there is input from that device.
+ // Useful if SDL detected a gamepad but there is none.
+@@ -357,7 +369,9 @@
+ #ifdef USE_TEXT // The menu won't work without text.
+ 
+ // Display the in-game menu.
++#if !defined(_HORIZON) // Horizon: not in the port
+ #define USE_MENU
++#endif
+ 
+ #endif
+ 
+@@ -365,7 +379,9 @@
+ #define USE_COLORED_TORCHES
+ 
+ // Enable fast forwarding with the backtick key.
++#if !defined(_HORIZON) // Horizon: not in the port
+ #define USE_FAST_FORWARD
++#endif
+ 
+ // Set how much should the fast forwarding speed up the game.
+ #define FAST_FORWARD_RATIO 10
+diff -ruN a/data.h b/data.h
+--- upstream/src/data.h
++++ src/data.h
+@@ -180,11 +180,11 @@
+ 
+ 
+ // data:5FF4
+-extern back_table_type foretable[200];
++extern back_table_type HZ_FAR foretable[200];
+ // data:463C
+-extern back_table_type backtable[200];
++extern back_table_type HZ_FAR backtable[200];
+ // data:3D38
+-extern midtable_type midtable[50];
++extern midtable_type HZ_FAR midtable[50];
+ // data:5F1E
+ extern peel_type* peels_table[50];
+ // data:4D9A
+@@ -203,7 +203,7 @@
+ // data:4082
+ extern short obj_clip_bottom;
+ // data:34D2
+-extern wipetable_type wipetable[300];
++extern wipetable_type HZ_FAR wipetable[300];
+ // data:2592
+ extern const byte chtab_shift[10] INIT(= {0,1,0,0,0,0,1,1,1,0});
+ // data:4354
+@@ -400,7 +400,7 @@
+ // data:588E
+ extern short n_curr_objs;
+ // data:5BAC
+-extern objtable_type objtable[50];
++extern objtable_type HZ_FAR objtable[50];
+ // data:5F8C
+ extern short curr_objs[50];
+ 
+diff -ruN a/options.c b/options.c
+--- upstream/src/options.c
++++ src/options.c
+@@ -37,6 +37,7 @@
+ 	custom = (new_state) ? &custom_saved : &custom_defaults;
+ }
+ 
++#if !defined(_HORIZON) // Horizon: no SDLPoP.ini (its defaults are the options: set_options_to_default)
+ // .ini file parser adapted from https://gist.github.com/OrangeTide/947070
+ /* Load an .ini format file
+  * filename - path to a file
+@@ -468,6 +469,7 @@
+ 	return 0;
+ }
+ 
++#endif // _HORIZON
+ void set_options_to_default() {
+ #ifdef USE_MENU
+ 	enable_pause_menu = 1;
+@@ -500,12 +502,18 @@
+ 	turn_custom_options_on_off(0);
+ }
+ 
++#if defined(_HORIZON)
++void load_global_options() {
++	set_options_to_default();
++}
++#else
+ void load_global_options() {
+ 	set_options_to_default();
+ 	ini_load(locate_file("SDLPoP.ini"), global_ini_callback); // global configuration
+ 	load_dos_exe_modifications("."); // read PRINCE.EXE in the current working directory
+ }
+ 
++#endif
+ void check_mod_param() {
+ 	// The 'mod' command line argument can override the levelset choice in SDLPoP.ini
+ 	// usage: prince mod "Mod Name"
+@@ -527,6 +535,7 @@
+ 	dos_14_unpacked = 5,
+ };
+ 
++#if !defined(_HORIZON) // Horizon: no PRINCE.EXE of a mod to read
+ bool read_exe_bytes(void* dest, size_t nbytes, byte* exe_memory, int exe_offset, int exe_size) {
+ 	if (exe_offset < 0) return false; // Happens if a CusPop modification is not available for the mod's EXE version.
+ 	if (exe_offset < exe_size) {
+@@ -780,6 +789,17 @@
+ }
+ 
+ 
++#endif
++#if defined(_HORIZON) // Horizon: no mods
++void load_dos_exe_modifications(const char* folder_name) {
++	(void)folder_name;
++}
++void load_mod_options() {
++	use_custom_levelset = 0;
++	turn_fixes_and_enhancements_on_off(use_fixes_and_enhancements);
++	turn_custom_options_on_off(use_custom_options);
++}
++#else
+ void load_mod_options() {
+ 	// load mod-specific INI configuration
+ 	if (use_custom_levelset) {
+@@ -826,6 +846,7 @@
+ 	turn_custom_options_on_off(use_custom_options);
+ }
+ 
++#endif
+ int process_rw_write(SDL_RWops* rw, void* data, size_t data_size) {
+ 	return (int)SDL_RWwrite(rw, data, data_size, 1);
+ }
+diff -ruN a/proto.h b/proto.h
+--- upstream/src/proto.h
++++ src/proto.h
+@@ -729,3 +729,13 @@
+ void init_midi(void);
+ void midi_callback(void *userdata, Uint8 *stream, int len);
+ void play_midi_sound(sound_buffer_type* buffer);
++
++#if defined(_HORIZON)
++// the Atari816 platform (horizon/)
++#include <horizon.h>
++image_type* hz_hflip(image_type* image);
++void ref_hook(void);
++extern int fps;
++extern int wait_time[];
++#endif
++
+diff -ruN a/replay.c b/replay.c
+--- upstream/src/replay.c
++++ src/replay.c
+@@ -32,8 +32,39 @@
+ #define REPLAY_FORMAT_DEPRECATION_NUMBER 2   // SDLPoP won't open replays with a higher deprecation number
+ // If deprecation_number >= 2: Waste an RNG cycle in loose_shake() to match DOS PoP.
+ 
++#if defined(_HORIZON)
++// Horizon: the moves in a bank of their own (one object is at most 64 KB): 91 minutes
++#define MAX_REPLAY_DURATION 61440
++static byte __far *moves; // and at 61440 the savestate (4 KB)
++static int moves_bank(void) {
++	if (moves == NULL) moves = (byte __far *)hz_far_alloc();
++	return moves != NULL;
++}
++static size_t fread_far(byte __far *dst, size_t n, FILE* fp) {
++	byte buf[256];
++	size_t done = 0;
++	while (done < n) {
++		size_t k = n - done > sizeof(buf) ? sizeof(buf) : n - done;
++		if (fread(buf, 1, k, fp) != k) break;
++		hz_far_copy(dst + done, buf, (unsigned)k);
++		done += k;
++	}
++	return done == n ? 1 : 0;
++}
++static void fwrite_far(const byte __far *src, size_t n, FILE* fp) {
++	byte buf[256];
++	size_t done = 0;
++	while (done < n) {
++		size_t k = n - done > sizeof(buf) ? sizeof(buf) : n - done;
++		hz_far_copy(buf, src + done, (unsigned)k);
++		fwrite(buf, 1, k, fp);
++		done += k;
++	}
++}
++#else
+ #define MAX_REPLAY_DURATION 345600 // 8 hours: 720 * 60 * 8 ticks
+ byte moves[MAX_REPLAY_DURATION] = {0}; // static memory for now because it is easier (should this be dynamic?)
++#endif
+ 
+ char replay_levelset_name[POP_MAX_PATH];
+ char stored_levelset_name[POP_MAX_PATH];
+@@ -56,7 +87,15 @@
+ int current_replay_number = 0;
+ int next_replay_number = 0;
+ 
++#if defined(_HORIZON)
++byte __far* savestate_buffer = NULL; // Horizon: in the moves' bank
++#define savestate_alloc() (moves_bank() ? moves + MAX_REPLAY_DURATION : NULL)
++#define memcpy_ss(d, s, n) hz_far_copy((d), (s), (unsigned)(n))
++#else
+ byte* savestate_buffer = NULL;
++#define savestate_alloc() malloc(MAX_SAVESTATE_SIZE)
++#define memcpy_ss memcpy
++#endif
+ dword savestate_offset = 0;
+ dword savestate_size = 0;
+ #define MAX_SAVESTATE_SIZE 4096
+@@ -225,7 +264,11 @@
+ 		// get the creation time
+ 		struct stat st;
+ 		if (stat( replay_info->filename, &st ) == 0) {
++#if defined(_HORIZON)
++			replay_info->creation_time = 0; // Horizon: no file times here
++#else
+ 			replay_info->creation_time = st.st_ctime;
++#endif
+ 		}
+ 		// read and store the levelset name associated with the replay
+ 		FILE* fp = fopen( replay_info->filename, "rb" );
+@@ -274,7 +317,12 @@
+ 		strncpy(exe_dir, exe_path, len);
+ 		exe_dir[len] = '\0';
+ 
++#if defined(_HORIZON)
++		int result = 0; // Horizon: already in the program's folder (hz_main.c)
++		(void)exe_dir;
++#else
+ 		int result = chdir(exe_dir);
++#endif
+ 		if (result != 0) {
+ 			perror("Can't change into SDLPoP directory");
+ 		}
+@@ -529,7 +577,7 @@
+ 		printf("Saving savestate to memory failed: buffer is overflowing!\n");
+ 		return 0;
+ 	}
+-	memcpy(savestate_buffer + savestate_offset, data, data_size);
++	memcpy_ss(savestate_buffer + savestate_offset, data, data_size);
+ 	savestate_offset += data_size;
+ 	return 1;
+ }
+@@ -538,7 +586,7 @@
+ 	// Prevent torches from being randomly colored when an older replay is loaded.
+ 	if (savestate_offset >= savestate_size) return 0;
+ 
+-	memcpy(data, savestate_buffer + savestate_offset, data_size);
++	memcpy_ss(data, savestate_buffer + savestate_offset, data_size);
+ 	savestate_offset += data_size;
+ 	return 1;
+ }
+@@ -546,7 +594,7 @@
+ int savestate_to_buffer(void) {
+ 	int ok = 0;
+ 	if (savestate_buffer == NULL)
+-		savestate_buffer = malloc(MAX_SAVESTATE_SIZE);
++		savestate_buffer = savestate_alloc();
+ 	if (savestate_buffer != NULL) {
+ 		savestate_offset = 0;
+ 		savestate_size = 0;
+@@ -611,7 +659,11 @@
+ 		special_move = 0;
+ 	}
+ 
++#if defined(_HORIZON)
++	if (moves_bank()) moves[(word)curr_tick] = curr_move.bits;
++#else
+ 	moves[curr_tick] = curr_move.bits;
++#endif
+ 
+ 	++curr_tick;
+ 
+@@ -715,13 +767,13 @@
+ 		print_remaining_time();
+ 
+ 		int minute_ticks = curr_tick % 720;
+-		printf("Play duration:  %d min, %d sec, %d ticks. (curr_tick=%d)\n\n",
+-		       curr_tick / 720, minute_ticks / 12, minute_ticks % 12, curr_tick);
++		printf("Play duration:  %d min, %d sec, %d ticks. (curr_tick=%ld)\n\n",
++		       (int)(curr_tick / 720), minute_ticks / 12, minute_ticks % 12, (long)curr_tick); // (long: 16-bit int)
+ 
+ 		if (num_replay_ticks != curr_tick) {
+-			printf("WARNING: Play duration does not match replay length. (%d ticks)\n", num_replay_ticks);
++			printf("WARNING: Play duration does not match replay length. (%ld ticks)\n", (long)num_replay_ticks);
+ 		} else {
+-			printf("Play duration matches replay length. (%d ticks)\n", num_replay_ticks);
++			printf("Play duration matches replay length. (%ld ticks)\n", (long)num_replay_ticks);
+ 		}
+ 		exit(0);
+ 	}
+@@ -745,7 +797,11 @@
+ 	}
+ 	if (current_level == next_level) {
+ 		replay_move_type curr_move;
++#if defined(_HORIZON)
++		curr_move.bits = moves[(word)curr_tick];
++#else
+ 		curr_move.bits = moves[curr_tick];
++#endif
+ 
+ 		control_x = curr_move.x;
+ 		control_y = curr_move.y;
+@@ -834,7 +890,11 @@
+ 		fputs(implementation_name, replay_fp);
+ 		// embed a savestate into the replay
+ 		fwrite(&savestate_size, sizeof(savestate_size), 1, replay_fp);
++#if defined(_HORIZON)
++		fwrite_far(savestate_buffer, (size_t)savestate_size, replay_fp);
++#else
+ 		fwrite(savestate_buffer, savestate_size, 1, replay_fp);
++#endif
+ 
+ 		// Save the current options (not the defaults) into the replay!
+ 		fixes_options_replay = fixes_saved;
+@@ -853,7 +913,11 @@
+ 		fwrite(&saved_random_seed, sizeof(saved_random_seed), 1, replay_fp);
+ 		num_replay_ticks = curr_tick;
+ 		fwrite(&num_replay_ticks, sizeof(num_replay_ticks), 1, replay_fp);
++#if defined(_HORIZON)
++		if (moves_bank()) fwrite_far(moves, (size_t)num_replay_ticks, replay_fp);
++#else
+ 		fwrite(moves, num_replay_ticks, 1, replay_fp);
++#endif
+ 		fclose(replay_fp);
+ 		replay_fp = NULL;
+ 	}
+@@ -902,7 +966,7 @@
+ 		}
+ 	}
+ 	if (savestate_buffer == NULL)
+-		savestate_buffer = malloc(MAX_SAVESTATE_SIZE);
++		savestate_buffer = savestate_alloc();
+ 	if (replay_fp != NULL && savestate_buffer != NULL) {
+ 		replay_header_type header = {0};
+ 		char error_message[REPLAY_HEADER_ERROR_MESSAGE_MAX];
+@@ -919,7 +983,11 @@
+ 
+ 		// load the savestate
+ 		fread_check(&savestate_size, sizeof(savestate_size), 1, replay_fp);
++#if defined(_HORIZON)
++		if (savestate_size > MAX_SAVESTATE_SIZE || !fread_far(savestate_buffer, (size_t)savestate_size, replay_fp)) return 0;
++#else
+ 		fread_check(savestate_buffer, savestate_size, 1, replay_fp);
++#endif
+ 
+ 		// load the replay options, organized per section
+ 		for (int i = 0; i < COUNT(replay_options_sections); ++i) {
+@@ -933,7 +1001,15 @@
+ 		fread_check(&start_level, sizeof(start_level), 1, replay_fp);
+ 		fread_check(&saved_random_seed, sizeof(saved_random_seed), 1, replay_fp);
+ 		fread_check(&num_replay_ticks, sizeof(num_replay_ticks), 1, replay_fp);
++#if defined(_HORIZON)
++		if (num_replay_ticks > MAX_REPLAY_DURATION || !moves_bank() ||
++		    !fread_far(moves, (size_t)num_replay_ticks, replay_fp)) {
++			printf("Error loading replay: moves missing or too long\n");
++			return 0;
++		}
++#else
+ 		fread_check(moves, num_replay_ticks, 1, replay_fp);
++#endif
+ 		fclose(replay_fp);
+ 		replay_fp = NULL;
+ 		replay_file_open = 0;
+diff -ruN a/seg000.c b/seg000.c
+--- upstream/src/seg000.c
++++ src/seg000.c
+@@ -467,7 +467,11 @@
+ 			// don't apply the penalty after time has already stopped!
+ 			(current_level < /*13*/ custom->victory_stops_time_level || (current_level == /*13*/ custom->victory_stops_time_level && leveldoor_open < 2))
+ 		) {
++#if defined(_HORIZON) // Horizon: 720 * 60 does not fit a 16-bit int
++			long ticks_elapsed = 720L * (rem_min - old_rem_min) + (rem_tick - old_rem_tick);
++#else
+ 			int ticks_elapsed = 720 * (rem_min - old_rem_min) + (rem_tick - old_rem_tick);
++#endif
+ 			// don't restore time at all if the elapsed time is between 0 and 1 minutes
+ 			if (ticks_elapsed > 0 && ticks_elapsed < 720) {
+ 				rem_min = old_rem_min;
+@@ -668,6 +672,7 @@
+ 			answer_text = sprintf_temp;
+ 			need_show_text = 1;
+ 		break;
++#if !defined(_HORIZON) // Horizon: no SDL version to show
+ 		case SDL_SCANCODE_C | WITH_CTRL: // Ctrl+C
+ 		{
+ 			SDL_version verc, verl;
+@@ -681,6 +686,7 @@
+ 			need_show_text = 1;
+ 		}
+ 		break;
++#endif
+ 		case SDL_SCANCODE_L | WITH_SHIFT: // Shift+L
+ 			if (current_level < custom->shift_L_allowed_until_level /* 4 */ || cheats_enabled) {
+ 				// if Shift is not released within the delay, the cutscene is skipped
+@@ -1305,6 +1311,12 @@
+ 		axis_state[0] = 0;
+ 		axis_state[1] = 0;
+ 	} else {
++#if defined(_HORIZON) // Horizon: no analog sticks (the joystick is read as keys: hz_sys.c), no floating point
++		axis_state[0] = raw_x > 0 ? 1 : raw_x < 0 ? -1 : 0;
++		axis_state[1] = raw_y > 0 ? 1 : raw_y < 0 ? -1 : 0;
++	}
++}
++#else
+ 		double angle = atan2(raw_y, raw_x); // angle of the joystick: 0 = right, >0 = downward, <0 = upward
+ 		//printf("Joystick angle is %f degrees\n", angle/DEGREES_TO_RADIANS);
+ 
+@@ -1342,6 +1354,7 @@
+ 		}
+ 	}
+ }
++#endif
+ 
+ void get_joystick_state_hor_only(int raw_x, int axis_state[2]) {
+ 	if (raw_x > joystick_threshold) {
+@@ -1890,7 +1903,11 @@
+ 	//printf("slow fall started at: rem_min = %d, rem_tick = %d\n", rem_min, rem_tick);
+ 	if (fixes->fix_quicksave_during_feather) {
+ 		// feather fall is treated as a timer
++#if defined(_HORIZON) // Horizon: no floating point (18.75 s = 75 / 4)
++		is_feather_fall = (word)(75L * fps / (4L * wait_time[timer_1]));
++#else
+ 		is_feather_fall = FEATHER_FALL_LENGTH * get_ticks_per_sec(timer_1);
++#endif
+ 	} else {
+ 		is_feather_fall = 1;
+ 	}
+@@ -1940,6 +1957,9 @@
+ 
+ // seg000:17E6
+ void show_title() {
++#if defined(_HORIZON)
++	printf("prince: title\n"); // (the tests wait for these lines)
++#endif
+ 	load_opt_sounds(sound_50_story_2_princess, sound_55_story_1_absence); // main theme, story, princess door
+ 	dont_reset_time = 0;
+ 	if(offscreen_surface) free_surface(offscreen_surface); // missing in original
+@@ -2317,9 +2337,13 @@
+ 			color.b = 0x00;
+ 			color.a = 0xFF;
+ 		}
++#if !defined(_HORIZON) // Horizon: set_pal above is the image's colour (palette rows)
+ 		if (NULL != chtab_title40) {
+ 			SDL_SetPaletteColors(chtab_title40->images[0]->format->palette, &color, 14, 1);
+ 		}
++#else
++		(void)color;
++#endif
+ 	} else if (graphics_mode == gmEga || graphics_mode == gmTga) {
+ 		// ...
+ 	}
+@@ -2407,6 +2431,25 @@
+ 	need_quotes = 0;
+ }
+ 
++#if defined(_HORIZON)
++// Horizon: the port's own first screen (rows 20-199 are shown), its keys
++const rect_type splash_text_1_rect = {24, 0, 50, 320};
++const rect_type splash_text_2_rect = {54, 0, 200, 320};
++
++const char* splash_text_1 = "Prince of Persia for the Atari816";
++const char* splash_text_2 =
++		"from SDLPoP " SDLPOP_VERSION " (GPL-3)\n"
++		"\n"
++		"Arrows: run, jump, climb, crouch.\n"
++		"Shift: careful step, grab, strike.\n"
++		"Esc: pause.  Ctrl+A: restart the level.\n"
++		"Ctrl+G: save (from level 3), Ctrl+L: load.\n"
++		"F6: quicksave, F9: quickload.\n"
++		"Ctrl+S: sound.  Ctrl+R: new game.  Ctrl+Q: quit.\n"
++		"Space: time left.  Joystick: as the arrows.\n"
++		"\n"
++		"Press any key to continue...";
++#else
+ const rect_type splash_text_1_rect = {0, 0, 50, 320};
+ const rect_type splash_text_2_rect = {50, 0, 200, 320};
+ 
+@@ -2426,6 +2469,7 @@
+ 		"Questions? Visit https://forum.princed.org\n"
+ 		"\n"
+ 		"Press any key to continue...";
++#endif
+ 
+ void show_splash() {
+ 	if (!enable_info_screen || start_level >= 0) return;
+@@ -2468,6 +2512,12 @@
+ }
+ 
+ const char* get_writable_file_path(char* custom_path_buffer, size_t max_len, const char* file_name) {
++#if defined(_HORIZON)
++	// Horizon: saves, the hall of fame, quicksaves next to the program (hz_main.c made its
++	// folder the current one); there is no HOME (getenv fails: save_path stayed garbage)
++	(void)custom_path_buffer; (void)max_len;
++	return file_name;
++#endif
+ 	// If the SDLPOP_SAVE_PATH environment variable is set, put all saves into the directory it points to.
+ 	// Otherwise, save to the home directory
+ #if defined WIN32 || _WIN32 || WIN64 || _WIN64
+diff -ruN a/seg003.c b/seg003.c
+--- upstream/src/seg003.c
++++ src/seg003.c
+@@ -49,6 +49,9 @@
+ // seg003:005C
+ void play_level(int level_number) {
+ 	cutscene_ptr_type cutscene_func;
++#if defined(_HORIZON)
++	printf("prince: level %d\n", level_number); // (the tests wait for these lines)
++#endif
+ #ifdef USE_COPYPROT
+ 	if (enable_copyprot && level_number == custom->copyprot_level) {
+ 		level_number = 15;
+@@ -386,6 +389,9 @@
+ 		} else {
+ 			if (next_level == current_level || check_sound_playing()) {
+ 				draw_game_frame();
++#if defined(_HORIZON)
++				ref_hook(); // the tests' state lines and pictures (horizon/hz_ref.c)
++#endif
+ 				flash_if_hurt();
+ 				remove_flash_if_hurt();
+ 				do_simple_wait(timer_1);
+diff -ruN a/seg006.c b/seg006.c
+--- upstream/src/seg006.c
++++ src/seg006.c
+@@ -20,6 +20,12 @@
+ 
+ #include "common.h"
+ 
++#if defined(_HORIZON)
++#define HZ_FAR_TBL __far // Horizon: the frame tables in a bank of their own (the main bank is small)
++#else
++#define HZ_FAR_TBL
++#endif
++
+ #define SEQTBL_BASE 0x196E
+ #define SEQTBL_0 (seqtbl - SEQTBL_BASE)
+ extern const byte seqtbl[]; // the sequence table is defined in seqtbl.c
+@@ -124,7 +130,7 @@
+ }
+ 
+ // data:0FE0
+-const frame_type frame_table_kid[] = {
++HZ_FAR_TBL const frame_type frame_table_kid[] = {
+ { 255, 0x00| 0,   0,   0, 0x00| 0},
+ {   0, 0x00| 0,   1,   0, 0xC0| 4},
+ {   1, 0x00| 0,   1,   0, 0x40| 4},
+@@ -369,7 +375,7 @@
+ };
+ 
+ // data:1496
+-const frame_type frame_tbl_guard[] = {
++HZ_FAR_TBL const frame_type frame_tbl_guard[] = {
+ { 255, 0x00| 0,   0,   0, 0x00| 0},
+ {  12, 0xC0|13,   2,   1, 0x00| 0},
+ {   2, 0xC0| 1,   3,   1, 0x00| 0},
+@@ -414,7 +420,7 @@
+ };
+ 
+ // data:1564
+-const frame_type frame_tbl_cuts[] = {
++HZ_FAR_TBL const frame_type frame_tbl_cuts[] = {
+ { 255, 0x00| 0,   0,   0, 0x00| 0},
+ {  15, 0x40| 0,   0,   0, 0x00| 0},
+ {   1, 0x40| 0,   0,   0, 0x80| 0},
+@@ -504,7 +510,7 @@
+ };
+ 
+ 
+-void get_frame_internal(const frame_type frame_table[], int frame, const char* frame_table_name, int count) {
++void get_frame_internal(HZ_FAR_TBL const frame_type frame_table[], int frame, const char* frame_table_name, int count) {
+ 	if (frame >= 0 && frame < count) {
+ 		cur_frame = frame_table[frame];
+ 	} else {
+diff -ruN a/seg007.c b/seg007.c
+--- upstream/src/seg007.c
++++ src/seg007.c
+@@ -1153,7 +1153,7 @@
+ 
+ // seg007:14DE
+ void add_mob_to_objtable(int ypos) {
+-	objtable_type* curr_obj;
++	objtable_type HZ_FAR* curr_obj;
+ 	word index = objtable_count++;
+ 	curr_obj = &objtable[index];
+ 	curr_obj->obj_type = curmob.type | 0x80;
+diff -ruN a/seg008.c b/seg008.c
+--- upstream/src/seg008.c
++++ src/seg008.c
+@@ -797,7 +797,7 @@
+ 		show_dialog("BackTable Overflow");
+ 		return 0; // added
+ 	}
+-	back_table_type* backtable_item = &backtable[index];
++	back_table_type HZ_FAR* backtable_item = &backtable[index];
+ 	backtable_item->xh = xh;
+ 	backtable_item->xl = xl;
+ 	backtable_item->chtab_id = chtab_id;
+@@ -823,7 +823,7 @@
+ 		show_dialog("ForeTable Overflow");
+ 		return 0; // added
+ 	}
+-	back_table_type* foretable_item = &foretable[index];
++	back_table_type HZ_FAR* foretable_item = &foretable[index];
+ 	foretable_item->xh = xh;
+ 	foretable_item->xl = xl;
+ 	foretable_item->chtab_id = chtab_id;
+@@ -851,7 +851,7 @@
+ 		show_dialog("MidTable Overflow");
+ 		return 0; // added
+ 	}
+-	midtable_type* midtable_item = &midtable[index];
++	midtable_type HZ_FAR* midtable_item = &midtable[index];
+ 	midtable_item->xh = xh;
+ 	midtable_item->xl = xl;
+ 	midtable_item->chtab_id = chtab_id;
+@@ -899,7 +899,7 @@
+ 		show_dialog("WipeTable Overflow");
+ 		return /*0*/; // added
+ 	}
+-	wipetable_type* wipetable_item = &wipetable[index];
++	wipetable_type HZ_FAR* wipetable_item = &wipetable[index];
+ 	wipetable_item->left = left;
+ 	wipetable_item->bottom = bottom + 1;
+ 	wipetable_item->height = height;
+@@ -938,7 +938,7 @@
+ void draw_back_fore(int which_table,int index) {
+ 	image_type* image;
+ 	image_type* mask;
+-	back_table_type* table_entry;
++	back_table_type HZ_FAR* table_entry;
+ 	if (which_table == 0) {
+ 		table_entry = &backtable[index];
+ 	} else /* if (which_table == 1) this is always true */ {
+@@ -956,6 +956,10 @@
+ }
+ 
+ 
++#if defined(_HORIZON)
++// Horizon: tools/mkdata.py made the mirrored images (hz_video.c)
++#define hflip(image) hz_hflip(image)
++#else
+ SDL_Surface* hflip(SDL_Surface* input) {
+ 	int width = input->w;
+ 	int height = input->h;
+@@ -986,6 +990,7 @@
+ 
+ 	return output;
+ }
++#endif
+ 
+ 
+ // seg008:140C
+@@ -996,7 +1001,7 @@
+ 	word blit_flip = 0;
+ 	word need_free_image = 0;
+ 	word need_free_mask = 0;
+-	midtable_type* midtable_entry = &midtable[index];
++	midtable_type HZ_FAR* midtable_entry = &midtable[index];
+ 	word image_id = midtable_entry->id;
+ 	word chtab_id = midtable_entry->chtab_id;
+ 	image_type* image = mask = get_image(chtab_id, image_id);
+@@ -1014,7 +1019,11 @@
+ 	}
+ 
+ 	if (chtab_flip_clip[chtab_id]) {
++#if defined(_HORIZON) // (the table is far: a near copy of the rectangle)
++		{ rect_type clip = midtable_entry->clip; set_clip_rect(&clip); }
++#else
+ 		set_clip_rect(&midtable_entry->clip);
++#endif
+ 		if (chtab_id != id_chtab_0_sword) {
+ 			xpos = calc_screen_x_coord(xpos);
+ 		}
+@@ -1037,7 +1046,9 @@
+ 	}
+ 	if (need_free_image) {
+ 		//free(image);
++#if !defined(_HORIZON) // Horizon: the mirrored image is the atlas's, not a copy
+ 		SDL_FreeSurface(image);
++#endif
+ 	}
+ 	if (need_free_mask) {
+ 		free(mask);
+@@ -1079,7 +1090,7 @@
+ // seg008:1730
+ void draw_wipe(int index) {
+ 	rect_type rect;
+-	wipetable_type* ptr = &wipetable[index];
++	wipetable_type HZ_FAR* ptr = &wipetable[index];
+ 	rect.left = rect.right = ptr->left;
+ 	rect.right += ptr->width;
+ 	rect.bottom = rect.top = ptr->bottom;
+@@ -1607,7 +1618,7 @@
+ 
+ // seg008:2228
+ int load_obj_from_objtable(int index) {
+-	objtable_type* curr_obj = &objtable[index];
++	objtable_type HZ_FAR* curr_obj = &objtable[index];
+ 	obj_xh = obj_x = curr_obj->xh;
+ 	obj_xl = curr_obj->xl;
+ 	obj_y = curr_obj->y;
+@@ -1701,9 +1712,13 @@
+ 		show_dialog("ObjTable Overflow");
+ 		return /*0*/; // added
+ 	}
+-	objtable_type* entry_addr = &objtable[index];
++	objtable_type HZ_FAR* entry_addr = &objtable[index];
+ 	entry_addr->obj_type = obj_type;
++#if defined(_HORIZON) // (the table is far: the function takes near pointers)
++	{ sbyte xh, xl; x_to_xh_and_xl(obj_x, &xh, &xl); entry_addr->xh = xh; entry_addr->xl = xl; }
++#else
+ 	x_to_xh_and_xl(obj_x, &entry_addr->xh, &entry_addr->xl);
++#endif
+ 	entry_addr->y = obj_y;
+ 	entry_addr->clip.top = obj_clip_top;
+ 	entry_addr->clip.bottom = obj_clip_bottom;
+@@ -1848,7 +1863,11 @@
+ 
+ // seg008:2602
+ short calc_screen_x_coord(short logical_x) {
++#if defined(_HORIZON) // Horizon: logical_x*320 overflows a 16-bit int; 320/280 = 8/7 exactly
++	return logical_x*8/7;
++#else
+ 	return logical_x*320/280;
++#endif
+ }
+ 
+ // seg008:2627
+@@ -1862,6 +1881,9 @@
+ 
+ // seg008:2644
+ void display_text_bottom(const char* text) {
++#if defined(_HORIZON)
++	printf("prince: text %s\n", text); // (the tests wait for these lines)
++#endif
+ 	draw_rect(&rect_bottom_text, color_0_black);
+ 	show_text(&rect_bottom_text, halign_center, valign_bottom, text);
+ #ifndef USE_TEXT
+diff -ruN a/types.h b/types.h
+--- upstream/src/types.h
++++ src/types.h
+@@ -21,8 +21,12 @@
+ #ifndef TYPES_H
+ #define TYPES_H
+ 
++#if defined(_HORIZON)
++typedef struct stb_vorbis stb_vorbis; // Horizon: no OGG music (the AdLib music plays)
++#else
+ #define STB_VORBIS_HEADER_ONLY
+ #include "stb_vorbis.c"
++#endif
+ 
+ #if !defined(_MSC_VER)
+ # include <SDL2/SDL.h>
+@@ -61,6 +65,12 @@
+        typedef int SDL_dummy_ ## name[(x) * 2 - 1]
+ */
+ 
++#if defined(_HORIZON)
++#define HZ_FAR __far // Horizon: a table in a bank of its own (the main bank is small)
++#else
++#define HZ_FAR
++#endif
++
+ typedef Uint8 byte;
+ typedef Sint8 sbyte;
+ typedef Uint16 word;

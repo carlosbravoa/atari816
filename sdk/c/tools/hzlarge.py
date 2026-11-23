@@ -274,6 +274,11 @@ def link(objs, out, sstack, debug=False, mapfile=None, libs=(), keep=None, heap=
             if und and und <= {"__T" + x for x in t} and not t <= need:
                 need |= t
                 continue
+            # (a name really missing: the thunks still wanted (__T_x of functions that are
+            # defined, their address taken) are not the fault: say only the missing ones)
+            if any(not n.startswith("__T_") for n in und):
+                msg = "\n".join(ln for ln in msg.splitlines()
+                                if not re.search(r"Unresolved external [‘'`]__T_", ln))
             # (a function's 16-bit address __T_x missing: it is x that is missing)
             msg = re.sub(r"([‘'`])__T(_\w+)([’'])", r"\1\2\3", msg)
             raise HccError(link_error(msg, name, sstack, tmp_map))

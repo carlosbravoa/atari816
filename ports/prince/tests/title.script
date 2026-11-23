@@ -1,0 +1,5 @@
+# tests/title.script - the first screen, then the title with its music untouched
+0 wait prince: start
++800 {space}
++0 wait prince: title
++11000 shot

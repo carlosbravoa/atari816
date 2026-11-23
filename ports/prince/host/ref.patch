@@ -1,0 +1,66 @@
+--- src/seg000.c
++++ src/seg000.c
+@@ -1806,6 +1806,7 @@
+ 	else
+ 		control_shift = CONTROL_RELEASED;
+ 
++	{ extern void ref_input(void); ref_input(); } // reference build: scripted controls
+ 	#ifdef USE_DEBUG_CHEATS
+ 	if (cheats_enabled && debug_cheats_enabled) {
+ 		if (key_states[SDL_SCANCODE_RIGHTBRACKET] & key_state) ++Char.x;
+--- src/seg003.c
++++ src/seg003.c
+@@ -386,6 +386,7 @@
+ 		} else {
+ 			if (next_level == current_level || check_sound_playing()) {
+ 				draw_game_frame();
++				{ extern void ref_hook(void); ref_hook(); } // reference build
+ 				flash_if_hurt();
+ 				remove_flash_if_hurt();
+ 				do_simple_wait(timer_1);
+--- src/seg009.c
++++ src/seg009.c
+@@ -2430,6 +2430,7 @@
+ 
+ // seg009:7220
+ void play_sound_from_buffer(sound_buffer_type* buffer) {
++	if (getenv("POP_REF_SILENT")) return; // reference build: no sound (as validate)
+ 
+ #ifdef USE_REPLAY
+ 	if (replaying && skipping_replay) return;
+@@ -4223,6 +4224,7 @@
+ }
+ 
+ int has_timer_stopped(int timer_index) {
++	if (getenv("POP_REF_FAST")) return true; // reference build: no waiting
+ #ifdef USE_COMPAT_TIMER
+ 	return wait_time[timer_index] == 0;
+ #else
+--- src/midi.c
++++ src/midi.c
+@@ -333,7 +333,9 @@
+ 	memset(opl_cached_regs, 0, sizeof(opl_cached_regs));
+ }
+ 
++static double ref_opl_us; // reference build: the music's clock
+ static void opl_write_reg(word reg, byte value) {
++	{ extern void ref_opl(int, int, double); ref_opl(reg, value, ref_opl_us); } // reference build
+ 	OPL3_WriteReg(&opl_chip, reg, value);
+ 	opl_cached_regs[reg] = value;
+ }
+@@ -530,6 +532,7 @@
+ 			}
+ 			free(temp_buffer);
+ 
++			ref_opl_us += (double)advance_us; // reference build
+ 			frames_needed -= advance_frames;
+ 			stream += advance_frames * 4;
+ 			// Advance the current MIDI tick position.
+@@ -668,6 +671,7 @@
+ 	}
+ 
+ 	midi_current_pos = 0;
++	ref_opl_us = 0; // reference build
+ 	midi_current_pos_fract_part = 0;
+ 	ticks_to_next_pause = 0;
+ 	midi_tracks = parsed_midi.tracks;

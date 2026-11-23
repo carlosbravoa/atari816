@@ -1,0 +1,9 @@
+# APP.INF of Prince of Persia (sdk/docs/apps.md): make app packs it with PRINCE.PRG, the
+# data made from your copy of SDLPoP's data (POP.DAT, .GFX, .MSK, .SND) and PRINCE.ICN
+# (a frame of the kid from that data) into PRINCE.HZA. Not committed: built locally.
+name=Prince of Persia
+version=1.0
+description=Jordan Mechner's Prince of Persia (1990), from SDLPoP
+category=Games
+program=PRINCE.PRG
+icon=PRINCE.ICN

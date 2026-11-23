@@ -1,0 +1,24 @@
+# fight: level 2 start, the kid kills the first guard with the sword. 122 ticks.
+# Recorded with: rec.sh fight.txt fight.p1r "2 seed=1"   (seed=1 matters: guard AI is random)
+# t=1-25    runs left from the start door, room 5 -> room 4 at t=25 (guard waits at x=72)
+# t=30-50   two loose floors behind the kid fall (room 4 middle row)
+# t=40-48   kid draws the sword, en garde; the guard advances
+# t=63      kid advances, t=66 strikes: guard hit at t=70 (hp 3 -> 2)
+# t=81      advance, t=84 strike: guard hit (hp 2 -> 1)
+# t=96      advance, t=100 strike: guard hit (hp 1 -> 0), guard dying frames 179-185
+# t=~105    guard dead (alive 0 at t=110); kid sheathes; ends t=122, kid hp 3/3
+5 -
+30 L
+27 -
+1 L
+3 -
+1 S
+10 -
+1 L
+2 -
+1 S
+10 -
+1 L
+4 -
+1 S
+25 -

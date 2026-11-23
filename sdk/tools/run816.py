@@ -50,6 +50,8 @@ Options:
   --log-sound     log every write to POKEY 2 / the DACs in emu.err
   --log-sound-us  the same with the emulated time in microseconds ("sound US $DBxx = $yy")
   --log-lau       log every write to Lau, the sample player, in emu.err ("lau $DBxx = $yy")
+  --log-opl       log every OPL2 register write in emu.err ("opl $RR = $yy"); --log-opl-us
+                  with the emulated time in microseconds ("opl US $RR = $yy")
   --shot-on TEXT  a screenshot (OUT/autoN.png) each time the program prints a console line
                   holding TEXT, taken two frames later: pictures at points of the program's
                   own progress (hold the picture a few frames after printing the line)
@@ -123,7 +125,8 @@ def main():
             opt['files'].append(val()); i += 2
         elif w == '--expect':
             opt['expect'].append(val()); i += 2
-        elif w in ('--log-sound', '--log-sound-us', '--log-lau', '--window', '--net'):
+        elif w in ('--log-sound', '--log-sound-us', '--log-lau', '--log-opl', '--log-opl-us',
+                   '--window', '--net'):
             opt[w[2:]] = True; i += 1
         elif w.startswith('--'):
             die(f'unknown option {w}')
@@ -239,6 +242,10 @@ def main():
         cmdl += ['--kbd-release', opt['kbd-release']]
     if opt.get('log-lau'):
         cmdl.append('--log-lau')
+    if opt.get('log-opl'):
+        cmdl.append('--log-opl')
+    if opt.get('log-opl-us'):
+        cmdl.append('--log-opl-us')
     if opt.get('wav'):
         os.makedirs(os.path.dirname(os.path.abspath(opt['wav'])), exist_ok=True)
         cmdl += ['--wav', os.path.abspath(opt['wav'])]

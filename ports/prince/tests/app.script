@@ -1,0 +1,35 @@
+# tests/app.script - the app installed, started and updated as a user would (make test-app;
+# --mode none: time 0 = the Desktop up, Files open at the card's root):
+#  1. PRINCE.HZA found in Files by typing its name, opened: the Installer asks, Install;
+#  2. Programs menu (F10, Right), End to "Games >", Enter (its pop-up), Enter: the game;
+#  3. its first screen, the title, level 1; a quicksave (F6: QUICKSAVE.SAV in the app's
+#     folder), Ctrl+Q;
+#  4. PRINCE.HZA opened again: Replace, which must keep QUICKSAVE.SAV (tests/app.sh).
+1000 prince\n
++0 wait install: asks: Install /APPS/PRINCE
++800 shot
++500 \n
++0 wait install: installed /APPS/PRINCE
++800 \n
++1500 {f10}
++400 {right}
++600 {end}
++400 \n
++600 shot
++400 \n
++0 wait prince: start
++1500 shot
++500 {space}
++0 wait prince: title
++2500 {space}
++0 wait prince: level 1
++0 wait prince: text LEVEL 1
++3000 shot
++300 {f6}
++0 wait prince: text QUICKSAVE
++800 ^Q
++3000 prince\n
++0 wait install: asks: Replace /APPS/PRINCE
++500 \n
++0 wait install: replaced /APPS/PRINCE
++800 \n

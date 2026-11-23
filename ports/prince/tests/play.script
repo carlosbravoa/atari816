@@ -1,0 +1,23 @@
+# tests/play.script - a game through the keyboard: the first screen, the title, level 1,
+# running, a quicksave (F6), running on, a quickload (F9: back), a pause (Esc). Every step
+# waits for the program's own console lines (tests/check.sh checks them and the pictures,
+# taken only where nothing moves: the kid's runs are timed by the clock, not by the game)
+0 wait prince: start
++800 {space}
++0 wait prince: title
++2500 {space}
++0 wait prince: level 1
++0 wait prince: text LEVEL 1
++4500 shot
++300 key right 900
++1500 {f6}
++0 wait prince: text QUICKSAVE
++600 key left 1600
++1500 {f9}
++0 wait prince: text QUICKLOAD
++1200 shot
++300 {esc}
++0 wait prince: text GAME PAUSED
++600 shot
++300 {esc}
++1500 shot

@@ -1,0 +1,25 @@
+Replay started in level 1, room 1.
+Remaining time: 59 min, 59 sec, 11 ticks. (rem_min=60, rem_tick=719)
+ref: tick 10 level 1 room 1 kid 1 78 118 110 0 alive -1 hp 3/3 guard 0 0 0 0 alive 0 hp 0/0 seed 4135446429 time 60 709
+ref: tick 20 level 1 room 1 kid 1 77 118 15 0 alive -1 hp 3/3 guard 0 0 0 0 alive 0 hp 0/0 seed 120733505 time 60 699
+ref: tick 30 level 1 room 1 kid 1 99 118 10 0 alive -1 hp 3/3 guard 0 0 0 0 alive 0 hp 0/0 seed 1307733797 time 60 689
+ref: tick 40 level 1 room 1 kid 1 135 121 102 0 alive -1 hp 3/3 guard 0 0 0 0 alive 0 hp 0/0 seed 1943722825 time 60 679
+ref: tick 50 level 1 room 1 kid 1 142 181 112 0 alive -1 hp 3/3 guard 0 0 0 0 alive 0 hp 0/0 seed 3062799006 time 60 669
+ref: tick 60 level 1 room 1 kid 1 139 181 2 0 alive -1 hp 3/3 guard 0 0 0 0 alive 0 hp 0/0 seed 1075662290 time 60 659
+ref: tick 70 level 1 room 1 kid 1 170 181 12 0 alive -1 hp 3/3 guard 0 0 0 0 alive 0 hp 0/0 seed 2150976206 time 60 649
+ref: tick 80 level 1 room 1 kid 1 187 181 52 0 alive -1 hp 3/3 guard 0 0 0 0 alive 0 hp 0/0 seed 3230120550 time 60 639
+ref: tick 90 level 1 room 1 kid 1 191 181 15 0 alive -1 hp 3/3 guard 0 0 0 0 alive 0 hp 0/0 seed 3029526042 time 60 629
+ref: tick 100 level 1 room 1 kid 1 184 181 46 -1 alive -1 hp 3/3 guard 0 0 0 0 alive 0 hp 0/0 seed 1298653966 time 60 619
+ref: tick 110 level 1 room 1 kid 1 165 181 8 -1 alive -1 hp 3/3 guard 0 0 0 0 alive 0 hp 0/0 seed 676472130 time 60 609
+ref: tick 120 level 1 room 2 kid 2 151 85 106 -1 alive -1 hp 3/3 guard 0 0 0 0 alive 0 hp 0/0 seed 1584850144 time 60 599
+ref: tick 130 level 1 room 2 kid 2 146 116 109 -1 alive -1 hp 2/3 guard 0 0 0 0 alive 0 hp 0/0 seed 487682868 time 60 589
+ref: tick 140 level 1 room 2 kid 2 146 116 109 -1 alive -1 hp 2/3 guard 0 0 0 0 alive 0 hp 0/0 seed 4001246408 time 60 579
+ref: tick 150 level 1 room 2 kid 2 146 116 109 -1 alive -1 hp 2/3 guard 0 0 0 0 alive 0 hp 0/0 seed 282666396 time 60 569
+ref: tick 160 level 1 room 2 kid 2 142 118 116 -1 alive -1 hp 2/3 guard 0 0 0 0 alive 0 hp 0/0 seed 1130738096 time 60 559
+ref: tick 170 level 1 room 2 kid 2 146 118 15 -1 alive -1 hp 2/3 guard 0 0 0 0 alive 0 hp 0/0 seed 2757911812 time 60 549
+ref: tick 180 level 1 room 2 kid 2 146 118 15 -1 alive -1 hp 2/3 guard 0 0 0 0 alive 0 hp 0/0 seed 4061991832 time 60 539
+Replay ended in level 1, room 2.
+Kid is alive.
+Remaining time: 59 min, 44 sec, 11 ticks. (rem_min=60, rem_tick=539)
+Play duration:  0 min, 15 sec, 0 ticks. (curr_tick=180)
+Play duration matches replay length. (180 ticks)

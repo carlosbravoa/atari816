@@ -37,7 +37,10 @@ agents' own. "Fixed" means the SDK changed since; the lesson still holds.
 | No keys, music stops when frames run late (Xargon) | a late game never waits, never calls `hg_frame` | `hg_poll()` once a game frame | 20 min |
 | Music clips (1-2 % of samples) | the board mixes the OPL2 3x louder than a Lau voice | convert songs 13.5 dB quieter | 20 min |
 | No sound in the emulator from POKEY | emu816 only logs POKEY | `--log-sound` checks; listen on the board | - |
-| Needed emulator options not reachable (`--card-kbps`, `--log-opl`) | run816.py does not pass them | the game's own `/BUSY:ms` for slow runs; call emu816 yourself | still open |
+| Needed emulator options not reachable (`--card-kbps`, `--log-opl`) | run816.py does not pass them | the game's own `/BUSY:ms` for slow runs; call emu816 yourself. `--log-opl`/`--log-opl-us` now pass (Prince of Persia) | `--card-kbps` still open |
+| A replay passes with one link order and fails with another (or with `--spread`, `-O0` vs `-O2`) (Prince of Persia) | `a[d + 1]` with a signed `d = -1`: the constant went into the address, X = $FFFF, and abs,X carries into the next bank | fixed in cc816 (`regress/r040`). When results depend on placement, suspect a negative index register or a far address used as near, before the game | 1 h 30 |
+| Sprites drawn far off; no warning (Prince of Persia) | `&p->member` with `p` a `__far` pointer was typed near: given to a near parameter, it pointed into the main bank | fixed: it is a far pointer now, `-Wfar-pointer` warns (`diag/w_far_member.c`); copy into a near local and back | 40 min |
+| Whole frames missing, rooms black (Prince of Persia) | `sheet_draw`/`draw_list` refuse the whole call for one bad record (a source x below 0, a rectangle past its sheet) | print `hz_errno` when a call fails; cut sources to their sheet | 40 min |
 
 ## C pitfalls of cc816 on this machine
 
