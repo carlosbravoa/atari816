@@ -2,7 +2,7 @@
  * model the index is added to the offset alone (IR addlo: the element lies in the
  * pointer's object, so in its bank), no longer widened to 32 bits; negative indexes, an
  * object at a bank's offset 0, a structure array through a pointer, and the near model's
-  * 32-bit step, all must give the same results (through __far pointers in every model:
+ * 32-bit step, all must give the same results (through __far pointers in every model:
  * a near pointer with a negative index register carries into the next bank, a limit of
  * near data). LEVELS: 0 1 2 */
 #include <stdlib.h>
