@@ -208,6 +208,9 @@ void start_game() {
 	}
 	release_title_images(); // added
 	free_optsnd_chtab(); // added
+#if defined(_HORIZON) // Horizon: a key in fade_in_2 / fade_out_2 jumped here and left its buffer
+	{ extern void hzv_fade_abandoned(void); hzv_fade_abandoned(); }
+#endif
 #ifdef USE_COPYPROT
 	copyprot_plac = prandom(13);
 	memset(&entry_used, 0, sizeof(entry_used));
@@ -384,6 +387,9 @@ int quick_save(void) {
 		ok = quick_process(process_save);
 		fclose(quick_fp);
 		quick_fp = NULL;
+#if defined(_HORIZON) // (tests/check.sh: the quickload must bring this state back)
+		{ extern void hz_ref_print_sum(const char *); hz_ref_print_sum("quicksave state"); }
+#endif
 	} else {
 		perror("quick_save: fopen");
 		printf("Tried to open for writing: %s\n", path);
@@ -454,9 +460,15 @@ int quick_load(void) {
 		short old_rem_min = rem_min;
 		word old_rem_tick = rem_tick;
 
+#if defined(_HORIZON)
+		{ extern void hz_ref_print_sum(const char *); hz_ref_print_sum("quickload from state"); }
+#endif
 		ok = quick_process(process_load);
 		fclose(quick_fp);
 		quick_fp = NULL;
+#if defined(_HORIZON)
+		{ extern void hz_ref_print_sum(const char *); hz_ref_print_sum("quickload state"); }
+#endif
 
 		restore_room_after_quick_load();
 		update_screen();
@@ -2235,7 +2247,11 @@ void clear_screen_and_sounds() {
 
 	is_cutscene = 0;
 	is_ending_sequence = false; // added
+#if defined(_HORIZON) // Horizon: freed (a key in a cutscene left its peels in the 12 KB heap)
+	free_peels();
+#else
 	peels_count = 0;
+#endif
 	// should these be freed?
 	for (short index = 2; index < 10; ++index) {
 		if (chtab_addrs[index]) {

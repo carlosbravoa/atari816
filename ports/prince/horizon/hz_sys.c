@@ -12,6 +12,45 @@
 char hz_prog[128];
 unsigned char hz_busy_ms;
 
+/* ---------------------------------------------------------------- the heap (hz_heap.h) */
+#undef malloc
+#undef calloc
+#undef realloc
+void *malloc(size_t n);
+void *calloc(size_t n, size_t size);
+void *realloc(void *p, size_t n);
+
+static void out_of_memory(size_t n)
+{
+    printf("prince: out of memory: %u bytes wanted, %u free, %u in one piece\n", (unsigned)n,
+           hz_heap_free(), hz_heap_largest());
+    quit(1);
+}
+
+void *hz_malloc_or_quit(size_t n)
+{
+    void *p = malloc(n);
+    if (!p)
+        out_of_memory(n);
+    return p;
+}
+
+void *hz_calloc_or_quit(size_t n, size_t size)
+{
+    void *p = calloc(n, size);
+    if (!p)
+        out_of_memory(n * size);
+    return p;
+}
+
+void *hz_realloc_or_quit(void *p, size_t n)
+{
+    void *q = realloc(p, n);
+    if (!q && n)
+        out_of_memory(n);
+    return q;
+}
+
 /* ---------------------------------------------------------------- time */
 
 int fps = BASE_FPS;

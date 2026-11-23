@@ -5,7 +5,7 @@ in C, SDL2), about 19,700 lines of game code, large code model, 2 MB of data.
 
 Upstream: SDLPoP at commit f7be2e9 (7 November 2026, "1.24 RC"), GPL-3. Its game files are in
 `src/` (seg000-seg008, seqtbl, replay, options, data, the headers) with every change in
-`#if defined(_HORIZON)` (`upstream.patch`: 11 files, about 255 lines added, 38 removed). Not
+`#if defined(_HORIZON)` (`upstream.patch`: 11 files, about 275 lines added, 38 removed). Not
 built: `seg009.c` (the SDL layer: replaced by `horizon/`), `main.c`, `menu.c` (the pause
 menu), `lighting.c`, `screenshot.c`, `midi.c` and `opl3.c` (the music: converted at build
 time, played by the real OPL2), `stb_vorbis.c` (OGG music).
@@ -59,6 +59,8 @@ plays them at the game's speed.
 | 8 | The peels' area filled up: the start-up dialog's peel stays for good, so an allocator that resets when no peel is left never reset | port | a stack of peels: freed ones pop | 15 min |
 | 9 | The upstream replays' option sections and `moves[345600]` (345 KB) | main bank | moves and the savestate in a bank of their own (61,440 ticks: 85 minutes), sections of 160 bytes (the biggest is 147) | 20 min |
 | 10 | `midi2imf`'s first version had the instrument record's fields in the wrong order (feedback came out 0) | tool | SDLPoP's layout; now the stream's 1,258 writes of the title music equal upstream's own OPL writes (times within 1.3 ms) | 15 min |
+| 11 | **Level 1 started empty on the board** (the kid in room 0, dead at once) when the title had run 40 s or more before the key: a key in `fade_out_2`/`fade_in_2` (the story's fades) or in the princess's scene jumps to `start_game` (longjmp), which never frees the fade's 1.5 KB buffer nor the scene's peels (upstream leaks them too: `clear_screen_and_sounds` sets `peels_count = 0`). The 12 KB heap then had no 2,310 bytes in one piece; `load_from_opendats_alloc`'s `malloc` gave NULL and `load_level` silently left the level all zero (25 non-zero bytes of 2,305: exactly what the board showed). Depends on when the key comes, not on the build: in the emulator the tests' key came 2.5 s into the title | port + upstream leaks | the level copied straight from POP.DAT's far copy (no heap); `start_game` frees an abandoned fade (`hzv_fade_abandoned`); `clear_screen_and_sounds` frees its peels; `horizon/hz_heap.h`: every `malloc`/`calloc`/`realloc` of the port stops the game with "prince: out of memory" instead of returning NULL; `list_replay_files` asked 49,792 bytes (128 replays' records, NULL before, written through when a replays folder exists): grows by 4. Test 4b: a key after 15, 40, 60 s, level 1 in room 1 with the same heap | 2 h 30 |
+| 12 | `make test`'s scripted-game pictures failed or passed with the layout: how many game ticks a held key covers depends on the CPU's time (emu816 models the cache by address), so the kid's run and the torches' random flames moved. The kid "missing" after the quickload is upstream's: he stops in the wall's column (the PC's build draws the same) | test | the quickload checked by a checksum of the whole savestate (`prince: quicksave state`, `quickload state`); after the first picture only the status line's rows are compared; `make test-layouts` (PAD=n: `tools/mkpad.py`) | 1 h |
 
 Also: `get_joystick_state` used `atan2` and doubles (1.7 KB of floating point in the main
 bank for an analog stick Horizon does not have): signs instead; the feather fall's tick
@@ -146,8 +148,17 @@ About 6 h of the agent's time (wall clock), builds and emulator runs on a fast P
 1. Build upstream on the PC with a state hook and compare tick by tick; a savestate dump
    (a printing `process` function) finds the first differing variable.
 2. When behaviour changes with link order or `--spread`, suspect an index register going
-   negative (fault 1) or a far address taken as near (fault 2), before suspecting the game.
-3. A kernel call that takes many records is refused whole for one bad record: check the
+   negative (fault 1) or a far address taken as near (fault 2), before suspecting the game;
+   but first check whether the test itself depends on timing (fault 12): input held for a
+   time in ms covers a number of game ticks that moves with the program's layout.
+   `make test-layouts` runs the tests with the layout shifted; emu816 `--watch ADDR:LEN`
+   logs every write into a range with its instruction, `--dump-ram-on TEXT` the RAM at a
+   console line, `--ram-random SEED` other power-on memory (run816 `--emu-arg`, or
+   `EMU816_ARGS` for a whole `make test`).
+3. A game written for a PC does not check malloc: give the port a malloc that stops with a
+   message (`horizon/hz_heap.h`), and look for leaks on longjmp/restart paths (fault 11): a
+   heap of a few KB runs out where the PC never notices.
+4. A kernel call that takes many records is refused whole for one bad record: check the
    console for the refusal, print the bad record.
-4. Keep the PC's palette layout (VGA rows) when the game had one: images stay keyed copies
+5. Keep the PC's palette layout (VGA rows) when the game had one: images stay keyed copies
    and the palette effects stay the palette's.

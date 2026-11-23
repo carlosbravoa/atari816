@@ -107,6 +107,11 @@ void play_level(int level_number) {
 		do_startpos();
 		have_sword = /*(level_number != 1)*/ (level_number == 0 || level_number >= custom->have_sword_from_level);
 		find_start_level_door();
+#if defined(_HORIZON) // (the tests check these: a level left empty starts in room 0; a leak shows)
+		{ extern unsigned hz_heap_free(void), hz_heap_largest(void);
+		  printf("prince: level %d in room %d, the heap %u free, %u in one piece\n", level_number,
+		         Kid.room, hz_heap_free(), hz_heap_largest()); }
+#endif
 		// busy waiting?
 		while (check_sound_playing() && !do_paused()) idle();
 		stop_sounds();

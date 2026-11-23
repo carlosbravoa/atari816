@@ -9,8 +9,16 @@
 #   make app        PRINCE.HZA, the installable app; make test-app installs it in the
 #                   emulator and starts it
 #   make host       the reference: upstream SDLPoP built on this PC (host/; needs SDL2)
+#   make test-layouts  make test's checks with the program's layout shifted (PAD=n: an
+#                   object of n bytes of constants, data, bss and code linked first,
+#                   tests/layouts.sh): a fault that depends on where things lie shows
 #   make clean
 # HORIZON=DIR: a Horizon tree with a built card (0.30).
+#
+# Rebuilds follow the files' contents, not only their times: every source, the headers
+# and the SDK's compiler and libraries have a checksum in build/sum/ that is renewed only
+# when the content changed (a copy that kept old times, rsync -a or an unpacked archive,
+# still rebuilds what changed).
 
 SDK      ?= ../../sdk
 HORIZON  ?= $(SDK)/../horizon
@@ -27,23 +35,54 @@ GAMESRC  := data seg000 seg001 seg002 seg003 seg004 seg005 seg006 seg007 seg008 
             replay options
 PLATSRC  := hz_main hz_seg009 hz_video hz_data hz_sound hz_sys hz_ref
 NEEDS    := horizon=0.30,blitter,mem=3072K
-CFLAGS   := --code large -D_HORIZON -I src -I horizon -I horizon/compat -fsigned-char -Wall
+CFLAGS   := --code large -D_HORIZON -I src -I horizon -I horizon/compat -include horizon/hz_heap.h \
+            -fsigned-char -Wall
 OBJS     := $(GAMESRC:%=build/o/%.o) $(PLATSRC:%=build/o/%.o)
 LFLAGS   := --code large --game --map --stack 4096 --heap 12288 --needs $(NEEDS)
 HEADERS  := $(wildcard src/*.h horizon/*.h horizon/compat/*/*.h)
+# the SDK's compiler, C library and game library: a change rebuilds everything
+TOOLSRC  := $(wildcard $(SDK)/c/bin/hcc $(SDK)/c/cc816/cc816/*.py $(SDK)/c/tools/*.py \
+            $(SDK)/c/lib/*.[chs] $(SDK)/c/rt/*.[chs] $(SDK)/c/include/*.h $(SDK)/c/include/*/*.h \
+            $(SDK)/c/game/*.[chs] $(SDK)/c/game/*.py)
+# PAD=n (tests only): build/o/padN.o linked first, everything after it n bytes on
+PAD      ?= 0
+PADOBJ   := $(if $(filter-out 0,$(PAD)),build/o/pad$(PAD).o)
 
 all: PRINCE.PRG
 
-build/o/%.o: src/%.c $(HEADERS)
+# build/sum/FILE.sum: FILE's checksum, rewritten (new time) only when it changed
+build/sum/%.sum: % FORCE
+	@mkdir -p $(dir $@)
+	@md5sum $< > $@.new; if cmp -s $@.new $@; then rm $@.new; else mv $@.new $@; fi
+build/sum/headers.sum: FORCE
+	@mkdir -p build/sum
+	@md5sum $(HEADERS) > $@.new; if cmp -s $@.new $@; then rm $@.new; else mv $@.new $@; fi
+build/sum/sdk.sum: FORCE
+	@mkdir -p build/sum
+	@md5sum $(TOOLSRC) > $@.new; if cmp -s $@.new $@; then rm $@.new; else mv $@.new $@; fi
+build/sum/pad.sum: FORCE
+	@mkdir -p build/sum
+	@echo $(PAD) > $@.new; if cmp -s $@.new $@; then rm $@.new; else mv $@.new $@; fi
+DEPS     := build/sum/headers.sum build/sum/sdk.sum
+
+build/o/%.o: src/%.c build/sum/src/%.c.sum $(DEPS)
 	@mkdir -p build/o
 	$(HCC) $(CFLAGS) -c -o $@ $<
 
-build/o/%.o: horizon/%.c $(HEADERS)
+build/o/%.o: horizon/%.c build/sum/horizon/%.c.sum $(DEPS)
 	@mkdir -p build/o
 	$(HCC) $(CFLAGS) -c -o $@ $<
 
-PRINCE.PRG: $(OBJS)
-	$(HCC) $(LFLAGS) -o $@ $^
+build/o/pad%.o: tools/mkpad.py build/sum/sdk.sum
+	@mkdir -p build/o
+	$(PYTHON) tools/mkpad.py $* build/pad$*.c
+	$(HCC) $(CFLAGS) -c -o $@ build/pad$*.c
+
+PRINCE.PRG: $(PADOBJ) $(OBJS) build/sum/pad.sum build/sum/sdk.sum
+	$(HCC) $(LFLAGS) -o $@ $(PADOBJ) $(OBJS)
+
+.SECONDARY:
+FORCE:
 
 # ---------------------------------------------------------------- the data
 
@@ -94,6 +133,11 @@ run: PRINCE.PRG data $(CARD)
 test: PRINCE.PRG data $(CARD)
 	sh tests/check.sh $(HORIZON)
 
+# make test's checks with the layout shifted: PAD=0 and LAYOUTS (each builds, runs check.sh)
+LAYOUTS ?= 0 1 37 250 500
+test-layouts: data $(CARD)
+	sh tests/layouts.sh $(HORIZON) $(LAYOUTS)
+
 # the replays' pictures of the last make test against upstream's on the PC (make host)
 check-host:
 	sh tests/hostframes.sh
@@ -107,4 +151,4 @@ refs: PRINCE.PRG data $(CARD)
 clean:
 	rm -rf build PRINCE.PRG PRINCE.map PRINCE.lbl PRINCE.HZA
 
-.PHONY: all data host run test check-host refs-host refs app test-app clean
+.PHONY: all data host run test test-layouts check-host refs-host refs app test-app clean FORCE

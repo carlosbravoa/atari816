@@ -298,6 +298,20 @@ void free_chtab(chtab_type *chtab_ptr)
     free(chtab_ptr);
 }
 
+/* a palette record -> upstream's dat_shpl_type: n_images and the palette */
+static void shpl_from(dat_shpl_type *s, const unsigned char __far *p)
+{
+    unsigned i;
+    memset(s, 0, sizeof *s);
+    s->n_images = p[0];
+    s->palette.n_colors = 16;
+    for (i = 0; i < 16; i++) {
+        s->palette.vga[i].r = p[50 + 3 * i];
+        s->palette.vga[i].g = p[51 + 3 * i];
+        s->palette.vga[i].b = p[52 + 3 * i];
+    }
+}
+
 void *load_from_opendats_alloc(int resource, const char *extension, data_location *out_result,
                                int *out_size)
 {
@@ -306,24 +320,12 @@ void *load_from_opendats_alloc(int resource, const char *extension, data_locatio
     if (out_result)
         *out_result = data_none;
     if (!strcmp(extension, "pal")) {
-        /* a dat_shpl_type: n_images and the palette */
         dat_shpl_type *s;
-        const unsigned char __far *p;
-        unsigned i;
         o = find_chain(KIND_PAL, (unsigned)resource);
         if (!o)
             return NULL;
-        p = dir + o;
-        s = calloc(1, sizeof(dat_shpl_type));
-        if (!s)
-            return NULL;
-        s->n_images = p[0];
-        s->palette.n_colors = 16;
-        for (i = 0; i < 16; i++) {
-            s->palette.vga[i].r = p[50 + 3 * i];
-            s->palette.vga[i].g = p[51 + 3 * i];
-            s->palette.vga[i].b = p[52 + 3 * i];
-        }
+        s = hz_malloc_or_quit(sizeof(dat_shpl_type));
+        shpl_from(s, dir + o);
         if (out_size)
             *out_size = (int)sizeof(dat_shpl_type);
         if (out_result)
@@ -334,9 +336,7 @@ void *load_from_opendats_alloc(int resource, const char *extension, data_locatio
     if (!o)
         return NULL;
     n = *(const unsigned __far *)(dir + o);
-    m = malloc(n ? n : 1);
-    if (!m)
-        return NULL;
+    m = hz_malloc_or_quit(n ? n : 1);
     hz_far_copy(m, dir + o + 2, n);
     if (out_size)
         *out_size = (int)n;
@@ -345,14 +345,28 @@ void *load_from_opendats_alloc(int resource, const char *extension, data_locatio
     return m;
 }
 
+/* straight from POP.DAT's copy in far memory into the area: no heap (the level, 2,305
+ * bytes, was malloc'd and copied before; once the heap had less than that in one piece
+ * the level silently stayed empty: the kid started in room 0 and died) */
 int load_from_opendats_to_area(int resource, void *area, int length, const char *extension)
 {
-    int size = 0;
-    void *m = load_from_opendats_alloc(resource, extension, NULL, &size);
-    if (!m)
+    unsigned o, n;
+    if (!strcmp(extension, "pal")) {
+        dat_shpl_type s;
+        o = find_chain(KIND_PAL, (unsigned)resource);
+        if (!o)
+            return 0;
+        shpl_from(&s, dir + o);
+        memcpy(area, &s, sizeof s < (unsigned)length ? sizeof s : (unsigned)length);
         return 0;
-    memcpy(area, m, size < length ? (unsigned)size : (unsigned)length);
-    free(m);
+    }
+    o = find_chain(KIND_BIN, (unsigned)resource);
+    if (!o) {
+        printf("prince: no resource %d in POP.DAT\n", resource);
+        return 0;
+    }
+    n = *(const unsigned __far *)(dir + o);
+    hz_far_copy(area, dir + o + 2, n < (unsigned)length ? n : (unsigned)length);
     return 0;
 }
 

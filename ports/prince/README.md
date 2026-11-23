@@ -103,9 +103,17 @@ as checksums only, and the app archive is built locally.
    the PC's frames: `make check-host`);
 4. a game through the keyboard (`tests/play.script`, the waits follow the program's
    console lines): the first screen, the title, level 1, a quicksave and quickload, a pause
-   (QUICKSAVE.SAV, Lau's writes, pictures in `tests/play.md5`); the title music's OPL2
-   writes against its stream for 10 s;
+   (QUICKSAVE.SAV, the quickload's savestate checksum equal to the quicksave's, Lau's
+   writes, pictures in `tests/play.md5`: the first whole, the others' status line); the
+   title music's OPL2 writes against its stream for 10 s; a key at the title after 15, 40
+   and 60 s: level 1 in room 1 with the heap as after a key at once (no leak);
 5. a game saved on level 3 (Ctrl+G) and loaded from the title (Ctrl+L).
+
+`make test-layouts`: `make test`'s checks with the program's layout shifted (`PAD=n`:
+`tools/mkpad.py`'s object linked first; default 0 1 37 250 500).
+
+The Makefile rebuilds by content (checksums in `build/sum/`), so a copy with old file
+times (rsync -a, an archive) still rebuilds what changed.
 
 `make test-app`: the archive installed with the Installer, started from Programs > Games
 into level 1, a quicksave, the app updated (Replace keeps QUICKSAVE.SAV).

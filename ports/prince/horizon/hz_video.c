@@ -629,13 +629,29 @@ void free_peel(peel_type *peel_ptr)
 
 /* ---------------------------------------------------------------- fades (the palette's) */
 
+/* fade_in_2 and fade_out_2's buffer (1.5 KB of the 12 KB heap): a key in their loop can
+ * start the game (do_paused, process_key, start_game: a longjmp), which never comes back
+ * to free it (upstream leaks it too); start_game calls hzv_fade_abandoned */
+static palette_fade_type *fade2;
+
+void hzv_fade_abandoned(void)
+{
+    if (fade2) {
+        set_pal_256(fade2->original_pal);
+        free(fade2);
+        fade2 = NULL;
+    }
+}
+
 void fade_in_2(surface_type *source_surface, int which_rows)
 {
     palette_fade_type *b = make_pal_buffer_fadein(source_surface, which_rows, 2);
+    fade2 = b;
     while (fade_in_frame(b) == 0) {
         process_events();
         do_paused();
     }
+    fade2 = NULL;
     pal_restore_free_fadein(b);
 }
 
@@ -692,10 +708,12 @@ int fade_in_frame(palette_fade_type *b)
 void fade_out_2(int rows)
 {
     palette_fade_type *b = make_pal_buffer_fadeout(rows, 2);
+    fade2 = b;
     while (fade_out_frame(b) == 0) {
         process_events();
         do_paused();
     }
+    fade2 = NULL;
     pal_restore_free_fadeout(b);
 }
 

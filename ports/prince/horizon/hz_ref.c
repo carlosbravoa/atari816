@@ -40,6 +40,26 @@ static int dump_func(void *data, size_t size)
 }
 extern int quick_process(int (*f)(void *, size_t));
 
+/* a checksum of the whole savestate (quick_process: what QUICKSAVE.SAV holds): the
+ * scripted game's quickload must bring back the state its quicksave saved (tests/check.sh) */
+static unsigned long state_sum;
+static int sum_func(void *data, size_t size)
+{
+    const unsigned char *p = data;
+    size_t i;
+    for (i = 0; i < size; i++)
+        state_sum = (state_sum ^ p[i]) * 16777619UL;    /* FNV-1a, 32 bits */
+    return 1;
+}
+
+void hz_ref_print_sum(const char *what)
+{
+    state_sum = 2166136261UL;
+    quick_process(sum_func);
+    printf("prince: %s %08lx kid room %d x %d frame %d\n", what, state_sum, Kid.room, Kid.x,
+           Kid.frame);
+}
+
 void ref_print_state(void)
 {
     printf("ref: tick %ld level %d room %d kid %d %d %d %d %d alive %d hp %d/%d "

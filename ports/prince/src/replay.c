@@ -220,7 +220,11 @@ int read_replay_header(replay_header_type* header, FILE* fp, char* error_message
 }
 
 int num_replay_files = 0; // number of listed replays
+#if defined(_HORIZON) // Horizon: 128 x 389 bytes did not fit the 12 KB heap (malloc gave NULL: written through)
+int max_replay_files = 0; // grows by 4 as replay files are found
+#else
 int max_replay_files = 128; // initially, may grow if there are > 128 replay files found
+#endif
 replay_info_type* replay_list = NULL;
 
 // Compare function -- for qsort() in list_replay_files() below
@@ -231,7 +235,7 @@ static int compare_replay_creation_time(const void* a, const void* b) {
 
 void list_replay_files(void) {
 
-	if (replay_list == NULL) {
+	if (replay_list == NULL && max_replay_files > 0) {
 		// need to allocate enough memory to store info about all replay files in the directory
 		replay_list = malloc( max_replay_files * sizeof( replay_info_type ) ); // will realloc() later if > 256 files exist
 	}
@@ -247,7 +251,11 @@ void list_replay_files(void) {
 		++num_replay_files;
 		if (num_replay_files > max_replay_files) {
 			// too many files, expand the memory available for replay_list
+#if defined(_HORIZON)
+			max_replay_files += 4;
+#else
 			max_replay_files += 128;
+#endif
 			void* new_replay_list = realloc( replay_list, max_replay_files * sizeof( replay_info_type ) );
 			if (new_replay_list == NULL) {
 				printf("list_replay_files: realloc failed!");

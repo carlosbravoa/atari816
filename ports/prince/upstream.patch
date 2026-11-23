@@ -237,7 +237,40 @@ diff -ruN a/replay.c b/replay.c
  dword savestate_offset = 0;
  dword savestate_size = 0;
  #define MAX_SAVESTATE_SIZE 4096
-@@ -225,7 +264,11 @@
+@@ -181,7 +220,11 @@
+ }
+ 
+ int num_replay_files = 0; // number of listed replays
++#if defined(_HORIZON) // Horizon: 128 x 389 bytes did not fit the 12 KB heap (malloc gave NULL: written through)
++int max_replay_files = 0; // grows by 4 as replay files are found
++#else
+ int max_replay_files = 128; // initially, may grow if there are > 128 replay files found
++#endif
+ replay_info_type* replay_list = NULL;
+ 
+ // Compare function -- for qsort() in list_replay_files() below
+@@ -192,7 +235,7 @@
+ 
+ void list_replay_files(void) {
+ 
+-	if (replay_list == NULL) {
++	if (replay_list == NULL && max_replay_files > 0) {
+ 		// need to allocate enough memory to store info about all replay files in the directory
+ 		replay_list = malloc( max_replay_files * sizeof( replay_info_type ) ); // will realloc() later if > 256 files exist
+ 	}
+@@ -208,7 +251,11 @@
+ 		++num_replay_files;
+ 		if (num_replay_files > max_replay_files) {
+ 			// too many files, expand the memory available for replay_list
++#if defined(_HORIZON)
++			max_replay_files += 4;
++#else
+ 			max_replay_files += 128;
++#endif
+ 			void* new_replay_list = realloc( replay_list, max_replay_files * sizeof( replay_info_type ) );
+ 			if (new_replay_list == NULL) {
+ 				printf("list_replay_files: realloc failed!");
+@@ -225,7 +272,11 @@
  		// get the creation time
  		struct stat st;
  		if (stat( replay_info->filename, &st ) == 0) {
@@ -249,7 +282,7 @@ diff -ruN a/replay.c b/replay.c
  		}
  		// read and store the levelset name associated with the replay
  		FILE* fp = fopen( replay_info->filename, "rb" );
-@@ -274,7 +317,12 @@
+@@ -274,7 +325,12 @@
  		strncpy(exe_dir, exe_path, len);
  		exe_dir[len] = '\0';
  
@@ -262,7 +295,7 @@ diff -ruN a/replay.c b/replay.c
  		if (result != 0) {
  			perror("Can't change into SDLPoP directory");
  		}
-@@ -529,7 +577,7 @@
+@@ -529,7 +585,7 @@
  		printf("Saving savestate to memory failed: buffer is overflowing!\n");
  		return 0;
  	}
@@ -271,7 +304,7 @@ diff -ruN a/replay.c b/replay.c
  	savestate_offset += data_size;
  	return 1;
  }
-@@ -538,7 +586,7 @@
+@@ -538,7 +594,7 @@
  	// Prevent torches from being randomly colored when an older replay is loaded.
  	if (savestate_offset >= savestate_size) return 0;
  
@@ -280,7 +313,7 @@ diff -ruN a/replay.c b/replay.c
  	savestate_offset += data_size;
  	return 1;
  }
-@@ -546,7 +594,7 @@
+@@ -546,7 +602,7 @@
  int savestate_to_buffer(void) {
  	int ok = 0;
  	if (savestate_buffer == NULL)
@@ -289,7 +322,7 @@ diff -ruN a/replay.c b/replay.c
  	if (savestate_buffer != NULL) {
  		savestate_offset = 0;
  		savestate_size = 0;
-@@ -611,7 +659,11 @@
+@@ -611,7 +667,11 @@
  		special_move = 0;
  	}
  
@@ -301,7 +334,7 @@ diff -ruN a/replay.c b/replay.c
  
  	++curr_tick;
  
-@@ -715,13 +767,13 @@
+@@ -715,13 +775,13 @@
  		print_remaining_time();
  
  		int minute_ticks = curr_tick % 720;
@@ -319,7 +352,7 @@ diff -ruN a/replay.c b/replay.c
  		}
  		exit(0);
  	}
-@@ -745,7 +797,11 @@
+@@ -745,7 +805,11 @@
  	}
  	if (current_level == next_level) {
  		replay_move_type curr_move;
@@ -331,7 +364,7 @@ diff -ruN a/replay.c b/replay.c
  
  		control_x = curr_move.x;
  		control_y = curr_move.y;
-@@ -834,7 +890,11 @@
+@@ -834,7 +898,11 @@
  		fputs(implementation_name, replay_fp);
  		// embed a savestate into the replay
  		fwrite(&savestate_size, sizeof(savestate_size), 1, replay_fp);
@@ -343,7 +376,7 @@ diff -ruN a/replay.c b/replay.c
  
  		// Save the current options (not the defaults) into the replay!
  		fixes_options_replay = fixes_saved;
-@@ -853,7 +913,11 @@
+@@ -853,7 +921,11 @@
  		fwrite(&saved_random_seed, sizeof(saved_random_seed), 1, replay_fp);
  		num_replay_ticks = curr_tick;
  		fwrite(&num_replay_ticks, sizeof(num_replay_ticks), 1, replay_fp);
@@ -355,7 +388,7 @@ diff -ruN a/replay.c b/replay.c
  		fclose(replay_fp);
  		replay_fp = NULL;
  	}
-@@ -902,7 +966,7 @@
+@@ -902,7 +974,7 @@
  		}
  	}
  	if (savestate_buffer == NULL)
@@ -364,7 +397,7 @@ diff -ruN a/replay.c b/replay.c
  	if (replay_fp != NULL && savestate_buffer != NULL) {
  		replay_header_type header = {0};
  		char error_message[REPLAY_HEADER_ERROR_MESSAGE_MAX];
-@@ -919,7 +983,11 @@
+@@ -919,7 +991,11 @@
  
  		// load the savestate
  		fread_check(&savestate_size, sizeof(savestate_size), 1, replay_fp);
@@ -376,7 +409,7 @@ diff -ruN a/replay.c b/replay.c
  
  		// load the replay options, organized per section
  		for (int i = 0; i < COUNT(replay_options_sections); ++i) {
-@@ -933,7 +1001,15 @@
+@@ -933,7 +1009,15 @@
  		fread_check(&start_level, sizeof(start_level), 1, replay_fp);
  		fread_check(&saved_random_seed, sizeof(saved_random_seed), 1, replay_fp);
  		fread_check(&num_replay_ticks, sizeof(num_replay_ticks), 1, replay_fp);
@@ -395,7 +428,43 @@ diff -ruN a/replay.c b/replay.c
 diff -ruN a/seg000.c b/seg000.c
 --- upstream/src/seg000.c
 +++ src/seg000.c
-@@ -467,7 +467,11 @@
+@@ -208,6 +208,9 @@
+ 	}
+ 	release_title_images(); // added
+ 	free_optsnd_chtab(); // added
++#if defined(_HORIZON) // Horizon: a key in fade_in_2 / fade_out_2 jumped here and left its buffer
++	{ extern void hzv_fade_abandoned(void); hzv_fade_abandoned(); }
++#endif
+ #ifdef USE_COPYPROT
+ 	copyprot_plac = prandom(13);
+ 	memset(&entry_used, 0, sizeof(entry_used));
+@@ -384,6 +387,9 @@
+ 		ok = quick_process(process_save);
+ 		fclose(quick_fp);
+ 		quick_fp = NULL;
++#if defined(_HORIZON) // (tests/check.sh: the quickload must bring this state back)
++		{ extern void hz_ref_print_sum(const char *); hz_ref_print_sum("quicksave state"); }
++#endif
+ 	} else {
+ 		perror("quick_save: fopen");
+ 		printf("Tried to open for writing: %s\n", path);
+@@ -454,9 +460,15 @@
+ 		short old_rem_min = rem_min;
+ 		word old_rem_tick = rem_tick;
+ 
++#if defined(_HORIZON)
++		{ extern void hz_ref_print_sum(const char *); hz_ref_print_sum("quickload from state"); }
++#endif
+ 		ok = quick_process(process_load);
+ 		fclose(quick_fp);
+ 		quick_fp = NULL;
++#if defined(_HORIZON)
++		{ extern void hz_ref_print_sum(const char *); hz_ref_print_sum("quickload state"); }
++#endif
+ 
+ 		restore_room_after_quick_load();
+ 		update_screen();
+@@ -467,7 +479,11 @@
  			// don't apply the penalty after time has already stopped!
  			(current_level < /*13*/ custom->victory_stops_time_level || (current_level == /*13*/ custom->victory_stops_time_level && leveldoor_open < 2))
  		) {
@@ -407,7 +476,7 @@ diff -ruN a/seg000.c b/seg000.c
  			// don't restore time at all if the elapsed time is between 0 and 1 minutes
  			if (ticks_elapsed > 0 && ticks_elapsed < 720) {
  				rem_min = old_rem_min;
-@@ -668,6 +672,7 @@
+@@ -668,6 +684,7 @@
  			answer_text = sprintf_temp;
  			need_show_text = 1;
  		break;
@@ -415,7 +484,7 @@ diff -ruN a/seg000.c b/seg000.c
  		case SDL_SCANCODE_C | WITH_CTRL: // Ctrl+C
  		{
  			SDL_version verc, verl;
-@@ -681,6 +686,7 @@
+@@ -681,6 +698,7 @@
  			need_show_text = 1;
  		}
  		break;
@@ -423,7 +492,7 @@ diff -ruN a/seg000.c b/seg000.c
  		case SDL_SCANCODE_L | WITH_SHIFT: // Shift+L
  			if (current_level < custom->shift_L_allowed_until_level /* 4 */ || cheats_enabled) {
  				// if Shift is not released within the delay, the cutscene is skipped
-@@ -1305,6 +1311,12 @@
+@@ -1305,6 +1323,12 @@
  		axis_state[0] = 0;
  		axis_state[1] = 0;
  	} else {
@@ -436,7 +505,7 @@ diff -ruN a/seg000.c b/seg000.c
  		double angle = atan2(raw_y, raw_x); // angle of the joystick: 0 = right, >0 = downward, <0 = upward
  		//printf("Joystick angle is %f degrees\n", angle/DEGREES_TO_RADIANS);
  
-@@ -1342,6 +1354,7 @@
+@@ -1342,6 +1366,7 @@
  		}
  	}
  }
@@ -444,7 +513,7 @@ diff -ruN a/seg000.c b/seg000.c
  
  void get_joystick_state_hor_only(int raw_x, int axis_state[2]) {
  	if (raw_x > joystick_threshold) {
-@@ -1890,7 +1903,11 @@
+@@ -1890,7 +1915,11 @@
  	//printf("slow fall started at: rem_min = %d, rem_tick = %d\n", rem_min, rem_tick);
  	if (fixes->fix_quicksave_during_feather) {
  		// feather fall is treated as a timer
@@ -456,7 +525,7 @@ diff -ruN a/seg000.c b/seg000.c
  	} else {
  		is_feather_fall = 1;
  	}
-@@ -1940,6 +1957,9 @@
+@@ -1940,6 +1969,9 @@
  
  // seg000:17E6
  void show_title() {
@@ -466,7 +535,19 @@ diff -ruN a/seg000.c b/seg000.c
  	load_opt_sounds(sound_50_story_2_princess, sound_55_story_1_absence); // main theme, story, princess door
  	dont_reset_time = 0;
  	if(offscreen_surface) free_surface(offscreen_surface); // missing in original
-@@ -2317,9 +2337,13 @@
+@@ -2215,7 +2247,11 @@
+ 
+ 	is_cutscene = 0;
+ 	is_ending_sequence = false; // added
++#if defined(_HORIZON) // Horizon: freed (a key in a cutscene left its peels in the 12 KB heap)
++	free_peels();
++#else
+ 	peels_count = 0;
++#endif
+ 	// should these be freed?
+ 	for (short index = 2; index < 10; ++index) {
+ 		if (chtab_addrs[index]) {
+@@ -2317,9 +2353,13 @@
  			color.b = 0x00;
  			color.a = 0xFF;
  		}
@@ -480,7 +561,7 @@ diff -ruN a/seg000.c b/seg000.c
  	} else if (graphics_mode == gmEga || graphics_mode == gmTga) {
  		// ...
  	}
-@@ -2407,6 +2431,25 @@
+@@ -2407,6 +2447,25 @@
  	need_quotes = 0;
  }
  
@@ -506,7 +587,7 @@ diff -ruN a/seg000.c b/seg000.c
  const rect_type splash_text_1_rect = {0, 0, 50, 320};
  const rect_type splash_text_2_rect = {50, 0, 200, 320};
  
-@@ -2426,6 +2469,7 @@
+@@ -2426,6 +2485,7 @@
  		"Questions? Visit https://forum.princed.org\n"
  		"\n"
  		"Press any key to continue...";
@@ -514,7 +595,7 @@ diff -ruN a/seg000.c b/seg000.c
  
  void show_splash() {
  	if (!enable_info_screen || start_level >= 0) return;
-@@ -2468,6 +2512,12 @@
+@@ -2468,6 +2528,12 @@
  }
  
  const char* get_writable_file_path(char* custom_path_buffer, size_t max_len, const char* file_name) {
@@ -540,7 +621,19 @@ diff -ruN a/seg003.c b/seg003.c
  #ifdef USE_COPYPROT
  	if (enable_copyprot && level_number == custom->copyprot_level) {
  		level_number = 15;
-@@ -386,6 +389,9 @@
+@@ -104,6 +107,11 @@
+ 		do_startpos();
+ 		have_sword = /*(level_number != 1)*/ (level_number == 0 || level_number >= custom->have_sword_from_level);
+ 		find_start_level_door();
++#if defined(_HORIZON) // (the tests check these: a level left empty starts in room 0; a leak shows)
++		{ extern unsigned hz_heap_free(void), hz_heap_largest(void);
++		  printf("prince: level %d in room %d, the heap %u free, %u in one piece\n", level_number,
++		         Kid.room, hz_heap_free(), hz_heap_largest()); }
++#endif
+ 		// busy waiting?
+ 		while (check_sound_playing() && !do_paused()) idle();
+ 		stop_sounds();
+@@ -386,6 +394,9 @@
  		} else {
  			if (next_level == current_level || check_sound_playing()) {
  				draw_game_frame();

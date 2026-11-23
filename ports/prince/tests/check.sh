@@ -12,8 +12,14 @@
 #      them with the PC's again)
 #   4. the scripted game (tests/play.script): the first screen, the title, level 1 through
 #      the keyboard, a quicksave and a quickload, a pause; its console lines, QUICKSAVE.SAV
-#      on the card, Lau's writes (the effects), the title music's OPL2 writes against its
-#      stream (tests/oplcheck.py), the pictures (tests/play.md5)
+#      on the card, the quickload's state the same as the quicksave's (a checksum of the
+#      whole savestate), Lau's writes (the effects), the title music's OPL2 writes against
+#      its stream (tests/oplcheck.py), the pictures (tests/play.md5: level 1's first
+#      picture whole, the others' status line: how far the kid runs while a key is held
+#      depends on the game's ticks against the clock, which move with the program's layout)
+#   4b. a key at the title after 15, 40 and 60 s (the story, the princess's scene, their
+#      fades): level 1 must start in room 1 with the heap as after a key at once (a key in
+#      a fade or a cutscene leaked their memory; then the level was not loaded at all)
 #   5. a game saved on level 3 (Ctrl+G: PRINCE.SAV) and loaded from the title (Ctrl+L)
 #
 # --refs: write tests/frames.md5 and tests/play.md5 anew (look at the pictures first).
@@ -113,6 +119,11 @@ for w in "prince: title" "prince: level 1" "prince: text LEVEL 1" "prince: text 
   grep -aq "^$w" "$con" || { bad "the scripted game: no '$w'"; okl=0; }
 done
 [ $okl = 1 ] && ok "the scripted game: the title, level 1, a quicksave, a quickload, a pause"
+st() { tr -d '\r' < "$con" | sed -n "s/^prince: $1 \([0-9a-f]\{8\}\) .*/\1/p" | head -1; }
+saved=$(st "quicksave state") before=$(st "quickload from state") loaded=$(st "quickload state")
+if [ -n "$saved" ] && [ "$saved" = "$loaded" ] && [ "$before" != "$saved" ]; then
+  ok "the quickload brought back the quicksave's state ($saved; it was $before)"
+else bad "the quickload's state: saved '$saved', before the load '$before', loaded '$loaded'"; fi
 if grep -aq '\[kill\]\|sheet_draw refused' "$con"; then bad "the scripted game: $(grep -a '\[kill\]\|refused' "$con" | head -1)"; fi
 q=build/test/play/card/APPS/PRINCE/QUICKSAVE.SAV
 if [ -f "$q" ] && [ "$(wc -c < "$q")" -gt 3000 ]; then ok "QUICKSAVE.SAV written ($(wc -c < "$q") bytes)"
@@ -127,6 +138,23 @@ else bad "sound: the title music's OPL2 writes"; fi
 if [ "$REFS" = --refs ]; then
   python3 tests/shots.py tests/play.md5 build/test/play/shot*.png --update || fail=1
 elif python3 tests/shots.py tests/play.md5 build/test/play/shot*.png; then :; else fail=1; fi
+
+# ---------------------------------------------------------------- 4b. a key late at the title
+heap1=$(tr -d '\r' < "$con" | grep -a '^prince: level 1 in room' | head -1 | sed 's/.*, the heap //')
+for t in 15000 40000 60000; do
+  printf '0 wait prince: start\n+800 {space}\n+0 wait prince: title\n+%d {space}\n+0 wait prince: level 1 in room\n+1000 shot\n' \
+    $t > build/test/key$t.script
+  run --mode desktop --script build/test/key$t.script --seconds $((t / 1000 + 30)) \
+    --out build/test/key$t > build/test/key$t.log 2>&1 &
+done
+wait
+for t in 15000 40000 60000; do
+  l=$(tr -d '\r' < build/test/key$t/console.txt | grep -a '^prince: level 1 in room\|^prince: out of memory' | head -1)
+  case "$l" in
+    "prince: level 1 in room 1, the heap $heap1") ok "a key at the title after $((t / 1000)) s: level 1 in room 1, the heap as at once ($heap1)";;
+    *) bad "a key at the title after $((t / 1000)) s: '$l' (at once: the heap $heap1)";;
+  esac
+done
 
 # ---------------------------------------------------------------- 5. save and load
 shell "megahit 3" --script tests/save.script --seconds 30 --out build/test/save \

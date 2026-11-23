@@ -4,7 +4,10 @@ the 1280 x 720 picture: MD5 of its RGB pixels), against a list (the pictures sho
 art, which is not in the repository: only their checksums are).
 
   shots.py LIST PICTURE... [--update]     LIST lines: "NAME MD5"; NAME = the picture's file
-                                          name (auto3.png); --update writes LIST anew
+                                          name (auto3.png), or NAME@Y0-Y1: only the screen's
+                                          rows Y0 to Y1 - 1 (shot2.png@172-180: the status
+                                          line); --update writes LIST anew (keeping each
+                                          name's rows)
 
 Before --update, look at the pictures, and where the PC's reference build can draw the
 same frame, compare them with it (tests/cmpframe.py: the replays' frames were equal pixel
@@ -16,16 +19,33 @@ import sys
 from PIL import Image
 
 
-def md5(path):
+def md5(path, rows=None):
     im = Image.open(path).convert("RGB").resize((320, 180), Image.NEAREST)
+    if rows:
+        im = im.crop((0, rows[0], 320, rows[1]))
     return hashlib.md5(im.tobytes()).hexdigest()
+
+
+def split(key):
+    """NAME@Y0-Y1 -> (NAME, (Y0, Y1)); NAME -> (NAME, None)"""
+    if "@" not in key:
+        return key, None
+    name, r = key.split("@")
+    y0, y1 = r.split("-")
+    return name, (int(y0), int(y1))
 
 
 def main():
     args = [a for a in sys.argv[1:] if a != "--update"]
     update = "--update" in sys.argv
     lst, pics = args[0], args[1:]
-    got = {os.path.basename(p): md5(p) for p in pics}
+    paths = {os.path.basename(p): p for p in pics}
+    keys = [l.split()[0] for l in open(lst) if l.strip()] if os.path.exists(lst) else []
+    rows = {split(k)[0]: k for k in keys}
+    got = {}
+    for name, p in paths.items():
+        k = rows.get(name, name)
+        got[k] = md5(p, split(k)[1])
     if update:
         with open(lst, "w") as f:
             for k in sorted(got):
