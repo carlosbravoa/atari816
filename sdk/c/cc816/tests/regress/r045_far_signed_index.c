@@ -2,7 +2,9 @@
  * model the index is added to the offset alone (IR addlo: the element lies in the
  * pointer's object, so in its bank), no longer widened to 32 bits; negative indexes, an
  * object at a bank's offset 0, a structure array through a pointer, and the near model's
- * 32-bit step, all must give the same results. LEVELS: 0 1 2 */
+  * 32-bit step, all must give the same results (through __far pointers in every model:
+ * a near pointer with a negative index register carries into the next bank, a limit of
+ * near data). LEVELS: 0 1 2 */
 #include <stdlib.h>
 #include <horizon.h>
 
@@ -10,7 +12,7 @@ struct cell { int a; unsigned char b; };
 static int arr[10] = { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 };
 static struct cell cells[6];
 
-static int sum_around(const int *p, int lo, int hi)
+static int sum_around(const int __far *p, int lo, int hi)
 {
     int i, s = 0;
     for (i = lo; i < hi; i++)
@@ -29,9 +31,9 @@ static int far_back(unsigned char __far *q, int n)
 int main(void)
 {
     unsigned char __far *bank = hz_far_alloc();
-    struct cell *c = cells + 3;
+    struct cell __far *c = cells + 3;
     int i, k;
-    char *m;
+    char __far *m;
     if (!bank)
         return 1;
     if (sum_around(arr + 5, -5, 5) != 55 || sum_around(arr, 0, 10) != 55)
@@ -60,7 +62,7 @@ int main(void)
         k += m[i];
     if (k != 4950)
         return 6;
-    free(m - 50);
+    free((void *)(m - 50));
     hz_far_free(bank);
     return 0;
 }
