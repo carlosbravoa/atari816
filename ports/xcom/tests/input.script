@@ -1,0 +1,26 @@
+# The real keyboard and mouse through Horizon (no KEYS script, the real clock): the
+# start menu, New Game, the difficulty, a base placed on the globe, the geoscape, the
+# base screen, back to the geoscape. Coordinates: 640 x 360 (each screen pixel 2 x 2).
+0 wait xcom: start
++6000 move 315 198
++500 shot
++300 click
++3000 move 320 100
++500 shot
++300 click
++5000 shot
++300 move 280 120
++500 click
++3000 shot
++300 {enter}
++4000 shot
++300 move 577 38
++500 click
++5000 shot
++300 move 580 350
++800 shot
++300 click
++5000 shot
+# the geoscape answers the keyboard again: G, the graphs
++300 g
++4000 shot

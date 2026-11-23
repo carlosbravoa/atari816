@@ -28,10 +28,24 @@ unsigned char xd_dac[768];
    pointer (16 bits, within its bank) stays right for any object. */
 unsigned char xd_banks[17];
 
+void __far *xd_mkfp_raw(unsigned seg, unsigned off)
+{
+    /* linear seg * 16 + off in 16-bit steps: its low word, its bank */
+    unsigned lo = (seg << 4) + off, b = seg >> 12;
+
+    if (lo < off)
+        b++;
+    return (void __far *)(((unsigned long)xd_banks[b] << 16) | lo);
+}
+
+/* The engine's MK_FP: a pointer into the battle view's back buffer (bank D,
+   plat.h XD_BB_SEG) is made after what the blitter was sent is drawn (the
+   engine reads it: BENCH's checks) */
 void __far *xd_mkfp(unsigned seg, unsigned off)
 {
-    unsigned long a = LIN(seg, off);
-    return (void __far *)(((unsigned long)xd_banks[(unsigned)(a >> 16)] << 16) | (unsigned)a);
+    if ((seg >> 12) == 0xD)
+        plat_bb_sync();
+    return xd_mkfp_raw(seg, off);
 }
 
 static unsigned long lin_of(const void __far *p)
@@ -48,6 +62,11 @@ static unsigned long lin_of(const void __far *p)
 void *xd_mkfp(unsigned seg, unsigned off)
 {
     return xd_mem + LIN(seg & 0xFFFF, off & 0xFFFF);
+}
+
+void *xd_mkfp_raw(unsigned seg, unsigned off)
+{
+    return xd_mkfp(seg, off);
 }
 
 static unsigned long lin_of(const void *p)
@@ -273,6 +292,7 @@ static int mcb_free(unsigned seg)
 
     for (;;) {
         if (m + 1 == seg && MCB_W(m, 1)) {
+            plat_mem_changed(MK_FP(seg, 0), (unsigned long)MCB_W(m, 3) << 4);
             MCB_W(m, 1) = 0;
             mcb_merge();
             return 0;
@@ -308,6 +328,7 @@ static int mcb_resize(unsigned seg, unsigned paras, unsigned *max)
         return 0;
     if (paras < have) {
         char kind = (char)MCB_B(m, 0);
+        plat_mem_changed(MK_FP(seg + paras, 0), (unsigned long)(have - paras) << 4);
         MCB_B(m, 0) = 'M';
         MCB_W(m, 3) = (unsigned short)paras;
         mcb_set(seg + paras, kind, 0, have - paras - 1);
@@ -335,6 +356,15 @@ unsigned _dos_allocmem(unsigned paras, unsigned *seg)
     unsigned s = mcb_alloc(paras, _psp);
 
     if (!s) {
+        static int said;
+        /* DOS's answer (the engine plans by it: asking for FFFFh is how it
+           measures); a real shortage is said on the console a few times */
+        if (paras < 0x9000u && said++ < 4) {
+            char b[80];
+            sprintf(b, "xdos: no DOS block of %u paragraphs (the largest %u)", paras,
+                    mcb_largest());
+            plat_note(b);
+        }
         *seg = mcb_largest();
         return 8;
     }
@@ -361,6 +391,16 @@ unsigned _dos_setblock(unsigned paras, unsigned seg, unsigned *max)
 void *xd_malloc(size_t n)
 {
     unsigned s = mcb_alloc((unsigned)(((unsigned long)n + 15) >> 4) + (n == 0), _psp);
+
+    if (!s) {
+        static int said;
+        if (said++ < 4) {
+            char b[80];
+            sprintf(b, "xdos: malloc(%u): the DOS memory is full (the largest block %u "
+                    "paragraphs)", (unsigned)n, mcb_largest());
+            plat_note(b);
+        }
+    }
 
     return s ? (void *)MK_FP(s, 0) : NULL;
 }
@@ -435,35 +475,85 @@ void xd_init(int argc, char **argv)
     vectors[0x33] = mouse_vector;
 }
 
+/* ---------------------------------------------------------------- test pictures */
+
+int xd_mode = 3;
+unsigned char xd_dac_dirty = 1;
+int g_plat_shots;
+unsigned g_plat_idle = 30;
+
+/* A Fletcher sum of the picture: A000's 32,000 words, then the DAC's 384. */
+unsigned long xd_screen_sum(void)
+{
+    const unsigned short far *p = (const unsigned short far *)MK_FP(0xA000, 0);
+    const unsigned short *d = (const unsigned short *)xd_dac;
+    unsigned short a = 0, b = 0;
+    unsigned i;
+
+    for (i = 0; i < 32000u; i++) {
+        a = (unsigned short)(a + p[i]);
+        b = (unsigned short)(b + a);
+    }
+    for (i = 0; i < 384u; i++) {
+        a = (unsigned short)(a + d[i]);
+        b = (unsigned short)(b + a);
+    }
+    return (unsigned long)b << 16 | a;
+}
+
+static unsigned long shot_try, shot_sum;
+static unsigned shot_n;
+
+/* A picture if the screen changed since the last one; looked at no more
+   often than every gap_ms of virtual time (0: now). */
+void xd_shot_point(unsigned gap_ms, const char *why)
+{
+    unsigned long now, sum;
+
+    if (!g_plat_shots || xd_mode != 0x13)
+        return;
+    now = plat_now();
+    if (gap_ms && shot_try && now - shot_try < (unsigned long)gap_ms * 1193UL)
+        return;
+    shot_try = now ? now : 1;
+    sum = xd_screen_sum();
+    if (shot_n && sum == shot_sum)
+        return;
+    shot_sum = sum;
+    plat_shot(shot_n++, now / 1193UL, sum, why);
+}
+
 /* ---------------------------------------------------------------- time */
 
 /* The BIOS clock at 0040:006C follows the model's clock (18.2065 Hz). */
-static void bios_clock(void)
+static void bios_clock(unsigned long c)
 {
-    unsigned long c = plat_counts();
-
-    *(unsigned long far *)MK_FP(0x40, 0x6C) = c / 65536UL;
+    *(unsigned long far *)MK_FP(0x40, 0x6C) = c >> 16;
 }
 
-void timer_run_hook(void);
+void timer_run_hook_at(unsigned long now);
 
+/* One reading of the clock serves the BIOS clock and the timer hook. */
 void xd_poll(void)
 {
+    unsigned long now;
+
     plat_poll();
-    bios_clock();
-    timer_run_hook();
+    xd_shot_point(500, "poll");
+    now = plat_counts();
+    bios_clock(now);
+    timer_run_hook_at(now);
 }
 
 void delay(unsigned ms)
 {
     unsigned long t0 = plat_counts(), n = (unsigned long)ms * 1193UL;
 
-    if (g_plat_virtual) {
+    (void)t0;
+    if (g_plat_virtual)
         plat_wait_counts(n);
-        return;
-    }
-    while (plat_counts() - t0 < n)
-        xd_poll();
+    else
+        plat_sleep_counts(n);
 }
 
 void sound(unsigned hz)
@@ -478,6 +568,26 @@ void nosound(void)
 /* ---------------------------------------------------------------- the keyboard */
 
 static unsigned key_held;
+static unsigned long idle_since;
+extern FILE *g_script;                  /* the engine's KEYS script (input.c) */
+
+/* The platform's next key. In a test run (the virtual clock) the engine
+   asking for a key is a point for a picture, and a run whose script is done
+   ends after g_plat_idle seconds of nothing. */
+static unsigned next_key(void)
+{
+    if (g_plat_virtual) {
+        unsigned long now = plat_now();
+        xd_shot_point(200, "waiting for input");
+        if (g_script || !idle_since)
+            idle_since = now ? now : 1;
+        else if (now - idle_since > g_plat_idle * 1193182UL) {
+            xd_shot_point(0, "end");
+            plat_end();
+        }
+    }
+    return plat_key();
+}
 
 unsigned _bios_keybrd(unsigned cmd)
 {
@@ -486,13 +596,13 @@ unsigned _bios_keybrd(unsigned cmd)
     xd_poll();
     if (cmd == _KEYBRD_READY || cmd == 0x11) {
         if (!key_held)
-            key_held = plat_key();
+            key_held = next_key();
         return key_held;
     }
     if (cmd == _KEYBRD_SHIFTSTATUS || cmd == 0x12)
         return 0;
     while (!key_held) {
-        key_held = plat_key();
+        key_held = next_key();
         if (!key_held) {
             if (g_plat_virtual)
                 plat_wait_counts(1193UL * 10);
@@ -542,7 +652,8 @@ static void int10(union REGS *r)
 {
     switch (r->h.ah) {
     case 0x00:
-        plat_setmode(r->h.al & 0x7F);
+        xd_mode = r->h.al & 0x7F;
+        plat_setmode(xd_mode);
         break;
     case 0x0F:
         r->h.al = 0x13;
@@ -626,7 +737,10 @@ static void int33(union REGS *r)
 {
     int x, y, b;
 
-    xd_poll();
+    /* the platform's events once per mouse_poll (its function 3 comes
+       first; 5 and 6 answer from the same state) */
+    if (r->x.ax == 3)
+        xd_poll();
     switch (r->x.ax) {
     case 0x00:
     case 0x21:
@@ -641,6 +755,7 @@ static void int33(union REGS *r)
         break;
     case 0x04:
         plat_mouse_set(r->x.cx / 2, r->x.dx);
+        idle_since = 0;                 /* (a script's CLICK or MOVE) */
         break;
     case 0x05: {                        /* presses since the last call, where */
         int n;
@@ -717,11 +832,13 @@ unsigned outp(unsigned port, unsigned v)
 {
     v &= 0xFF;
     switch (port) {
-    case 0x3C8: dac_w = v * 3; break;
+    case 0x3C8: dac_w = v * 3; break;     /* (v < 256: below 768) */
     case 0x3C7: dac_r = v * 3; break;
     case 0x3C9:
-        xd_dac[dac_w % 768] = (unsigned char)(v & 63);
-        dac_w = (dac_w + 1) % 768;
+        xd_dac[dac_w] = (unsigned char)(v & 63);
+        if (++dac_w == 768)
+            dac_w = 0;
+        xd_dac_dirty = 1;
         break;
     case 0x388: opl_reg = v; break;
     case 0x389: plat_opl((int)opl_reg, (int)v); break;
@@ -743,8 +860,9 @@ unsigned inp(unsigned port)
 
     switch (port) {
     case 0x3C9:
-        v = xd_dac[dac_r % 768];
-        dac_r = (dac_r + 1) % 768;
+        v = xd_dac[dac_r];
+        if (++dac_r == 768)
+            dac_r = 0;
         return v;
     case 0x3DA:                         /* the vertical retrace comes and goes */
         vsync_bit ^= 8;
@@ -849,6 +967,25 @@ FILE *xd_fopen(const char *name, const char *mode)
     return f;
 }
 
+/* reads into the engine's memory: the platform hears of them (plat_mem_changed) */
+#undef fread
+#undef read
+size_t xd_fread(void *p, size_t size, size_t n, FILE *f)
+{
+    size_t k = fread(p, size, n, f);
+
+    plat_mem_changed(p, (unsigned long)size * n);
+    return k;
+}
+
+int xd_read(int fd, void *p, unsigned n)
+{
+    int k = (int)read(fd, p, n);
+
+    plat_mem_changed(p, n);
+    return k;
+}
+
 #undef open
 int xd_open(const char *name, int flags, ...)
 {
@@ -948,9 +1085,10 @@ unsigned _dos_close(int handle)
    straight into the arena's bank) */
 unsigned _dos_read(int handle, void *buf, unsigned n, unsigned *got)
 {
-    int k = read(handle, buf, n);
+    int k = read(handle, buf, n);       /* (16-bit int: 32,768 bytes or more read look negative) */
 
-    if (k < 0)
+    plat_mem_changed(buf, n);
+    if (k == -1)
         return 5;
     *got = (unsigned)k;
     return 0;
@@ -960,7 +1098,7 @@ unsigned _dos_write(int handle, const void *buf, unsigned n, unsigned *put)
 {
     int k = write(handle, buf, n);
 
-    if (k < 0)
+    if (k == -1)
         return 5;
     *put = (unsigned)k;
     return 0;
@@ -1013,6 +1151,7 @@ unsigned _dos_read(int handle, void *buf, unsigned n, unsigned *got)
 {
     ssize_t k = read(handle, buf, n);
 
+    plat_mem_changed(buf, n);
     if (k < 0)
         return 5;
     *got = (unsigned)k;
@@ -1070,7 +1209,6 @@ unsigned _dos_findnext(struct find_t *f)
     *(struct find_state **)f->reserved = NULL;
     return 18;                          /* no more files */
 }
-#undef free
 unsigned _dos_findfirst(const char *path, unsigned attr, struct find_t *f)
 {
     char dir[200], *slash;
@@ -1083,6 +1221,8 @@ unsigned _dos_findfirst(const char *path, unsigned attr, struct find_t *f)
     slash = strrchr(dir, '/');
     st = (struct find_state *)malloc(sizeof *st);
     memset(f, 0, sizeof *f);
+    if (!st)
+        return 8;                       /* not enough memory (DOS's answer) */
     if (slash) {
         strncpy(st->pat, slash + 1, sizeof st->pat - 1);
         st->pat[sizeof st->pat - 1] = 0;
@@ -1100,9 +1240,6 @@ unsigned _dos_findfirst(const char *path, unsigned attr, struct find_t *f)
     *(struct find_state **)f->reserved = st;
     return _dos_findnext(f);
 }
-#if defined(XD_HEAP_IN_ARENA)
-#define free(p) xd_free(p)
-#endif
 
 unsigned _dos_findclose(struct find_t *f)
 {
@@ -1120,7 +1257,10 @@ unsigned _dos_findclose(struct find_t *f)
 #undef snprintf
 #undef vsnprintf
 
-/* "%ld" -> "%d" etc.: `long` is int here (xcompat.h). "%lld" is left. */
+/* "%ld" -> "%d" etc.: `long` is int here (xcompat.h). "%lld" is left. And "%d" ->
+   "%hd", "%u" -> "%hu", "%x" -> "%hx" ...: an int argument is DOS's 16-bit one (the
+   host's int is short: tools/host16.py; an expression promoted to 32 bits prints as
+   the 16-bit int it is on DOS). */
 static const char *fix_fmt(const char *fmt, char *out, size_t size)
 {
     size_t n = 0;
@@ -1140,6 +1280,8 @@ static const char *fix_fmt(const char *fmt, char *out, size_t size)
             out[n++] = *p++;
         if (*p == 'l' && p[1] != 'l')
             p++;
+        else if (*p && strchr("diouxX", *p))
+            out[n++] = 'h';
     }
     out[n] = 0;
     return out;

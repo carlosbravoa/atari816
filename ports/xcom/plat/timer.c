@@ -16,14 +16,12 @@ static unsigned long hook_next;
 static int in_hook;
 int g_pace_log;
 
-void timer_run_hook(void)
+void timer_run_hook_at(unsigned long now)
 {
-    unsigned long now;
     int n = 0;
 
-    if (!tick_hook || in_hook)
+    if (!tick_hook || in_hook || (long)(now - hook_next) < 0)
         return;
-    now = plat_counts();
     in_hook = 1;
     while ((long)(now - hook_next) >= 0 && n++ < 8) {
         hook_next += FAST_DIV;
@@ -54,7 +52,7 @@ unsigned long timer_read(void)
 {
     unsigned long t = plat_counts();
 
-    timer_run_hook();
+    timer_run_hook_at(t);
     return t;
 }
 
@@ -71,8 +69,7 @@ void timer_pace(unsigned long t0, unsigned ms, int what)
         if (g_plat_virtual)
             plat_wait_counts(lim - (now - t0));
         else
-            while (timer_read() - t0 < lim)
-                xd_poll();
+            plat_sleep_counts(lim - (now - t0));
     }
     if (g_pace_log && what)
         log_printf("PACE %c %u %lu", what, ms, (timer_read() - t0) / 1193UL);

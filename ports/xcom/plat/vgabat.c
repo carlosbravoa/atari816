@@ -19,7 +19,11 @@
    battle is shown at the sky's one shade (NIGHT_SHADE) everywhere; DOS's
    smoke and fire pictures (fxpic, SMOKEV.PAK) and their animation step
    (pics_next): the dithered shapes are drawn instead, as upstream does
-   without SMOKEV.PAK. */
+   without SMOKEV.PAK.
+
+   A platform with a blitter draws the buffer itself (plat.h "the battle
+   view": the Atari816, horizon/hz_bb.c); every entry asks it first and
+   falls back on the C here, which stays the reference (the host). */
 #include "xcompat.h"
 #include "plat.h"
 #include "gfx.h"
@@ -34,7 +38,7 @@
 typedef unsigned short u16;
 
 /* The buffer of segment seg, offset 0. */
-#define BUF(seg)    ((unsigned char far *)MK_FP(seg, 0))
+#define BUF(seg)    ((unsigned char far *)xd_mkfp_raw(seg, 0))
 
 static u16 lx, rx, vtop, vbot;          /* V_LX, V_RX, V_TOP, V_BOT */
 static unsigned char save_box[32 * 40]; /* SAVE: the cursor's box */
@@ -74,8 +78,11 @@ void __cdecl blitc_masked(const void *spr, unsigned bufseg, unsigned dest)
     const unsigned char far *s = (const unsigned char far *)spr;
     unsigned char far *buf = BUF(bufseg);
     unsigned first, rows, n, x, len;
-    u16 o = header(s, dest, &first, &rows);
+    u16 o;
 
+    if (plat_bb_sprite(s, 0, dest, 0, 0xFFFF, 0, 0xFFFF))
+        return;
+    o = header(s, dest, &first, &rows);
     s += 2;
     for (; rows; rows--, o = (u16)(o + ROW)) {
         n = *s++;
@@ -130,6 +137,8 @@ void __cdecl blitc_masked_clip(const void *spr, unsigned bufseg, unsigned dest,
     u16 o;
 
     clip_vars(top, bottom, wmask);
+    if (plat_bb_sprite(s, 0, dest, vtop, vbot, lx, rx))
+        return;
     o = header(s, dest, &first, &rows);
     s += 2;
     for (row = first; rows; rows--, row++, o = (u16)(o + ROW)) {
@@ -155,8 +164,11 @@ void __cdecl blitc_or(const void *spr, unsigned bufseg, unsigned dest)
     const unsigned char far *s = (const unsigned char far *)spr;
     unsigned char far *buf = BUF(bufseg);
     unsigned first, rows, x, n;
-    u16 o = header(s, dest, &first, &rows);
+    u16 o;
 
+    if (plat_bb_sprite(s, 1, dest, 0, 0xFFFF, 0, 0xFFFF))
+        return;
+    o = header(s, dest, &first, &rows);
     s += 2;
     for (; rows; rows--, o = (u16)(o + ROW)) {
         u16 d;
@@ -181,6 +193,8 @@ void __cdecl blitc_or_clip(const void *spr, unsigned bufseg, unsigned dest,
     u16 o;
 
     clip_vars(top, bottom, wmask);
+    if (plat_bb_sprite(s, 1, dest, vtop, vbot, lx, rx))
+        return;
     o = header(s, dest, &first, &rows);
     s += 2;
     for (row = first; rows; rows--, row++, o = (u16)(o + ROW)) {
@@ -208,6 +222,8 @@ void __cdecl bufc_clear_rect(unsigned bufseg, unsigned col, unsigned row, unsign
 
     clear_y0 = row;
     clear_y1 = row + rows;
+    if (plat_bb_fill(d, w, rows, 0))
+        return;
     for (; rows; rows--, d = (u16)(d + ROW))
         for (i = 0; i < w; i++)
             buf[(u16)(d + i)] = 0;
@@ -235,6 +251,10 @@ void __cdecl bufc_present_rect(unsigned bufseg, unsigned col, unsigned row, unsi
 
     if (!rows || !cols)
         return;
+    if (g_vshade)
+        plat_bb_sync();
+    else if (plat_bb_present(d, w, rows))
+        goto shown;
     if (g_vshade) {
         /* (night: upstream's lit_present shows each cell at its light
            level; here every cell at the sky's) */
@@ -248,6 +268,8 @@ void __cdecl bufc_present_rect(unsigned bufseg, unsigned col, unsigned row, unsi
             for (i = 0; i < w; i++)
                 scr[(u16)(d + i)] = buf[(u16)(d + i)];
     }
+shown:
+    plat_view(1);
     plat_present((int)(col * 4), (int)row, (int)((col + cols) * 4), (int)(row + rows));
 }
 
@@ -262,6 +284,8 @@ void __cdecl buf_shift(unsigned bufseg, unsigned plane_bytes, unsigned planes, i
 
     (void)plane_bytes;
     (void)planes;
+    if (plat_bb_shift(dx))
+        return;
     if (dx > 0) {
         n = (unsigned)(BYTES - dx);
         for (i = n; i-- > 0;)
@@ -286,6 +310,8 @@ void __cdecl buf_box(unsigned bufseg, unsigned off, unsigned stride, unsigned by
 
     (void)stride;
     (void)save;
+    if (plat_bb_box(s, w, rows, out))
+        return;
     for (; rows; rows--, s = (u16)(s + ROW))
         for (i = 0; i < w; i++, k++) {
             if (k >= sizeof save_box)
@@ -334,6 +360,8 @@ void render_arrow(int c0, int r0, int cols, int rows)
         return;
     t0 = (short)(g_cam_x + g_arrow[1]);
     t1 = (short)(g_cam_y + g_arrow[2]);
+    if (plat_bb_arrow(arrow_px, t0, t1, qx, qy, qw, qh))
+        return;
     buf = BUF(g_bufseg);
     for (r = 0; r < 9; r++) {
         y = (short)(t1 + r);
@@ -370,6 +398,7 @@ void __cdecl fxtile_cga(unsigned seg, unsigned off, const unsigned char *shape, 
 
     if (n <= 0)
         return;
+    plat_bb_sync();
     pat[0] = (unsigned char)q01;
     pat[1] = (unsigned char)(q01 >> 8);
     pat[2] = (unsigned char)q23;

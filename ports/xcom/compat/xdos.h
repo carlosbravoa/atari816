@@ -30,6 +30,7 @@ extern xd_ptr xd_mem;                   /* the arena: linear 0 */
 
 #if defined(__CC816__)
 void __far *xd_mkfp(unsigned seg, unsigned off);
+void __far *xd_mkfp_raw(unsigned seg, unsigned off);    /* (no plat_bb_sync) */
 unsigned xd_seg(const void __far *p);
 unsigned xd_off(const void __far *p);
 #define MK_FP(s, o)     xd_mkfp((unsigned)(s), (unsigned)(o))
@@ -37,6 +38,7 @@ unsigned xd_off(const void __far *p);
 #define FP_OFF(p)       xd_off((const void __far *)(p))
 #else
 void *xd_mkfp(unsigned seg, unsigned off);
+void *xd_mkfp_raw(unsigned seg, unsigned off);
 unsigned xd_seg(const void *p);
 unsigned xd_off(const void *p);
 #define MK_FP(s, o)     xd_mkfp((unsigned)(s), (unsigned)(o))
@@ -165,6 +167,10 @@ int xd_open(const char *name, int flags, ...);
 int xd_access(const char *name, int mode);
 int xd_remove(const char *name);
 int xd_rename(const char *a, const char *b);
+size_t xd_fread(void *p, size_t size, size_t n, FILE *f);
+int xd_read(int fd, void *p, unsigned n);
+#define fread(p, s, n, f)   xd_fread(p, s, n, f)
+#define read(fd, p, n)      xd_read(fd, p, n)
 #define fopen(n, m)     xd_fopen(n, m)
 #define open            xd_open
 #define access(n, m)    xd_access(n, m)

@@ -1,3 +1,0 @@
-# script   options (upstream's XCOMXT options; the host adds KEYS tests/<script>.keys)
-geo        VGA NOINTRO LOG GEO.TXT
-battle     VGA NOINTRO BATTLE SEED 1 MISSION FA1V.PAK RACE RSV.PAK LOG BATTLE.TXT

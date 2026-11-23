@@ -1,0 +1,8 @@
+# The test runs (make test, tests/check.sh): NAME  the engine's options. Each runs
+# tests/NAME.keys (upstream's KEYS script) on the host (the reference) and on the Atari816
+# in the emulator (with /V: the virtual clock), and the two must give the same LOG, the
+# same pictures at the same virtual times, the same files. NAME: at most 8 characters.
+geo        VGA NOINTRO LOG GEO.TXT
+battle     VGA NOINTRO BATTLE SEED 1 MISSION FA1V.PAK RACE RSV.PAK LOG BATTLE.TXT
+save       VGA NOINTRO LOG SAVE.TXT
+bench      VGA NOINTRO BENCH MISSION FA1V.PAK RACE RSV.PAK LOG BENCHLOG.TXT

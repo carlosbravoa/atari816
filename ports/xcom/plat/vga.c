@@ -283,6 +283,9 @@ void vga_uk_pic(const void *head, int x, int y, int to_save)
     }
     if (!(tmpe.fl & 1))
         last = tmpe;
+    if (y < 144 && y + (int)h->h > 144 && h->w >= 64)
+        plat_view(0);                   /* a picture across the view's bottom (a window, the
+                                           inventory): the whole screen pans again */
     qx = x;
     qy = y;
     qw = h->w;
@@ -517,6 +520,8 @@ void vga_vx_world(const unsigned char far *map, unsigned vx, unsigned vy, unsign
     unsigned need = VIEW_W >> zoom, n1 = WMAP_W - vx < need ? WMAP_W - vx : need, y, i, k;
     unsigned rep = 1u << zoom;
 
+    plat_view(0);
+
     xsp = STACK0;
     for (y = 0; y < WMAP_H; y++, d += ROW) {
         const unsigned char far *s = map + ((y >> zoom) + vy) * WMAP_W;
@@ -692,10 +697,14 @@ int vga_init(void)
     void *p;
 
     g_video = VIDEO_CGA;
+    /* the DOS memory the prototype takes (its code and buffer), as upstream; the
+       buffer itself is at D004 (plat.h XD_BB_SEG), outside the DOS memory: the
+       Atari816 maps that bank onto its framebuffer's second bank, where the
+       blitter draws it */
     p = malloc(VGA_BYTES + 256 + 16);
     if (!p)
         return 2;
-    g_bufseg = FP_SEG(p) + ((FP_OFF(p) + 15) >> 4);
+    g_bufseg = XD_BB_SEG;
     _fmemset(MK_FP(g_bufseg, 0), 0, VGA_BYTES);
     vid_setmode(0x13);
     if (read_palette())

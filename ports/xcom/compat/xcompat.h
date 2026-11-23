@@ -7,8 +7,12 @@
      random numbers (rng.c's 32-bit state), file offsets and every long
      product wrap as on DOS; the printf family is wrapped (xdos.h) so that
      "%ld" still reads the value;
-   - `int` stays 32 bits (no compiler flag gives gcc a 16-bit int): code
-     that depends on 16-bit wrap-around differs (see PORTING-NOTES.md).
+   - `int` is 16 bits: no compiler flag gives gcc a 16-bit int, so the host
+     compiles copies of the files in which tools/host16.py made `int` a
+     `short` and `unsigned` an `unsigned short` (main, va_arg's type and
+     lines marked "host16: native" keep the native int); structures are
+     packed (#pragma pack(1) below), as cc816's are. Expressions still
+     promote to the 32-bit int (PORTING-NOTES.md, "The host build");
    On the Atari816 (cc816) int is 16 and long 32 bits already. */
 #ifndef XCOMPAT_H
 #define XCOMPAT_H
@@ -64,7 +68,12 @@
 
 #if !defined(__CC816__)
 /* 32-bit long, as on DOS (see above); a long long is not used upstream. */
-#define long int
+#define long int    /* host16: native */
+/* The host compiles tools/host16.py's copies of the files: int is short there (16
+   bits, as on DOS), and every structure from here on is packed as cc816 packs them
+   (the C library's headers above, and any included later, keep their layout: the copy
+   wraps each #include <...> in the default packing). */
+#pragma pack(1)
 #endif
 
 #include "xdos.h"
