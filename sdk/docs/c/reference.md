@@ -306,8 +306,8 @@ direct-page register: the 65816's own long indirect addressing). The rules:
   keeps a pointer one past an object that ends at a bank's last byte greater than the
   object's start (DOS's would wrap to offset 0). An element `p[i]` (an access, not a
   pointer value) is reached as DOS reaches it: an unsigned `i` in Y (`[p],y`), a signed
-  one added to the offset alone (the element is in `p`'s object, so in its bank: cheaper
-  than widening `i` to 32 bits). `p - q` is the difference of the offsets (16 bits,
+  one added to the offset alone, with its constant part (`p[d + 1]`: the element is in
+  `p`'s object, so in its bank: cheaper than widening `i` to 32 bits). `p - q` is the difference of the offsets (16 bits,
   `ptrdiff_t`). Not supported: arithmetic that relies on the offset wrapping inside its
   segment (DOS's `p + 0xFFFF` as `p - 1`).
 - **Compares**: `==`, `!=`, `<` ... compare the whole 32 bits (the bank first). Pointers
@@ -425,7 +425,8 @@ cycles a byte), `strlen`, `strcpy`, `memcmp` read through `[dp],y`. A syscall ta
 pointer as X = offset, Y = bank (ABI.md), so the stubs pass a far pointer as it is: every
 syscall takes a pointer into any bank the program owns. The POSIX `read` and `write` move
 the bytes straight between the card and far memory (one `hz_read` / `hz_write` for 512
-bytes or more; smaller reads go through the read-ahead as before). hgame is built for the
+bytes or more, at most 32,767 a call as in every model; smaller reads go through the
+read-ahead as before). hgame is built for the
 far data model too; the controls library (`hui.h`) is not (hcc refuses `--ui` with
 `--data far`): a window application has no need of DOS's model.
 
@@ -569,6 +570,43 @@ __far *)0x050000L` is bank 5, offset 0 (`hz_farptr(5, 0)` is the same). Code tha
 far addresses in plain pointers (`(char *)hz_far_alloc()`, `(const char *)farbuf`) must
 say `__far` instead, or copy the data into the main bank first (`hz_far_copy`): see
 [porting.md](porting.md).
+
+### Negative indexes
+
+A near pointer's arithmetic wraps in its bank, as C on a 16-bit machine expects: `p[-1]`,
+`p[i]` with `i = -1`, `*(p - n)`, `a[d + 1]` with `d = -1`, and `p[u]` with an unsigned
+`u` of 65535 (`p + 0xFFFF` is `p - 1`) all reach the element before. The 65816's index
+registers do not wrap: abs,X, abs,Y, (dp),Y and (sr,S),Y add X or Y to their 16-bit base
+in 24 bits, so a base plus an index past $FFFF is the next bank. cc816 keeps an element's
+access in an index register only when it cannot carry:
+
+- an element of a local array or structure (the software stack): Y is its offset from
+  `__sp`, always;
+- an element of a global (`abs,x`): when the base is the object's start or below it, or
+  the index is known to be a non-negative offset; otherwise X is the index plus the
+  constant offset (`a[d + 1]`: `lda d ; clc ; adc #2 ; tax ; lda a,x`);
+- through a near pointer (`(p),y`): when the index is known to be a non-negative offset
+  (and stays one with the constant part: `p[i - 1]` with `i` known to be 1 or more);
+  otherwise the address is added in 16 bits and read as `(__h2)`: `lda p ; clc ; adc i ;
+  sta __h2 ; lda (__h2)`, about 10 cycles more than `ldy i ; lda (p),y`.
+
+A non-negative offset is an index of an array object (`a[i]`, `a[i][j]`, `s.m[i]`,
+`p->m[i]`, `a[n].x`: C keeps it inside its array, so 0 or more; not with a positive
+constant part, `a[d + 1]`, where `d` may be -1; an index outside its array, `a[2][-1]`
+for `a[1][5]`, is not C and may carry: write such code through a pointer, `(&a[2][0])[-1]`),
+or what the optimiser can show: a constant below 32,768, an
+`unsigned char`, a mask (`i & 15`), a right shift, an unsigned quotient or remainder, a
+value a branch has compared (`i >= 0`, `i < 100` unsigned), and sums, products and left
+shifts of those, among them a loop counter that starts at 0 or more and only counts up
+(`for (i = 0; i < n; i++) p[i]`), and one that a compare keeps at 0 or more (`while (--n
+>= 0) p[n]`). An `int` parameter or a value loaded from memory is not, nor an `unsigned`
+one (it may be a negative index in disguise). In a loop that matters, make the index an
+`unsigned char`, mask it, or count up from 0. A member's constant offset in Y (`p->m`,
+`p[i].m`) cannot carry: no object crosses the top of a bank. Through a far pointer the
+index is part of the 32-bit address (the far data model: below). `--log-bankwrap` of
+emu816 (`EMU816_ARGS=--log-bankwrap`, or `run816.py --log-bankwrap`) reports every
+indexed access in a program's bank that carries into the next one; cc816's tests run
+every program with it.
 
 ## Calling convention (for assembly)
 
@@ -858,7 +896,7 @@ data (there the heap is filled by taking every bank Horizon has).
 | `assert` | prints the expression, the file and the line on stderr, then exit code 3 |
 | `time()` | seconds since 1970 from Horizon's clock (`time_get`: set by the Desktop or the shell from /SYSTEM/CLOCK or the PC; never set: it counts from 2000-01-01); `gmtime`, `localtime`, `mktime`, `strftime` (no time zones) |
 | `clock()` | CLOCKS_PER_SEC is 50: 20 ms steps. Milliseconds: `hz_uptime()` |
-| `open`, `creat` (`fcntl.h`), `read`, `write`, `lseek`, `close`, `unlink`, `isatty` (`unistd.h`) | POSIX's file descriptors, for code written for Unix or DOS (the Xargon port's boards): `O_RDONLY O_WRONLY O_RDWR O_CREAT O_TRUNC O_EXCL O_APPEND` (`O_BINARY`, `O_TEXT` are 0: nothing is converted); descriptors 0-2 are the console, files 3 and up (Horizon's 4 handles, shared with `fopen`). No buffer for writing; a read-only descriptor reads ahead 512 bytes from the heap (small reads of records, each a call to the card otherwise), a read of 512 or more goes straight to the card. `lseek` any 32-bit position (`SEEK_END` from the size at open); `read` returns all the bytes asked for unless the file ends. Errors in `errno` (`ENOENT`, `EEXIST`, `EBADF`, `ESPIPE`, `ENFILE`). `sdk/c/lib/posixio.c`; tested by `tests/libc` |
+| `open`, `creat` (`fcntl.h`), `read`, `write`, `lseek`, `close`, `unlink`, `isatty` (`unistd.h`) | POSIX's file descriptors, for code written for Unix or DOS (the Xargon port's boards): `O_RDONLY O_WRONLY O_RDWR O_CREAT O_TRUNC O_EXCL O_APPEND` (`O_BINARY`, `O_TEXT` are 0: nothing is converted); descriptors 0-2 are the console, files 3 and up (Horizon's 4 handles, shared with `fopen`). No buffer for writing; a read-only descriptor reads ahead 512 bytes from the heap (small reads of records, each a call to the card otherwise), a read of 512 or more goes straight to the card. `lseek` any 32-bit position (`SEEK_END` from the size at open); `read` returns all the bytes asked for unless the file ends, up to 32,767: `ssize_t` is a 16-bit `int`, so one `read` or `write` moves at most 32,767 bytes and a call that asks for more does that many and returns the count (a short count, as POSIX allows, never one that looks negative and is taken for an error by `if (n < 0)`); a loop until all is moved copes, a single `read(fd, p, 40000u)` that wants all 40,000 must loop (`fread` / `fwrite` count in `size_t` and are not limited). Errors in `errno` (`ENOENT`, `EEXIST`, `EBADF`, `ESPIPE`, `ENFILE`). `sdk/c/lib/posixio.c`; tested by `tests/libc` |
 | `system`, `getenv`, `signal`, `raise`, locales | not supported (they return failure) |
 
 ## Floating point
@@ -1404,8 +1442,12 @@ division, remainder and shifts by constants and compares with constants, every w
 operands at the edges); and floating-point programs, `--features
 basic,float`: float and double arithmetic, compares, conversions both ways, `++`, compound
 assignments, float arrays, structures, globals, pointers, parameters, results, variadic
-doubles, sprintf `%f %e %g`, checked bit for bit against gcc's SSE single precision). And
-the c-testsuite when `CTS=` points at a checkout.
+doubles, sprintf `%f %e %g`, checked bit for bit against gcc's SSE single precision; and
+negative indexes, `--features basic,index`: pointers into the middle of arrays of every
+width, of structures and of 2-D rows, indexed back and forth with `int`, `signed char`,
+`i - 1`, `i + 2`, `*(p - n)`, loops down to 0, and unsigned indexes meant as negative). And
+the c-testsuite when `CTS=` points at a checkout. Every program runs under emu816's
+`--log-bankwrap`: an indexed access that carries into the next bank fails it.
 
 ### Faults found and fixed
 
@@ -1512,6 +1554,17 @@ the c-testsuite when `CTS=` points at a checkout.
     shares the structure's members. DOS's declarators `T __far *a, __far *b;` and `void
     (__far *f)(void)` were refused ("Invalid declarator") (`r042_far_declarators.c`,
     `tests/diag/far_declarators.c`; the XCOM-XT port).
+31. **A negative index through a near pointer carried into the next bank**: `p[i]` with
+    `i = -1` put $FFFF in Y, and `(p),y` read p + $FFFF in the next bank (a wrong value,
+    or the program killed when that bank was not its own); also `p[i - 1]` with `i = 0`,
+    a pointer to the middle of a global indexed back (`p = &a[5]` then `p[i]`: `abs,x`
+    with base a + 10), `((char *)0xD000)[i]`, and `p[u]` with an unsigned `u` meant as
+    negative. `a[d + 1]` with a signed `d` (Prince of Persia, `r040`) had been fixed alone.
+    An index stays in a register now only when it cannot carry ("Negative indexes",
+    above); and the far data model's `p[d + 1]` adds the constant to the offset too (with
+    Y = 2 after `p + d` it carried from an object at a bank's offset 0 into the next bank)
+    (`r046_negative_index.c`, the random programs' `index` shape; found by the far data
+    model's `r045`, whose first version failed in the small model).
 
 Faster code from the same port (its profile: 13 % of the time in `__mul16` and
 `__sdiv16`, and its board, a `__far` array of arrays, read through 32-bit address
@@ -1595,8 +1648,9 @@ ranges and range designators). Each of the other 7 is listed in
 `__ILP32__` macros. 00040.c (8 queens by brute force) is right but slow: about 260
 emulated seconds (1.5 million calls of its check function; 384 before `a < b & c < d`
 in a condition was compiled as `&&`), so `tests/check.py` gives it 400 seconds in a
-batch of its own. The random programs of seeds 1, 2 and 3 (1,200 programs, and 600
-floating-point ones) all agree with gcc.
+batch of its own. The random programs of seeds 1, 2 and 3 (1,200 programs, 600
+negative-index ones and 600 floating-point ones) all agree with gcc, in each of the three
+configurations, and none carries an access into the next bank.
 
 ## Speed
 

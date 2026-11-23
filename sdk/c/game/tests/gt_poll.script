@@ -1,0 +1,5 @@
+# gt_poll: time 0 = the program started; the mouse moved with no button held
+500 move 400 200
+2400 move 100 300
+2800 shot
+3800 shot

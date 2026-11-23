@@ -86,9 +86,14 @@ int hg_raster(unsigned count, const hz_raster *changes);
  * framebuffer from pixel (x, y) (in 4 bpp x even); hg_split(line, x2, y2): from that
  * screen line on (1 .. 359, or 179 in 320 x 180) from (x2, y2) instead: a fixed panel
  * above a part of the framebuffer that scrolls (line 0: no split). Both views must stay
- * inside the framebuffer; set at hg_end, in the vertical blank. */
+ * inside the framebuffer. Sent at hg_end (shown from the vertical blank after the frame's
+ * drawing); a program without frames (it keeps its own time, calls only hg_poll) has it
+ * sent by hg_poll, or at once by hg_view_send. */
 void hg_scroll(int x, int y);
 void hg_split(unsigned line, int x2, int y2);
+/* the view set by hg_scroll / hg_split to the screen now, without a frame: taken at the
+ * next vertical blank (a program that draws straight into the framebuffer) */
+void hg_view_send(void);
 
 /* n consecutive 64 KB banks (for a buffer larger than a bank) -> the first, or 0 */
 unsigned hg_banks(unsigned n);
@@ -109,8 +114,9 @@ unsigned hg_steps(unsigned hz);
 void hg_quit(void);
 /* the events (keys, mouse, the pause on a lost focus), the POKEY envelopes and the OPL2's
  * stream now, without waiting for the vertical blank: for a game whose frames run late, or
- * that keeps time by itself (a DOS game's clock), between its calls of hg_frame. 0 once the
- * game was closed */
+ * that keeps time by itself (a DOS game's clock), between its calls of hg_frame. Outside a
+ * frame (no hg_begin open) also a changed view (hg_scroll, hg_split). 0 once the game was
+ * closed */
 int hg_poll(void);
 /* full screen: pause by itself when the focus goes (default 1) */
 void hg_autopause(int on);
@@ -374,7 +380,9 @@ unsigned hg_joy(unsigned port);
 unsigned hg_p1(void);
 unsigned hg_p1_pressed(void);
 
-/* the mouse, in screen pixels (in a window: its content; 320 x 180: halved) */
+/* the mouse, in screen pixels (in a window: its content; 320 x 180: halved), updated by
+ * hg_frame / hg_poll whenever it moves, a button held or not. Absolute only: no relative
+ * motion (the pointer stops at the screen's edges, and cannot be moved by a program) */
 extern int hg_mouse_x, hg_mouse_y;
 extern unsigned hg_mouse_b;     /* buttons held: 1 left, 2 right, 4 middle */
 unsigned hg_mouse_clicked(void);   /* buttons pressed since the last frame */

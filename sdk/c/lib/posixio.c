@@ -12,7 +12,13 @@
  * Horizon's seek is absolute and it has no "tell": the position and the size are kept here,
  * as stdio does (the size from stat at open, plus what is written past it). Horizon's own
  * modes are read, read/write (the file must exist), create/truncate and append; open's
- * flags are mapped onto them (O_CREAT without O_TRUNC on a file that exists: read/write). */
+ * flags are mapped onto them (O_CREAT without O_TRUNC on a file that exists: read/write).
+ *
+ * The count: ssize_t is int (16 bits), so one read or write moves at most 32,767 bytes
+ * (RWMAX, POSIX's SSIZE_MAX here). A call that asks for more does the first 32,767 and
+ * returns that: a short count, as POSIX allows, never a "negative" one taken for an
+ * error. A loop that reads (writes) until done copes; a single read(fd, p, 40000u) that
+ * wants all 40,000 must loop. fread / fwrite (size_t counts) are not limited. */
 #include <fcntl.h>
 #include <unistd.h>
 #include <stdio.h>
@@ -30,6 +36,7 @@ int __hz_seterrno(void);
 #define D_APPEND 8
 
 #define RABUF 512
+#define RWMAX 32767u            /* the most one read or write moves (ssize_t: int) */
 
 static unsigned char dflags[NH];
 static long dpos[NH], dsize[NH];        /* the position (the program's), the size */
@@ -113,6 +120,8 @@ ssize_t read(int fd, void *buf, size_t n)
     int h, r, c;
     unsigned char *p;
 
+    if (n > RWMAX)
+        n = RWMAX;
     if (fd == 0) {                      /* the console: what stdin has (a line at a time) */
         p = (unsigned char *)buf;
         for (r = 0; (unsigned)r < n; ) {
@@ -179,6 +188,8 @@ ssize_t write(int fd, const void *buf, size_t n)
     hz_io io;
     int h, r;
 
+    if (n > RWMAX)
+        n = RWMAX;
     if (fd == 1 || fd == 2) {
         r = (int)fwrite(buf, 1, n, fd == 1 ? stdout : stderr);
         fflush(fd == 1 ? stdout : stderr);

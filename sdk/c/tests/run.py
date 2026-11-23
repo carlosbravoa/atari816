@@ -16,6 +16,9 @@ Tests (in tests/):
   libc     the C library: printf formats, string.h, stdlib, malloc, files (create, write,
            seek, read back, append, delete, the 5th handle), folders, time, far memory,
            errno, argv, keyboard input (scanf, fgets on stdin), atexit
+  bigio    read and write of 40,000 bytes (tests/libc/bigio.c): one call moves at most
+           32,767 (ssize_t is a 16-bit int: a short count, never a negative one), a loop
+           gets the rest; a near buffer (small, large) and a far one (largefar)
   sys      every syscall stub linked, the safe ones called, the blocks' sizes
   codegen  code generation trouble spots (32-bit loads from tables)
   float    floating point (tests/float/float.c): arithmetic, conversions, math.h, printf
@@ -283,6 +286,17 @@ def run_model(model, horizon, only):
                              script=T("libc", "input.script"), seconds=8)
             ok = "LIBC PASS" in con and "atexit ran" in con and "[kill]" not in con
             report("libc", model, ok, grab(con, r"libc: \d+ checks, \d+ failures") +
+                   ("" if ok else " " + " | ".join(l for l in con.splitlines() if "FAIL" in l)))
+
+    if want("bigio"):
+        prg = os.path.join(b, "BIGIO.PRG")
+        rc, out = hcc(prg, [T("libc", "bigio.c")], model)
+        if rc:
+            report("bigio", model, False, "build: " + out.strip().splitlines()[-1])
+        else:
+            rc, con, _ = emu(prg, os.path.join(b, "run-bigio"), horizon, seconds=4)
+            ok = "BIGIO PASS" in con and "[kill]" not in con
+            report("bigio", model, ok, grab(con, r"bigio: \d+ checks, \d+ failures") +
                    ("" if ok else " " + " | ".join(l for l in con.splitlines() if "FAIL" in l)))
 
     if want("sys"):

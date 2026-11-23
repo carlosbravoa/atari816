@@ -146,7 +146,9 @@ while (hg_frame()) { input; logic; draw; }
 - Fixed-rate logic: `n = hg_steps(50); while (n--) step();` (at most 4 after a stall).
 - Frames running late: `hg_missed` counts frames that took more than one blank. A game with
   its own clock (a DOS port) calls `hg_poll()` between frames: events, POKEY envelopes and
-  the OPL2 stream without waiting; 0 once closed.
+  the OPL2 stream without waiting; 0 once closed. Outside a frame (no `hg_begin` open: a
+  program that never calls `hg_frame`) `hg_poll` also sends a changed view (`hg_scroll`,
+  `hg_split`); `hg_view_send()` sends it at once (taken at the next vertical blank).
 - Timers: `hg_ms()` (milliseconds, 10 ms steps); `hg_frames` (frames begun). No delay call:
   wait by looping on `hg_frame()` (`while (hg_ms() - t < ms && hg_frame()) ;`).
 - `hg_stats("NAME")` prints `NAME: N frames, M missed, CPU X.XX ms a frame` (CPU from
@@ -266,6 +268,8 @@ windows (Gem Run in C does it).
   `hg_screen_fb(HG_320X180, "Game", 512, 400)`, then `hg_scroll(x, y)` and
   `hg_split(line, x2, y2)` (from screen `line` on, show from (x2, y2)). Views must stay
   inside the framebuffer (else refused). ports/digger uses this for its 320 x 200 screen.
+  The view is sent at `hg_end` (shown after the frame's drawing); without frames by
+  `hg_poll` or `hg_view_send()` (`gt_poll.c`).
 
 ## Input
 
@@ -277,7 +281,7 @@ windows (Gem Run in C does it).
 | `hg_key_next()` | next key press in order: usage in bits 0-7, character in 8-15 (16 kept) |
 | `hg_p1()`, `hg_p1_pressed()` | player 1: arrows + W A S D + joystick 1 as `HG_UP` `HG_DOWN` `HG_LEFT` `HG_RIGHT` `HG_FIRE` (Space, Enter, trigger) |
 | `hg_joy(1 or 2)` | joystick port; reads 0 in the emulator (no joystick) |
-| `hg_mouse_x`, `hg_mouse_y`, `hg_mouse_b` (1 left, 2 right, 4 middle), `hg_mouse_clicked()` | screen pixels (window: its content; 320 x 180: halved) |
+| `hg_mouse_x`, `hg_mouse_y`, `hg_mouse_b` (1 left, 2 right, 4 middle), `hg_mouse_clicked()` | screen pixels (window: its content; 320 x 180: halved), updated by `hg_frame` / `hg_poll` whenever the mouse moves, a button held or not. Absolute only: no relative motion (the pointer stops at the screen's edges; a program cannot move it) |
 
 F10 opens the menu bar and F12 leaves: do not bind them. Test with `key right 700` lines in
 run816 scripts (references/testing.md).

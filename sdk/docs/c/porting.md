@@ -366,7 +366,12 @@ calls the same functions as before.
   flipping is the scroll registers' choice of rows.
 - [ ] **Late frames still need their events.** A game whose frame takes longer than its
   tick never waits, so it never reaches `hg_frame`: call `hg_poll()` once a frame (keys,
-  the pause, the music's stream).
+  the pause, the music's stream). A program with no frames at all (it keeps its own time
+  and draws straight into the framebuffer, as X-COM does) has its `hg_scroll` /
+  `hg_split` sent by `hg_poll`, or at once by `hg_view_send()`.
+- [ ] **`read` moves at most 32,767 bytes a call** (`ssize_t` is a 16-bit `int`): a DOS
+  `read(fd, p, 40000u)` returns 32,767; a DOS layer's `_dos_read` loops until it has the
+  count or the file ends.
 
 ### 6. Test it
 

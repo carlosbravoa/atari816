@@ -927,6 +927,7 @@ k2_fsmove:
         and     #64                     ; (WF_HOVER)
         beq     @out
 :       jsr     fs_xy                   ; wm_motx subtracts the window's content origin: add it
+        ldx     fs_w                    ; (fs_xy leaves the row in X)
         lda     kg_t
         clc
         adc     w_x,x

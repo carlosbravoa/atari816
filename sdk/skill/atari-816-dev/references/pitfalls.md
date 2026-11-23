@@ -35,15 +35,22 @@ agents' own. "Fixed" means the SDK changed since; the lesson still holds.
 | Choppy effects while the game draws (board) | the 72.8 Hz sound steps ran from the frame loop: at 60 Hz, and none during 100 ms of drawing | the music timer: `hz_sample_timer(port, us)` + `hz_recv`, polled from the drawing code (`ports/digger/horizon/hz_timer.c`) | round 2 |
 | Scrolling in jumps (board) | the view moved only while the game waited | move the view at every vertical blank, also mid-work | round 2 |
 | No keys, music stops when frames run late (Xargon) | a late game never waits, never calls `hg_frame` | `hg_poll()` once a game frame | 20 min |
+| A mouse-driven full-screen game's pointer does not follow the mouse (X-COM) | `hg_screen` opened its window without `WF_HOVER`, and Horizon 0.30's kernel loses the window in full-screen motion events (`k2_fsmove`: none at all, a button held or not) | fixed in hgame: `WF_HOVER`, and on a kernel that sends no motion the pointer is read (`ws_mouse`) at each `hg_frame` / `hg_poll`: `hg_mouse_x/y` follow the mouse always (`gt_poll`) | in the port |
+| `hg_scroll` / `hg_split` never reach the screen in a DOS port (X-COM) | it keeps its own time and calls only `hg_poll`; the view was sent only at `hg_end` | fixed: `hg_poll` sends a changed view outside a frame; `hg_view_send()` sends it at once | in the port |
+| `read(fd, p, 40000u)` "fails" (X-COM) | `ssize_t` is a 16-bit `int`: 40,000 looks negative | fixed: one `read`/`write` moves at most 32,767 bytes and returns that (a short count); loop until done (`tests/libc/bigio.c`) | in the port |
 | Music clips (1-2 % of samples) | the board mixes the OPL2 3x louder than a Lau voice | convert songs 13.5 dB quieter | 20 min |
 | No sound in the emulator from POKEY | emu816 only logs POKEY | `--log-sound` checks; listen on the board | - |
 | Needed emulator options not reachable (`--card-kbps`, `--log-opl`) | run816.py does not pass them | the game's own `/BUSY:ms` for slow runs; call emu816 yourself. `--log-opl`/`--log-opl-us` now pass (Prince of Persia) | `--card-kbps` still open |
-| A replay passes with one link order and fails with another (or with `--spread`, `-O0` vs `-O2`) (Prince of Persia) | `a[d + 1]` with a signed `d = -1`: the constant went into the address, X = $FFFF, and abs,X carries into the next bank | fixed in cc816 (`regress/r040`). When results depend on placement, suspect a negative index register or a far address used as near, before the game | 1 h 30 |
+| A replay passes with one link order and fails with another (or with `--spread`, `-O0` vs `-O2`) (Prince of Persia) | `a[d + 1]` with a signed `d = -1`: the constant went into the address, X = $FFFF, and abs,X carries into the next bank | fixed in cc816 (`regress/r040`; every negative or wrapping index since, `r046`: an index stays in a register only when it is known non-negative). When results depend on placement, suspect a negative index register (`EMU816_ARGS=--log-bankwrap` reports one) or a far address used as near, before the game | 1 h 30 |
 | Sprites drawn far off; no warning (Prince of Persia) | `&p->member` with `p` a `__far` pointer was typed near: given to a near parameter, it pointed into the main bank | fixed: it is a far pointer now, `-Wfar-pointer` warns (`diag/w_far_member.c`); copy into a near local and back | 40 min |
 | Whole frames missing, rooms black (Prince of Persia) | `sheet_draw`/`draw_list` refuse the whole call for one bad record (a source x below 0, a rectangle past its sheet) | print `hz_errno` when a call fails; cut sources to their sheet | 40 min |
 
 ## C pitfalls of cc816 on this machine
 
+- **`read` / `write` move at most 32,767 bytes a call** (`ssize_t` is `int`): asked for
+  more they return 32,767, a short count. `if (read(fd, p, n) != n)` with `n` over 32,767
+  is then wrong: loop (`while (done < n && (k = read(fd, p + done, n - done)) > 0) done +=
+  k;`), or use `fread` (`size_t` counts, no limit).
 - **`int` is 16 bits** (`size_t`, pointers too). `printf("%d", a_long)` prints garbage:
   `%ld`/`%lu` and a cast. `a * b` of ints is 16 bits: `(long)a * b`. `1 << 20` shifts
   an `int` past its width: `1L << 20`. Counters of frames, ms, bytes, scores: `long`.

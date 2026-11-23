@@ -245,7 +245,8 @@ Every function is described in `hgame.h`. In short:
 | --- | --- |
 | `hg_screen(mode, title)` | full screen: `HG_320X180`, `HG_640X360`, `HG_640X360X4` (16 colours), `| HG_DOUBLE` (two pages), `| HG_POINTER` (the mouse pointer, 640 modes). The framebuffer's banks are found and taken (consecutive banks, as `examples/deepdive` does) |
 | `hg_screen_fb(mode, title, stride, rows)` | full screen on a framebuffer of another shape: taller than the screen (a 320 x 200 game at 320 x 180, 640 x 400 at 640 x 360), or with a stride of 512 / 1024 so that no row crosses a bank (drawing by the CPU) |
-| `hg_scroll(x, y)`, `hg_split(line, x2, y2)` | the view on such a framebuffer: from (x, y); from screen line `line` on from (x2, y2): a fixed panel above a part that scrolls (full screen, one page, not with `hg_map`) |
+| `hg_scroll(x, y)`, `hg_split(line, x2, y2)` | the view on such a framebuffer: from (x, y); from screen line `line` on from (x2, y2): a fixed panel above a part that scrolls (full screen, one page, not with `hg_map`). Sent at `hg_end`, shown from the blank after the frame's drawing; a program without frames (it keeps its own time and calls only `hg_poll`) has it sent by `hg_poll` |
+| `hg_view_send()` | the view set by `hg_scroll` / `hg_split` to the screen now, without a frame (taken at the next vertical blank): a DOS port that draws straight into the framebuffer moves its view at once |
 | `hg_window(w, h, title)`, `hg_window_menu(menus)` | a game in a window on the desktop (centred); its menus (`hg_menu()` reports picks) |
 | `hg_close()` | back to the desktop, everything freed (also at exit) |
 | `hg_w`, `hg_h`, `hg_win`, `hg_fb_bank`, `hg_fb_stride`, `hg_fb_rows` | the screen's size, the window, the framebuffer |
@@ -259,7 +260,7 @@ Every function is described in `hgame.h`. In short:
 | `hg_begin()`, `hg_end()` | the two halves, for programs that want them apart |
 | `hg_steps(hz)` | logic steps due at hz a second (fixed time step; at most 4 after a stall) |
 | `hg_quit()`, `hg_autopause(on)` | make `hg_frame` return 0; the pause on lost focus |
-| `hg_poll()` | the events, the POKEY envelopes and the OPL2 stream now, without waiting for the blank: for a game whose frames run late or that keeps its own time (a DOS port's clock: ports/xargon); 0 once closed |
+| `hg_poll()` | the events, the POKEY envelopes and the OPL2 stream now, without waiting for the blank: for a game whose frames run late or that keeps its own time (a DOS port's clock: ports/xargon); outside a frame (no `hg_begin` open) also a changed view (`hg_scroll`, `hg_split`); 0 once closed |
 | `hg_frames`, `hg_missed`, `hg_pauses`, `hg_cpu_ms`, `hg_stats(name)` | counters; "NAME: N frames, M missed, CPU X ms a frame" on the console |
 
 | Drawing | |
@@ -305,7 +306,7 @@ Every function is described in `hgame.h`. In short:
 | `hg_getchar()` | typed characters (ASCII, `KEY_*` for arrows) |
 | `hg_key_next()` | the keys pressed, in order (SDL_KEYDOWN's events): the HID usage in bits 0-7, the character in bits 8-15 |
 | `hg_joy(port)`, `hg_p1()`, `hg_p1_pressed()` | the joysticks; player 1: arrows + W A S D + joystick 1, fire Space / Enter / trigger |
-| `hg_mouse_x`, `hg_mouse_y`, `hg_mouse_b`, `hg_mouse_clicked()` | the mouse in screen pixels (halved in 320 x 180) |
+| `hg_mouse_x`, `hg_mouse_y`, `hg_mouse_b`, `hg_mouse_clicked()` | the mouse in screen pixels (halved in 320 x 180), updated by `hg_frame` / `hg_poll` whenever it moves, a button held or not (full screen and window). Absolute only: there is no relative motion (the pointer stops at the screen's edges and a program cannot move it), so a mouse-look game gets no deltas past an edge |
 
 | Sound | |
 | --- | --- |

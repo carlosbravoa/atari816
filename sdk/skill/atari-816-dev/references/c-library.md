@@ -157,7 +157,9 @@ closedir(d);
 **POSIX descriptors** (`fcntl.h`, `unistd.h`), for Unix/DOS code: `O_RDONLY O_WRONLY
 O_RDWR O_CREAT O_TRUNC O_EXCL O_APPEND` (`O_BINARY`, `O_TEXT` are 0). Descriptors 0-2 are
 the console; files are 3 and up. No write buffer; a read-only descriptor reads ahead 512
-bytes from the heap. Errors in `errno` (`ENOENT EEXIST EBADF ESPIPE ENFILE`). Tested:
+bytes from the heap. One `read` or `write` moves at most 32,767 bytes (`ssize_t` is a
+16-bit `int`): asked for more it returns 32,767 (a short count, not an error); loop until
+done. Errors in `errno` (`ENOENT EEXIST EBADF ESPIPE ENFILE`). Tested:
 
 ```c
 /* int fd, n; char line[16]; */

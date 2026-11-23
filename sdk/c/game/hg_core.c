@@ -29,6 +29,8 @@ void (*hg__hook_opl)(void);             /* hg_opl.c: the stream's records due */
 void (*hg__hook_opl_pause)(int on);     /* 1 pause, 0 go on, 2 the end (hg_close) */
 
 static unsigned char ws_own, atexit_set, quit_req, autopause = 1;
+static unsigned char unfocused;         /* the window lost the focus (WE_UNFOCUS) */
+static unsigned char fsmotion;          /* a motion event came in full screen (events) */
 static unsigned lastf, endf;
 static unsigned long t_begin;
 static char title_buf[40];
@@ -187,6 +189,7 @@ static int ws_and_window(unsigned w, unsigned h, int x, int y, const char *title
     hg_frames = hg_missed = 0;
     hg_cpu_ms = 0;
     quit_req = 0;
+    unfocused = 0;
     hg__ox = hg__oy = 0;
     lastf = endf = hz_frame();
     return 0;
@@ -257,7 +260,9 @@ int hg_screen_fb(unsigned mode, const char *title, unsigned fbstride, unsigned f
         if (fbrows)
             rows = fbrows;
     }
-    if (ws_and_window(280, 44, 180, 150, title, 0))
+    /* WF_HOVER: in full screen every move of the mouse comes as a motion event, a button
+     * held or not (the kernel keeps one queued and updates it: at most one a poll) */
+    if (ws_and_window(280, 44, 180, 150, title, WF_HOVER))
         return -1;
     sprintf(line, "%.30s is paused.", title_buf);
     wtext(8, 6, line);
@@ -518,6 +523,22 @@ void hg_split(unsigned line, int x2, int y2)
     hg__scr_dirty = 1;
 }
 
+/* the view set by hg_scroll / hg_split, if changed, to the kernel now: Marga takes it at
+ * the next vertical blank */
+static void view_send(void)
+{
+    if (hg__scr_dirty) {
+        hz_fs_scroll(&hg__scr);
+        hg__scr_dirty = 0;
+    }
+}
+
+void hg_view_send(void)
+{
+    if (hg__kind == HG__FULL && !hg__double && !hg__scroll)
+        view_send();
+}
+
 /* ---------------------------------------------------------------- the frame */
 
 static void events(void);
@@ -595,10 +616,7 @@ void hg_end(void)
     } else {
         if (hg__hook_scroll)
             hg__hook_scroll();
-        if (hg__scr_dirty) {
-            hz_fs_scroll(&hg__scr);
-            hg__scr_dirty = 0;
-        }
+        view_send();
         hg__submit(1);
     }
     hg__began = 0;
@@ -710,6 +728,7 @@ void hg__pause(void)
         if (ev.type == WE_FOCUS)
             break;
     }
+    unfocused = 0;
     if (hg__hook_pause)
         hg__hook_pause(0);
     if (hg__hook_opl_pause)
@@ -745,8 +764,11 @@ static void events(void)
                 krel[k >> 3] |= (unsigned char)(1 << (k & 7));
             }
             break;
-        case WE_BUTTON:
         case WE_MOTION:
+            if (hg__kind == HG__FULL)
+                fsmotion = 1;
+            /* fall through */
+        case WE_BUTTON:
             hg_mouse_x = (int)ev.a;
             hg_mouse_y = (int)ev.b;
             if (ev.type == WE_BUTTON) {
@@ -761,12 +783,26 @@ static void events(void)
         case WE_CLOSE:
             quit_req = 1;
             break;
+        case WE_FOCUS:
+            unfocused = 0;
+            break;
         case WE_UNFOCUS:
             keys_up();
             mlast = 0;
+            unfocused = 1;
             if (hg__kind == HG__FULL && autopause)
                 hg__pause();
             break;
+        }
+    }
+    /* Full screen on a kernel that sends it no motion events (Horizon 0.30's k2_fsmove
+     * loses the window: none at all, a button held or not): the pointer as it is now, one
+     * ws_mouse a call, until the first motion event shows the kernel sends them */
+    if (hg__kind == HG__FULL && !fsmotion && !unfocused) {
+        hz_mouse m;
+        if (hz_ws_mouse(0xFF, &m) != 0xFFFF) {
+            hg_mouse_x = hg__mode == FS_320X8 ? m.sx >> 1 : m.sx;
+            hg_mouse_y = hg__mode == FS_320X8 ? m.sy >> 1 : m.sy;
         }
     }
 }
@@ -781,12 +817,16 @@ int hg__poll(void)
 
 /* the events (keys, the pause), the sound's envelopes and the OPL2's stream now, without
  * waiting for a vertical blank: for a game whose frames are late (its frame loop does not
- * reach hg_frame every blank) or that keeps its own time. 0 once the game was closed */
+ * reach hg_frame every blank) or that keeps its own time. Outside a frame (no hg_begin
+ * open: a program that never calls hg_frame) also a changed view (hg_scroll, hg_split);
+ * inside one it waits for hg_end, with the frame's drawing. 0 once the game was closed */
 int hg_poll(void)
 {
     if (hg__kind == HG__NONE)
         return !quit_req;
     events();
+    if (!hg__began && hg__kind == HG__FULL)
+        view_send();
     if (hg__hook_sound)
         hg__hook_sound();
     if (hg__hook_opl)

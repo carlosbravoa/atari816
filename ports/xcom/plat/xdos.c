@@ -1085,12 +1085,16 @@ unsigned _dos_close(int handle)
    straight into the arena's bank) */
 unsigned _dos_read(int handle, void *buf, unsigned n, unsigned *got)
 {
-    int k = read(handle, buf, n);       /* (16-bit int: 32,768 bytes or more read look negative) */
+    unsigned done = 0; int k;           /* (read() moves at most 32,767 bytes a call) */
 
+    while (done < n) {
+        k = read(handle, (char *)buf + done, n - done);
+        if (k < 0) return 5;
+        if (k == 0) break;
+        done += (unsigned)k;
+    }
     plat_mem_changed(buf, n);
-    if (k == -1)
-        return 5;
-    *got = (unsigned)k;
+    *got = done;
     return 0;
 }
 
