@@ -178,7 +178,7 @@ typedef struct {
 /* the record a pass draws from, with its clipped spans, and the shapes it drew so far
  * (C: drawn together, in order, by FbOps.span_jobs; the pointer row's entries copied
  * near) */
-#define PASS_JOBS 512
+#define PASS_JOBS 256     /* (C, round 2: was 512; a pass flushes when full; the main bank is tight) */
 typedef struct {
     const TrekdatRecord SR_FAR *record;
     const PreparedShape SR_FAR *prepared;
@@ -192,9 +192,8 @@ typedef struct {
 static void pass_flush(PassRecord *rec)
 {
     if (rec->njobs) {
-        /* (the frame's restores, sent before the pass, must be done before the CPU draws) */
-        if (fb_ops.sync)
-            fb_ops.sync(rec->frame);
+        /* (C, round 2: no wait here for the frame's restores: span_jobs waits for them if it
+         * draws by the CPU; a blitter's list keeps the order by itself) */
         fb_ops.span_jobs(rec->frame, rec->jobs, rec->njobs);
         rec->njobs = 0;
     }
@@ -623,7 +622,8 @@ static void draw_dos_cell(DRAW_ARGS)
 /* pointer_row: the pointer table's row (TrekdatDosPointerLayout's rows[i]: its cell s
  * is entries row * 24 + s * 6 .. + 5); the rows' descriptors (C: copied near) */
 static void draw_dos_pointer_row(PassRecord *rec, unsigned pointer_row,
-                                 const uint16_t *current_row, const uint16_t *nearer_row)
+                                 const uint16_t SR_FAR *current_row,
+                                 const uint16_t SR_FAR *nearer_row)
 {
     unsigned side_i, k;
     const uint16_t SR_FAR *row = &rec->record->pointer_shape[pointer_row * TREKDAT_POINTER_COLUMNS];
@@ -665,37 +665,59 @@ typedef struct {
     int32_t row_offset;
 } RowStep;
 
-/* the rows' descriptors, near (an empty row: zeros, LevelCell::empty()). C: the twelve
- * rows the two passes read (the group - 4 .. + 7), once a frame */
-static uint16_t pass_rows[12][ROAD_COLUMNS];
-static const DemoPlaybackState *pass_rows_scene;
-static const LevelRow SR_FAR *pass_rows_first;
-static unsigned pass_rows_row, pass_rows_frame, pass_rows_count;
+/* the row's descriptors (an empty row: zeros, LevelCell::empty()): the level's own (C, round 2:
+ * the road's rows, DemoPlaybackState.raw_rows, read where they are; a row not among the
+ * scene's rows, scene_row's EMPTY_ROW) */
+static const uint16_t ZERO_ROW[ROAD_COLUMNS];
 
-static const uint16_t *row_raw(const DemoPlaybackState *scene, int32_t row_index)
+static const uint16_t SR_FAR *row_raw(const DemoPlaybackState *scene, int32_t row_index)
 {
-    const int32_t group = (int32_t)(scene->current_row >> 3);
-    unsigned k;
-    const LevelRow SR_FAR *first = scene->row_count ? scene->rows[0].cells : 0;
-    if (pass_rows_scene != scene || pass_rows_row != scene->current_row ||
-        pass_rows_frame != scene->frame_index || pass_rows_first != first ||
-        pass_rows_count != scene->row_count) {
-        for (k = 0; k < 12; ++k) {
-            const LevelRow SR_FAR *row = scene_row(scene, group - 4 + (int32_t)k);
-            unsigned c;
-            for (c = 0; c < ROAD_COLUMNS; ++c)
-                pass_rows[k][c] = row->c[c].raw_descriptor;
-        }
-        pass_rows_scene = scene;
-        pass_rows_row = scene->current_row;
-        pass_rows_frame = scene->frame_index;
-        pass_rows_first = first;
-        pass_rows_count = scene->row_count;
+    if (scene->row_count && row_index >= (int32_t)scene->rows[0].row_index &&
+        row_index < (int32_t)scene->rows[0].row_index + (int32_t)scene->row_count) {
+        const unsigned k = (unsigned)(row_index - (int32_t)scene->rows[0].row_index);
+        if (scene->rows[k].row_index == (unsigned)row_index)    /* (always: consecutive) */
+            return scene->raw_rows[(unsigned)row_index].c;
     }
-    return pass_rows[row_index - (group - 4)];
+    if (scene_row(scene, row_index) != &EMPTY_ROW)               /* (never) */
+        return scene->raw_rows[(unsigned)row_index].c;
+    return ZERO_ROW;
 }
 
 static PassRecord pass_rec;
+
+/* C (round 2): the pass as a RoadPass (FbOps.road_prepare): its pointer rows and their level
+ * rows, the record's shapes; false where draw_demo_rows would draw nothing or fail (no
+ * record for the slot, a scene without rows) */
+static bool make_road_pass(const Renderer *r, const DemoPlaybackState *scene, DosRoadPhase phase,
+                           RoadPass *rp)
+{
+    static const RowStep before_seq[] = {{0, 7}, {1, 6}, {2, 5}, {3, 4},
+                                         {4, 3}, {5, 2}, {6, 1}, {11, 0}};
+    static const RowStep after_seq[] = {{12, 0}, {8, -1}, {9, -2}, {10, -3}};
+    const unsigned slot = scene->current_row & 7;
+    const int32_t current_group = (int32_t)(scene->current_row >> 3);
+    const RowStep *seq = phase == DosRoadPhase_BeforeShip ? before_seq : after_seq;
+    const unsigned seq_len = phase == DosRoadPhase_BeforeShip ? 8 : 4;
+    const TrekdatRecord SR_FAR *record;
+    unsigned i;
+    if (slot >= r->assets_.trekdat.record_count || scene->row_count == 0)
+        return false;
+    record = &r->assets_.trekdat.records[slot];
+    rp->prepared = r->prepared[slot];
+    rp->pointer_shape = record->pointer_shape;
+    rp->raw_rows = scene->raw_rows;
+    rp->shape_count = (uint16_t)record->shape_count;
+    rp->r0 = (int16_t)scene->rows[0].row_index;
+    rp->rn = (int16_t)scene->row_count;
+    rp->zero_row = ZERO_ROW;
+    rp->n = (uint16_t)seq_len;
+    rp->center = r->center[slot];
+    for (i = 0; i < seq_len; ++i) {
+        rp->seq[i].prow = (uint16_t)seq[i].pointer_row_index;
+        rp->seq[i].row = (int16_t)(current_group + seq[i].row_offset);
+    }
+    return true;
+}
 
 static bool draw_dos_trekdat_pass(FrameBuffer320x200 *frame, const DemoPlaybackState *scene,
                                   const TrekdatRecord SR_FAR *record,
@@ -828,7 +850,7 @@ static void c_span_jobs(FrameBuffer320x200 *f, const SpanJob *jobs, unsigned n)
                      jobs[i].index);
 }
 
-FbOps fb_ops = {c_spans, c_span_jobs, c_copy_rows, c_copy_rect, 0, 0, 0, 0, 0};
+FbOps fb_ops = {c_spans, c_span_jobs, c_copy_rows, c_copy_rect, 0, 0, 0, 0, 0, 0, 0};
 
 static void sync_cpu(FrameBuffer320x200 *f)
 {
@@ -839,6 +861,11 @@ static void sync_cpu(FrameBuffer320x200 *f)
 /* ---- assets / atlas -------------------------------------------------------- */
 
 void attract_mode_assets_load_from_root(AttractModeAssets *a, const char *source_root)
+{
+    attract_mode_assets_load(a, source_root, true);
+}
+
+void attract_mode_assets_load(AttractModeAssets *a, const char *source_root, bool with_trekdat)
 {
     char name[16];
     unsigned index;
@@ -857,7 +884,8 @@ void attract_mode_assets_load_from_root(AttractModeAssets *a, const char *source
     a->go_menu = load_image_archive_path(P("GOMENU.LZS"));
     a->cars = load_image_archive_path(P("CARS.LZS"));
     a->dashboard = load_image_archive_path(P("DASHBRD.LZS"));
-    a->trekdat = load_trekdat_lzs_path(P("TREKDAT.LZS"));
+    if (with_trekdat)
+        a->trekdat = load_trekdat_lzs_path(P("TREKDAT.LZS"));
     a->oxygen_gauge = load_dashboard_dat_path(P("OXY_DISP.DAT"));
     a->fuel_gauge = load_dashboard_dat_path(P("FUL_DISP.DAT"));
     a->speed_gauge = load_dashboard_dat_path(P("SPEED.DAT"));
@@ -1065,6 +1093,23 @@ static bool dash_cache_possible(const Renderer *r)
     return ok;
 }
 
+/* the dashboard's band cache (both inits) */
+static void renderer_init_dash(Renderer *r)
+{
+    /* the art's rows above the band */
+    memset(&r->dash_top, 0, sizeof r->dash_top);
+    r->dash_cache_ok = false;
+    if (archive_has_frame(&r->assets_.dashboard, 0) && r->assets_.dashboard.frames[0].count == 1) {
+        const ImageFrame SR_FAR *d = archive_front(&r->assets_.dashboard, 0);
+        if (d->y_offset < DASHBOARD_TOP && d->y_offset + d->height == FRAMEBUFFER_HEIGHT &&
+            d->x_offset == 0 && d->width == FRAMEBUFFER_WIDTH) {
+            r->dash_top = *d;
+            r->dash_top.height = (uint16_t)(DASHBOARD_TOP - d->y_offset);
+            r->dash_cache_ok = dash_cache_possible(r);
+        }
+    }
+}
+
 void renderer_init(Renderer *r)
 {
     unsigned i, k;
@@ -1083,18 +1128,127 @@ void renderer_init(Renderer *r)
     }
     for (i = 0; i < r->assets_.trekdat.record_count && i < 16; ++i)
         prepare_record(r, i);
-    /* the art's rows above the band */
-    memset(&r->dash_top, 0, sizeof r->dash_top);
-    r->dash_cache_ok = false;
-    if (archive_has_frame(&r->assets_.dashboard, 0) && r->assets_.dashboard.frames[0].count == 1) {
-        const ImageFrame SR_FAR *d = archive_front(&r->assets_.dashboard, 0);
-        if (d->y_offset < DASHBOARD_TOP && d->y_offset + d->height == FRAMEBUFFER_HEIGHT &&
-            d->x_offset == 0 && d->width == FRAMEBUFFER_WIDTH) {
-            r->dash_top = *d;
-            r->dash_top.height = (uint16_t)(DASHBOARD_TOP - d->y_offset);
-            r->dash_cache_ok = dash_cache_possible(r);
-        }
+    renderer_init_dash(r);
+}
+
+/* ---- C (round 2): what renderer_init makes, made once on the PC (srtool prepare, written
+ * by host/cli_main.c's write_prepared) and read here: TREKDAT's clipped spans and the ship's
+ * turned sprites (16.4 s and 4.3 s at the start on the Atari816). The file, little-endian:
+ *   "SKP2", u16 records; a record: u16 shape_count, u16 pointer_shape[312];
+ *   u16 chunks; a chunk: u32 size (<= 65,280), its PreparedSpan bytes (5 each);
+ *   a record's shapes: u16 count, u8 colour, u8 chunk, u16 index of its first span there;
+ *   u8 keyed_ok, u8 valid, u16 frames (77: 14 explosion, 63 flight); a frame: u16 width,
+ *   u16 height, its pixels;
+ *   a record's 13 pointer rows' centre merges (see Renderer.center): u16 count (0: none),
+ *   u8 0, u8 chunk, u16 index.
+ * The sprites' palette and transparency are the CARS archive's (loaded as before). */
+static uint16_t prep_u16(const Bytes *b, uint32_t off)
+{
+    return (uint16_t)(SR_BYTE(b->data, off) | ((uint16_t)SR_BYTE(b->data, off + 1) << 8));
+}
+
+bool renderer_init_prepared(Renderer *r, const Bytes *prep)
+{
+    TrekdatArchive *t = &r->assets_.trekdat;
+    uint32_t off = 6;
+    unsigned ri, s, nchunks, c;
+    PreparedSpan SR_FAR *chunk[16];
+    const ImageFrame SR_FAR *sheet;
+    if (prep->size < 6 || SR_BYTE(prep->data, 0) != 'S' || SR_BYTE(prep->data, 1) != 'K' ||
+        SR_BYTE(prep->data, 2) != 'P' || SR_BYTE(prep->data, 3) != '2')
+        return false;
+    t->record_count = prep_u16(prep, 4);
+    if (t->record_count > 16)
+        return false;
+    t->records = (TrekdatRecord SR_FAR *)plat_alloc((uint32_t)t->record_count * sizeof(TrekdatRecord));
+    for (ri = 0; ri < t->record_count; ++ri) {
+        TrekdatRecord SR_FAR *rec = &t->records[ri];
+        rec->index = ri;
+        rec->shape_count = prep_u16(prep, off);
+        sr_copy_from(rec->pointer_shape, prep, off + 2, TREKDAT_POINTER_COUNT * 2u);
+        off += 2 + TREKDAT_POINTER_COUNT * 2u;
     }
+    nchunks = prep_u16(prep, off);
+    off += 2;
+    if (nchunks > 16)
+        return false;
+    for (c = 0; c < nchunks; ++c) {
+        const uint32_t size = prep_u16(prep, off) | ((uint32_t)prep_u16(prep, off + 2) << 16);
+        const unsigned n = (unsigned)(size / 5u);
+        chunk[c] = (PreparedSpan SR_FAR *)plat_alloc((uint32_t)n * sizeof(PreparedSpan));
+        if (sizeof(PreparedSpan) == 5) {        /* (the Atari816: the bytes as they are) */
+            sr_copy_from(chunk[c], prep, off + 4, size);
+        } else {                                /* (a PC pads the structure) */
+            unsigned k;
+            for (k = 0; k < n; ++k) {
+                const uint32_t o = off + 4 + (uint32_t)k * 5u;
+                chunk[c][k].left = prep_u16(prep, o);
+                chunk[c][k].right = prep_u16(prep, o + 2);
+                chunk[c][k].width = SR_BYTE(prep->data, o + 4);
+            }
+        }
+        off += 4 + size;
+    }
+    for (ri = 0; ri < t->record_count; ++ri) {
+        const unsigned n = t->records[ri].shape_count;
+        PreparedShape SR_FAR *prepared =
+            (PreparedShape SR_FAR *)plat_alloc((uint32_t)SR_MAX(n, 1) * sizeof(PreparedShape));
+        /* (the table through a near copy, 64 shapes at a time) */
+        uint8_t tb[64 * 6];
+        for (s = 0; s < n; ++s, off += 6) {
+            const uint8_t *e = &tb[(s & 63u) * 6u];
+            unsigned count, ch;
+            if ((s & 63u) == 0)
+                sr_copy_from(tb, prep, off, SR_MIN(64u, n - s) * 6u);
+            count = e[0] | (unsigned)e[1] << 8;
+            ch = e[3];
+            prepared[s].count = (uint16_t)count;
+            prepared[s].color = e[2];
+            prepared[s].spans = count && ch < nchunks ? chunk[ch] + (e[4] | (unsigned)e[5] << 8) : 0;
+        }
+        r->prepared[ri] = prepared;
+    }
+    /* the ship's sprites */
+    memset(&r->car_atlas_, 0, sizeof r->car_atlas_);
+    r->car_atlas_.keyed_ok = SR_BYTE(prep->data, off) != 0;
+    r->car_atlas_.valid = SR_BYTE(prep->data, off + 1) != 0;
+    off += 2;
+    if (prep_u16(prep, off) != 77 || !archive_has_frame(&r->assets_.cars, 0)) {
+        r->car_atlas_.valid = r->car_atlas_.keyed_ok = false;
+    } else {
+        off += 2;
+        sheet = archive_front(&r->assets_.cars, 0);
+        for (s = 0; s < 77; ++s) {
+            ImageFrame *f = s < 14 ? &r->car_atlas_.explosion_frames[s]
+                                   : &r->car_atlas_.exact_ship_frames[s - 14];
+            f->width = prep_u16(prep, off);
+            f->height = prep_u16(prep, off + 2);
+            f->palette = sheet->palette;
+            f->transparent_zero = sheet->transparent_zero;
+            f->pixels = bytes_slice(prep, off + 4, (uint32_t)f->width * f->height);
+            off += 4 + (uint32_t)f->width * f->height;
+        }
+        r->car_atlas_.explosion_count = 14;
+        r->car_atlas_.exact_count = 63;
+        r->car_atlas_.destroyed = r->car_atlas_.explosion_frames[13];
+    }
+    /* the centre merges */
+    for (ri = 0; ri < t->record_count; ++ri) {
+        PreparedShape SR_FAR *cm =
+            (PreparedShape SR_FAR *)plat_alloc(TREKDAT_POINTER_ROWS * sizeof(PreparedShape));
+        for (s = 0; s < TREKDAT_POINTER_ROWS; ++s, off += 6) {
+            const unsigned count = prep_u16(prep, off);
+            const unsigned ch = SR_BYTE(prep->data, off + 3);
+            cm[s].count = (uint16_t)(ch < nchunks ? count : 0);
+            cm[s].color = 0;
+            cm[s].spans = cm[s].count ? chunk[ch] + prep_u16(prep, off + 4) : 0;
+        }
+        r->center[ri] = cm;
+    }
+    if (off > prep->size)
+        sr_fail("SKYPREP.DAT is short");
+    renderer_init_dash(r);
+    return true;
 }
 
 static void draw_fragment(const Renderer *r, FrameBuffer320x200 *frame,
@@ -1534,6 +1688,7 @@ static void draw_ship_shadow(FrameBuffer320x200 *frame, const DerivedShipVisualS
 
 static void render_play_scene(const Renderer *r, RenderedFrame *out, const DemoPlaybackState *scene)
 {
+    out->palette_stamp = 0;     /* (this palette is no cache generation's) */
     FrameBuffer320x200 *frame = &out->frame;
     const DerivedShipVisualState ship_visual = derive_ship_visual_state(scene);
     const ShipScreenPlacement ship_placement = ship_screen_placement(scene, &ship_visual);
@@ -1663,6 +1818,7 @@ void renderer_render_play_scene_incremental(const Renderer *r, RenderedFrame *ou
     const FrameBuffer320x200 *u = &c->underlay;
     DerivedShipVisualState ship_visual;
     ShipScreenPlacement ship_placement;
+    bool prepared[2];
 
     if (road_changed) {
         const ImageArchive *world = play_world(r, scene);
@@ -1681,7 +1837,11 @@ void renderer_render_play_scene_incremental(const Renderer *r, RenderedFrame *ou
         c->generation++;
         prime->primed = false;
     }
-    out->palette = c->palette;
+    /* (C, round 2: the palette copied only when it changed: RenderedFrame.palette_stamp) */
+    if (out->palette_stamp != c->generation) {
+        out->palette = c->palette;
+        out->palette_stamp = c->generation;
+    }
 
     if (!prime->primed) {
         fb_ops.copy_rows(f, u, 0, FRAMEBUFFER_HEIGHT);
@@ -1705,8 +1865,19 @@ void renderer_render_play_scene_incremental(const Renderer *r, RenderedFrame *ou
     ship_placement = ship_screen_placement(scene, &ship_visual);
 
     /* (C: the pass collects its shapes first and waits for the copies above only to draw
-     * them: Ali restores the band while the CPU works out what goes on it) */
-    if (!draw_demo_rows(r, f, scene, DosRoadPhase_BeforeShip)) {
+     * them: Ali restores the band while the CPU works out what goes on it. Round 2: both
+     * passes, when the platform prepares passes) */
+    prepared[0] = prepared[1] = false;
+    if (fb_ops.road_prepare) {
+        static RoadPass rp[2];
+        prepared[0] = make_road_pass(r, scene, DosRoadPhase_BeforeShip, &rp[0]) &&
+                      fb_ops.road_prepare(&rp[0], 0);
+        prepared[1] = prepared[0] && make_road_pass(r, scene, DosRoadPhase_AfterShip, &rp[1]) &&
+                      fb_ops.road_prepare(&rp[1], 1);
+    }
+    if (prepared[0])
+        fb_ops.road_send(f, 0);
+    else if (!draw_demo_rows(r, f, scene, DosRoadPhase_BeforeShip)) {
         /* No TREKDAT (never with shipped data): the fallback repaints
          * arbitrary pixels, so hand the frame to the pure path outright. */
         prime->primed = false;
@@ -1716,7 +1887,10 @@ void renderer_render_play_scene_incremental(const Renderer *r, RenderedFrame *ou
     draw_ship_sprite(r, f, &ship_visual, ship_placement);
     sync_cpu(f);
     draw_ship_shadow(f, &ship_visual, ship_placement);
-    draw_demo_rows(r, f, scene, DosRoadPhase_AfterShip);
+    if (prepared[1])
+        fb_ops.road_send(f, 1);
+    else
+        draw_demo_rows(r, f, scene, DosRoadPhase_AfterShip);
     if (c->dash.pixels && r->dash_cache_ok) {
         /* C: the band from the cache (see PlaySceneCache), the art's rows above it, the
          * banner (in the road band) */
@@ -1748,6 +1922,7 @@ void renderer_render_play_scene_incremental(const Renderer *r, RenderedFrame *ou
 
 void renderer_render_scene(const Renderer *r, RenderedFrame *out, const RenderScene *scene)
 {
+    out->palette_stamp = 0;
     switch (scene->tag) {
     case RenderScene_Intro: render_intro(r, out, &scene->intro); break;
     case RenderScene_MainMenu: render_main_menu(r, out, &scene->main_menu); break;

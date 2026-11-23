@@ -79,15 +79,11 @@ RoadsArchive load_roads_lzs_bytes(const Bytes *data)
         rows = road.row_count ? (RoadRow SR_FAR *)plat_alloc((uint32_t)road.row_count *
                                                               sizeof(RoadRow))
                               : 0;
-        for (base = 0; base < value_count; base += ROAD_COLUMNS) {
-            unsigned c;
-            RoadRow r;
-            for (c = 0; c < ROAD_COLUMNS; ++c) {
-                const uint32_t i = (base + c) * 2;
-                r.c[c] = (uint16_t)(raw_tiles.data[i] | ((uint16_t)raw_tiles.data[i + 1] << 8));
-            }
-            rows[base / ROAD_COLUMNS] = r;
-        }
+        /* (C, round 2: the tiles are little-endian u16s, as RoadRow holds them on the
+         * Atari816 and the PC: one copy, not a loop of 2 bytes a tile) */
+        if (road.row_count)
+            sr_copy_from(rows, &raw_tiles, 0, (uint32_t)road.row_count * sizeof(RoadRow));
+        (void)base;
         road.rows = rows;
         road.raw_tiles = raw_tiles;
         roads[index] = road;

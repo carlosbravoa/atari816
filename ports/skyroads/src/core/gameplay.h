@@ -77,6 +77,14 @@ typedef struct {
 } Ship;
 
 void ship_init(Ship *ship);
+/* C (round 2): move_to (the motion's collision walk) for the moves whose every probe lies in
+ * level_probe16's range: false (nothing done) for any other; and the bounce's scan, the
+ * first i of 1..14 where the probe at x + i * step is not inside (0: none). A platform may
+ * put its own in (horizon/hz_probe.s). */
+bool gameplay_move16_c(Ship *s, const Ship *dest, const Level *level);
+extern bool (*gameplay_move16)(Ship *s, const Ship *dest, const Level *level);
+unsigned gameplay_scan16_c(const Level *level, uint16_t x, int y, unsigned zrow, int step);
+extern unsigned (*gameplay_scan16)(const Level *level, uint16_t x, int y, unsigned zrow, int step);
 /* Advances one fixed step. `expected` is the DOS "expected" scratch ship,
  * carried across frames exactly as the reference does. Returns the events
  * raised this step, in order. */
@@ -134,6 +142,8 @@ void gameplay_session_init(GameplaySession *s, const Level *level);
  * when the original would stop simulating and report the outcome. */
 bool gameplay_death_animation_finished(const GameplaySession *s);
 void gameplay_run_frame(GameplaySession *s, ControllerState controls, GameplayFrameResult *out);
+/* C (round 2): gameplay_run_frame without the result (its events only) */
+void gameplay_step(GameplaySession *s, ControllerState controls, GameplayEvents *events);
 void gameplay_run_demo_frame(GameplaySession *s, const DemoRecording *demo,
                              GameplayFrameResult *out);
 

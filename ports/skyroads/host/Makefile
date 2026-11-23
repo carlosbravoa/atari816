@@ -10,7 +10,7 @@ GAME    := data/byteio data/compression data/image data/roads data/level data/tr
 OBJS    := $(GAME:%=$(B)/%.o)
 HDRS    := $(wildcard ../src/*.h ../src/*/*.h)
 
-all: $(B)/srtool
+all: $(B)/srtool $(B)/srsimcheck
 
 $(B)/%.o: ../src/%.c $(HDRS)
 	@mkdir -p $(dir $@)
@@ -22,6 +22,12 @@ $(B)/host_plat.o: host_plat.c $(HDRS)
 
 $(B)/srtool: $(OBJS) $(B)/host_plat.o cli_main.c $(HDRS)
 	$(CC) $(CFLAGS) -I../src -o $@ cli_main.c $(OBJS) $(B)/host_plat.o -lm
+
+# the simulation against the one before round 2 (ref_gameplay.c): simcheck.c includes
+# gameplay.c itself (its static functions are tested too)
+NOSIM   := $(filter-out $(B)/core/gameplay.o,$(OBJS))
+$(B)/srsimcheck: $(NOSIM) $(B)/host_plat.o simcheck.c ref_gameplay.c ../src/core/gameplay.c $(HDRS)
+	$(CC) $(CFLAGS) -I../src -o $@ simcheck.c ref_gameplay.c $(NOSIM) $(B)/host_plat.o -lm
 
 sdl: $(B)/skyroads-sdl
 $(B)/skyroads-sdl: $(OBJS) $(B)/host_plat.o sdl_main.c $(HDRS)

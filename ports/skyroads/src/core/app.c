@@ -461,7 +461,8 @@ static void enter_select(AttractModeApp *app, AudioCommands *audio, bool switch_
 
 static void tick_demo(AttractModeApp *app, AppInput input, AudioCommands *audio)
 {
-    GameplayFrameResult result;
+    const DemoInput SR_FAR *input_now;
+    GameplayEvents events;
     /* ESC (ds:0xbaa in the watched-scancode table, tested @0x21e9) is the only key
      * that ends a road, and it returns outcome 7. In the attract loop @0x36a-0x385
      * outcome 7 is the single case that leaves for the main menu -- which is where
@@ -470,11 +471,14 @@ static void tick_demo(AttractModeApp *app, AppInput input, AudioCommands *audio)
         enter_main_menu(app, audio);
         return;
     }
-    if (sample_demo_input_for_ship(app->demo_recording_, &app->demo_session_.ship) == 0) {
+    /* (C, round 2: the input sampled once; gameplay_run_demo_frame's tick without its
+     * result, which the demo does not use) */
+    input_now = sample_demo_input_for_ship(app->demo_recording_, &app->demo_session_.ship);
+    if (input_now == 0) {
         restart_intro(app, audio);
         return;
     }
-    gameplay_run_demo_frame(&app->demo_session_, app->demo_recording_, &result);
+    gameplay_step(&app->demo_session_, controller_state_from_demo_input(input_now), &events);
 }
 
 static void tick_gameplay(AttractModeApp *app, AppInput input, AudioCommands *audio)
@@ -561,6 +565,17 @@ static void tick_gameplay(AttractModeApp *app, AppInput input, AudioCommands *au
 
 void app_tick(AttractModeApp *app, AppInput input, AppTickResult *result)
 {
+    app_tick_logic(app, input, result);
+    app_scene(app, result);
+}
+
+void app_scene(const AttractModeApp *app, AppTickResult *result)
+{
+    current_render_scene(app, &result->render_scene);
+}
+
+void app_tick_logic(AttractModeApp *app, AppInput input, AppTickResult *result)
+{
     AudioCommands *audio = &result->audio_commands;
     audio->count = 0;
     switch (app->mode_) {
@@ -588,7 +603,6 @@ void app_tick(AttractModeApp *app, AppInput input, AppTickResult *result)
     }
 
     result->mode = app->mode_;
-    current_render_scene(app, &result->render_scene);
 }
 
 /* The empty-tank alarm. The HUD plays SFX 3 on the rising edge of the same 4 Hz blink
@@ -801,6 +815,7 @@ static void build_play_scene(const AttractModeApp *app, const GameplaySession *s
         session->ship.jump_o_master_velocity_delta_fp16;
     build_ship_render_state(session, &state->ship);
     state->road_palette = session->level->palette;
+    state->raw_rows = session->level->raw_rows;
     state->road_palette_count = session->level->palette_count;
 }
 

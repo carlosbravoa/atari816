@@ -15,7 +15,7 @@ static const unsigned page_row[HZV_PAGES] = {0, 206, 410};
 unsigned hzv_fbbank;
 FrameBuffer320x200 hzv_page[HZV_PAGES];
 PagePrime hzv_prime[HZV_PAGES];
-unsigned long hzv_blits;
+unsigned long hzv_blits, hzv_groups;
 bool hzv_nofast;                     /* /NOFAST: the C road pass (hz_main.c) */
 
 static unsigned shown = 0, pending = 0xFFFF, pending_frame;
@@ -58,16 +58,48 @@ static bool use_runs;
 bool hzv_noruns;
 static bool blits_out;                  /* records sent that may not be drawn yet */
 
+static void blit_sync(FrameBuffer320x200 *f);
+
+/* (round 2) FbOps.road_prepare / road_send: a pass's groups made by hz_road_pass into a slot
+ * (the frame's two passes: 8 and 4 pointer rows), sent in one call */
+#define SLOT0 400u
+#define SLOT1 200u
+static hg_rungroup slot0[SLOT0], slot1[SLOT1];
+static unsigned slot_n[2];
+
+static bool hzv_road_prepare(const RoadPass *pass, unsigned slot)
+{
+    const unsigned g = hz_road_pass(pass, slot ? (void *)slot1 : (void *)slot0, slot ? SLOT1 : SLOT0);
+    if (g == 0xFFFF)
+        return false;
+    slot_n[slot] = g;
+    return true;
+}
+
+static void hzv_road_send(FrameBuffer320x200 *f, unsigned slot)
+{
+    const unsigned g = slot_n[slot];
+    if (hzv_poll_hook)
+        hzv_poll_hook();
+    hzv_groups += g;
+    if (g)
+        hg_fill_groups_at((uint32_t)f->pixels, 64000u,
+                          (const hg_rungroup SR_FAR *)(slot ? slot1 : slot0), g);
+    blits_out = true;
+}
+
 static void hz_fb_span_jobs(FrameBuffer320x200 *f, const SpanJob *jobs, unsigned n)
 {
     const uint32_t a = (uint32_t)f->pixels;
     if (use_runs) {
         const unsigned g = hz_span_groups(jobs, n, grp);
+        hzv_groups += g;
         if (g)
             hg_fill_groups_at(a, 64000u, grp, g);
         blits_out = true;
         return;
     }
+    blit_sync(f);
     hz_span_jobs(jobs, n, (unsigned)(a >> 16), (unsigned)a);
 }
 
@@ -77,9 +109,7 @@ static void blit_sync(FrameBuffer320x200 *f)
 {
     (void)f;
     if (blits_out) {
-        unsigned long t = (unsigned long)hz_uptime();
         hg_flush(1);
-        hzv_wait_ms += (unsigned long)hz_uptime() - t;
         hzv_syncs++;
         blits_out = false;
     }
@@ -108,7 +138,11 @@ static void hz_copy_rows(FrameBuffer320x200 *f, const FrameBuffer320x200 *u, uns
         return;
     }
     hg_draw_part(img, 0, y0, 320, y1 - y0, 0, (int)(page_row[p] + y0));
-    hg_flush(0);
+    /* (round 2: sent at once only the frame's first restore, from the underlay, so Ali starts
+     * on it while the CPU works out the road; the dashboard band's copy goes with the
+     * fragment after it: one call less a frame) */
+    if (img == under_img)
+        hg_flush(0);
     blits_out = true;
     ++hzv_blits;
 }
@@ -126,7 +160,7 @@ static void hz_copy_rect(FrameBuffer320x200 *f, const FrameBuffer320x200 *u, uns
         return;
     }
     hg_draw_part(img, x0, y0, x1 - x0, y1 - y0, (int)x0, (int)(page_row[p] + y0));
-    hg_flush(0);
+    /* (round 2: the ship's rectangle goes with the band's restore that follows it) */
     blits_out = true;
     ++hzv_blits;
 }
@@ -165,13 +199,22 @@ void hzv_register_fragment(const ImageFrame SR_FAR *fragment, unsigned palette_b
         return;
     img->key = 0;
     px = hg_image_pixels(img, 0);
-    for (y = 0; y < fragment->height; ++y)
-        for (x = 0; x < fragment->width; ++x) {
-            const uint8_t v = fragment->pixels.data[(uint32_t)y * fragment->width + x];
-            px[(uint32_t)y * img->stride + x] =
-                (fragment->transparent_zero && v == 0) || v >= max_index ? 0
-                                                                         : (uint8_t)(palette_base + v);
+    {
+        /* (round 2: a row at a time through near copies: the 32-bit index a pixel took 2.6 s) */
+        uint8_t row[320];
+        const uint8_t SR_FAR *src = fragment->pixels.data;
+        const bool tz = fragment->transparent_zero;
+        for (y = 0; y < fragment->height; ++y) {
+            hz_far_copy(row, src, fragment->width);
+            for (x = 0; x < fragment->width; ++x) {
+                const uint8_t v = row[x];
+                row[x] = (tz && v == 0) || v >= max_index ? 0 : (uint8_t)(palette_base + v);
+            }
+            hz_far_copy(px, row, fragment->width);
+            src += fragment->width;
+            px += img->stride;
         }
+    }
     frag_img[nfrag] = img;
     frag_src[nfrag] = fragment;
     frag_base[nfrag] = palette_base;
@@ -203,11 +246,6 @@ static void hzv_shadow(FrameBuffer320x200 *f, const uint32_t *mask, int32_t left
 {
     blit_sync(f);
     hz_shadow(f->pixels, mask, (int)left, (int)top);
-}
-
-static bool hz_inside_tile_c(const LevelRow SR_FAR *row, uint16_t x, int y)
-{
-    return hz_inside_tile(row, x, y) != 0;
 }
 
 /* FbOps.sprite: hz_keyed over the clipped rectangle */
@@ -243,6 +281,10 @@ int hzv_init(void)
         if (hz_fill_runs(0, &probe) >= 0) {
             grp = (hg_rungroup SR_FAR *)plat_alloc(512u * sizeof(hg_rungroup));  /* PASS_JOBS */
             use_runs = grp != 0;
+            if (use_runs && !hzv_nofast) {
+                fb_ops.road_prepare = hzv_road_prepare;
+                fb_ops.road_send = hzv_road_send;
+            }
         }
     }
     fb_ops.spans = hz_fb_spans;
@@ -253,7 +295,13 @@ int hzv_init(void)
     fb_ops.sync = blit_sync;
     fb_ops.sprite = hzv_sprite;
     fb_ops.shadow = hzv_shadow;
-    level_inside_tile16_fast = hz_inside_tile_c;
+    level_probe = hz_probe;
+    level_probe16 = hz_probe16;
+    hzp_tables();
+    if (!hzv_nofast) {
+        gameplay_move16 = hz_move16;
+        gameplay_scan16 = hz_scan16;
+    }
     if (!hzv_nofast)
         fb_ops.road_row = hz_road_row;
     memset(&scr, 0, sizeof scr);
@@ -269,25 +317,42 @@ static void flips_done(void)
     }
 }
 
+unsigned hzv_held = 0xFFFF;             /* (round 2) a page drawn, to be shown later (/BEAT) */
+void (*hzv_poll_hook)(void);             /* (round 2) called while a frame is drawn (/BEAT) */
+
 unsigned hzv_free_page(void)
 {
     unsigned p;
-    flips_done();
-    for (p = 0; p < HZV_PAGES; ++p)
-        if (p != shown && p != pending)
-            return p;
-    return 0;
+    for (;;) {
+        flips_done();
+        for (p = 0; p < HZV_PAGES; ++p)
+            if (p != shown && p != pending && p != hzv_held)
+                return p;
+        hz_vsync();                     /* (a flip still waiting for its blank) */
+    }
 }
 
-void hzv_show(unsigned p, unsigned view_y)
+/* the page's drawing done (the blitter's too) */
+void hzv_ready(unsigned p)
 {
     blit_sync(&hzv_page[p]);
+}
+
+/* show page p (drawn and ready) from its row view_y at the next vertical blank */
+void hzv_flip(unsigned p, unsigned view_y)
+{
     flips_done();
     scr.y = (unsigned short)(page_row[p] + view_y);
     hz_fs_scroll(&scr);
     /* a page still waiting is never shown: it is free again */
     pending = p;
     pending_frame = hz_frame();
+}
+
+void hzv_show(unsigned p, unsigned view_y)
+{
+    hzv_ready(p);
+    hzv_flip(p, view_y);
 }
 
 void hzv_palette(const Palette256 *pal)

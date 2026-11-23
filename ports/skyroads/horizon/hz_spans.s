@@ -125,7 +125,10 @@ _hz_span_jobs:
 ; a job is its shape's PreparedSpan array as it is, {u24 the spans, u8 colour (the job's
 ; index), u16 count, u8 stride 5, u8 fields: the offset at 0 (left) or 2 (right), the width
 ; at 4}; jobs of no spans are left out. -> the groups written (8 bytes each, at out: one bank)
-        .export _hz_span_groups
+        .export _hz_span_groups, _hz_span_total
+        .segment "BSS"
+_hz_span_total: .res 2           ; (the runs sent: the measurements)
+        .segment "CODE"
 _hz_span_groups:
         lda     ARGS+4,s
         sta     njobs
@@ -156,6 +159,9 @@ _hz_span_groups:
         lda     [shp],y         ; its spans' count
         beq     @next
         sta     a:4,x
+        clc
+        adc     f:_hz_span_total
+        sta     f:_hz_span_total    ; (DBR: the groups' bank here)
         ldy     #0
         lda     [shp],y         ; the spans
         sta     a:0,x

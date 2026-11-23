@@ -64,10 +64,23 @@ typedef struct {
     uint16_t oxygen;
     const LevelRow SR_FAR *cells;
     unsigned length;                /* cells.size() */
+    const RoadRow SR_FAR *raw_rows; /* C (round 2): the road's own rows (raw descriptors) */
     /* The road's 72-entry VGA palette (already scaled 6-bit -> 8-bit). The DOS
      * road renderer indexes this by TREKDAT colour code for exact road/wall hues. */
     const RgbColor SR_FAR *palette;
     unsigned palette_count;
+    /* C (round 2): what the tick derives from the road's constants, once (each was a 32-bit
+     * divide a tick): level_gravity_acceleration_128, the oxygen burnt a tick, 0x7530 / fuel
+     * (-1: fuel 0); and a byte a row, bit c set when cell c is not empty */
+    int32_t gravity_acc_128;
+    int32_t oxygen_dec;
+    int32_t fuel_q;
+    const uint8_t SR_FAR *row_mask;
+    /* 8 bytes a row, a byte a cell: bit 0 not empty, 1 tunnel, 2 cube, 3 the cube 120 high
+     * (else 100); the 8th byte (no cell) only bit 4: the row has a tunnel or a cube. What
+     * the collision probe reads (horizon/hz_probe.s) */
+    const uint8_t SR_FAR *cell_bits;
+    bool built;                     /* C (round 2): cells, row_mask, cell_bits made */
 } Level;
 
 /* C: the cell probes return a pointer to the cell (the C++ returned a copy of the
@@ -88,8 +101,13 @@ CellRef level_get_cell_fp16(const Level *level, int32_t x_fp16, int32_t z_fp16);
 CellRef level_get_cell_128(const Level *level, int32_t x_128, int32_t z_fp16);
 bool level_is_inside_tile_128(const Level *level, int32_t x_128, int32_t y_128,
                               int32_t z_fp16);
-/* C: a platform's version of the 16-bit probe for the row at z (NULL: the C) */
-extern bool (*level_inside_tile16_fast)(const LevelRow SR_FAR *row, uint16_t x, int y);
+/* C (round 2): the probe the simulation calls: level_is_inside_tile_128, or a platform's
+ * own of the same arguments and result (horizon/hz_probe.s) */
+extern bool (*level_probe)(const Level *level, int32_t x_128, int32_t y_128, int32_t z_fp16);
+/* the same for x 6272..57855, y -20000..32767 and z >= 0 given as its row (z >> 16): the
+ * answer of level_is_inside_tile_128(level, x, y, z) (level_probe16_c, or a platform's) */
+bool level_probe16_c(const Level *level, uint16_t x_128, int y_128, unsigned zrow);
+extern bool (*level_probe16)(const Level *level, uint16_t x_128, int y_128, unsigned zrow);
 /* (the 32-bit form, which the 16-bit one must equal: host test probecheck) */
 bool level_is_inside_tile_128_ref(const Level *level, int32_t x_128, int32_t y_128,
                                   int32_t z_fp16);
@@ -97,7 +115,9 @@ bool level_is_inside_tunnel_128(const Level *level, int32_t x_128, int32_t y_128
                                 int32_t z_fp16);
 
 Level level_from_road_entry(const RoadEntry SR_FAR *road);
-/* levels_from_roads_archive: an array of roads.road_count levels (plat_alloc) */
+/* levels_from_roads_archive: an array of roads.road_count levels (malloc). C (round 2): their
+ * cells are built by level_build when a level is played (gameplay_session_init does it) */
 Level *levels_from_roads_archive(const RoadsArchive *roads);
+void level_build(Level *level);
 
 #endif

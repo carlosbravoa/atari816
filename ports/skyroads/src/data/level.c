@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 #include "data/level.h"
 
@@ -280,20 +281,23 @@ static bool inside_tile16(const Level *level, uint16_t x, int y, int32_t z_fp16)
                     cell16(row, far_side ? x + (uint16_t)(46 * 128) : x - (uint16_t)(46 * 128)));
 }
 
-bool (*level_inside_tile16_fast)(const LevelRow SR_FAR *row, uint16_t x, int y);
+bool (*level_probe)(const Level *level, int32_t x_128, int32_t y_128, int32_t z_fp16) =
+    level_is_inside_tile_128;
+
+/* C (round 2): the probe for x 6272..57855, y -20000..32767 and the row of a z >= 0 */
+bool level_probe16_c(const Level *level, uint16_t x_128, int y_128, unsigned zrow)
+{
+    return zrow < level->length && inside_tile16(level, x_128, y_128, (int32_t)zrow << 16);
+}
+
+bool (*level_probe16)(const Level *level, uint16_t x_128, int y_128, unsigned zrow) =
+    level_probe16_c;
 
 bool level_is_inside_tile_128(const Level *level, int32_t x_128, int32_t y_128,
                               int32_t z_fp16)
 {
-    if (x_128 >= 6272 && x_128 <= 57855 && y_128 >= -20000 && y_128 <= 32767 && z_fp16 >= 0) {
-        if (level_inside_tile16_fast) {
-            /* (a platform's own inside_tile16: horizon/hz_probe.s) */
-            const uint16_t zrow = (uint16_t)((uint32_t)z_fp16 >> 16);
-            return zrow < level->length &&
-                   level_inside_tile16_fast(&level->cells[zrow], (uint16_t)x_128, (int)y_128);
-        }
+    if (x_128 >= 6272 && x_128 <= 57855 && y_128 >= -20000 && y_128 <= 32767 && z_fp16 >= 0)
         return inside_tile16(level, (uint16_t)x_128, (int)y_128, z_fp16);
-    }
     return level_is_inside_tile_128_ref(level, x_128, y_128, z_fp16);
 }
 
@@ -345,15 +349,18 @@ static uint8_t up(uint8_t v)
     return s > 255u ? 255u : (uint8_t)s;
 }
 
-Level level_from_road_entry(const RoadEntry SR_FAR *road)
+/* C (round 2): a level's header (name, constants, palette, the road's rows), its cells built
+ * later by level_build (lazily: a level's cells cost 0.2 s on the Atari816, 31 levels
+ * 5.5 s at the start) */
+static Level level_header(const RoadEntry SR_FAR *road)
 {
     Level level;
-    unsigned color_count, i, r;
+    unsigned color_count, i;
     RgbColor SR_FAR *palette;
-    LevelRow SR_FAR *cells;
 
     if (div46[46] == 0)
         div46_init();
+    memset(&level, 0, sizeof level);
     level.road_index = road->index;
     if (road->index == 0)
         sprintf(level.name, "Demo Level");
@@ -370,16 +377,65 @@ Level level_from_road_entry(const RoadEntry SR_FAR *road)
                          up(road->palette_vga.data[i * 3 + 2]));
     level.palette = palette;
     level.palette_count = color_count;
-    cells = road->row_count ? (LevelRow SR_FAR *)plat_alloc((uint32_t)road->row_count *
-                                                             sizeof(LevelRow))
-                            : 0;
-    for (r = 0; r < road->row_count; ++r) {
+    level.length = road->row_count;
+    level.raw_rows = road->rows;
+    /* (C, round 2: the tick's constants, as handle_oxygen_and_fuel and
+     * level_gravity_acceleration_128 computed them every tick) */
+    level.gravity_acc_128 = -((int32_t)level.gravity * 0x1680 / 0x190);
+    level.oxygen_dec = level.oxygen > 0 ? 0x7530 / (0x24 * (int32_t)level.oxygen) : 0x7530;
+    level.fuel_q = level.fuel > 0 ? 0x7530 / (int32_t)level.fuel : -1;
+    level.built = false;
+    return level;
+}
+
+void level_build(Level *level)
+{
+    unsigned r;
+    LevelRow SR_FAR *cells;
+    const RoadRow SR_FAR *rows = level->raw_rows;
+    if (level->built)
+        return;
+    cells = level->length ? (LevelRow SR_FAR *)plat_alloc((uint32_t)level->length *
+                                                          sizeof(LevelRow))
+                          : 0;
+    for (r = 0; r < level->length; ++r) {
         unsigned column;
         for (column = 0; column < ROAD_COLUMNS; ++column)
-            cell_from_descriptor(road->rows[r].c[column], &cells[r].c[column]);
+            cell_from_descriptor(rows[r].c[column], &cells[r].c[column]);
     }
-    level.cells = cells;
-    level.length = road->row_count;
+    level->cells = cells;
+    {
+        uint8_t SR_FAR *mask = (uint8_t SR_FAR *)plat_alloc(level->length ? level->length : 1);
+        uint8_t SR_FAR *bits = (uint8_t SR_FAR *)plat_alloc((uint32_t)level->length * 8u + 8u);
+        for (r = 0; r < level->length; ++r) {
+            unsigned column, m = 0;
+            for (column = 0; column < ROAD_COLUMNS; ++column) {
+                const LevelCell SR_FAR *c = &cells[r].c[column];
+                uint8_t b = 0;
+                if (!cell_is_empty(c)) {
+                    m |= 1u << column;
+                    b = 1;
+                }
+                if (c->has_tunnel)
+                    b |= 2;
+                if (c->has_cube_height)
+                    b |= c->cube_height == 120 ? 12 : 4;     /* (100 or 120: cell_from_descriptor) */
+                bits[r * 8u + column] = b;
+                if (b & 6)
+                    bits[r * 8u + 7] = 0x10;    /* (the row has a tunnel or a cube) */
+            }
+            mask[r] = (uint8_t)m;
+        }
+        level->row_mask = mask;
+        level->cell_bits = bits;
+    }
+    level->built = true;
+}
+
+Level level_from_road_entry(const RoadEntry SR_FAR *road)
+{
+    Level level = level_header(road);
+    level_build(&level);
     return level;
 }
 
@@ -390,6 +446,6 @@ Level *levels_from_roads_archive(const RoadsArchive *roads)
     if (!levels)
         sr_fail("out of memory (levels)");
     for (i = 0; i < roads->road_count; ++i)
-        levels[i] = level_from_road_entry(&roads->roads[i]);
+        levels[i] = level_header(&roads->roads[i]);     /* (C, round 2: built when played) */
     return levels;
 }

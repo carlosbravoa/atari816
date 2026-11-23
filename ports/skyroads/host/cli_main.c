@@ -10,6 +10,10 @@
  *   srtool predecode DIR OUT          every LZ stream of the game's files, decoded, into
  *                                     OUT/NAME.DEC (for the Atari816: horizon/hz_data.c)
  *   srtool fadecheck                  the integer fades against the C++'s floats
+ *   srtool prepare DIR OUT            (round 2) SKYPREP.DAT: TREKDAT's clipped spans and the
+ *                                     ship's sprites as renderer_init makes them, for the
+ *                                     Atari816 to read (renderer_init_prepared)
+ *   srtool demo-frames DIR OUT incr PREP  the frames with the renderer from PREP
  * (upstream's `summary` printed the inspection catalogs this translation leaves out.) */
 #include <math.h>
 #include <stdio.h>
@@ -91,6 +95,31 @@ static int demo_sim(const char *root, unsigned frame_count)
 
 /* ---- the app, as upstream's host builds it */
 
+/* (round 2) the demo session's whole state as one number: horizon/hz_main.c's state_hash */
+static unsigned long state_hash(const GameplaySession *g)
+{
+    const Ship *sh[2];
+    uint32_t h = 5381;
+    unsigned k;
+    sh[0] = &g->ship;
+    sh[1] = &g->expected_ship;
+#define MIX(v) (h = (h << 5) + h + (uint32_t)(int32_t)(v))
+    for (k = 0; k < 2; ++k) {
+        const Ship *s = sh[k];
+        MIX(s->x_position_128); MIX(s->y_position_128); MIX(s->z_position_fp16);
+        MIX(s->slide_amount_128); MIX(s->sliding_accel); MIX(s->x_movement_base_128);
+        MIX(s->y_velocity_128); MIX(s->z_velocity_fp16); MIX(s->fuel_remaining);
+        MIX(s->oxygen_remaining); MIX(s->offset_at_which_not_inside_tile);
+        MIX(s->is_on_ground); MIX(s->is_going_up); MIX(s->has_run_jump_o_master);
+        MIX(s->jump_o_master_velocity_delta_fp16); MIX(s->jump_o_master_in_use);
+        MIX(s->jumped_from_y_position_128); MIX(s->state);
+    }
+    MIX(g->did_win); MIX(g->has_death_frame_index); MIX(g->death_frame_index);
+    MIX(g->frame_index_);
+#undef MIX
+    return h;
+}
+
 static Renderer renderer;
 static AttractModeApp app;
 static RoadsArchive roads;
@@ -112,6 +141,8 @@ static void load_game(const char *root)
     app_set_intro_anim_group_count(&app, groups);
 }
 
+static void load_game_prepared(const char *root, const char *prep);
+
 static void put_frame(FILE *f, const RenderedFrame *r)
 {
     unsigned i;
@@ -123,7 +154,7 @@ static void put_frame(FILE *f, const RenderedFrame *r)
     }
 }
 
-static int demo_frames(const char *root, const char *outpath, bool incremental)
+static int demo_frames(const char *root, const char *outpath, bool incremental, const char *prep)
 {
     static uint8_t pixels[64000], under[64000], dash[64000];
     RenderedFrame fr;
@@ -136,7 +167,10 @@ static int demo_frames(const char *root, const char *outpath, bool incremental)
     FILE *out = fopen(outpath, "wb");
     if (!out)
         sr_fail("cannot write %s", outpath);
-    load_game(root);
+    if (prep)
+        load_game_prepared(root, prep);
+    else
+        load_game(root);
     memset(&none, 0, sizeof none);
     memset(&fr, 0, sizeof fr);
     memset(&cache, 0, sizeof cache);
@@ -175,6 +209,28 @@ static int demo_frames(const char *root, const char *outpath, bool incremental)
     fprintf(stderr, "dashboard cache %s; ", renderer.dash_cache_ok ? "on" : "off");
     fprintf(stderr, "%u frames; spans a frame: %lu on average, %lu at most; their pixels %lu, %lu\n",
             n, spans / n, worst, span_px / n, worst_px);
+    return 0;
+}
+
+/* demo-state: "s N HASH" for every demo tick, as /CHECK prints them (the state after the
+ * tick, the frame it draws) */
+static int demo_state(const char *root)
+{
+    AppTickResult t;
+    AppInput none;
+    unsigned n = 0;
+    load_game(root);
+    memset(&none, 0, sizeof none);
+    for (;;) {
+        app_tick(&app, none, &t);
+        if (t.mode != AppMode_DemoPlayback) {
+            if (n)
+                break;
+            continue;
+        }
+        printf("s %u %08lx\n", n, state_hash(&app.demo_session_));
+        n++;
+    }
     return 0;
 }
 
@@ -237,6 +293,206 @@ static int script_frames(const char *root, const char *outpath, const char *scri
     return 0;
 }
 
+/* ---- prepare: SKYPREP.DAT, what renderer_init makes (renderer.c renderer_init_prepared) */
+static void put16(FILE *f, unsigned v) { fputc((int)(v & 255), f); fputc((int)((v >> 8) & 255), f); }
+
+/* (round 2, the spans' merge) the centre tile's two halves: pointer slot 3's top face drawn
+ * on the left (left offsets) and again on the right (right offsets), the same shape, the
+ * same colour (the side tables are the identity below 0x1F). One group of both, its spans
+ * joined where they meet, drawn where the left half was, is the same picture when the right
+ * half's pixels meet none of the shapes drawn between: the left cell's others and the right
+ * side's cells 0..2 (every shape draw_dos_type_0..5 can reach from a cell's pointer k: the
+ * cursor goes at most 2, 0, 1, 2, 7, 2 shapes on from pointers 0..5; but column 4's inward
+ * face, which needs column 3 without a tile).
+ * centre_merge -> its spans (offset, width; both offsets the same) or 0 */
+typedef struct { unsigned o, w; } OW;
+static int cmp_ow(const void *a, const void *b) { return (int)((const OW *)a)->o - (int)((const OW *)b)->o; }
+
+static unsigned centre_merge(const Renderer *r, unsigned ri, unsigned prow, OW *out)
+{
+    static unsigned char mark[64000];
+    const TrekdatRecord *rec = &r->assets_.trekdat.records[ri];
+    const uint16_t *ptr = &rec->pointer_shape[prow * TREKDAT_POINTER_COLUMNS];
+    const unsigned s = ptr[3 * 6];
+    const PreparedShape *top;
+    unsigned k, j, i, slot, n = 0, x;
+    int ok = 1;
+    OW all[512];
+    if (s == TREKDAT_NO_SHAPE || s >= rec->shape_count)
+        return 0;
+    top = &r->prepared[ri][s];
+    if (top->count == 0)
+        return 0;
+    memset(mark, 0, sizeof mark);
+    for (i = 0; i < top->count; ++i)
+        for (x = 0; x < top->spans[i].width; ++x)
+            mark[top->spans[i].right + x] = 1;
+    /* the shapes drawn between: left slot 3's (but its top's own first drawing), right 0..2 */
+    for (slot = 0; slot < 4 && ok; ++slot) {
+        const int right = slot < 3;
+        const unsigned cs = right ? slot : 3;
+        for (k = 0; k < 6 && ok; ++k) {
+            const unsigned p0 = ptr[cs * 6 + k];
+            if (p0 == TREKDAT_NO_SHAPE)
+                continue;
+            static const unsigned MAXJ[6] = {2, 0, 1, 2, 7, 2};
+            for (j = 0; j <= MAXJ[k] && p0 + j < rec->shape_count && ok; ++j) {
+                const PreparedShape *sh = &r->prepared[ri][p0 + j];
+                if (!right && k == 0 && j == 0)
+                    continue;           /* (the left half itself, its first drawing) */
+                if (right && slot == 2 && k == 0 && j == 1)
+                    continue;           /* (column 4's inward face: drawn only when column 3
+                                         * has no tile, and then it has no top face) */
+                for (i = 0; i < sh->count && ok; ++i) {
+                    const unsigned o = right ? sh->spans[i].right : sh->spans[i].left;
+                    for (x = 0; x < sh->spans[i].width; ++x)
+                        if (mark[o + x])
+                            ok = 0;
+                }
+            }
+        }
+    }
+    if (!ok)
+        return 0;
+    if (top->count * 2 > 512)
+        return 0;
+    for (i = 0; i < top->count; ++i) {
+        all[2 * i].o = top->spans[i].left;
+        all[2 * i].w = top->spans[i].width;
+        all[2 * i + 1].o = top->spans[i].right;
+        all[2 * i + 1].w = top->spans[i].width;
+    }
+    qsort(all, top->count * 2, sizeof(OW), cmp_ow);
+    for (i = 0; i < top->count * 2; ++i) {
+        if (n && out[n - 1].o + out[n - 1].w == all[i].o && out[n - 1].w + all[i].w <= 255) {
+            out[n - 1].w += all[i].w;
+            continue;
+        }
+        if (n && out[n - 1].o + out[n - 1].w > all[i].o)
+            return 0;               /* (the halves overlap: left as they are) */
+        out[n++] = all[i];
+    }
+    return n;
+}
+
+static int prepare(const char *root, const char *outpath)
+{
+    static uint8_t chunk[16][65280];
+    static unsigned chunk_size[16];
+    static unsigned shape_chunk[16][TREKDAT_SHAPE_ROWS + 64], shape_index[16][TREKDAT_SHAPE_ROWS + 64];
+    static unsigned cm_chunk[16][TREKDAT_POINTER_ROWS], cm_index[16][TREKDAT_POINTER_ROWS],
+        cm_count[16][TREKDAT_POINTER_ROWS];
+    static OW cm[512];
+    unsigned nchunks = 0, r, sh, k, i, p, merged = 0, before = 0, after = 0;
+    const TrekdatArchive *t;
+    FILE *f;
+    load_game(root);
+    t = &renderer.assets_.trekdat;
+    if (t->record_count > 16)
+        sr_fail("prepare: %u records", t->record_count);
+#define NEWCHUNK(bytes) do { if (nchunks == 0 || chunk_size[nchunks - 1] + (bytes) > 65280u) { \
+        if (nchunks == 16) sr_fail("prepare: too many spans"); chunk_size[nchunks++] = 0; } } while (0)
+#define PUT5(off_l, off_r, w) do { uint8_t *o_ = &chunk[nchunks - 1][chunk_size[nchunks - 1]]; \
+        o_[0] = (uint8_t)(off_l); o_[1] = (uint8_t)((off_l) >> 8); o_[2] = (uint8_t)(off_r); \
+        o_[3] = (uint8_t)((off_r) >> 8); o_[4] = (uint8_t)(w); chunk_size[nchunks - 1] += 5; } while (0)
+    for (r = 0; r < t->record_count; ++r) {
+        for (sh = 0; sh < t->records[r].shape_count; ++sh) {
+            const PreparedShape *ps = &renderer.prepared[r][sh];
+            if (sh >= TREKDAT_SHAPE_ROWS + 64)
+                sr_fail("prepare: too many shapes");
+            if (ps->count == 0) {
+                shape_chunk[r][sh] = 0;
+                shape_index[r][sh] = 0;
+                continue;
+            }
+            NEWCHUNK(ps->count * 5u);
+            shape_chunk[r][sh] = nchunks - 1;
+            shape_index[r][sh] = chunk_size[nchunks - 1] / 5u;
+            for (k = 0; k < ps->count; ++k)
+                PUT5(ps->spans[k].left, ps->spans[k].right, ps->spans[k].width);
+        }
+        for (p = 0; p < TREKDAT_POINTER_ROWS; ++p) {
+            const unsigned n = centre_merge(&renderer, r, p, cm);
+            cm_count[r][p] = n;
+            if (!n)
+                continue;
+            merged++;
+            before += 2 * renderer.prepared[r][t->records[r].pointer_shape[p * TREKDAT_POINTER_COLUMNS + 18]].count;
+            after += n;
+            NEWCHUNK(n * 5u);
+            cm_chunk[r][p] = nchunks - 1;
+            cm_index[r][p] = chunk_size[nchunks - 1] / 5u;
+            for (k = 0; k < n; ++k)
+                PUT5(cm[k].o, cm[k].o, cm[k].w);
+        }
+    }
+    f = fopen(outpath, "wb");
+    if (!f)
+        sr_fail("cannot write %s", outpath);
+    fwrite("SKP2", 1, 4, f);
+    put16(f, t->record_count);
+    for (r = 0; r < t->record_count; ++r) {
+        put16(f, t->records[r].shape_count);
+        for (k = 0; k < TREKDAT_POINTER_COUNT; ++k)
+            put16(f, t->records[r].pointer_shape[k]);
+    }
+    put16(f, nchunks);
+    for (i = 0; i < nchunks; ++i) {
+        put16(f, chunk_size[i]);
+        put16(f, 0);
+        fwrite(chunk[i], 1, chunk_size[i], f);
+    }
+    for (r = 0; r < t->record_count; ++r)
+        for (sh = 0; sh < t->records[r].shape_count; ++sh) {
+            const PreparedShape *ps = &renderer.prepared[r][sh];
+            put16(f, ps->count);
+            fputc(ps->color, f);
+            fputc((int)shape_chunk[r][sh], f);
+            put16(f, shape_index[r][sh]);
+        }
+    fputc(renderer.car_atlas_.keyed_ok, f);
+    fputc(renderer.car_atlas_.valid, f);
+    put16(f, 77);
+    for (i = 0; i < 77; ++i) {
+        const ImageFrame *fr = i < 14 ? &renderer.car_atlas_.explosion_frames[i]
+                                      : &renderer.car_atlas_.exact_ship_frames[i - 14];
+        put16(f, fr->width);
+        put16(f, fr->height);
+        fwrite(fr->pixels.data, 1, (size_t)fr->width * fr->height, f);
+    }
+    /* the centre merges: a record's 13 pointer rows, {u16 count (0: none), u8 0, u8 chunk,
+     * u16 index} */
+    for (r = 0; r < t->record_count; ++r)
+        for (p = 0; p < TREKDAT_POINTER_ROWS; ++p) {
+            put16(f, cm_count[r][p]);
+            fputc(0, f);
+            fputc(cm_count[r][p] ? (int)cm_chunk[r][p] : 0, f);
+            put16(f, cm_count[r][p] ? cm_index[r][p] : 0);
+        }
+    fclose(f);
+    fprintf(stderr, "prepare: %u records, %u chunks of spans, %u centre merges (%u spans -> %u), %s\n",
+            t->record_count, nchunks, merged, before, after, outpath);
+    return 0;
+}
+
+/* load_game, the renderer's part from SKYPREP.DAT (as the Atari816 does) */
+static void load_game_prepared(const char *root, const char *prep)
+{
+    unsigned g, groups = 0;
+    Bytes b;
+    roads = load_roads_lzs_path(plat_asset_path(root, "ROADS.LZS"));
+    demo = load_demo_rec_path(plat_asset_path(root, "DEMO.REC"));
+    levels = levels_from_roads_archive(&roads);
+    attract_mode_assets_load(&renderer.assets_, root, false);
+    if (!plat_read_file(prep, &b) || !renderer_init_prepared(&renderer, &b))
+        sr_fail("%s: not a SKYPREP.DAT", prep);
+    app_init(&app, levels, roads.road_count, &demo);
+    for (g = 0; g < renderer.assets_.anim.frame_count; ++g)
+        if (renderer.assets_.anim.frames[g].count)
+            groups++;
+    app_set_intro_anim_group_count(&app, groups);
+}
+
 /* ---- predecode: every stream the loaders decode, in order, with what they consumed */
 
 static FILE *dec_out;
@@ -290,6 +546,8 @@ static int probecheck(const char *root)
     Level *lv = levels_from_roads_archive(&r);
     unsigned long n = 0, bad = 0;
     unsigned i;
+    for (i = 0; i < r.road_count; ++i)
+        level_build(&lv[i]);
     srand(1);
     for (i = 0; i < 4000000; ++i) {
         const Level *l = &lv[rand() % r.road_count];
@@ -310,9 +568,14 @@ int main(int argc, char **argv)
     if (strcmp(command, "demo-sim") == 0 && argc > 2)
         return demo_sim(argv[2], argc > 3 ? (unsigned)strtoul(argv[3], NULL, 10) : 60);
     if (strcmp(command, "demo-frames") == 0 && argc > 3)
-        return demo_frames(argv[2], argv[3], argc > 4 && strcmp(argv[4], "incr") == 0);
+        return demo_frames(argv[2], argv[3], argc > 4 && strcmp(argv[4], "incr") == 0,
+                           argc > 5 ? argv[5] : NULL);
+    if (strcmp(command, "prepare") == 0 && argc > 3)
+        return prepare(argv[2], argv[3]);
     if (strcmp(command, "script") == 0 && argc > 5)
         return script_frames(argv[2], argv[3], argv[4], (unsigned)strtoul(argv[5], NULL, 10));
+    if (strcmp(command, "demo-state") == 0 && argc > 2)
+        return demo_state(argv[2]);
     if (strcmp(command, "probecheck") == 0 && argc > 2)
         return probecheck(argv[2]);
     if (strcmp(command, "predecode") == 0 && argc > 3)

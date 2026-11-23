@@ -60,6 +60,9 @@ uint8_t fb_pixel_at(const FrameBuffer320x200 *f, unsigned x, unsigned y);
 typedef struct {
     FrameBuffer320x200 frame;
     Palette256 palette;
+    /* C (round 2): the PlaySceneCache generation the palette is a copy of (0: none): the
+     * incremental path copies the palette only when it changed */
+    unsigned palette_stamp;
 } RenderedFrame;
 
 /* RVSTACK: state for the incremental play-scene path (the console port).
@@ -130,6 +133,8 @@ typedef struct {
 
 /* source_root: the folder of the game's files (plat_asset_path finds each) */
 void attract_mode_assets_load_from_root(AttractModeAssets *a, const char *source_root);
+/* C (round 2): the same, TREKDAT left out when renderer_init_prepared makes what it gives */
+void attract_mode_assets_load(AttractModeAssets *a, const char *source_root, bool with_trekdat);
 
 /* ---- ship visual derivation (public so the placement helpers can share it) -- */
 
@@ -191,12 +196,33 @@ typedef struct {
     uint8_t right;              /* 1: the mirrored offsets */
 } SpanJob;
 
+/* C (round 2): a whole road pass for FbOps.road_pass: its pointer rows (n of them, each
+ * with the level row it draws: row and row - 1), the record's shapes and pointer table, the
+ * road's rows (any row outside the scene's r0 .. r0 + rn - 1 reads as zero_row) */
+typedef struct {
+    const PreparedShape SR_FAR *prepared;
+    const uint16_t SR_FAR *pointer_shape;
+    const RoadRow SR_FAR *raw_rows;
+    uint16_t shape_count;
+    int16_t r0, rn;
+    const uint16_t SR_FAR *zero_row;
+    uint16_t n;
+    struct {
+        uint16_t prow;
+        int16_t row;
+    } seq[8];
+    /* the record's centre merges (Renderer.center; NULL: none) */
+    const PreparedShape SR_FAR *center;
+} RoadPass;
+/* (the platform's own use of a RoadPass: renderer.c fills only the fields above) */
+
 /* the platform's fast paths (FbOps): defaults are plain C */
 typedef struct {
     /* `count` spans of `shape`: fb[(side ? right : left) .. + width) = index */
     void (*spans)(FrameBuffer320x200 *f, const PreparedSpan SR_FAR *spans, unsigned count,
                   bool right, uint8_t index);
-    /* n jobs, in order (each its shape's spans, as spans() draws them) */
+    /* n jobs, in order (each its shape's spans, as spans() draws them); drawing by the CPU,
+     * it waits first for what the ops sent before (sync) */
     void (*span_jobs)(FrameBuffer320x200 *f, const SpanJob *jobs, unsigned n);
     /* rows y0 .. y1 - 1 of u into f */
     void (*copy_rows)(FrameBuffer320x200 *f, const FrameBuffer320x200 *u, unsigned y0,
@@ -217,9 +243,16 @@ typedef struct {
     void (*shadow)(FrameBuffer320x200 *f, const uint32_t *mask, int32_t left, int32_t top);
     /* draw_dos_pointer_row's cells (both sides, the four slots): the jobs they add, in
      * order, written to jobs (at most 96) -> how many; NULL: the C below */
-    unsigned (*road_row)(const uint16_t SR_FAR *ptr24, const uint16_t *current_row,
-                         const uint16_t *nearer_row, const PreparedShape SR_FAR *prepared,
+    unsigned (*road_row)(const uint16_t SR_FAR *ptr24, const uint16_t SR_FAR *current_row,
+                         const uint16_t SR_FAR *nearer_row, const PreparedShape SR_FAR *prepared,
                          unsigned shape_count, SpanJob *jobs);
+    /* (round 2) a whole pass: draw_dos_pointer_row's jobs of every pointer row, worked out
+     * into the platform's slot (0 or 1; false: they did not fit, the renderer draws the pass
+     * by road_row / the C), and later drawn, in order, by road_send. The incremental path
+     * prepares both passes of a frame before it sends the first (the CPU works while the
+     * blitter restores the band). NULL: the pass by road_row / the C */
+    bool (*road_prepare)(const RoadPass *pass, unsigned slot);
+    void (*road_send)(FrameBuffer320x200 *f, unsigned slot);
 } FbOps;
 
 extern FbOps fb_ops;
@@ -234,9 +267,18 @@ typedef struct {
      * overlap: then drawing only what changed gives the same pixels) */
     ImageFrame dash_top;
     bool dash_cache_ok;
+    /* C (round 2, from SKYPREP.DAT; NULL without it): per record, per pointer row, the centre
+     * tile's top face, its left and right halves (pointer slot 3, the same shape) as one
+     * array of spans joined where they meet, where drawing it whole at the left half's turn
+     * is the same picture (host/cli_main.c centre_merge checks the pixels between); count 0:
+     * not so. FbOps.road_prepare may draw it so (horizon/hz_road.s) */
+    PreparedShape SR_FAR *center[16];
 } Renderer;
 
 void renderer_init(Renderer *r);   /* after its assets_ are loaded */
+/* C (round 2): renderer_init from SKYPREP.DAT's bytes (srtool prepare): TREKDAT's spans and the
+ * ship's sprites as renderer_init makes them; false: not such a file */
+bool renderer_init_prepared(Renderer *r, const Bytes *prep);
 void renderer_render_scene(const Renderer *r, RenderedFrame *out, const RenderScene *scene);
 /* RVSTACK: byte-identical to render_play_scene, at the DOS write budget.
  * `out.frame` must persist across calls (it carries the previous frame);

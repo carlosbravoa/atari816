@@ -158,6 +158,9 @@ typedef struct {
     ShipRenderState ship;
     const RgbColor SR_FAR *road_palette; /* this road's VGA palette */
     unsigned road_palette_count;
+    /* C (round 2): the level's rows of raw descriptors (Level.raw_rows): the road pass reads
+     * its rows there */
+    const RoadRow SR_FAR *raw_rows;
 } DemoPlaybackState;
 
 typedef struct {
@@ -256,6 +259,10 @@ void app_init(AttractModeApp *app, const Level *levels, unsigned level_count,
               const DemoRecording *demo_recording);
 static inline AppMode app_mode(const AttractModeApp *app) { return app->mode_; }
 void app_tick(AttractModeApp *app, AppInput input, AppTickResult *result);
+/* C (round 2): app_tick in two: the tick (the result's mode and audio commands) and the
+ * render scene of the state it left (needed only for a tick whose frame is drawn) */
+void app_tick_logic(AttractModeApp *app, AppInput input, AppTickResult *result);
+void app_scene(const AttractModeApp *app, AppTickResult *result);
 
 void app_current_gameplay_scene(const AttractModeApp *app, DemoPlaybackState *out);
 void app_current_demo_scene(const AttractModeApp *app, DemoPlaybackState *out);

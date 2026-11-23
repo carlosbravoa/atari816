@@ -39,7 +39,9 @@ static unsigned cur_bank;               /* the bank being filled, 0 = none */
 static uint32_t cur_off;
 unsigned hzp_banks_used;
 
-void SR_FAR *plat_alloc(uint32_t n)
+/* plat_alloc without the zeroing, for a buffer the caller fills whole at once (round 2:
+ * zeroing the decoded streams before reading them over took a second of the load) */
+static void SR_FAR *alloc_raw(uint32_t n)
 {
     void SR_FAR *p;
     if (n == 0)
@@ -57,10 +59,16 @@ void SR_FAR *plat_alloc(uint32_t n)
         hzp_banks_used++;
     }
     p = hz_farptr(cur_bank, (unsigned)cur_off);
-    hz_far_set(p, 0, (unsigned)n);
     cur_off += n;
     if (cur_off & 1)
         cur_off++;
+    return p;
+}
+
+void SR_FAR *plat_alloc(uint32_t n)
+{
+    void SR_FAR *p = alloc_raw(n);
+    hz_far_set(p, 0, (unsigned)(n ? n : 1));
     return p;
 }
 
@@ -189,7 +197,7 @@ static bool fetch_hook(uint32_t offset, uint32_t expected_size, DecompressResult
         sr_fail(".DEC file does not match its .LZS (stream at %lu: %lu, want %lu, %lu)",
                 (unsigned long)off, (unsigned long)size, (unsigned long)offset,
                 (unsigned long)expected_size);
-    result->output.data = size ? (uint8_t SR_FAR *)plat_alloc(size) : 0;
+    result->output.data = size ? (uint8_t SR_FAR *)alloc_raw(size) : 0;
     result->output.size = size;
     result->consumed = consumed;
     if (size && !read_far(dec_handle, (uint32_t)result->output.data, size))
