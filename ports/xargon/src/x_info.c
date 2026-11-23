@@ -44,6 +44,9 @@ void init_info (void) {
 		info[c].na[len]=0;
 #endif
 		};
+#if defined(_HORIZON)
+	close (blockfile);					// (its 512-byte read-ahead is the heap's)
+#endif
 
 	for (c=0; c<numstates; c++) {
 		stateinfo [c]=0;

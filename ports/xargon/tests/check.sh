@@ -7,13 +7,19 @@
 #      again. Checked: the save on the card (SAVE_0.XR1, the name in CONFIG.XR1); the game
 #      loaded back where it was saved; the sound (Lau's writes for the effects, the music
 #      and the effects in the recorded output: loud enough, not clipped); the frame rate;
-#      the pictures of its screens (tests/play.shots) against tests/play.md5
+#      the pictures of its screens (tests/play.shots) against tests/play.md5; the heap at
+#      each board's start the same each time (no leak), and room on every board of the
+#      three episodes for the longest text window (tests/heapcheck.py)
 #   2. the recorded demo (tests/demo.script: DEMO-PREVIEW, DEMO_MAC.XR0) played twice, the
 #      second time on a slower machine (/BUSY:30: 30 ms more of the CPU each game frame,
 #      so the frames are late and fall elsewhere): at its frame 1,500 (of 5,077) the game
 #      must be exactly as tests/demo.ref says (score, health, emeralds, hero, objects): the
 #      game logic, frame for frame, and the compiler; and both runs' pictures (the title,
-#      the menu, five frames of the demo: tests/demo.shots) as tests/demo.md5
+#      the menu, five frames of the demo: tests/demo.shots) as tests/demo.md5; the heap at
+#      its boards' starts as in 1.
+#   3. the help (tests/help.script): INSTRUCTIONS on the title's menu twice, the heap's
+#      tightest place (the longest text over the board with the most texts). And no
+#      "out of memory" in any run
 #
 # The pictures are of the game's frames, not of moments: the program (/SHOTS:FILE,
 # horizon/hz_frame.c) stops at each screen of the list, counted by the game (a screen that
@@ -41,7 +47,10 @@ run() {
 rm -rf build/test
 mkdir -p build/test
 
-# (2.'s two runs of the demo go on meanwhile)
+# (2.'s two runs of the demo and 3. go on meanwhile)
+run " /SHOTS:PLAY.SHT" --file tests/play.shots:/GAMES/XARGON/PLAY.SHT \
+  --script tests/help.script --shot-on "xargon: shot" --seconds 30 \
+  --out build/test/help > build/test/help.log 2>&1 && touch build/test/help.ok &
 for k in 1 2; do
   extra=
   [ $k = 2 ] && extra=" /BUSY:30"
@@ -75,6 +84,15 @@ case "$last" in
 esac
 fr=$(grep -a 'game frames' "$con" | tail -1 | tr -d '\r')
 if [ -n "$fr" ]; then ok "frames: $fr"; else bad "no frame statistics"; fi
+# the heap at each board's start (loadboard, after the last board's texts were freed): the
+# same every time (title, map, level 1, the level again after a death, the title, the map
+# loaded: nothing kept), no "out of memory"; and room on every board for the help text
+before=$(grep -a '^xargon: heap before' "$con" | sed 's/.*: //' | tr -d '\r' | sort -u)
+nb=$(grep -ac '^xargon: heap before' "$con")
+if [ "$nb" -ge 6 ] && [ "$(echo "$before" | wc -l)" = 1 ]; then
+  ok "heap: the same at all $nb board starts ($before)"
+else bad "heap: board starts $nb, with $(echo "$before" | tr '\n' '/') (a leak?)"; fi
+python3 tests/heapcheck.py data/card "$con" || fail=1
 UPD=
 [ "$REFS" = --refs ] && UPD=--update
 python3 tests/shots.py build/test/play tests/play.md5 $UPD || fail=1
@@ -87,9 +105,26 @@ for k in 1 2; do
   got=$(grep -a '^xargon: demo reached' build/test/demo$k/console.txt | head -1 | tr -d '\r')
   if [ "$got" = "$want" ]; then ok "the demo$([ $k = 2 ] && echo ', slower,') as tests/demo.ref: $got"
   else bad "the demo$([ $k = 2 ] && echo ', slower,'): '$got', want '$want'"; fi
+  # the heap at the demo's boards: the title's (the menu, the demo's first board) as in
+  # the scripted game; the boards the macro goes to (its 2,360 bytes held) all the same
+  c=build/test/demo$k/console.txt
+  b=$(grep -a '^xargon: heap before intro' $c | sed 's/.*: //' | tr -d '\r' | sort -u)
+  m=$(grep -a '^xargon: heap before' $c | grep -av 'before intro' | sed 's/.*: //' | tr -d '\r' | sort -u)
+  n=$(grep -ac '^xargon: heap before' $c)
+  if [ "$n" -ge 4 ] && [ "$b" = "$before" ] && [ "$(echo "$m" | wc -l)" = 1 ]; then
+    ok "heap: the demo's $n board starts$([ $k = 2 ] && echo ', slower,'): the title's as the game's, the macro's boards all $m"
+  else bad "heap: the demo's $n board starts$([ $k = 2 ] && echo ', slower,'): the title's $(echo "$b" | tr '\n' '/') (want $before), the others $(echo "$m" | tr '\n' '/')"; fi
   if [ $k = 1 ]; then python3 tests/shots.py build/test/demo1 tests/demo.md5 $UPD || fail=1
   else python3 tests/shots.py build/test/demo2 tests/demo.md5 || fail=1; fi
 done
 
+# ---------------------------------------------------------------- 3. the help on the title
+[ -f build/test/help.ok ] || bad "the help's run (killed, or a wait not met: build/test/help.log)"
+h=$(grep -a '^xargon: heap with the help' build/test/help/console.txt | tr -d '\r')
+n=$(echo "$h" | grep -c .)
+if [ "$n" = 2 ]; then ok "the help opened twice on the title's board ($(echo "$h" | tail -1 | sed 's/.*help: //'))"
+else bad "the help opened $n times on the title's board, want 2"; fi
+
+if grep -a 'out of memory' build/test/*/console.txt; then bad "out of memory"; fi
 [ $fail = 0 ] && echo "xargon: ALL TESTS PASSED"
 exit $fail

@@ -26,8 +26,6 @@
 
 /* music.h's names that upstream's files use (the PC speaker's and the WORX library's are
  * not needed) */
-long textposn[num_text];
-int textlen[num_text];
 int vocflag = 1, musicflag = 1, soundf = 1;
 char *textmsg;
 int textmsglen;
@@ -93,15 +91,6 @@ void snd_init(char *voclib)
 
     textmsg = NULL;
     strcpy(vocname, voclib);
-    /* the texts' places: AUDIO.XRn's header (upstream's snd_init reads all of it: the
-     * sounds' places, lengths and rates first, 400 bytes) */
-    fd = open(voclib, O_RDONLY);
-    if (fd >= 0) {
-        lseek(fd, num_samps * 8L, SEEK_SET);
-        read(fd, textposn, sizeof textposn);
-        read(fd, textlen, sizeof textlen);
-        close(fd);
-    }
     if (!hg_has_lau())
         vocflag = 0;
     if (!hg_has_opl())
@@ -168,18 +157,32 @@ void hzs_frame(void)
 {
 }
 
+/* text n of AUDIO.XRn: its place and length from the file's header (after the sounds'
+ * 400 bytes: num_text places, then num_text lengths; upstream kept them in textposn[] and
+ * textlen[], 240 bytes the main bank has not got), then the text, in the heap (never
+ * NULL: hz_heap.h). The heap's room is taken with the file closed: its read-ahead (512
+ * bytes of the heap) would otherwise lie where the help's 4,313 bytes must go. */
 void text_get(int n)
 {
-    int fd;
+    int fd, len = 0;
+    long at = 0;
     textmsg = NULL;
-    if (n < 0 || n >= num_text || textlen[n] == 0)
-        return;
-    textmsglen = textlen[n];
-    textmsg = malloc(textmsglen);
-    if (!textmsg)
+    if (n < 0 || n >= num_text)
         return;
     fd = open(vocname, O_RDONLY);
-    if (fd < 0 || lseek(fd, textposn[n], SEEK_SET) < 0 || read(fd, textmsg, textmsglen) < 0) {
+    if (fd < 0)
+        return;
+    if (lseek(fd, num_samps * 8L + n * 4L, SEEK_SET) < 0 || read(fd, &at, 4) != 4 ||
+        lseek(fd, num_samps * 8L + num_text * 4L + n * 2L, SEEK_SET) < 0 || read(fd, &len, 2) != 2)
+        len = 0;
+    close(fd);
+    if (len <= 0)
+        return;
+    textmsglen = len;
+    textmsg = malloc(textmsglen);
+    hz_heap_report("with", n == 1 ? "the help" : "a text");    /* (tests/check.sh) */
+    fd = open(vocname, O_RDONLY);
+    if (fd < 0 || lseek(fd, at, SEEK_SET) < 0 || read(fd, textmsg, textmsglen) < 0) {
         free(textmsg);
         textmsg = NULL;
     }

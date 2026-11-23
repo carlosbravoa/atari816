@@ -248,6 +248,10 @@ void playmac (char *fname) {
 
 void recordmac (char *fname) {
 	stopmac();
+#if defined(_HORIZON)
+	return;		// (only the level editor's build records: 8,000 bytes, more than the
+				// 7 KB heap, and its end test at 30,000 writes past them; not here)
+#endif
 	macptr=malloc (8000);
 	if (macptr!=NULL) {
 		macofs=0;

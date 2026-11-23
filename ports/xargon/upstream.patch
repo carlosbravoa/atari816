@@ -1,6 +1,6 @@
 diff -ruN a/src/gamectrl.c b/src/gamectrl.c
---- a/src/gamectrl.c	2026-11-22 20:35:40.656369481 -0300
-+++ b/src/gamectrl.c	2026-11-22 20:35:40.913167491 -0300
+--- a/src/gamectrl.c	2026-11-23 11:48:35.628150913 -0300
++++ b/src/gamectrl.c	2026-11-23 11:54:58.394986629 -0300
 @@ -8,7 +8,7 @@
  #include <conio.h>;
  #include <stdlib.h>;
@@ -10,9 +10,20 @@ diff -ruN a/src/gamectrl.c b/src/gamectrl.c
  
  extern int gamecount;
  extern int debug,swrite;
+@@ -248,6 +248,10 @@
+ 
+ void recordmac (char *fname) {
+ 	stopmac();
++#if defined(_HORIZON)
++	return;		// (only the level editor's build records: 8,000 bytes, more than the
++				// 7 KB heap, and its end test at 30,000 writes past them; not here)
++#endif
+ 	macptr=malloc (8000);
+ 	if (macptr!=NULL) {
+ 		macofs=0;
 diff -ruN a/src/graphics.c b/src/graphics.c
---- a/src/graphics.c	2026-11-22 20:35:40.663737743 -0300
-+++ b/src/graphics.c	2026-11-22 20:35:40.913190098 -0300
+--- a/src/graphics.c	2026-11-23 11:48:35.628264110 -0300
++++ b/src/graphics.c	2026-11-23 11:54:58.395043716 -0300
 @@ -5,8 +5,8 @@
  #include <conio.h>;
  #include <mem.h>;
@@ -51,8 +62,8 @@ diff -ruN a/src/graphics.c b/src/graphics.c
  	};
  
 diff -ruN a/src/gr.h b/src/gr.h
---- a/src/gr.h	2026-11-22 20:35:40.827865863 -0300
-+++ b/src/gr.h	2026-11-22 20:35:40.913769448 -0300
+--- a/src/gr.h	2026-11-23 11:48:35.628349350 -0300
++++ b/src/gr.h	2026-11-23 11:54:58.396260687 -0300
 @@ -7,7 +7,11 @@
  #define shm_maxtbls 64
  
@@ -66,8 +77,8 @@ diff -ruN a/src/gr.h b/src/gr.h
  extern int shm_flags[shm_maxtbls];
  
 diff -ruN a/src/windows.c b/src/windows.c
---- a/src/windows.c	2026-11-22 20:35:40.701376027 -0300
-+++ b/src/windows.c	2026-11-22 20:35:40.913306958 -0300
+--- a/src/windows.c	2026-11-23 11:48:35.628416855 -0300
++++ b/src/windows.c	2026-11-23 11:54:58.395282570 -0300
 @@ -2,9 +2,9 @@
  
  #include <dos.h>;
@@ -82,8 +93,8 @@ diff -ruN a/src/windows.c b/src/windows.c
  char cursorchar;
  int  curhi, curlo, curback;					// current color scheme
 diff -ruN a/src/xargon.c b/src/xargon.c
---- a/src/xargon.c	2026-11-22 20:35:40.716545061 -0300
-+++ b/src/xargon.c	2026-11-22 20:35:40.913364201 -0300
+--- a/src/xargon.c	2026-11-23 11:48:35.628561407 -0300
++++ b/src/xargon.c	2026-11-23 11:54:58.395424436 -0300
 @@ -11,21 +11,25 @@
  #include <io.h>
  #include <ctype.h>
@@ -120,7 +131,15 @@ diff -ruN a/src/xargon.c b/src/xargon.c
  int scrollxd, scrollyd, oldscrollxd, oldscrollyd, oldx0, oldy0;
  
  int stateinfo [numstates];
-@@ -311,11 +315,21 @@
+@@ -306,24 +310,61 @@
+ 
+ 	strcpy (curlevel,fname);
+ 	zapobjs ();
++#if defined(_HORIZON)
++	hz_heap_report ("before",dest);			// (tests/check.sh: no leaks)
++#endif
+ 	for (c=162; c<168; c++) {					// reset laser colors
+ 		setcolor (c,vgapal[c*3+0],vgapal[c*3+1],vgapal[c*3+2]);
  		};
  
  	boardfile=_open (dest,O_BINARY);
@@ -139,10 +158,42 @@ diff -ruN a/src/xargon.c b/src/xargon.c
 +		objs[c].inside_hi=0;
 +		};
 +#endif
++#if defined(_HORIZON)
++	{		// the texts' room is taken with the file closed: its read-ahead (512 bytes of
++			// the heap) would stay a hole above them, where the help's text cannot go
++	long at=lseek (boardfile,0L,SEEK_CUR);
  	for (c=0; c<numobjs; c++) {
  		if (objs[c].inside!=NULL) {
  			read (boardfile,&tempint,sizeof(tempint));
-@@ -346,7 +360,11 @@
++			lseek (boardfile,tempint+1L,SEEK_CUR);
++			objs[c].inside=(char *)(tempint+1);	// (for now its length)
++			};
++		};
++	_close (boardfile);
++	for (c=0; c<numobjs; c++) {
++		if (objs[c].inside!=NULL) objs[c].inside=malloc((unsigned)objs[c].inside);
++		};
++	boardfile=_open (dest,O_BINARY);
++	lseek (boardfile,at,SEEK_SET);
++	};
++#endif
++	for (c=0; c<numobjs; c++) {
++		if (objs[c].inside!=NULL) {
++			read (boardfile,&tempint,sizeof(tempint));
++#if !defined(_HORIZON)
+ 			objs[c].inside=malloc(tempint+1);
++#endif
+ 			read (boardfile,objs[c].inside,tempint+1);
+ 			};
+ 		};
+ 	_close (boardfile);
++#if defined(_HORIZON)
++	hz_heap_report ("with",dest);			// (with the board's texts)
++#endif
+ 
+ 	for (x=0; x<boardxs; x++) {
+ 		for (y=0; y<boardys; y++) {
+@@ -346,7 +387,11 @@
  
  	boardfile=_creat (dest,0);				// Was O_BINARY
  	if (boardfile<0) rexit(20);
@@ -155,8 +206,8 @@ diff -ruN a/src/xargon.c b/src/xargon.c
  	write (boardfile,&objs,numobjs*sizeof(objs[0]));
  	write (boardfile,&pl,sizeof(pl));
 diff -ruN a/src/xargon.h b/src/xargon.h
---- a/src/xargon.h	2026-11-22 20:35:40.880360272 -0300
-+++ b/src/xargon.h	2026-11-22 20:35:40.913903558 -0300
+--- a/src/xargon.h	2026-11-23 11:48:35.628735093 -0300
++++ b/src/xargon.h	2026-11-23 11:54:58.396545829 -0300
 @@ -11,7 +11,13 @@
  
  extern vptype gamevp, statvp, textvp, tempvp;
@@ -182,8 +233,8 @@ diff -ruN a/src/xargon.h b/src/xargon.h
  	int zaphold;
  	} objtype;
 diff -ruN a/src/x_info.c b/src/x_info.c
---- a/src/x_info.c	2026-11-22 20:35:40.731262101 -0300
-+++ b/src/x_info.c	2026-11-22 20:35:40.913426546 -0300
+--- a/src/x_info.c	2026-11-23 11:48:35.628805726 -0300
++++ b/src/x_info.c	2026-11-23 11:54:58.395530168 -0300
 @@ -8,10 +8,10 @@
  #include <string.h>
  #include <fcntl.h>
@@ -199,7 +250,7 @@ diff -ruN a/src/x_info.c b/src/x_info.c
  
  extern char tilefile[];
  
-@@ -33,9 +33,16 @@
+@@ -33,10 +33,20 @@
  		read (blockfile,&temp,2);
  		info[c].flags^=temp;
  		read (blockfile,&len,1);
@@ -214,11 +265,15 @@ diff -ruN a/src/x_info.c b/src/x_info.c
  		info[c].na[len]=0;
 +#endif
  		};
++#if defined(_HORIZON)
++	close (blockfile);					// (its 512-byte read-ahead is the heap's)
++#endif
  
  	for (c=0; c<numstates; c++) {
+ 		stateinfo [c]=0;
 diff -ruN a/src/x_obj2.c b/src/x_obj2.c
---- a/src/x_obj2.c	2026-11-22 20:35:40.738890615 -0300
-+++ b/src/x_obj2.c	2026-11-22 20:35:40.913445827 -0300
+--- a/src/x_obj2.c	2026-11-23 11:48:35.628896481 -0300
++++ b/src/x_obj2.c	2026-11-23 11:54:58.395591137 -0300
 @@ -6,14 +6,14 @@
  
  #include <stdlib.h>
@@ -243,8 +298,8 @@ diff -ruN a/src/x_obj2.c b/src/x_obj2.c
  int msg_grunt (int n, int msg, int z) {
  	int sh=kindtable[obj_grunt]*256;
 diff -ruN a/src/x_obj3.c b/src/x_obj3.c
---- a/src/x_obj3.c	2026-11-22 20:35:40.746206391 -0300
-+++ b/src/x_obj3.c	2026-11-22 20:35:40.913475664 -0300
+--- a/src/x_obj3.c	2026-11-23 11:48:35.629003031 -0300
++++ b/src/x_obj3.c	2026-11-23 11:54:58.395689656 -0300
 @@ -6,14 +6,14 @@
  
  #include <stdlib.h>
@@ -269,8 +324,8 @@ diff -ruN a/src/x_obj3.c b/src/x_obj3.c
  int blinkshtab[16]={12,13,14,15,16,17,18,19,19,19,18,17,16,15,14,13};
  int lastwater;
 diff -ruN a/src/x_obj.c b/src/x_obj.c
---- a/src/x_obj.c	2026-11-22 20:35:40.753446876 -0300
-+++ b/src/x_obj.c	2026-11-22 20:35:40.913502195 -0300
+--- a/src/x_obj.c	2026-11-23 11:48:35.629169325 -0300
++++ b/src/x_obj.c	2026-11-23 11:54:58.395778028 -0300
 @@ -6,14 +6,14 @@
  
  #include <stdlib.h>
@@ -313,8 +368,8 @@ diff -ruN a/src/x_obj.c b/src/x_obj.c
  
  int msg_null (int n, int msg, int z) {
 diff -ruN a/src/x_objman.c b/src/x_objman.c
---- a/src/x_objman.c	2026-11-22 20:35:40.760824609 -0300
-+++ b/src/x_objman.c	2026-11-22 20:35:40.913553938 -0300
+--- a/src/x_objman.c	2026-11-23 11:48:35.629359015 -0300
++++ b/src/x_objman.c	2026-11-23 11:54:58.395858232 -0300
 @@ -6,14 +6,14 @@
  
  #include <stdlib.h>
@@ -339,8 +394,8 @@ diff -ruN a/src/x_objman.c b/src/x_objman.c
  //byte updtab [boardxs][20];			// refresh (0) only
  
 diff -ruN a/src/x_player.c b/src/x_player.c
---- a/src/x_player.c	2026-11-22 20:35:40.768254019 -0300
-+++ b/src/x_player.c	2026-11-22 20:35:40.913582617 -0300
+--- a/src/x_player.c	2026-11-23 11:48:35.629470115 -0300
++++ b/src/x_player.c	2026-11-23 11:54:58.395919600 -0300
 @@ -6,14 +6,14 @@
  
  #include <stdlib.h>
@@ -365,8 +420,8 @@ diff -ruN a/src/x_player.c b/src/x_player.c
  extern char *fidgetmsg[4];
  /*int fidgetseq[4][4]={
 diff -ruN a/src/x_vol1.c b/src/x_vol1.c
---- a/src/x_vol1.c	2026-11-22 20:35:40.776482222 -0300
-+++ b/src/x_vol1.c	2026-11-22 20:35:40.913637795 -0300
+--- a/src/x_vol1.c	2026-11-23 11:48:35.629556021 -0300
++++ b/src/x_vol1.c	2026-11-23 11:54:58.395965766 -0300
 @@ -5,13 +5,13 @@
  // by Allen W. Pilgrim
  
@@ -389,8 +444,8 @@ diff -ruN a/src/x_vol1.c b/src/x_vol1.c
  int c_len=CFG_WIN_LENGTH;
  unsigned char CFG_WIN[];
 diff -ruN a/src/x_vol2.c b/src/x_vol2.c
---- a/src/x_vol2.c	2026-11-22 20:35:40.784042144 -0300
-+++ b/src/x_vol2.c	2026-11-22 20:35:40.913659507 -0300
+--- a/src/x_vol2.c	2026-11-23 11:48:35.629643930 -0300
++++ b/src/x_vol2.c	2026-11-23 11:54:58.396005491 -0300
 @@ -5,13 +5,13 @@
  // by Allen W. Pilgrim
  
@@ -413,8 +468,8 @@ diff -ruN a/src/x_vol2.c b/src/x_vol2.c
  int c_len=CFG_WIN_LENGTH;
  unsigned char CFG_WIN[];
 diff -ruN a/src/x_vol3.c b/src/x_vol3.c
---- a/src/x_vol3.c	2026-11-22 20:35:40.791193154 -0300
-+++ b/src/x_vol3.c	2026-11-22 20:35:40.913677707 -0300
+--- a/src/x_vol3.c	2026-11-23 11:48:35.629715798 -0300
++++ b/src/x_vol3.c	2026-11-23 11:54:58.396044922 -0300
 @@ -5,13 +5,13 @@
  // by Allen W. Pilgrim
  

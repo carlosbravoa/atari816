@@ -20,7 +20,7 @@ the registered game (`Xargon_Commercial.zip`, all three episodes; `tools/getdata
 | --- | --- |
 | Upstream C ported | 11 files and 14 headers, 8,350 lines (`xargon.c`, `x_obj*.c`, `x_objman.c`, `x_player.c`, `x_info.c`, `x_vol1-3.c`, `windows.c`, `gamectrl.c`, `graphics.c`); `_xargon.c`, `x_editor.c`, `routines.c` (the level editor's build, dead code) not built |
 | Upstream files replaced | `config.c` (the DOS set-up dialogs), `keyboard.c` (int 9, BIOS), `music.c` (WORX, PC speaker, timer), `shapeman.c` (shapes in near memory): by `horizon/hz_cfg.c`, `hz_kbd.c`, `hz_snd.c`, `hz_shm.c` with the same interface |
-| Game lines changed | `upstream.patch`: 82 `#include` lines (absolute DOS paths `"\develop\xargon\include\x.h"` to `"x.h"`) and 45 other lines in 6 files, all `#if defined(_HORIZON)` |
+| Game lines changed | `upstream.patch`: 82 `#include` lines (absolute DOS paths `"\develop\xargon\include\x.h"` to `"x.h"`) and 79 other lines in 7 files, all `#if defined(_HORIZON)` |
 | New platform layer | `horizon/`: 9 C files, 2 headers, 1 assembly file, 5 DOS headers: about 2,300 lines; tools and tests 830 lines |
 | Build | `hcc --code large`: `XARGON1.PRG` 190,746 bytes (code 147 KB in 3 other banks; the main bank 52,736 bytes without its movable code: bss 34,617, constants 8,947; heap 7 KB, software stack 4 KB; the board, 16 KB, a `__far` object in a bank of its own) |
 | Data | `XSHAPES.XR1` 1,001,288 bytes (1,976 shapes in 1,923 atlas rows), `XSOUND.XR1` 174,764, 12 songs 2.5-70 KB, the boards and texts as they are: 2.0 MB for the three episodes |
@@ -54,6 +54,12 @@ the compiler (SDK problem 7).
 only the level editor shows: 8.5 KB, the whole heap; every `malloc` after it (the boards'
 texts) failed, and the intro's text objects were drawn from address 0. The names are
 read past, not kept.
+
+**The heap (`x_info.c`, `gamectrl.c`, `xargon.c`: 34 lines; `horizon/hz_heap.h`).** See
+"The heap" below: `init_info` closes the tile file it never closed (its 512-byte
+read-ahead stayed in the heap for good: INSTRUCTIONS on the title then did nothing),
+`recordmac` (the level editor's) records nothing, `loadboard` takes the room for the
+board's texts with the board's file closed and prints the heap.
 
 **`graphics.c` (6 lines).** Upstream's `drawshape` is left out (`#if !defined(_HORIZON)`):
 the platform's (hz_vga.c) does the same with the blitter. `getportnum()` returns the CRTC's
@@ -113,6 +119,44 @@ joysticks (the one-shots' counts for left / centre / right, calibrated in `hz_cf
 - **Configuration (`hz_cfg.c`).** The hardware answers upstream's set-up questions: Lau
   for the effects, the OPL2 for the music, the joystick calibrated for the emulated port.
 
+## The heap
+
+The main bank's heap is what is left of the bank, at least 7,168 bytes (`--heap 7168`):
+7,817 bytes in `XARGON1.PRG` now (7,618 and 7,665 in episodes 2 and 3), of which 7,500
+are free, 7,496 in one piece, when a board is loaded (317 are taken before `main`, 6 by
+`gr_init`). Upstream was written for DOS's 640 KB and checks almost none of its
+`malloc`s; a NULL here would be a text drawn from, or written to, the main bank's start.
+So `horizon/hz_heap.h` (in every file: the Makefile's `-include`, as ports/prince's)
+makes `malloc`, `calloc` and `realloc` stop the game with `xargon: out of memory: N bytes
+wanted, F free, L in one piece` (`hz_dos.c`) instead of returning NULL; none returns NULL
+silently now (checked once with a `malloc(8000)` put in `main`: the line, then the exit).
+Every allocation of the built game:
+
+| Where | What | Size | Can it exceed the heap? |
+| --- | --- | --- | --- |
+| `loadboard` (`xargon.c`) | the board's texts, `objs[].inside`, freed at the next board (`zapobjs`) or when the object goes (`purgeobjs`) | 1-50 bytes each; a board's all from 156 (the map) to 2,318 (the title's, 83 texts) and 3,798 (`STORY.XR1`) | no: the biggest leaves 3,702 free. None leaks: the heap is the same at every board's start (`make test`) |
+| `text_get` (`hz_snd.c`) | a text window's text (`dotextmsg`, `pageview`), freed when it closes | up to 4,313 bytes (the help: F1 in a level, INSTRUCTIONS on the title) | no, but it is the tightest: on the title's board (the most texts of the boards with windows) 5,178 bytes are left in one piece for the help's 4,318 (860 to spare; at the smallest heap the link allows, 7,168, about 200). `tests/heapcheck.py` checks every board of the three episodes |
+| `playmac` (`gamectrl.c`) | a recorded macro, the whole file: the demo (`DEMO_MAC.XR0`, 2,360 bytes) or the end of episode 1 (`END_MAC.XR1`, 335), freed at its end | the file's length | not with these files (with the demo's held, 5,136 bytes stay free at its boards' starts) |
+| `recordmac` (`gamectrl.c`) | the level editor's macro recording | 8,000 bytes | always: more than the heap (and its end test, at 30,000 bytes, wrote past them on DOS too). Only `routines.c` and `_xargon.c` (not built) call it: under `_HORIZON` it records nothing |
+| `gr_init` (`graphics.c`) | `LOST=malloc(1)`, never used or freed | 6 bytes | no |
+| `init_info` (`x_info.c`) | the 900 tile names (the level editor's) | 8.5 KB | not done here (the names are read past) |
+| the C library's `open` (read only) | a 512-byte read-ahead while the file is open (NULL: reads go to the card, no error) | 516 | no. But `init_info` never closed the tile file, so 516 bytes stayed in use for good: INSTRUCTIONS on the title did nothing (the help's `malloc` gave NULL; seen in the emulator with the program before this change). Closed now. And a file's read-ahead taken before a block that outlives the file leaves a hole above it: `loadboard` opened the board, took its texts under the read-ahead, closed it, and 516 bytes over the texts were lost to the help. Now it reads the texts' lengths, closes the file, takes their room, opens it again; `text_get` reads the text's place and length, closes, takes the room, opens again |
+| `fopen` (`hzt_shots`, the tests' list) | 1 KB of buffer while open | 1 KB | no (NULL: unbuffered) |
+
+The shapes, the sounds, the songs and the board itself are in far memory (`hg_banks`,
+checked: "not enough memory for the pictures"); `strdup` is only in a commented-out
+function (`addtext`). The texts' places and lengths (upstream's `textposn[]`,
+`textlen[]`: 240 bytes of bss) are read from `AUDIO.XRn` when a text is shown: the main
+bank had no room for the heap's checks otherwise (`XARGON2.PRG` did not link).
+
+`loadboard` prints the heap at each board's start and with its texts (`xargon: heap
+before intro.xr1: 7500 free, 7496 in one piece`), `text_get` with its text (`xargon: heap
+with the help: 864 free, 860 in one piece`). `make test` checks that every board start
+shows the same (the title, the map, level 1, level 1 again after a death, the title, the
+map loaded from a save; the demo's, the title's as the game's), opens the help on the
+title twice (`tests/help.script`), runs `tests/heapcheck.py`, and fails on any "out of
+memory".
+
 ## SDK problems met
 
 | # | Problem | Kind | What was done | Time |
@@ -142,7 +186,9 @@ first try once problems 3 and 4 were fixed, and the recorded demo replays exactl
 `make test` (`tests/check.sh`): the scripted game (title, menus, a save, the map with its
 journal, level 1 with a jump, a shot and a death, the game's menu, quit, high scores, a
 load) with 13 pictures compared by checksum, the save files on the card, the loaded
-game's position, Lau's writes and the recorded sound's level and clipping; then the
+game's position, Lau's writes and the recorded sound's level and clipping, the heap at
+every board's start (no leak) and the room on every board for the help (see "The heap");
+the help opened twice on the title; then the
 recorded demo twice (the second time 30 ms a frame slower) to its frame 1,500, which
 must match `tests/demo.ref`, with 7 pictures (the title, the menu, five of the demo's
 frames) that must be the same in both runs. The demo is the strongest check: 1,500
@@ -234,3 +280,6 @@ speed (170 KB/s; not measured on the board).
 4. Page flipping with the scroll registers, a ring for the scrolling playfield.
 5. `hg_poll` for games whose frames run late.
 6. `hz_read`'s `int` result (32 KB reads).
+7. (Not yet in porting.md.) A malloc that stops with a message (`horizon/hz_heap.h`, as
+   ports/prince's), the heap printed at each level's start and compared in the tests, and
+   every file opened for reading closed: each holds 512 bytes of read-ahead from the heap.

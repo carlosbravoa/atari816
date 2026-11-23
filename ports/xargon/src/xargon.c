@@ -310,6 +310,9 @@ void loadboard (char *fname) {
 
 	strcpy (curlevel,fname);
 	zapobjs ();
+#if defined(_HORIZON)
+	hz_heap_report ("before",dest);			// (tests/check.sh: no leaks)
+#endif
 	for (c=162; c<168; c++) {					// reset laser colors
 		setcolor (c,vgapal[c*3+0],vgapal[c*3+1],vgapal[c*3+2]);
 		};
@@ -330,14 +333,38 @@ void loadboard (char *fname) {
 		objs[c].inside_hi=0;
 		};
 #endif
+#if defined(_HORIZON)
+	{		// the texts' room is taken with the file closed: its read-ahead (512 bytes of
+			// the heap) would stay a hole above them, where the help's text cannot go
+	long at=lseek (boardfile,0L,SEEK_CUR);
 	for (c=0; c<numobjs; c++) {
 		if (objs[c].inside!=NULL) {
 			read (boardfile,&tempint,sizeof(tempint));
+			lseek (boardfile,tempint+1L,SEEK_CUR);
+			objs[c].inside=(char *)(tempint+1);	// (for now its length)
+			};
+		};
+	_close (boardfile);
+	for (c=0; c<numobjs; c++) {
+		if (objs[c].inside!=NULL) objs[c].inside=malloc((unsigned)objs[c].inside);
+		};
+	boardfile=_open (dest,O_BINARY);
+	lseek (boardfile,at,SEEK_SET);
+	};
+#endif
+	for (c=0; c<numobjs; c++) {
+		if (objs[c].inside!=NULL) {
+			read (boardfile,&tempint,sizeof(tempint));
+#if !defined(_HORIZON)
 			objs[c].inside=malloc(tempint+1);
+#endif
 			read (boardfile,objs[c].inside,tempint+1);
 			};
 		};
 	_close (boardfile);
+#if defined(_HORIZON)
+	hz_heap_report ("with",dest);			// (with the board's texts)
+#endif
 
 	for (x=0; x<boardxs; x++) {
 		for (y=0; y<boardys; y++) {

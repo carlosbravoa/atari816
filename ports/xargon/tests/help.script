@@ -1,0 +1,11 @@
+# tests/help.script - the help on the title (make test; tests/check.sh, 3.): INSTRUCTIONS
+# from the main menu twice. Its text (4,313 bytes) is the longest of the game's windows and
+# the title's board holds the most texts of the boards with windows (2,318 bytes): the
+# heap's tightest place (tests/heapcheck.py). Each prints "xargon: heap with the help: ...".
+0 wait xargon: shot 1 at
++200 key space 100
++0 wait xargon: shot 2 at
++300 key i 100
++3000 key esc 100
++1000 key i 100
++3000 key esc 100

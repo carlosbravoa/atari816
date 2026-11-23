@@ -177,6 +177,53 @@ unsigned long coreleft(void)
     return hz_heap_free() + ((unsigned long)hz_mem_info() << 16);
 }
 
+/* ---------------------------------------------------------------- the heap (hz_heap.h) */
+#undef malloc
+#undef calloc
+#undef realloc
+void *malloc(size_t n);
+void *calloc(size_t n, size_t size);
+void *realloc(void *p, size_t n);
+
+static void out_of_memory(size_t n)
+{
+    unsigned f = hz_heap_free(), l = hz_heap_largest();
+    hg_close();                         /* (as hz_fatal) */
+    printf("xargon: out of memory: %u bytes wanted, %u free, %u in one piece\n", (unsigned)n,
+           f, l);
+    exit(1);
+}
+
+void *hz_malloc_or_quit(size_t n)
+{
+    void *p = malloc(n);
+    if (!p)
+        out_of_memory(n);
+    return p;
+}
+
+void *hz_calloc_or_quit(size_t n, size_t size)
+{
+    void *p = calloc(n, size);
+    if (!p)
+        out_of_memory(n * size);
+    return p;
+}
+
+void *hz_realloc_or_quit(void *p, size_t n)
+{
+    void *q = realloc(p, n);
+    if (!q && n)
+        out_of_memory(n);
+    return q;
+}
+
+void hz_heap_report(const char *what, const char *name)
+{
+    printf("xargon: heap %s %s: %u free, %u in one piece\n", what, name, hz_heap_free(),
+           hz_heap_largest());
+}
+
 /* ---------------------------------------------------------------- Turbo C's stdlib */
 
 static char *utoa_(unsigned long v, char *s, int radix, int neg)
