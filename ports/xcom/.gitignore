@@ -1,0 +1,9 @@
+upstream/
+upstream.tmp/
+build/
+data/
+scratch/
+*.PRG
+*.map
+*.lbl
+*.HZA

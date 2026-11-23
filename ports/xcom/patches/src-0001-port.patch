@@ -1,0 +1,426 @@
+diff -ruN src/bplayer.c /home/carlos/devel/fpga/atari-816/ports/xcom/scratch/b/src/bplayer.c
+--- a/src/bplayer.c	2026-11-23 10:47:21.176744319 -0300
++++ b/src/bplayer.c	2026-11-23 10:51:07.870958823 -0300
+@@ -78,8 +78,13 @@
+                     sy = TILE_SY(u->x, u->y, u->z);
+                     render_rect(sx - 16, sy - 8, sx + 48, sy + 56);
+                 }
++#if defined(XCOM_PORT)
++        if (g_vga && (r = vga_pics_next()) != NULL)
++            render_rect(r[0], r[1], r[2], r[3]);
++#else
+         if ((sx = g_vga) != 0 && FP_SEG(r = ((const int far *(__cdecl far *)(void))MK_FP(sx, VGA_PICS))()))
+             render_rect(r[0], r[1], r[2], r[3]);    /* DOS's smoke and fire pictures move on */
++#endif
+         if (g_cv)
+             cv_idle();          /* the canvas draws ahead (canvas.h) */
+     }
+diff -ruN src/cvpriv.h /home/carlos/devel/fpga/atari-816/ports/xcom/scratch/b/src/cvpriv.h
+--- a/src/cvpriv.h	2026-11-23 10:47:21.167399899 -0300
++++ b/src/cvpriv.h	2026-11-23 10:53:35.986040650 -0300
+@@ -55,16 +55,22 @@
+     unsigned seg, mode, handle, frame, slots, hbits, hand, used, page, save_pg;
+     int check, idle_x, idle_y, idle_t, synced;
+     unsigned gen, idle_gen;
+-    unsigned char far *fob, far *seenp;
++    unsigned char far *fob;     /* (port: one far declarator a line, cc816) */
++    unsigned char far *seenp;
+     unsigned nfx;
+     unsigned long n_read, n_hit, n_part, n_miss, n_store, n_evict, n_fill, n_bad;
+     unsigned long t_sync, t_get;
+-    unsigned short far *hash, far *key;
+-    unsigned char far *mask, far *ref;      /* 3 bytes a slot: 2 cell rows each */
++    unsigned short far *hash;
++    unsigned short far *key;
++    unsigned char far *mask;    /* 3 bytes a slot: 2 cell rows each */
++    unsigned char far *ref;
+     USh far *us;
+-    TSh far *fl, far *dv, far *fx;
++    TSh far *fl;
++    TSh far *dv;
++    TSh far *fx;
+     unsigned far *keys;
+-    unsigned char far *seen, far *bounce;
++    unsigned char far *seen;
++    unsigned char far *bounce;
+     unsigned long xbase;            /* XMS: the blocks' place in the handle (a loan: xmemlend.h) */
+     unsigned lent, lent_kb;         /* the loan's xl_lend answer and size, 0 none */
+     /* the back buffer's format: EGA 0, 40, 3, 1536, 10; VGA CV_8BPP, 320, 0, 3072, 5
+diff -ruN src/geo.c /home/carlos/devel/fpga/atari-816/ports/xcom/scratch/b/src/geo.c
+--- a/src/geo.c	2026-11-23 10:47:21.165016921 -0300
++++ b/src/geo.c	2026-11-23 10:47:32.716800650 -0300
+@@ -217,6 +217,27 @@
+    pair each) bytes at dst through the table (XLAT). */
+ static void zoom_bytes(unsigned char far *dst, const unsigned char far *src, unsigned n,
+                        unsigned tab, unsigned z);
++#if defined(XCOM_PORT)
++static void zoom_bytes(unsigned char far *dst, const unsigned char far *src, unsigned n,
++                       unsigned tab, unsigned z)
++{
++    const unsigned char far *t = (const unsigned char far *)MK_FP(FP_SEG(src), tab);
++    unsigned b;
++
++    while (n--) {
++        b = *src++;
++        if (z == 1) {
++            *dst++ = t[b >> 4];
++            *dst++ = t[b & 15];
++        } else {
++            *dst++ = t[b >> 6 & 3];
++            *dst++ = t[b >> 4 & 3];
++            *dst++ = t[b >> 2 & 3];
++            *dst++ = t[b & 3];
++        }
++    }
++}
++#else
+ #pragma aux zoom_bytes = \
+     "push ds" \
+     "mov ds, dx" \
+@@ -240,6 +261,7 @@
+ "zx: pop ds" \
+     parm [es di] [dx si] [cx] [bx] [ax] \
+     modify [ax cx si di];
++#endif
+ 
+ static void draw_detail(void);
+ static void centre_on(int x, int y);
+diff -ruN src/gfx.c /home/carlos/devel/fpga/atari-816/ports/xcom/scratch/b/src/gfx.c
+--- a/src/gfx.c	2026-11-23 10:47:21.165320443 -0300
++++ b/src/gfx.c	2026-11-23 10:51:07.848802614 -0300
+@@ -122,6 +122,12 @@
+ {
+     int r;
+ 
++#if defined(XCOM_PORT)
++    if (g_vga) {
++        vga_gfx_dot(x, y, colour);
++        return;
++    }
++#endif
+     x &= ~1;
+     if (x < 0 || x > 318 || y < 0 || y > VIEW_H - 2 || g_view_off)
+         return;
+@@ -274,6 +280,12 @@
+     union REGS r;
+     int i;
+ 
++#if defined(XCOM_PORT)
++    if (g_vga) {
++        vga_gfx_night(night);
++        return;
++    }
++#endif
+     if (g_video != VIDEO_EGA)
+         return;
+     for (i = 0; i < 16; i++) {
+diff -ruN src/hud.c /home/carlos/devel/fpga/atari-816/ports/xcom/scratch/b/src/hud.c
+--- a/src/hud.c	2026-11-23 10:47:21.175773430 -0300
++++ b/src/hud.c	2026-11-23 10:51:07.804000780 -0300
+@@ -41,6 +41,12 @@
+     unsigned char expand[16];
+     int c = cga_colour(colour), i, k, b;
+ 
++#if defined(XCOM_PORT)
++    if (g_vga) {
++        vga_hud_text(col, row, colour, s, len);
++        return;
++    }
++#endif
+     for (i = 0; i < 16; i++) {
+         unsigned char v = 0;
+         for (b = 0; b < 4; b++)
+@@ -90,6 +96,12 @@
+ 
+ void hud_clear_rows(int row, int count)
+ {
++#if defined(XCOM_PORT)
++    if (g_vga) {
++        vga_hud_clear(row, count);
++        return;
++    }
++#endif
+     mouse_hide_rect(0, row * 8, 320, (row + count) * 8);
+     if (g_video == VIDEO_CGA) {
+         unsigned y;
+diff -ruN src/invscr.c /home/carlos/devel/fpga/atari-816/ports/xcom/scratch/b/src/invscr.c
+--- a/src/invscr.c	2026-11-23 10:47:21.173295592 -0300
++++ b/src/invscr.c	2026-11-23 10:53:36.042539040 -0300
+@@ -658,7 +658,8 @@
+     unsigned short hd[5];
+     int ega = g_video == VIDEO_EGA, ch = ega ? 5 : 2, nb, r, k, c;
+     unsigned pix, raw, save, need;
+-    unsigned char far *p, far *s;
++    unsigned char far *p;       /* (port: one far declarator a line, cc816) */
++    unsigned char far *s;
+ 
+     hp = NULL;
+     if (!uk_read(id, 0, hd, sizeof hd) || !(hd[4] & UIF_MASKED) || hd[2] > 32 || hd[3] > 48)
+@@ -807,7 +808,11 @@
+         return;
+     }
+     if (g_vga) {                        /* black to yellow (gfx.h VGA_VMAP) */
++#if defined(XCOM_PORT)
++        unsigned char v = g_vmap[14];
++#else
+         unsigned char v = ((const unsigned char far *)MK_FP(g_vga, VGA_VMAP))[14];
++#endif
+         mouse_hide_rect(x, y, x + w, y + h);
+         for (r = y; r < y + h; r++) {
+             unsigned char far *d = (unsigned char far *)MK_FP(0xA000, r * 320 + x);
+diff -ruN src/mouse.c /home/carlos/devel/fpga/atari-816/ports/xcom/scratch/b/src/mouse.c
+--- a/src/mouse.c	2026-11-23 10:47:21.176958229 -0300
++++ b/src/mouse.c	2026-11-23 10:51:07.826095055 -0300
+@@ -229,6 +229,12 @@
+ {
+     int sh = (x & 3) * 2, r, i, nb = 80 - (x >> 2);
+ 
++#if defined(XCOM_PORT)
++    if (g_vga) {
++        vga_ms_draw(x, y);
++        return;
++    }
++#endif
+     if (nb > 3)
+         nb = 3;
+     for (r = 0; r < CUR_H && y + r < 200; r++) {
+@@ -247,6 +253,12 @@
+ {
+     int r, i, nb = 80 - (x >> 2);
+ 
++#if defined(XCOM_PORT)
++    if (g_vga) {
++        vga_ms_erase(x, y);
++        return;
++    }
++#endif
+     if (nb > 3)
+         nb = 3;
+     for (r = 0; r < CUR_H && y + r < 200; r++) {
+diff -ruN src/pak.c /home/carlos/devel/fpga/atari-816/ports/xcom/scratch/b/src/pak.c
+--- a/src/pak.c	2026-11-23 10:47:21.176560413 -0300
++++ b/src/pak.c	2026-11-23 11:02:23.615371446 -0300
+@@ -648,7 +648,24 @@
+     if (!read_into(f, g_pak.fill, h.n_fill)
+         || !read_into(f, g_pak.landing, h.n_landing)
+         || !read_into(f, g_pak.big, h.n_big)
+-        || !read_into(f, g_pak.unit_base, h.n_unit_sets * 2u)) {
++#if defined(XCOM_PORT)          /* u16 in the file, `unsigned` in Pack (32 bits on the host) */
++        ) {
++        err = "pack truncated (tables)";
++        goto out;
++    }
++    for (i = 0; i < h.n_unit_sets && i < MAX_UNIT_SETS; i++) {
++        unsigned short u;
++        if (!read_into(f, &u, 2)) {
++            err = "pack truncated (tables)";
++            goto out;
++        }
++        g_pak.unit_base[i] = u;
++    }
++    if (0
++#else
++        || !read_into(f, g_pak.unit_base, h.n_unit_sets * 2u)
++#endif
++        ) {
+         err = "pack truncated (tables)";
+         goto out;
+     }
+diff -ruN src/sound.c /home/carlos/devel/fpga/atari-816/ports/xcom/scratch/b/src/sound.c
+--- a/src/sound.c	2026-11-23 10:47:21.163026408 -0300
++++ b/src/sound.c	2026-11-23 10:53:36.068792630 -0300
+@@ -113,7 +113,11 @@
+ unsigned g_sb_port, g_sb_irq, g_sb_dma = 1, g_sb_dsp;
+ volatile unsigned g_sb_irqs, g_sb_started;
+ 
++#if defined(XCOM_PORT)          /* no far function pointers in cc816 (xdos.h xd_isr) */
++static xd_isr old_sb_vec;
++#else
+ static void (__interrupt __far *old_sb_vec)(void);
++#endif
+ static unsigned char old_mask;
+ static volatile unsigned char sb_busy, sb_cmd, sb_prio;
+ static volatile unsigned long sb_phys, sb_end;
+diff -ruN src/uik.c /home/carlos/devel/fpga/atari-816/ports/xcom/scratch/b/src/uik.c
+--- a/src/uik.c	2026-11-23 10:47:21.171752878 -0300
++++ b/src/uik.c	2026-11-23 10:51:07.780952840 -0300
+@@ -227,6 +227,12 @@
+ 
+ void uk_theme(int t)            /* (VGA) */
+ {
++#if defined(XCOM_PORT)
++    if (g_vga) {
++        vga_uk_theme(t);
++        return;
++    }
++#endif
+     g_uk = g_video == VIDEO_EGA ? &ega_themes[t] : &g_cga_themes[t];
+ }
+ 
+@@ -234,6 +240,10 @@
+ {
+     union REGS r;
+ 
++#if defined(XCOM_PORT)
++    if (g_vga)
++        return;
++#endif
+     if (g_video != VIDEO_CGA || p == cga_pal)
+         return;
+     cga_pal = p;
+@@ -391,6 +401,12 @@
+     unsigned nb = h->w >> 2, r, k, j, rows, rb;
+     int masked = h->flags & UIF_MASKED;
+ 
++#if defined(XCOM_PORT)
++    if (g_vga) {
++        vga_uk_pic(h, x, y, to_save);
++        return;
++    }
++#endif
+     rb = masked ? nb * 2 : nb;
+     for (r = 0; r < h->h; r += rows) {
+         rows = bsize / rb;
+@@ -476,6 +492,10 @@
+ 
+ int uk_pic_clean(unsigned id)   /* (VGA) */
+ {
++#if defined(XCOM_PORT)
++    if (g_vga)
++        return vga_uk_pic_clean(id);
++#endif
+     return pic(id, -1, 0, 1);
+ }
+ 
+@@ -529,6 +549,10 @@
+    colours given by screens is mapped. */
+ int __near uk_cga_c(int c)      /* (VGA) */
+ {
++#if defined(XCOM_PORT)
++    if (g_vga)
++        return vga_uk_cga_c(c);
++#endif
+     return c < 4 ? c : cga_map[cga_pal >> 1][c & 15];
+ }
+ 
+@@ -536,6 +560,12 @@
+ {
+     int r;
+ 
++#if defined(XCOM_PORT)
++    if (g_vga) {
++        vga_uk_fill(x, y, w, h, c);
++        return;
++    }
++#endif
+     if (w <= 0 || h <= 0)
+         return;
+     mouse_hide_rect(x, y, x + w, y + h);
+@@ -672,6 +702,12 @@
+     unsigned char pat = (unsigned char)(c * 0x55);
+     int s = (x & 3) * 2, r, k;
+ 
++#if defined(XCOM_PORT)
++    if (g_vga) {
++        vga_uk_glyph(x, y, g, h, bpr, c);
++        return;
++    }
++#endif
+     for (r = 0; r < h; r++, g += bpr) {
+         unsigned bits = bpr == 2 ? (g[0] << 8) | g[1] : g[0] << 8;
+         unsigned char mb[5];
+@@ -830,6 +866,12 @@
+ {
+     int r;
+ 
++#if defined(XCOM_PORT)
++    if (g_vga) {
++        vga_uk_copy(sx, sy, dx, dy, w, h);
++        return;
++    }
++#endif
+     mouse_hide_rect(dx, dy, dx + w, dy + h);
+     if (g_video == VIDEO_EGA) {
+         latch_copy(dy * 40 + (dx >> 3), sy * 40 + (sx >> 3), w >> 3, h);
+@@ -843,6 +885,12 @@
+ {
+     int y;
+ 
++#if defined(XCOM_PORT)
++    if (g_vga) {
++        vga_uk_save(y0, y1);
++        return;
++    }
++#endif
+     mouse_hide();
+     save_y0 = y0;
+     save_y1 = y1;
+@@ -861,6 +909,12 @@
+ {
+     int r;
+ 
++#if defined(XCOM_PORT)
++    if (g_vga) {
++        vga_uk_restore(x, y, w, h);
++        return;
++    }
++#endif
+     if (y < save_y0) {
+         h -= save_y0 - y;
+         y = save_y0;
+diff -ruN src/vbench.c /home/carlos/devel/fpga/atari-816/ports/xcom/scratch/b/src/vbench.c
+--- a/src/vbench.c	2026-11-23 10:47:21.167227160 -0300
++++ b/src/vbench.c	2026-11-23 10:53:43.933788516 -0300
+@@ -1097,6 +1097,7 @@
+             for (k = 0; k < 4; k++)
+                 d += (v[(k >> 1) * 320 + (k & 1)] != was[k]) * 16;
+             fprintf(f, "VGA dot check: %u of 4 pixels changed, %u not back\n", d & 15, d >> 4);
++#if !defined(XCOM_PORT)         /* (port: vgaasm.asm's block is not there) */
+             if (*(void far * far *)MK_FP(g_vga, 0x9D8)) {
+                 /* DOS's smoke and fire pictures' step (vgaasm.asm pics_next):
+                    one pass of bplayer.c's idle loop over fx_bench's smoke
+@@ -1145,6 +1146,7 @@
+                 const unsigned far *nl = (const unsigned far *)MK_FP(g_vga, 48);
+                 fprintf(f, "VGA lights: %u relights in %u night presents\n", nl[0], nl[1]);
+             }
++#endif
+         }
+         fclose(f);
+     }
+diff -ruN src/vgageo.h /home/carlos/devel/fpga/atari-816/ports/xcom/scratch/b/src/vgageo.h
+--- a/src/vgageo.h	2026-11-23 10:47:21.164338151 -0300
++++ b/src/vgageo.h	2026-11-23 10:53:36.093340487 -0300
+@@ -13,6 +13,12 @@
+ 
+ void vgx_init(unsigned vseg);   /* from vga_init (vgainit.c), once */
+ 
++#if defined(XCOM_PORT)          /* plat/vga.c */
++#define vgx_world   vga_vx_world
++#define vgx_xor     vga_vx_xor
++#define vgx_battle  vga_vx_battle
++#define vgx_slide   vga_vx_slide
++#else
+ typedef void (__far __cdecl *VgxWorld)(const unsigned char __far *map, unsigned vx, unsigned vy,
+                                        unsigned zoom);
+ typedef void (__far __cdecl *VgxXor)(int x0, int y0, int x1, int y1, int colour);
+@@ -23,5 +29,6 @@
+ /* The end slides (cut.c): the DAC from 768 bytes (NULL: black), the
+    caption's palette index as EGA colour 14. */
+ #define vgx_slide   ((void (__far __cdecl *)(const char __far *dac, int caption))MK_FP(g_vgx, 24))
++#endif
+ 
+ #endif
+diff -ruN src/xmemlend.h /home/carlos/devel/fpga/atari-816/ports/xcom/scratch/b/src/xmemlend.h
+--- a/src/xmemlend.h	2026-11-23 10:47:21.168429412 -0300
++++ b/src/xmemlend.h	2026-11-23 10:53:36.010571789 -0300
+@@ -80,7 +80,9 @@
+ {
+     XmemHdr __far *h = xl_hdr();
+     unsigned n, k = (kb + 3) / 4, ns, i, b;
+-    unsigned __far *heads, __far *blk, __far *next;
++    unsigned __far *heads;      /* (port: one far declarator a line, cc816) */
++    unsigned __far *blk;
++    unsigned __far *next;
+     unsigned char __far *file;
+ 
+     if (!h)
