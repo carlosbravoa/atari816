@@ -7,6 +7,9 @@ Structures are packed (no padding), as the SDK's parameter blocks need.
 """
 import re
 
+# the data model of the compile (driver.compile_c sets it): far_data, the far data model
+# (hcc --data far: plain data pointers are far)
+MODEL = {'far_data': False}
 
 
 def where(coord):
@@ -58,21 +61,23 @@ class T:
     const = False
     volatile = False
     far = False          # a pointer to this type is a far pointer
+    near = False         # (__near) a pointer to this type is a near one (the far data model)
 
-    def qual(self, const=False, volatile=False, far=False):
-        if not (const or volatile or far):
+    def qual(self, const=False, volatile=False, far=False, near=False):
+        if not (const or volatile or far or near):
             return self
         t = self.copy()
         t.const = self.const or const
         t.volatile = self.volatile or volatile
         t.far = self.far or far
+        t.near = (self.near or near) and not t.far
         return t
 
     def unqual(self):
-        if not (self.const or self.volatile or self.far):
+        if not (self.const or self.volatile or self.far or self.near):
             return self
         t = self.copy()
-        t.const = t.volatile = t.far = False
+        t.const = t.volatile = t.far = t.near = False
         return t
 
     def copy(self):
@@ -141,9 +146,12 @@ class FloatT(T):
 class PtrT(T):
     kind = 'ptr'
 
-    def __init__(self, to, far=False):
+    def __init__(self, to, far=False, near=False):
         self.to = to
-        self.isfar = far or to.far
+        # the far data model (hcc --data far): a data pointer is far unless __near; a
+        # function pointer is the main-bank entry (16 bits) in every model
+        self.isfar = far or to.far or (MODEL['far_data'] and not near and not to.near and
+                                       not to.is_func)
         self.size = 4 if self.isfar else 2
 
     def __repr__(self): return f'{self.to!r}{" far" if self.isfar else ""}*'
@@ -184,8 +192,25 @@ class StructT(T):
         self.uid = StructT._n    # the same structure (copies made by qualifiers keep it)
         self.tag = tag
         self.union = union
-        self.fields = None       # None = incomplete
-        self.size = 0
+        # the members and the size, shared with the copies qualifiers make (a `struct s
+        # __near *` declared before struct s is defined sees the definition)
+        self.body = {'fields': None, 'size': 0}
+
+    @property
+    def fields(self):
+        return self.body['fields']   # None = incomplete
+
+    @fields.setter
+    def fields(self, v):
+        self.body['fields'] = v
+
+    @property
+    def size(self):
+        return self.body['size']
+
+    @size.setter
+    def size(self, v):
+        self.body['size'] = v
 
     @property
     def complete(self): return self.fields is not None
@@ -293,6 +318,8 @@ def cname(t):
     if t.is_ptr:
         far = ' __far' if t.isfar else ''
         to = t.to
+        if MODEL['far_data']:           # (far is the default: the near ones are named)
+            far = ' __near' if not t.isfar and not to.is_func else ''
         tail = ' const' if t.const else ''
         if to.is_func:
             return f'{cname(to.ret)} (*{far.strip()}{tail})({_params(to)})'

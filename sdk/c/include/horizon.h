@@ -7,6 +7,8 @@
  * bank), where its globals, strings, locals and malloc's heap all are. Memory in other
  * banks (hz_far_alloc, __far objects) needs __far pointers (32 bits). A syscall takes a
  * pointer as X = offset, Y = bank: the stubs do that (the code bank for a near pointer).
+ * With far data (hcc --data far) every plain data pointer is a far one, and every
+ * function here takes it as it is: any bank the program owns.
  *
  * Errors. Every hz_ function sets hz_errno: 0 when the call worked, else Horizon's error
  * code (HZ_EINVAL, HZ_ENOMEM, ..., HZ_EIO + n for the card: HZ_ENOFILE ...). It returns -1
@@ -344,9 +346,18 @@ unsigned hz_sstack_free(void);
  * bytes now, the biggest block malloc can give now, and the most bytes in use at once
  * since the program started (block headers counted). hcc --debug prints the heap's use
  * at exit, with the stacks' */
+#ifdef __CC816_FAR_DATA__
+/* (the far data model, hcc --data far: the heap is the main bank's room, then banks of
+ * 64 KB taken from Horizon as needed: the counts are long; largest counts a bank Horizon
+ * still has free) */
+unsigned long hz_heap_free(void);
+unsigned hz_heap_largest(void);
+unsigned long hz_heap_peak(void);
+#else
 unsigned hz_heap_free(void);
 unsigned hz_heap_largest(void);
 unsigned hz_heap_peak(void);
+#endif
 
 /* ---- console */
 /* read a line from the keyboard with echo and editing (Backspace, Left, Right): at most

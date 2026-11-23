@@ -17,10 +17,73 @@
 	.a16
 	.i16
 	.include "model.inc"
-	.importzp __rg, __sp, __rv
+	.importzp __rg, __sp, __rv, __h0
 	.export	_setjmp, _longjmp
 
 	.segment "CODE"
+
+.if FARDATA
+; The far data model (hcc --data far): env is a far pointer (a jmp_buf in any bank), the
+; same layout through [__h0],y; val at ARGS+4.
+_setjmp:
+	lda	ARGS,s
+	sta	__h0
+	lda	ARGS+2,s
+	sta	__h0+2
+	tsc
+	sta	[__h0]
+	ldy	#2
+	lda	1,s
+	sta	[__h0],y
+	ldy	#54
+	lda	3,s			; the return address's bank
+	sta	[__h0],y
+	ldy	#4
+	lda	__sp
+	sta	[__h0],y
+	.repeat	24, k
+	iny
+	iny
+	lda	__rg+48+2*k
+	sta	[__h0],y
+	.endrep
+	lda	#0
+	RET
+
+_longjmp:
+	lda	ARGS+4,s
+	bne	:+
+	inc	a
+:	sta	__rv
+	lda	ARGS,s
+	sta	__h0
+	lda	ARGS+2,s
+	sta	__h0+2
+	ldy	#4
+	.repeat	24, k
+	iny
+	iny
+	lda	[__h0],y
+	sta	__rg+48+2*k
+	.endrep
+	ldy	#4
+	lda	[__h0],y
+	sta	__sp
+	lda	[__h0]
+	tcs
+	ldy	#2
+	lda	[__h0],y
+	sta	1,s
+	ldy	#54
+	sep	#$20
+	.a8
+	lda	[__h0],y
+	sta	3,s
+	rep	#$20
+	.a16
+	lda	__rv
+	RET
+.else
 
 ; int setjmp(jmp_buf env): env at 3,s (large: 4,s)
 _setjmp:
@@ -71,3 +134,4 @@ _longjmp:
 .endif
 	lda	__rv
 	RET
+.endif

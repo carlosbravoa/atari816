@@ -3,6 +3,13 @@
 #include <stddef.h>
 #include <stdbool.h>
 
+/* a data pointer's size: 2, or 4 with far data (hcc --data far) */
+#ifdef __CC816_FAR_DATA__
+#define PTRSZ 4
+#else
+#define PTRSZ 2
+#endif
+
 static int calls;
 static int touch(int v) { calls++; return v; }
 
@@ -25,7 +32,8 @@ int main(void)
     if ((a ? p : NULL) != NULL || (a ? v : &b) != &a || (b > 100 ? 1.5 : 2) != 2.0)
         return 3;
     if (sizeof arr != 20 || sizeof arr[0] != 2 || sizeof(arr) / sizeof(arr[0]) != 10 ||
-        sizeof(long) != 4 || sizeof(char *) != 2 || sizeof &arr != 2 || sizeof "abc" != 4)
+        sizeof(long) != 4 || sizeof(char *) != PTRSZ || sizeof &arr != PTRSZ ||
+        sizeof "abc" != 4)
         return 4;
     if (sizeof(touch(1)) != 2 || calls != 0)   /* sizeof does not evaluate */
         return 5;

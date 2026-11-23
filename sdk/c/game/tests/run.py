@@ -139,7 +139,10 @@ def make_files(name, run):
 
 CODES = {"small": [],
          # the large code model: every function that can move in another bank
-         "large": ["--code", "large", "--main-room", "0", "--bank-room", "16384"]}
+         "large": ["--code", "large", "--main-room", "0", "--bank-room", "16384"],
+         # the same with far data (hcc --data far)
+         "largefar": ["--code", "large", "--data", "far", "--main-room", "0",
+                      "--bank-room", "16384"]}
 
 
 def run_tests(cc, horizon, only, update):
@@ -216,7 +219,7 @@ def main():
         elif a[i] == "--code":
             ccs = [a[i + 1]]; i += 2
             if ccs[0] not in CODES:
-                sys.exit("run.py: --code is small or large")
+                sys.exit("run.py: --code is small, large or largefar")
         elif a[i] == "--only":
             only.append(a[i + 1]); i += 2
         elif a[i] == "--update-refs":
@@ -226,7 +229,7 @@ def main():
     sys.path.insert(0, GAME)
     import hgbuild
     for cc in ccs:
-        hgbuild.lib_for(cc)
+        hgbuild.lib_for({"largefar": "large-far"}.get(cc, cc))
         run_tests(cc, horizon, only, update)
     bad = [n for n, ok in results if not ok]
     print(f"hgame tests: {len(results) - len(bad)} passed, {len(bad)} failed"

@@ -257,7 +257,11 @@ int __hz_vscan(hz_getfn get, hz_ungetfn unget, void *ctx, const char *fmt, va_li
             v = 0UL - v;
         if (!skip) {
             if (fc == 'p')
+#ifdef __CC816_FAR_DATA__
+                *va_arg(ap, void **) = (void *)v;
+#else
                 *va_arg(ap, void **) = (void *)(unsigned)v;
+#endif
             else if (size == 4)
                 *va_arg(ap, unsigned long *) = v;
             else if (size == 1)

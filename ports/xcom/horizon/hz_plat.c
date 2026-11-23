@@ -217,9 +217,39 @@ void plat_note(const char *s)
     printf("%s\n", s);
 }
 
+/* "@FILE" among the arguments: the words of FILE in its place (the shell's line holds
+   about 70 characters; a test's options are longer: tests/*.args) */
+static char *more_argv[40];
+static char more_text[512];
+
+static int args_from_file(int argc, char **argv, char ***out)
+{
+    int i, n = 0;
+    for (i = 0; i < argc && n < 39; i++) {
+        if (argv[i][0] == '@' && n < 38) {
+            FILE *f = fopen(argv[i] + 1, "r");
+            size_t len;
+            char *p;
+            if (!f)
+                continue;
+            len = fread(more_text, 1, sizeof more_text - 1, f);
+            fclose(f);
+            more_text[len] = 0;
+            for (p = strtok(more_text, " \t\r\n"); p && n < 39; p = strtok(NULL, " \t\r\n"))
+                more_argv[n++] = p;
+        } else
+            more_argv[n++] = argv[i];
+    }
+    more_argv[n] = NULL;
+    *out = more_argv;
+    return n;
+}
+
 int main(int argc, char **argv)
 {
     int i = 1;
+
+    argc = args_from_file(argc, argv, &argv);
 
     if (i < argc && !strcmp(argv[i], "/V")) {
         g_plat_virtual = 1;

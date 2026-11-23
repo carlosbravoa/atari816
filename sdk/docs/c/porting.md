@@ -150,6 +150,58 @@ bank (the main bank)", the data is too big:
 the first argument at `4,s`): reference.md, "Calling convention". `#ifdef
 __CC816_LARGE__` tells the two models apart in C and in inline assembly.
 
+## Porting a DOS large-model program
+
+A program written for a DOS compiler's large (or compact) model (Watcom `wcc -ml`,
+Microsoft `/AL`, Borland `-ml`) has far data pointers everywhere: every plain `char *` is a
+segment:offset pair, its heap is far, its strings and tables need not fit 64 KB. Build it
+with **`hcc --code large --data far`** (c.mk: `HZ_CODE := large` and `HZ_DATA := far`):
+plain data pointers are then 32-bit far pointers, `malloc` takes banks of 64 KB, string
+literals and `const` tables go to banks of far data, and the C library takes far pointers.
+The declarations of 49,000 lines need no change (`ports/xcom` is the worked example:
+XCOM-XT, Watcom C, ported without touching upstream's pointers). reference.md, "The far data
+model", has the whole of it. The steps:
+
+- [ ] **The keywords.** `__far`, `_far`, `__huge`, `_huge` and `__near`, `_near`,
+  `__cdecl`, `__pascal`, `__loadds`, `__interrupt` ... are accepted as they are;
+  `-fdos-keywords` makes `far`, `near` and `huge` keywords too (or `#define far __far` in
+  a header of your own, as `ports/xcom/compat/xcompat.h` does). `T far *a, far *b;` and
+  `void (far *f)(void)` compile (the second with a warning: a function pointer is always
+  the main-bank entry).
+- [ ] **`__near` in the source** (DOS's hot data in DGROUP): a `__near` object stays in the
+  main bank, a `__near` pointer is 16 bits again. Writable globals stay in the main bank
+  anyway, so a port can also `#define __near` to nothing (one pointer kind: the address of
+  a far object never loses its bank by accident). XCOM-XT does that.
+- [ ] **`#pragma aux` functions** (Watcom's inline machine code) are ignored with a warning
+  that names them: each needs a C body (or an `asm` statement). `#pragma pack(1)` is what
+  cc816 does anyway.
+- [ ] **Segment arithmetic** (`MK_FP`, `FP_SEG`, `FP_OFF`, `_dos_allocmem`): the 65816 has
+  banks of 64 KB, not paragraphs. Model DOS's memory where the program does arithmetic on
+  segments (`ports/xcom/compat/xdos.h`: the first megabyte as an arena of 17 banks,
+  `MK_FP(s, o)` is byte `s * 16 + o` of it, a DOS block never crossing a bank); where it
+  only takes the parts of a pointer, `HZ_BANK(p)`, `HZ_OFF(p)` and `hz_farptr(bank, off)`
+  are the 65816's own.
+- [ ] **`_fmemcpy`, `_fstrlen`, ...** are the plain ones (`#define _fmemcpy memcpy`): with
+  far data every library function takes far pointers.
+- [ ] **Files straight into far memory**: `read(fd, buf, n)` and `fread` read into a
+  `malloc` block in any bank; 512 bytes or more go straight from the card.
+- [ ] **The main bank's budget**: what stays there is the startup, the runtime and the
+  libraries' assembly, the thunks, the writable globals (bss and data), `--heap N` (the
+  part of the heap kept there: 1 KB by default) and the software stack. `hcc --sizes`
+  lists every object and function with its size and where it went, biggest first: the
+  big bss arrays at its top are the ones to declare `__far` when the main bank is full.
+- [ ] **What changes in behaviour**: `sizeof(void *)` is 4, `size_t` and `ptrdiff_t` stay
+  16 bits (as on DOS), structures with pointer members are 2 bytes bigger a pointer
+  (structures read from DOS files with far pointers in them keep their layout),
+  `intptr_t` is a `long`. Pointer arithmetic carries into the bank; DOS's wrapped inside
+  the segment, which only matters for code that relies on the wrap.
+- [ ] **Speed**: a far pointer is 4 bytes in every register, argument and structure; loops
+  through far pointers cost about 8-20 % more than through near ones, a call with
+  pointer arguments about twice as much (reference.md, "What it costs"). Hot loops can
+  take `__near` pointers to main-bank buffers, or move to assembly.
+- [ ] **Not there**: `huge` objects over 64 KB (an array must fit a bank), the small code
+  model, the controls library (`hui.h`).
+
 ## Not supported, and what to do instead
 
 | cc816 does not support | Do this instead |
@@ -202,9 +254,10 @@ scrolling in 256 colours with FM music; its `PORTING-NOTES.md` has the same list
   `-Dmain=game_main`, and write `main` in your platform layer.
 - [ ] Build with `-Wall` and **read every warning**.
 - [ ] Missing POSIX names: `<strings.h>` is there; `stricmp` is `strcasecmp`.
-- [ ] DOS's `far` and `huge` keywords: `#define huge __far` (and `far`). A qualifier
-  before a declarator's `*` (`char huge *a, huge *b;`) was Borland's: write one
-  declaration each.
+- [ ] DOS's `far` and `huge` keywords: `-fdos-keywords` (or `#define huge __far` and
+  `far`). A qualifier before a later declarator's `*` (`char huge *a, huge *b;`) is that
+  declarator's, as Borland and Watcom read it. A program of DOS's large model (far data
+  pointers everywhere): "Porting a DOS large-model program" above.
 - [ ] **Turbo C / Borland C code** (`ports/xargon`): its `dos.h`, `conio.h`, `io.h`,
   `alloc.h`, `mem.h` are small headers of your own (`-I compat`), and Borland's names in
   one header given to every file with `hcc -include` (`max`/`min`, `itoa`, `ltoa`,

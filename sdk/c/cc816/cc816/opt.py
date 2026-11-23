@@ -479,12 +479,16 @@ def natural_loops(f):
     for b in f.blocks:
         for s in b.succ():
             if s in dom[b]:            # back edge b -> s
-                body = loops.setdefault(s, {s})
+                # (a body is a dict used as an ordered set: the passes that walk it make
+                # their new values in the same order every run; a set of blocks went in
+                # the order of the objects' addresses, so a change anywhere in the
+                # compiler could reorder a loop's code)
+                body = loops.setdefault(s, {s: None})
                 stack = [b]
                 while stack:
                     x = stack.pop()
                     if x not in body:
-                        body.add(x)
+                        body[x] = None
                         stack.extend(x.preds)
     return loops
 

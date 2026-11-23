@@ -129,12 +129,40 @@ Rules:
   `-Wfar-pointer` warns on assignment, `-Wall`'s `-Wfar-cast` on a cast. Never write
   `(char *)hz_far_alloc()`.
 - The C library and `hui.h` take near pointers: copy far data into a main-bank buffer
-  (`hz_far_copy`) before `printf`, `strcmp`, `fwrite` and the like.
+  (`hz_far_copy`) before `printf`, `strcmp`, `fwrite` and the like (with near data; with
+  `--data far`, below, the library takes far pointers).
 - Cost: a far access builds a 32-bit address; `a[i][j]` in a `__far` object and an
   unsigned index through a far pointer use `[base],y` (cheap); a signed index keeps the
   32-bit add. Keep hot inner-loop data near when it fits.
 - An object (array, struct, `malloc` block) never crosses a bank: pointer arithmetic is
   16-bit within the bank.
+
+## The far data model (`--data far`)
+
+`hcc --code large --data far` (c.mk: `HZ_CODE := large`, `HZ_DATA := far`) makes every
+plain data pointer far, as in a DOS large-model program: for ports of such programs
+(`ports/xcom`) and for programs whose data is far bigger than one bank.
+
+| | near data (default) | far data |
+| --- | --- | --- |
+| `char *p`, `sizeof(void *)` | 16 bits, 2 | 32 bits (offset, bank, 0), 4; `char __near *` is 16 bits |
+| `size_t`, `ptrdiff_t`, `intptr_t` | 16, 16, 16 bits | 16, 16, 32 bits |
+| string literals, `const` objects | main bank | far data banks (long addressing) |
+| writable globals and statics | main bank | main bank (unless `__far`) |
+| `malloc` | the main bank's leftover | the main bank's room, then 64 KB banks from Horizon (a block at most 65,528 bytes) |
+| C library, hgame | near pointers | far pointers (`build/lib/large-far`); `hui.h` not available |
+| `__CC816_FAR_DATA__` | undefined | 1 (C and ca65) |
+
+- A near address (a global, `&local`, a local array) converts to far by itself (the main
+  bank). `printf("%s", s)` takes any string; `%p` prints `0x` and 6 digits.
+- Assembly: a pointer argument is 4 bytes; `model.inc` gives `PTRSZ` (2/4) and
+  `FARDATA` (0/1): `lda ARGS+PTRSZ,s` is the argument after a pointer.
+- Objects of the two data models never mix (hcc refuses: "an object made for the large
+  code model; this program is linked for the large code model with far data").
+- A port keeps its declarations: `T far *a, far *b;`, `void (far *f)(void)` (warning:
+  ignored), `#pragma aux` (warning: needs a C body) all compile.
+- Cost: pointers are 4 bytes everywhere; loops through pointers are about 8-20 % slower,
+  calls with pointer arguments about twice as slow, code about 27 % bigger.
 
 ## Stacks and heap
 
@@ -328,6 +356,9 @@ Build a port once with `-Wall` and read every warning.
 | `-w`, `-Wall`, `-Werror`, `-Wno-NAME`, `-WNAME` | warnings |
 | `-fsigned-char` | plain `char` signed |
 | `--code small\|large` | the code model (default `$HZ_CODE`, else small) |
+| `--data near\|far` | the data model (default `$HZ_DATA`, else near); far needs `--code large`: plain data pointers 32 bits (DOS's large model, below) |
+| `-fdos-keywords` | `far`, `near`, `huge` are keywords (`__far`, `__near`, `__far`) |
+| `--sizes` | every object and function of the link, its size and where it went (main bank, code bank k, far data bank k), biggest first |
 | `--stack N` | software stack bytes (512-32,768, even; default 8,192) |
 | `--heap N` | large model: main-bank bytes kept free for malloc (default 4,096) |
 | `--bank-room N`, `--main-room N`, `--spread N` | large model, for tests: limit code per bank |

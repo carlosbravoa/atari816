@@ -176,6 +176,47 @@ arrays with 16-bit indexes in Y, but a hot loop over far data is still slower th
 data. A far string given to a function taking `const char *` (printf, hui.h) must be
 copied into the main bank first (`hz_far_copy` into a static buffer).
 
+## Porting a DOS large-model program (`--data far`)
+
+A program of a DOS compiler's large model (Watcom `-ml`, Microsoft `/AL`, Borland `-ml`:
+every plain pointer far, the heap far, more strings and tables than 64 KB) is built with
+**`hcc --code large --data far`** (c.mk: `HZ_CODE := large`, `HZ_DATA := far`). Its
+declarations stay as they are. `ports/xcom` (XCOM-XT, 49,000 lines of Watcom C) is the
+worked example: with near data it could not link (51 KB of constants + 26 KB of bss in the
+main bank, every malloc'd structure out of reach); with `--data far` it links, boots and
+plays the new game to the geoscape, its LOG line for line the PC's.
+
+What the model does (sdk/docs/c/reference.md, "The far data model"):
+
+| | |
+| --- | --- |
+| `char *p` | 32 bits: offset, bank, 0; `char __near *p` 16 bits |
+| string literals, `const` objects, `__far` objects | banks of far data, read with long addressing (`lda f:name,x`: one cycle more than near) |
+| other globals and statics | the main bank (near addressing: as fast as near data) |
+| `&local`, a local array | a far pointer whose bank is the main bank (`__cbank`) |
+| `malloc` | the main bank's room, then banks from Horizon; a block at most 65,528 bytes, never across a bank |
+| the C library, hgame | built a third time (`build/lib/large-far`): every pointer argument far; `read`/`fread` straight into far memory |
+| not there | `huge` objects over 64 KB, the small code model, `hui.h`, mixing objects of the two models |
+
+Steps for the port:
+
+1. `-fdos-keywords` (or `#define far __far` in a compat header): `far`, `near`, `huge`.
+   `T far *a, far *b;` and `void (far *f)(void)` compile.
+2. Watcom's `#pragma aux f = "..."`: cc816 warns and names it; give `f` a C body.
+3. `MK_FP`/`FP_SEG`/`FP_OFF` and DOS memory calls: model the DOS megabyte as an arena of
+   banks (`ports/xcom/compat/xdos.h`, `plat/xdos.c`) when the code does segment
+   arithmetic; else use `HZ_BANK`, `HZ_OFF`, `hz_farptr`.
+4. `_fmemcpy` and friends: the plain ones (they take far pointers now).
+5. Budget the main bank with `hcc --sizes` (every object and function, its size and where
+   it went, biggest first). If bss does not fit, declare the biggest arrays `__far` in
+   every declaration (the header's too).
+6. Compare with the PC build (LOG lines, pictures): XCOM-XT's 816 LOG equals the host's.
+
+Costs measured (`sdk/c/tests/bench/farbench.c`, cycles a step, near data / far data):
+a byte copy loop through pointers 85 / 96, the masked sprite loop 95 / 105, an `int`
+array through a pointer parameter 171 / 205, a call with a pointer argument and result
+95 / 188; code grows about 27 % (XCOM-XT: 578 KB near, 732 KB far).
+
 ## Timing and the sound clock
 
 A Horizon program runs no code in interrupts. Clocks it has:

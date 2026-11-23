@@ -227,7 +227,7 @@ void __hz_xload(void)
             rdbuf(2 * m);
             if (where == 0) {
                 for (k = 0; k < m; k++)
-                    *(unsigned char *)o[k] = to;
+                    *(unsigned char __near *)o[k] = to;     /* (an offset in this bank) */
             } else {
                 unsigned char __far *p = (unsigned char __far *)hz_farptr(__hz_xbank[where], 0);
                 for (k = 0; k < m; k++)

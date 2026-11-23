@@ -16,6 +16,8 @@
 #   SRCS      the sources (default: every .c and .s in the folder)
 #   HZ_CODE   the code model: small (the default) or large (hcc --code large: code in
 #             several banks, still one file NAME.PRG; docs/c/reference.md)
+#   HZ_DATA   the data model: near (the default) or far (hcc --data far, with HZ_CODE
+#             large: plain data pointers are 32-bit far ones; docs/c/reference.md)
 #   HCCFLAGS  more hcc options (-O1, --stack N, --debug, -I dir, --needs ..., ...)
 #   RUNMODE   shell (default: a console program, typed at the shell's prompt) or desktop
 #             (a window program, chosen from the Desktop's Programs menu)
@@ -36,6 +38,8 @@ PRG      := $(shell echo $(NAME) | tr a-z A-Z).PRG
 SRCS     ?= $(wildcard *.c *.s)
 HZ_CODE  ?=
 export HZ_CODE
+HZ_DATA  ?=
+export HZ_DATA
 HCCFLAGS ?=
 RUNMODE  ?= shell
 ARGS     ?=
@@ -50,7 +54,7 @@ RUN816   := $(PYTHON) $(SDK)/tools/run816.py --horizon $(HORIZON) --mode $(RUNMO
 CARD     := $(HORIZON)/build/sd/SYSTEM/HORIZON.SYS
 
 # the code model the program was built with: another one rebuilds it
-CCSTAMP  := build/.code-$(or $(HZ_CODE),small)
+CCSTAMP  := build/.code-$(or $(HZ_CODE),small)$(if $(filter far,$(HZ_DATA)),-far)
 
 all: $(PRG)
 

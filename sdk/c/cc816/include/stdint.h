@@ -25,8 +25,14 @@ typedef long int_fast32_t;
 typedef unsigned long uint_fast32_t;
 typedef long long int_fast64_t;
 typedef unsigned long long uint_fast64_t;
+#ifdef __CC816_FAR_DATA__
+/* (the far data model: a pointer is 32 bits) */
+typedef long intptr_t;
+typedef unsigned long uintptr_t;
+#else
 typedef int intptr_t;
 typedef unsigned int uintptr_t;
+#endif
 typedef long long intmax_t;
 typedef unsigned long long uintmax_t;
 #define INT8_MIN (-128)
@@ -65,9 +71,15 @@ typedef unsigned long long uintmax_t;
 #define INT_FAST64_MIN INT64_MIN
 #define INT_FAST64_MAX INT64_MAX
 #define UINT_FAST64_MAX UINT64_MAX
+#ifdef __CC816_FAR_DATA__
+#define INTPTR_MIN INT32_MIN
+#define INTPTR_MAX INT32_MAX
+#define UINTPTR_MAX UINT32_MAX
+#else
 #define INTPTR_MIN INT16_MIN
 #define INTPTR_MAX INT16_MAX
 #define UINTPTR_MAX UINT16_MAX
+#endif
 #define INTMAX_MIN INT64_MIN
 #define INTMAX_MAX INT64_MAX
 #define UINTMAX_MAX UINT64_MAX

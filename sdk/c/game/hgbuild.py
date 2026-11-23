@@ -2,7 +2,9 @@
 """hgbuild.py - build hgame, the game library (sdk/c/game): build/game/small/libhgame.lib
 and build/game/large/libhgame.lib (the two code models: the C files and *.s, ca65).
 
-    python3 sdk/c/game/hgbuild.py [--force] [--code small|large]   (make -C sdk/c/game)
+    python3 sdk/c/game/hgbuild.py [--force] [--code small|large|large-far]   (make -C sdk/c/game)
+
+(large-far: the large code model with far data, hcc --data far: build/game/large-far)
 
 bin/hcc calls lib_for(code) to link it by itself when a C source includes <hgame.h>,
 <conio.h> or <joystick.h> (or with hcc --game); it is rebuilt whenever one of its sources,
@@ -52,8 +54,8 @@ def stale(code="small"):
 
 
 def build(code="small", quiet=False):
-    if code not in hzc816.CODES:
-        raise hzc816.HccError(f"hgame: the code model is small or large, not {code}")
+    if code not in hzc816.LIBS:
+        raise hzc816.HccError(f"hgame: the build is small, large or large-far, not {code}")
     od = os.path.join(outdir(code), "obj")
     if os.path.exists(od):
         import shutil
@@ -100,7 +102,7 @@ def lib_for(code="small"):
 
 if __name__ == "__main__":
     a = sys.argv[1:]
-    codes = list(hzc816.CODES)
+    codes = list(hzc816.LIBS)
     if "--code" in a:
         codes = [a[a.index("--code") + 1]]
     try:

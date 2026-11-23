@@ -20,6 +20,9 @@ HORIZON = os.path.abspath(os.environ.get('HORIZON') or os.path.join(SDK, '..', '
 # build/cc816-large (the random programs' sources stay in build/cc816, SRCBUILD)
 CODE = os.environ.get('HZ_CODE') or 'small'
 BUILD = os.path.join(SDKC, 'build', 'cc816-large' if CODE == 'large' else 'cc816')
+if hzc816.is_far():
+    # (the far data model, $HZ_DATA=far: check.py --code large-far)
+    BUILD = os.path.join(SDKC, 'build', 'cc816-largefar')
 SRCBUILD = os.path.join(SDKC, 'build', 'cc816')
 
 
@@ -66,6 +69,8 @@ def compile_obj(src, obj, level=2):
     incs, defs, opts = flags_of(src)
     if hzc816.CODE == 'large':
         opts['large'] = True
+    if hzc816.is_far():
+        opts['far_data'] = True
     asm, _ = driver.compile_c(src, incs, defs, level, opts=opts)
     s = obj[:-2] + '.s'
     with open(s, 'w') as fh:

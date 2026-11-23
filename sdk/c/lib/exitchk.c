@@ -21,7 +21,8 @@
 #define HSLO  0x0100
 #define SSTOP 0xFFF0
 extern unsigned __hz_stktop, __hz_sslo, __hz_paintflag, __hz_heappeak;
-extern char *__hz_heapstart, *__hz_heapend;
+/* (__near: the startup's words hold main-bank addresses, also with far data) */
+extern char __near *__hz_heapstart, __near *__hz_heapend;
 
 static unsigned __far *win(unsigned off)
 {
@@ -39,7 +40,7 @@ static int hard_ok(void)
 
 static int soft_ok(void)
 {
-    const unsigned *p = (const unsigned *)__hz_sslo;
+    const unsigned __near *p = (const unsigned __near *)__hz_sslo;
     unsigned i;
     for (i = 0; i < ZONE / 2; ++i)
         if (p[i] != HZ_GUARD)
@@ -74,10 +75,25 @@ static void say(const char *a, unsigned v, const char *b, unsigned w, const char
     hz_puts(c);
 }
 
+#ifdef __CC816_FAR_DATA__
+static void sayl(const char *a, unsigned long v, const char *c)
+{
+    char n[12], *e = n + 11;
+    *e = 0;
+    do {
+        *--e = (char)('0' + (unsigned)(v % 10));
+        v /= 10;
+    } while (v);
+    hz_puts(a);
+    hz_puts(e);
+    hz_puts(c);
+}
+#endif
+
 void __hz_exitchk(void)
 {
     unsigned a;
-    const unsigned *p;
+    const unsigned __near *p;
     if (!hard_ok())
         say("\nstack overflow: the guard zone at window address ", HSLO, 0, 0,
             " (the stack's last 256 bytes) was written; the program used more stack "
@@ -91,13 +107,19 @@ void __hz_exitchk(void)
         for (a = HSLO + ZONE; a < __hz_stktop && *win(a) == HZ_PAINTW; a += 2)
             ;
         say("stack: ", __hz_stktop - a, " of ", __hz_stktop - HSLO - ZONE, " bytes used\n");
-        for (p = (const unsigned *)(__hz_sslo + ZONE); p < (const unsigned *)SSTOP &&
-             *p == HZ_PAINTW; ++p)
+        for (p = (const unsigned __near *)(__hz_sslo + ZONE);
+             p < (const unsigned __near *)SSTOP && *p == HZ_PAINTW; ++p)
             ;
         say("software stack: ", SSTOP - (unsigned)p, " of ", SSTOP - __hz_sslo - ZONE,
             " bytes used\n");
+#ifdef __CC816_FAR_DATA__
+        /* (far data: the heap goes on in other banks; its counts are malloc.c's) */
+        sayl("heap: ", hz_heap_peak(), " bytes used at most (malloc: the main bank's "
+             "room, then banks of 64 KB; a file open with fopen takes 1 KB)\n");
+#else
         say("heap: ", __hz_heappeak, " of ", (unsigned)(__hz_heapend - __hz_heapstart),
             " bytes used at most (malloc; a file open with fopen takes 1 KB)\n");
+#endif
     }
 }
 

@@ -19,6 +19,9 @@
 	.i16
 	.include "model.inc"
 	.importzp __rg
+.if FARDATA
+	.importzp __cbank
+.endif
 	.import	_hg__offx, _hg__offy, _hg__cly0, _hg__cly1, _hg__clx1
 	.import	_hg__qn, _hg__qpix, _hg__nruns, _hg__runs, _hg__runkind, _hg__four
 	.import	_hg__dq, _hg__sq, _hg__kind, _hg__cutx, _hg__cuty, _hg__font
@@ -345,6 +348,26 @@ _hg__rec:
 	sta	_hg__cutx
 	lda	r14
 	sta	_hg__cuty
+.if FARDATA
+	ldy	__cbank			; (far data: a far pointer, X its bank)
+	txa
+	clc
+	adc	#_hg__dq
+	tyx
+	RET
+@none:	pei	(__cbank)		; (far pointers: the main bank)
+	pea	s_msg
+	pei	(__cbank)
+	pea	s_fn
+	CALL	_hg__fail
+	pla
+	pla
+	pla
+	pla
+@null:	lda	#0
+	tax
+	RET
+.else
 	txa				; &hg__dq[Y] (a near pointer)
 	clc
 	adc	#_hg__dq
@@ -356,6 +379,7 @@ _hg__rec:
 	pla
 @null:	lda	#0
 	RET
+.endif
 
 ; ------------------------------------------------------------------ void hg_fill
 ; (int x, int y, unsigned w, unsigned h, unsigned c): 3,s x, 5,s y, 7,s w, 9,s h, 11,s c
@@ -426,6 +450,29 @@ _hg_fill:
 ; the code bank, DBR). The 1 bpp picture of n characters of s, n bytes a row, 10 rows, from
 ; the built-in font (95 glyphs of 10 bytes from ' '). The row offsets (0, n, .. 9n) are
 ; made first, so a character is ten 8-bit loads and stores.
+.if FARDATA
+; (far data: dst and s are far pointers, [r6],y and [r2],y: dst at ARGS, s at ARGS+4, n at
+; ARGS+8; r7 and r3 their banks)
+.macro	STRIPIND op, r
+	op	[r],y
+.endmacro
+_hg__strip:
+	lda	ARGS,s
+	sta	r6
+	lda	ARGS+2,s
+	sta	r7
+	lda	ARGS+4,s
+	sta	r2
+	lda	ARGS+6,s
+	sta	r3
+	lda	ARGS+8,s
+	sta	r4			; n
+	bne	@go
+	RET
+.else
+.macro	STRIPIND op, r
+	op	(r),y
+.endmacro
 _hg__strip:
 	lda	ARGS,s			; (r6): dst + i
 	sta	r6
@@ -435,6 +482,7 @@ _hg__strip:
 	sta	r4			; n
 	bne	@go
 	RET
+.endif
 @go:	stz	r8			; the rows' offsets
 	sta	r9
 	clc
@@ -456,7 +504,7 @@ _hg__strip:
 	sta	r29
 	stz	r5			; i
 @char:	ldy	r5
-	lda	(r2),y
+	STRIPIND	lda, r2
 	and	#$00FF
 	sec
 	sbc	#32
@@ -476,34 +524,34 @@ _hg__strip:
 	.a8
 	lda	a:0,x
 	ldy	r8
-	sta	(r6),y
+	STRIPIND	sta, r6
 	lda	a:1,x
 	ldy	r9
-	sta	(r6),y
+	STRIPIND	sta, r6
 	lda	a:2,x
 	ldy	r10
-	sta	(r6),y
+	STRIPIND	sta, r6
 	lda	a:3,x
 	ldy	r11
-	sta	(r6),y
+	STRIPIND	sta, r6
 	lda	a:4,x
 	ldy	r12
-	sta	(r6),y
+	STRIPIND	sta, r6
 	lda	a:5,x
 	ldy	r13
-	sta	(r6),y
+	STRIPIND	sta, r6
 	lda	a:6,x
 	ldy	r14
-	sta	(r6),y
+	STRIPIND	sta, r6
 	lda	a:7,x
 	ldy	r15
-	sta	(r6),y
+	STRIPIND	sta, r6
 	lda	a:8,x
 	ldy	r28
-	sta	(r6),y
+	STRIPIND	sta, r6
 	lda	a:9,x
 	ldy	r29
-	sta	(r6),y
+	STRIPIND	sta, r6
 	rep	#$20
 	.a16
 	inc	r6

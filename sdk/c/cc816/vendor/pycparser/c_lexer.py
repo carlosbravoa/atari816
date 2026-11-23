@@ -528,6 +528,7 @@ _keywords: tuple[str, ...] = (
     "_THREAD_LOCAL",
     "_STATIC_ASSERT",
     "_ATOMIC",
+    "__CC816_NEAR",
     "_ALIGNOF",
     "_ALIGNAS",
     "_PRAGMA",

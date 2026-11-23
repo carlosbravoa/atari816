@@ -22,8 +22,9 @@ PYTHON ?= python3
 CTS    ?=
 SEEDS  ?= 1,2,3
 # the code models the set runs in, one after the other: small, and large (hcc --code
-# large: every program with its functions in turn in three other banks)
-CODES  ?= small large
+# large: every program with its functions in turn in three other banks), and large-far
+# (the same with far data: hcc --code large --data far)
+CODES  ?= small large large-far
 
 check:
 	@set -e; for c in $(CODES); do echo "==== code model: $$c"; \
@@ -36,6 +37,6 @@ diag:
 sdk:
 	$(PYTHON) tests/sdkcompile.py
 clean:
-	rm -rf ../build/cc816 ../build/cc816-large
+	rm -rf ../build/cc816 ../build/cc816-large ../build/cc816-largefar
 
 .PHONY: check quick diag sdk clean

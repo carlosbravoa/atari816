@@ -28,7 +28,7 @@ def main():
     seconds = None
     i = 0
     while i < len(a):
-        if a[i] == "--code" and i + 1 < len(a) and a[i + 1] in ("small", "large"):
+        if a[i] == "--code" and i + 1 < len(a) and a[i + 1] in ("small", "large", "largefar"):
             models = [a[i + 1]]; i += 2
         elif a[i] == "--horizon":
             hz = a[i + 1]; i += 2
@@ -48,9 +48,10 @@ def main():
     subprocess.run(gen, check=True)
     ok = True
     for m in models:
-        prg = os.path.join(out, f"RTTEST{'L' if m == 'large' else 'S'}.PRG")
+        prg = os.path.join(out, f"RTTEST{'L' if m == 'large' else 'F' if m == 'largefar' else 'S'}.PRG")
         cc = [] if m == "small" else \
-            ["--code", "large", "--main-room", "0", "--bank-room", "8192"]
+            ["--code", "large", "--main-room", "0", "--bank-room", "8192"] + \
+            (["--data", "far"] if m == "largefar" else [])
         r = subprocess.run([os.path.join(SDKC, "bin", "hcc")] + cc + ["-o", prg,
                             os.path.join(HERE, "rttest.c")])
         if r.returncode:

@@ -49,9 +49,15 @@
 	.import	__CONSTRUCTOR_TABLE__, __CONSTRUCTOR_COUNT__
 	.import	__DESTRUCTOR_TABLE__, __DESTRUCTOR_COUNT__
 .if LARGE
+.if FARDATA
+	.export	__icall, __cc816_largefar
+	.import	___hz_xload
+__cc816_largefar = 1		; (every object cc816 makes with far data imports it)
+.else
 	.export	__icall, __cc816_large
 	.import	___hz_xload
 __cc816_large = 1		; (every object cc816 makes for the large code model imports it)
+.endif
 .else
 	.export	__cc816_small
 __cc816_small = 1
@@ -173,12 +179,19 @@ __start:
 	bra	@ct
 @ctd:	CALL	___hz_mkargs	; lib/args.c: A = argc, ___hz_argv = argv
 	tax
+.if FARDATA
+	lda	___hz_argv+2	; (far data: argv is a far pointer, its bank first)
+	pha
+.endif
 	lda	___hz_argv	; main(int argc, char **argv) (or main(void): the same call)
 	pha
 	phx
 	CALL	_main
 	ply
 	ply
+.if FARDATA
+	ply
+.endif
 	jmp	exitA
 
 ; void exit(int code)

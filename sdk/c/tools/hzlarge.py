@@ -61,6 +61,7 @@ FAKE = {"A": lambda k: k, "B": lambda k: k + 0x40, "C": lambda k: 0x80 + 2 * (k 
 OFFSET = {"A": 0, "B": 0, "C": 1}
 MAX_BANKS = 64                  # (xload.c)
 HEAP = 4096                     # the main bank's room kept for malloc (hcc --heap N)
+HEAP_FAR = 1024                 # ... with far data (the heap goes on in other banks)
 MOVABLE = re.compile(r"^F(?:S[0-9a-f]{6})?_\w+$")
 # a __far object of the program (cc816: segment FD_name, FD<tag>_name for a static one):
 # placed in banks of far data after the code banks, loaded with them (offset 0 in every
@@ -234,9 +235,10 @@ def _undefined(msg):
 
 
 def link(objs, out, sstack, debug=False, mapfile=None, libs=(), keep=None, heap=HEAP,
-         bank_room=BANK, main_room=None, spread=None):
-    """-> the sizes dict (as hzc816.link's, and 'banks', 'xblock', 'o65', 'moved', 'thunks')"""
-    d = hzc816.libdir("large")
+         bank_room=BANK, main_room=None, spread=None, lib="large"):
+    """-> the sizes dict (as hzc816.link's, and 'banks', 'xblock', 'o65', 'moved', 'thunks').
+    lib: the library build, large or large-far (hcc --data far)"""
+    d = hzc816.libdir(lib)
     name = os.path.basename(out)
     base = os.path.splitext(out)[0]
     # (before: the other banks were in a second file, NAME.PRX; one left from such a build
@@ -248,7 +250,7 @@ def link(objs, out, sstack, debug=False, mapfile=None, libs=(), keep=None, heap=
     room = hzc816.CODE_ROOM - sstack
     defs = [f"__HZ_SSTACK__={sstack}", f"__HZ_PAINT__={1 if debug else 0}"]
     head = [os.path.join(d, "crt0.o")] + list(objs)
-    tail = list(libs) + [hzc816.lib_path("large")]
+    tail = list(libs) + [hzc816.lib_path(lib)]
     # (the glue goes before the libraries: its ___hz_xload must win over the library's)
     try:
         # (the libraries' functions too: the C library's, hgame's, the controls
@@ -457,6 +459,10 @@ def link(objs, out, sstack, debug=False, mapfile=None, libs=(), keep=None, heap=
         s["inmain"] = sum(sz for n, sz in moved if where[n] == "MAIN")
         s["thunks"] = len(thunks)
         s["xrelocs"] = sum(len(v) for v in relocs.values())
+        # (hcc --sizes: the map and the labels of link A, while tmp is kept)
+        s["mapfile"], s["lblfile"] = mp, os.path.join(tmp, "linkA.lbl")
+        s["ncode"] = nb
+        s["far_model"] = lib.endswith("-far")
         if mapfile:
             # (the map, and every label: the main bank's at bank 0, code bank k's at bank
             # k: prof816.py reads them)

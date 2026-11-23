@@ -102,7 +102,7 @@ the mode folder (`VGA/` first for read-only opens, as rdcount.asm's INT 21h hook
 
 On the Atari816 this model needs **far data pointers by default**: a plain `T *` in the
 engine is a DOS far pointer, but a cc816 plain pointer is a 16-bit offset in the main bank.
-See section 4.
+See section 4; since stage 3 the SDK has it (`hcc --data far`, section 4b).
 
 ### Video: the 286 VGA path
 
@@ -381,6 +381,39 @@ What it says:
 | 6 | Far byte loops are slow: `if (*s) d[k] = *s;` over far pointers runs about 120-200 cycles a byte (8.8 ms for a 32 x 40 sprite) | cc816 speed | the sprite loop in `tests/bench816/bench.c` |
 | 7 | `read()` into a near buffer + `hz_far_copy` is the only portable way to read into far memory, 100 times slower than `hz_read` into it: a `read_far(fd, void __far *, n)` in the library (honouring the read-ahead) would be the right tool | libc wish | `tests/bench816/bench.c` pictures |
 | 8 | `od65` (cc65's object dumper) is not installed on the build machine, and hcc has no per-module size report: the main bank's parts per file came from `--keep`'s trial map. `hcc --sizes` (per object: constants, data, bss) would help every port | hcc wish | |
+
+## 4b. Stage 3's gate: the far data model (done, 23 November 2026)
+
+The SDK now has items 1-5 and 7-8 of the table above: `hcc --code large --data far`
+(sdk/docs/c/reference.md, "The far data model"): plain data pointers are 32-bit far
+pointers, string literals and `const` tables live in banks of far data, `malloc` takes
+banks from Horizon, the C library and hgame take far pointers, `read` goes straight into
+far memory, `T far *a, far *b;` and `void (far *f)(void)` compile, `#pragma aux` is
+warned about, and `hcc --sizes` lists every object. The port changed only `Makefile`
+(`--data far`, `--game`), `compat/xcompat.h` (`__near` empty: one pointer kind;
+`XD_FAR_DATA`, so the engine's malloc is the DOS chain in the arena), `plat/xdos.c`
+(`_dos_read`/`_dos_write` straight into the arena) and `horizon/hz_plat.c` (`@FILE`: the
+options of a test from a file, `tests/*.args`). Upstream is untouched.
+
+| | |
+| --- | --- |
+| XCOM.PRG | 833,994 bytes: an o65 of 21 KB, 12 code banks (732,183 bytes of code; 578,218 with near data: far pointers make it 27 % bigger), 1 bank of far data (51,168 bytes: the strings and constant tables) |
+| The main bank | 46,577 bytes besides movable code: code that must stay 8,005, constants 3,517, data 319, bss 34,736 (the biggest, `hcc --sizes`: hgame's record queues 4.6 KB, `arena` 2 KB, `g_units` 2 KB, `save_box` 1.3 KB); + `--heap 2048` + `--stack 8192` = 56,817 of 65,264; 8 KB of it then filled with movable code |
+| Banks at run time | 13 for the program, 17 for the DOS arena, the framebuffer's |
+| Boot | `X.PRG @GEO.ARG` (`/V VGA NOINTRO LOG GEO.TXT KEYS GEO.KEY`): the start menu, a new game, the base placed, the geoscape within 20 s of emulated time; the whole of tests/geo.keys (the base, the UFOpaedia, the graphs) by about 80 s |
+| Against the host | GEO.TXT and BATTLE.TXT (tests/battle.keys: a quick battle on FA1V, sectoids, seed 1, to "script finished") are the host's line for line, except the VGA buffer's segment (the structures' sizes differ: 16-bit `int`, 4-byte pointers) and BATTLE.TXT's "KB in all" (the host prints 0: a 32-bit `int` fault of the host build; the Atari816's 434 is the DOS model's own figure); every screenshot is one of the host's pictures but for 55 pixels (the mouse arrow: the emulator's pointer at 0,0) |
+
+The profile of the first 60 s (`run816.py --prof`, `sdk/tools/prof816.py`): the platform
+layer's polling dominates, not the engine: `uptime_us` (`hg_us`) 82,206 calls, 13 % of the
+cycles; `__udiv32` 9 % (the clock's conversions); `memcmp` 8 % (`plat_poll` compares the
+768-byte DAC each poll); the INT 33h model 7.5 %; `scan` (the floor pass) 5 %; `xd_mkfp`
+4.8 %; `mouse_poll`, `plat_poll`, `bios_clock`, `plat_mouse` 2-4 % each.
+
+**The next blockers**, in order: (1) the polling of `horizon/hz_plat.c` (poll the clock and
+the mouse once a frame, keep the DAC's changes in a flag instead of comparing it); (2) the
+battle view's drawing (stage 4: the blitter atlases); (3) speed of the far data model's
+code in the engine's hot loops (pointer arithmetic on far pointers: reference.md, "What it
+costs"; assembly where the profile says so).
 
 ## 5. The plan
 

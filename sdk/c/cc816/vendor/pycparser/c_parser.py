@@ -445,6 +445,12 @@ class CParser:
                 fixed_decl = declaration
             else:
                 fixed_decl = self._fix_decl_name_type(declaration, spec["type"])
+            if decl.get("lead"):
+                inner = fixed_decl.type
+                while not isinstance(inner, c_ast.TypeDecl):
+                    inner = inner.type
+                inner.quals = list(inner.quals or []) + [
+                    q for q in decl["lead"] if q not in (inner.quals or [])]
 
             # Record the declared name in the current scope so the parser can
             # distinguish identifiers from typedef names.
@@ -616,6 +622,8 @@ class CParser:
 
     def _scan_declarator_name_info(self) -> tuple[str | None, bool]:
         saw_paren = False
+        while self._peek_type() in _LEAD_QUALIFIER and self._peek_type(2) == "TIMES":
+            self._advance()
         while self._accept("TIMES"):
             self._parse_attribute_specifier_sequence()
             while self._peek_type() in _TYPE_QUALIFIER:
@@ -1177,7 +1185,13 @@ class CParser:
         )
 
         while self._accept("COMMA"):
-            decls.append(self._parse_init_declarator(id_only=id_only))
+            lead = []
+            while self._peek_type() in _LEAD_QUALIFIER and self._peek_type(2) != "LPAREN":
+                lead.append(self._advance().value)
+            d = self._parse_init_declarator(id_only=id_only)
+            if lead:
+                d["lead"] = lead
+            decls.append(d)
         return decls
 
     # BNF: init_declarator : declarator ('=' initializer)?
@@ -1301,7 +1315,13 @@ class CParser:
     def _parse_struct_declarator_list(self) -> list["_DeclInfo"]:
         decls = [self._parse_struct_declarator()]
         while self._accept("COMMA"):
-            decls.append(self._parse_struct_declarator())
+            lead = []
+            while self._peek_type() in _LEAD_QUALIFIER and self._peek_type(2) != "LPAREN":
+                lead.append(self._advance().value)
+            d = self._parse_struct_declarator()
+            if lead:
+                d["lead"] = lead
+            decls.append(d)
         return decls
 
     # BNF: struct_declarator : declarator? ':' constant_expression
@@ -1427,7 +1447,7 @@ class CParser:
     # BNF: declarator_kind : pointer? direct_declarator(kind)
     def _parse_declarator_kind(self, kind: str, allow_paren: bool) -> c_ast.Node:
         ptr = None
-        if self._peek_type() == "TIMES":
+        if self._at_pointer():
             ptr = self._parse_pointer()
         direct = self._parse_direct_declarator(kind, allow_paren=allow_paren)
         if ptr is not None:
@@ -1559,10 +1579,23 @@ class CParser:
 
         return func
 
+    def _at_pointer(self) -> bool:
+        """'*', or (cc816) __far / __near before it: `void (__far *f)(void)`"""
+        return self._peek_type() == "TIMES" or (
+            self._peek_type() in _LEAD_QUALIFIER and self._peek_type(2) == "TIMES")
+
     # BNF: pointer : '*' type_qualifier_list? pointer?
     def _parse_pointer(self) -> c_ast.Node | None:
         stars = []
+        lead = []
+        while self._peek_type() in _LEAD_QUALIFIER and self._peek_type(2) == "TIMES":
+            lead.append("lead:" + self._advance().value)
         times_tok = self._accept("TIMES")
+        if lead and times_tok:
+            attributes = self._parse_attribute_specifier_sequence()
+            quals = (self._parse_type_qualifier_list() or []) + lead
+            stars.append((quals, self._tok_coord(times_tok), attributes))
+            times_tok = self._accept("TIMES")
         while times_tok:
             attributes = self._parse_attribute_specifier_sequence()
             quals = self._parse_type_qualifier_list() or []
@@ -1686,7 +1719,7 @@ class CParser:
 
     # BNF: abstract_declarator_opt : pointer? direct_abstract_declarator?
     def _parse_abstract_declarator_opt(self) -> c_ast.Node | None:
-        if self._peek_type() == "TIMES":
+        if self._at_pointer():
             ptr = self._parse_pointer()
             if self._starts_direct_abstract_declarator():
                 decl = self._parse_direct_abstract_declarator()
@@ -1706,7 +1739,7 @@ class CParser:
     def _parse_direct_abstract_declarator(self) -> c_ast.Node:
         lparen_tok = self._accept("LPAREN")
         if lparen_tok:
-            if self._starts_declaration() or self._peek_type() in {
+            if (self._starts_declaration() and not self._at_pointer()) or self._peek_type() in {
                 "RPAREN",
                 "ELLIPSIS",
             }:
@@ -2636,7 +2669,10 @@ _STORAGE_CLASS = {
 
 _FUNCTION_SPEC = {"INLINE", "_NORETURN"}
 
-_TYPE_QUALIFIER = {"CONST", "RESTRICT", "VOLATILE", "_ATOMIC"}
+_TYPE_QUALIFIER = {"CONST", "RESTRICT", "VOLATILE", "_ATOMIC", "__CC816_NEAR"}
+# (cc816: __far and __near before a later declarator, `T __far *a, __far *b;`, as Watcom
+# and Microsoft C take it: the qualifier applies to that declarator's base type)
+_LEAD_QUALIFIER = {"_ATOMIC", "__CC816_NEAR"}
 
 _TYPEOF_SPEC = {"TYPEOF", "TYPEOF_UNQUAL"}
 

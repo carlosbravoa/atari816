@@ -76,8 +76,10 @@ host-run: build/host/xcomhost
 	build/host/xcomhost -C data/packs -o build/host/shots $(ARGS)
 
 # ---------------------------------------------------------------- Atari816
-CFLAGS816 := --code large -Icompat -Iplat -Ibuild/src -include compat/xcompat.h -fsigned-char -w $(PLATDEFS)
-LFLAGS816 := --code large --map --stack 8192 --heap 8192
+# the far data model (hcc --data far): the engine's plain pointers are DOS far pointers,
+# its strings and constant tables in far data (sdk/docs/c/reference.md)
+CFLAGS816 := --code large --data far -Icompat -Iplat -Ibuild/src -include compat/xcompat.h -fsigned-char -w $(PLATDEFS)
+LFLAGS816 := --code large --data far --game --map --sizes --stack 8192 --heap 2048
 build/816/o/%.o: build/src/%.c $(HEADERS) build/src/.stamp
 	@mkdir -p build/816/o
 	$(HCC) $(CFLAGS816) $(if $(filter main,$*),-Dmain=xcom_main) -c -o $@ $<
