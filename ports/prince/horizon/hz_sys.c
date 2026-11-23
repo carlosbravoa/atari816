@@ -43,7 +43,11 @@ void hzt_wait_frames(unsigned n)
 
 void init_timer(int frequency)
 {
-    (void)frequency;
+    /* upstream's own: transition_ltr() divides by perf_frequency / 120. Left at 0 the
+     * quotients were garbage that still advanced while the clock was small, and froze the
+     * story's wipe once the machine had been on for some 4.5 minutes */
+    perf_frequency = SDL_GetPerformanceFrequency();
+    perf_counters_per_tick = perf_frequency / (Uint64)frequency;
 }
 
 void reset_timer(int timer_index)

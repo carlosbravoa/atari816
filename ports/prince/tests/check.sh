@@ -94,6 +94,15 @@ if [ "$REFS" = --refs ]; then
   python3 tests/shots.py tests/frames.md5 build/test/frames/*.png --update || fail=1
 elif python3 tests/shots.py tests/frames.md5 build/test/frames/*.png; then :; else fail=1; fi
 
+# ---------------------------------------------------------------- 3b. a late clock
+# the machine on for 280 s before the title (every other run is in its first minute): the
+# title's pictures, the story's wipe (it froze there on the board), then a key starts level 1
+run --mode desktop --script tests/late.script --seconds 330 \
+  --out build/test/late > build/test/late.log 2>&1 || bad "the late clock's run (killed, or a wait never ended)"
+if grep -aq "^prince: level 1" build/test/late/console.txt; then
+  ok "the machine on for 280 s: the title, the story's wipe, level 1"
+else bad "the machine on for 280 s: no level 1 (the title froze)"; fi
+
 # ---------------------------------------------------------------- 4. the scripted game
 run --mode desktop --script tests/play.script --seconds 40 --log-lau \
   --out build/test/play > build/test/play.log 2>&1 || bad "the scripted game's run (killed, or a wait never ended)"
