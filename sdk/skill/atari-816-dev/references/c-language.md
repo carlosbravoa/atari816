@@ -161,7 +161,7 @@ plain data pointer far, as in a DOS large-model program: for ports of such progr
   code model; this program is linked for the large code model with far data").
 - A port keeps its declarations: `T far *a, far *b;`, `void (far *f)(void)` (warning:
   ignored), `#pragma aux` (warning: needs a C body) all compile.
-- Cost: pointers are 4 bytes everywhere; loops through pointers are about 15-40 % slower,
+- Cost: pointers are 4 bytes everywhere; loops through pointers are about 8-20 % slower,
   calls with pointer arguments about twice as slow, code about 30 % bigger.
 
 ## Stacks and heap

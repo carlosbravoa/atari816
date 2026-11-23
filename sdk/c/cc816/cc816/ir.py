@@ -13,6 +13,8 @@ Instructions (Ins.op):
   shl ushr sshr                d = a shift b         (b is a 16-bit count)
   neg com                      d = -a, ~a
   zx sx                        d(4) = a(2) zero / sign extended
+  addlo d a b                  d(4) = a(4) with b(2) added to its low word alone (the far
+                               data model's p[i], i signed: the bank stays)
   tr                           d(2) = low word of a(4)
   x8u x8s                      d(2) = low byte of a, zero / sign extended
   ld  d base idx off sz sgn    d = *(base + idx + off), sz 1/2/4 bytes

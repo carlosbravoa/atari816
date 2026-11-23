@@ -304,9 +304,12 @@ direct-page register: the 65816's own long indirect addressing). The rules:
   inside its object, and one past its end or one before its start (`p - 1` in a loop
   that walks down to the start), that is the same as DOS's offset-only arithmetic, and it
   keeps a pointer one past an object that ends at a bank's last byte greater than the
-  object's start (DOS's would wrap to offset 0). `p - q` is the difference of the
-  offsets (16 bits, `ptrdiff_t`). Not supported: arithmetic that relies on the offset
-  wrapping inside its segment (DOS's `p + 0xFFFF` as `p - 1`).
+  object's start (DOS's would wrap to offset 0). An element `p[i]` (an access, not a
+  pointer value) is reached as DOS reaches it: an unsigned `i` in Y (`[p],y`), a signed
+  one added to the offset alone (the element is in `p`'s object, so in its bank: cheaper
+  than widening `i` to 32 bits). `p - q` is the difference of the offsets (16 bits,
+  `ptrdiff_t`). Not supported: arithmetic that relies on the offset wrapping inside its
+  segment (DOS's `p + 0xFFFF` as `p - 1`).
 - **Compares**: `==`, `!=`, `<` ... compare the whole 32 bits (the bank first). Pointers
   into one object compare as their offsets do.
 - **NULL** is 0 (bank 0, offset 0: nothing of a program is there). A near pointer
@@ -474,8 +477,32 @@ here). The lower-case `far`, `near` and `huge` are only keywords with `-fdos-key
 
 ### What it costs
 
-(Measured at the end of the work: the table of near against far data, the benchmarks and
-micro-cases, is filled in below under "Costs of far data".)
+The same C with near data (`--code large`) and with far data (`--code large --data far`),
+in the emulator (`tests/run.py`'s bench and fbench; `tests/bench/farbench.c` for the
+pointer shapes, in cycles a step: a byte, an element, a call):
+
+| | near data | far data | |
+| --- | --- | --- | --- |
+| bench: sieve, sum16, mul32, fib22, strs, structs (ms) | 810, 298, 1,279, 420, 849, 675 | 810, 296, 1,287, 416, 954, 740 | strs (pointers and bytes) +12 %, structs +10 % |
+| fbench: mandel, sincos, sqrt, expow, conv (ms) | 2,150, 1,650, 370, 1,950, 1,065 | 2,140, 1,647, 349, 1,940, 1,070 | the same |
+| copy, `while ((*d++ = *s++))` | 85 | 96 (121 before the pointer's in-place step) | +13 % |
+| sprite, `if (*s) d[k] = *s;` (a 32 x 40 masked sprite) | 95 | 105 (111) | +11 % |
+| index, `s += a[i]` of a global array | 98 | 103 | the array is near: its name is absolute addressing |
+| pindex, the same through a pointer parameter (`int i`) | 171 | 205 (255 before the offset-only index) | +20 % |
+| member, `p->x += p->y + i` along an array of structures | 116 | 125 | +8 % |
+| call, `d = pass(d) - 1`: a pointer argument and result | 95 | 188 (197) | 4 bytes pushed, A and X back, 32-bit arithmetic |
+| `memcpy`, `strlen` (4,000 bytes) | 12, 12 | 10, 10 | MVN either way; `strlen` reads two bytes a round |
+| program size: fbench, farbench | 27,881, 10,979 bytes | 32,169, 18,703 | the far library's heap, stdio and printf with far pointers |
+| XCOM-XT's code | 578,218 bytes (does not link: its data does not fit) | 763,057 bytes in 12 banks | +32 % |
+
+So: arithmetic, calls without pointers and code that reads globals by name cost nothing;
+loops through pointers cost 8-20 % more, a call with pointer arguments about twice as
+much, and code grows by about a third where pointers are everywhere. A byte read through
+a far pointer is an 8-bit load (`sep`/`rep`: a 16-bit one could touch the next bank at a
+bank's last byte); a far pointer stepped in place is `inc`, `bne`, `inc` (`p++`), and
+an index through it is Y (`[p],y`) when it is unsigned, an add to the offset alone when
+it is signed (`r045_far_signed_index.c`). Hot loops can take `__near` pointers to main-bank buffers, or move
+to assembly.
 
 ## Types
 
@@ -795,7 +822,8 @@ cc816 has a C library of its own (`sdk/c/lib`, in C) and a runtime (`sdk/c/rt`: 
 startup, the memory and string routines and the arithmetic, in assembly). It is built
 split, one function a module, so a program links only what it uses. The libc test
 (`tests/libc`, 86 checks: formats, strings, sorting, the heap, files, folders, time, far
-memory, errno, argv, the keyboard, atexit) checks it in both code models.
+memory, errno, argv, the keyboard, atexit) checks it in both code models and with far
+data (there the heap is filled by taking every bank Horizon has).
 
 | | |
 | --- | --- |
@@ -1343,7 +1371,11 @@ code, 10 cycles a call of a function with a frame; the library keeps its checks)
 
 ### How it is tested
 
-Its regression set (`make -C sdk/c/cc816 check`) has five parts. `tests/diag/` (106
+Its regression set (`make -C sdk/c/cc816 check`) has five parts, and runs them in three
+configurations: the small code model, the large one, and the large one with far data
+(`CODES=small large large-far`; `tests/check.py --code large-far`: every data pointer 32
+bits, every string literal and constant in far data, every function in another bank: the
+same programs give the same results). `tests/diag/` (109
 files, no emulator; `make -C sdk/c/cc816 diag` runs it alone): each file says the errors
 and warnings it must give, and nothing else may be said; a Python traceback fails the
 test. Then 400 test programs, each with one random change (a token taken out, doubled

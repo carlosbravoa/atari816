@@ -2649,6 +2649,14 @@ class Front:
             self.emit(Ins('add', nv, base.idx, sc))
             sc = nv
         if isinstance(base.base, V) and base.base.size == 4 and \
+                not base.farobj and iv.t.signed and MODEL['far_data']:
+            # (far data: a far pointer + a signed index: the index added to the offset
+            # alone, as DOS's far pointers do (the element is in the pointer's object, so
+            # in its bank): 20 cycles less than widening the index to 32 bits and adding)
+            nv = self.newv(4)
+            self.emit(Ins('addlo', nv, base.base, sc))
+            return LV('mem', el, base=nv, off=base.off + koff * size)
+        if isinstance(base.base, V) and base.base.size == 4 and \
                 not base.farobj and iv.t.signed:
             # far pointer + a signed index: a 32-bit step (the index may be negative)
             z = self.newv(4)

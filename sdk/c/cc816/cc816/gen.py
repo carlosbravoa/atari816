@@ -436,6 +436,18 @@ class Gen:
             self.I('adc', self.opsrc(b, p))
             self.sta(d, p)
 
+    def g_addlo(self, i):
+        """d(4) = the far pointer a(4) with the 16-bit b added to its offset alone (the far
+        data model's p[i] with a signed i: the bank stays)"""
+        d, a, b = i.d, i.a, i.b
+        self.lda(a, 0)
+        self.I('clc')
+        self.I('adc', self.opsrc(b))
+        self.sta(d, 0)
+        if not (isinstance(a, V) and a.loc == d.loc and a is not self.res):
+            self.lda(a, 1)
+            self.sta(d, 1)
+
     def g_sub(self, i):
         d, a, b = i.d, i.a, i.b
         if d.size == 2:

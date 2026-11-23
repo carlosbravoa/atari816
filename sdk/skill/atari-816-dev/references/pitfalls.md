@@ -80,7 +80,7 @@ agents' own. "Fixed" means the SDK changed since; the lesson still holds.
   `__near` pointer to a `const` or `__far` object loses the bank (`-Wfar-pointer`);
   `#pragma aux f = "..."` is ignored with a warning (give `f` a C body); `hui.h` is not
   there; objects of near and far data never link together. Speed: pointer-heavy loops
-  15-40 % slower, calls with pointer arguments about twice, code about 30 % bigger.
+  8-20 % slower, calls with pointer arguments about twice, code about 30 % bigger.
 - **Local arrays live on the 8 KB software stack** (`--stack N`). Big arrays: `static` or
   `malloc`. An overflow is reported only at exit ("stack overflow: ... guard zone ...
   was written"); `hcc --debug` prints what each stack and the heap used.

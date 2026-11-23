@@ -196,7 +196,7 @@ model", has the whole of it. The steps:
   `intptr_t` is a `long`. Pointer arithmetic carries into the bank; DOS's wrapped inside
   the segment, which only matters for code that relies on the wrap.
 - [ ] **Speed**: a far pointer is 4 bytes in every register, argument and structure; loops
-  through far pointers cost about 15-40 % more than through near ones, a call with
+  through far pointers cost about 8-20 % more than through near ones, a call with
   pointer arguments about twice as much (reference.md, "What it costs"). Hot loops can
   take `__near` pointers to main-bank buffers, or move to assembly.
 - [ ] **Not there**: `huge` objects over 64 KB (an array must fit a bank), the small code

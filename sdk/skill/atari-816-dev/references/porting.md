@@ -213,9 +213,9 @@ Steps for the port:
 6. Compare with the PC build (LOG lines, pictures): XCOM-XT's 816 LOG equals the host's.
 
 Costs measured (`sdk/c/tests/bench/farbench.c`, cycles a step, near data / far data):
-a byte copy loop through pointers 85 / 121 before the in-place pointer step, the masked
-sprite loop 95 / 111, a call with a pointer argument and result 83 / 197; code grows
-about 30 % (XCOM-XT: 578 KB near, 763 KB far).
+a byte copy loop through pointers 85 / 96, the masked sprite loop 95 / 105, an `int`
+array through a pointer parameter 171 / 205, a call with a pointer argument and result
+95 / 188; code grows about 30 % (XCOM-XT: 578 KB near, 763 KB far).
 
 ## Timing and the sound clock
 

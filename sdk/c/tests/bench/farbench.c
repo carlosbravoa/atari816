@@ -4,8 +4,9 @@
  *   copy     while ((*d++ = *s++)) over 4,000 bytes                          (x 10)
  *   sprite   if (*s) d[k] = *s; a 32 x 40 masked sprite (bench816's shape)    (x 20)
  *   index    s += a[i] over 2,000 ints, int i                                  (x 10)
- *   member   p->x += p->y over 500 structures through a pointer             (x 10)
- *   call     f(p) with a pointer argument and result                     (x 5,000)
+ *   pindex   the same through a pointer parameter (a signed index through it)  (x 10)
+ *   member   p->x += p->y over 500 structures through a pointer             (x 50)
+ *   call     f(p) with a pointer argument and result                    (x 20,000)
  *   memcpy   4,000 bytes                                                       (x 20)
  *   strlen   4,000 bytes                                                       (x 20)
  * The buffers are globals (near data: the main bank; far data: their addresses are far
@@ -37,6 +38,15 @@ static void stop(const char *name, unsigned long steps)
 }
 
 static char *pass(char *p) { return p + 1; }
+
+static long psum(const int *a, int n)
+{
+    long s = 0;
+    int j;
+    for (j = 0; j < n; j++)
+        s += a[j];
+    return s;
+}
 
 int main(void)
 {
@@ -86,15 +96,21 @@ int main(void)
 
     start();
     for (r = 0; r < 10; r++)
+        sum += psum(arr, 2000);
+    stop("pindex", 20000UL);
+
+    start();
+    for (r = 0; r < 50; r++)
         for (p = pts, i = 0; i < 500; i++, p++)
             p->x += p->y + (int)i;
-    stop("member", 5000UL);
+    stop("member", 25000UL);
 
     start();
     d = dst;
-    for (i = 0; i < 5000; i++)
-        d = pass(d) - 1;
-    stop("call", 5000UL);
+    for (r = 0; r < 4; r++)
+        for (i = 0; i < 5000; i++)
+            d = pass(d) - 1;
+    stop("call", 20000UL);
 
     start();
     for (r = 0; r < 20; r++)
