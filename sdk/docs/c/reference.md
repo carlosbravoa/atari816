@@ -336,7 +336,10 @@ direct-page register: the 65816's own long indirect addressing). The rules:
   huge object (its arena keeps every block inside a bank), so it is not done; `huge` and
   `__huge` are accepted as `__far` in the compatibility spellings (below).
 - **printf `%p`** prints the 24-bit address as `0x` and 6 hexadecimal digits
-  (`0x05a3f0`; near data: 4 digits); `scanf %p` reads it back. `%s` takes a far string. Variable arguments: a pointer is 4 bytes.
+  (`0x05a3f0`; near data: 4 digits); `scanf %p` reads it back. `%s` takes a far string. Variable arguments: a data pointer is
+  4 bytes, and a `__near` one given among them is widened to a far one (as a `float`
+  goes as a `double`): read it with `va_arg(ap, char *)`, not `char __near *`. A
+  function pointer stays 2 bytes there.
 - **Function pointers** are as in the large code model: 16 bits, the function's entry in
   the main bank. Converting one to `void *` gives a far pointer into the main bank, and
   back.
