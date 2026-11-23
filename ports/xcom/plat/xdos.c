@@ -943,7 +943,29 @@ unsigned _dos_close(int handle)
     return close(handle) ? 6 : 0;
 }
 
-#if defined(__CC816__)
+#if defined(__CC816_FAR_DATA__)
+/* the far data model: read and write take the far buffer as it is (the card reads
+   straight into the arena's bank) */
+unsigned _dos_read(int handle, void *buf, unsigned n, unsigned *got)
+{
+    int k = read(handle, buf, n);
+
+    if (k < 0)
+        return 5;
+    *got = (unsigned)k;
+    return 0;
+}
+
+unsigned _dos_write(int handle, const void *buf, unsigned n, unsigned *put)
+{
+    int k = write(handle, buf, n);
+
+    if (k < 0)
+        return 5;
+    *put = (unsigned)k;
+    return 0;
+}
+#elif defined(__CC816__)
 unsigned _dos_read(int handle, void __far *buf, unsigned n, unsigned *got)
 {
     /* the SDK's read takes a near buffer: through one */

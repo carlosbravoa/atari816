@@ -45,6 +45,14 @@
 #define huge
 #define __huge
 #endif
+#if defined(__CC816_FAR_DATA__)
+/* cc816's far data model (hcc --data far): every plain pointer is far, as the engine's
+   were on DOS. Its __near objects (hot data in DGROUP) are writable globals, which stay in
+   the main bank anyway; its __near pointers become far ones (one pointer kind: an
+   address of a far object never loses its bank). */
+#undef __near
+#define XD_FAR_DATA 1
+#endif
 #define __near
 #define near
 #define __cdecl
