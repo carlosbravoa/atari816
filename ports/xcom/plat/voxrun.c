@@ -8,9 +8,15 @@
    counts there (vox.c tile_info), then goes on with that voxel's check
    (resume = 1). Empty layers of a plain tile are passed in one go. The
    assembly's 16-bit arithmetic is kept (u16 / short); its block is vox.c's
-   struct VoxRun, read here by field. Build with -DXD_HAVE_VOX. */
+   struct VoxRun, read here by field. Build with -DXD_HAVE_VOX. The host runs
+   this C (the reference); the Atari816 runs horizon/hz_vox.s, the same walk
+   in assembly (PORTING-NOTES.md 4f), on the block itself. -DVOXCHECK (the
+   Atari816): each new line run by both, differences on the console. */
 #include "xcompat.h"
 #include "plat.h"
+#if defined(VOXCHECK)
+#include <stdio.h>
+#endif
 
 typedef unsigned short u16;
 typedef unsigned char u8;
@@ -57,6 +63,8 @@ static const u8 far *vox;               /* DS: the voxel blob's segment, offset 
 static const u8 far *vmap, *vmcd, *vunit;
 
 #define VW(off)     ((u16)(vox[(u16)(off)] | vox[(u16)((off) + 1)] << 8))
+
+static void extend(struct VoxRun far *b);
 
 static u8 *oxyz(int a)
 {
@@ -384,20 +392,8 @@ static void setup(void)
     int i;
     u8 t8;
 
-    if (v->ext) {
-        u16 m = 0, n;
-        for (i = 0; i < 3; i++) {
-            short d = (short)(v->t[i] - v->o[i]);
-            u16 a = (u16)(d < 0 ? -d : d);
-            if (a > m)
-                m = a;
-        }
-        if (m) {
-            n = (u16)((u16)(1699 + m) / m);
-            for (i = 0; i < 3; i++)
-                v->t[i] = (short)(u16)((u16)((short)(v->t[i] - v->o[i]) * (short)n) + v->o[i]);
-        }
-    }
+    if (v->ext)
+        extend(v);
     for (i = 0; i < 3; i++) {
         short d = (short)(v->t[i] - v->o[i]);
         u8 code = (u8)(2 * i);
@@ -451,11 +447,93 @@ static int finish(int r)
 
 static int run(int resume);
 
+/* setup's first part: a line that goes on past its target, lengthened (on the
+   block itself: the same result as the C's on its copy) */
+static void extend(struct VoxRun far *b)
+{
+    u16 m = 0, n;
+    int i;
+
+    for (i = 0; i < 3; i++) {
+        short d = (short)(b->t[i] - b->o[i]);
+        u16 a = (u16)(d < 0 ? -d : d);
+        if (a > m)
+            m = a;
+    }
+    if (m) {
+        n = (u16)((u16)(1699 + m) / m);
+        for (i = 0; i < 3; i++)
+            b->t[i] = (short)(u16)((u16)((short)(b->t[i] - b->o[i]) * (short)n) + b->o[i]);
+    }
+}
+
+#if defined(__CC816__)
+/* The Atari816: the run in assembly (horizon/hz_vox.s), on the block itself when it
+   is in the main bank (vox.c's static: always), with long pointers to the blob, the
+   map, the MCD records and the unit table (made again when a segment changed). */
+struct HzVx { const u8 far *vox, *map, *mcd, *unit; };
+struct HzVx hz_vx;
+int hz_vox_run(void *block, int resume);
+static unsigned vx_seg[4] = { 0xFFFFu, 0xFFFFu, 0xFFFFu, 0xFFFFu };
+static unsigned char vx_probe;          /* a main-bank object */
+#endif
+
 int __cdecl vox_run(void *block, int resume)
 {
     int r;
 
     plat_busy_poll();                   /* (an alien turn: thousands of lines) */
+#if defined(__CC816__)
+    if ((unsigned long)block >> 16 == (unsigned long)(void far *)&vx_probe >> 16) {
+        struct VoxRun far *b = (struct VoxRun far *)block;
+        if (b->voxseg != vx_seg[0] || b->mapseg != vx_seg[1] || b->mcdseg != vx_seg[2]
+            || b->unitseg != vx_seg[3]) {
+            vx_seg[0] = b->voxseg;
+            vx_seg[1] = b->mapseg;
+            vx_seg[2] = b->mcdseg;
+            vx_seg[3] = b->unitseg;
+            hz_vx.vox = (const u8 far *)MK_FP(b->voxseg, 0);
+            hz_vx.map = (const u8 far *)MK_FP(b->mapseg, 0);
+            hz_vx.mcd = (const u8 far *)MK_FP(b->mcdseg, 0);
+            hz_vx.unit = (const u8 far *)MK_FP(b->unitseg, 0);
+        }
+        if (!resume && b->ext)
+            extend(b);
+#if defined(VOXCHECK)
+        /* (a check: the assembly against the C on the same block, a new line's
+           first run; differences on the console) */
+        if (!resume) {
+            static struct VoxRun in, as;
+            static unsigned nbad;
+            int ra, rc;
+            _fmemcpy(&in, block, sizeof in);
+            ra = hz_vox_run(block, 0);
+            _fmemcpy(&as, block, sizeof as);
+            _fmemcpy(&vr, &in, sizeof vr);
+            vox = (const u8 far *)MK_FP(v->voxseg, 0);
+            vmap = (const u8 far *)MK_FP(v->mapseg, 0);
+            vmcd = (const u8 far *)MK_FP(v->mcdseg, 0);
+            vunit = (const u8 far *)MK_FP(v->unitseg, 0);
+            v->ext = 0;
+            rc = run(0);
+            if ((ra != rc || _fmemcmp(&as.tx, &vr.tx, 124 - 32)) && nbad++ < 20) {
+                int i;
+                printf("VOXCHECK %d/%d o %d,%d,%d t %d,%d,%d: hit %d,%d,%d / %d,%d,%d k %u/%u n %d/%d\n",
+                       ra, rc, in.o[0], in.o[1], in.o[2], in.t[0], in.t[1], in.t[2],
+                       as.hit[0], as.hit[1], as.hit[2], vr.hit[0], vr.hit[1], vr.hit[2],
+                       as.k, vr.k, as.n, vr.n);
+                for (i = 32; i < 124; i++)
+                    if (((u8 *)&as)[i] != ((u8 *)&vr)[i])
+                        printf(" @%d %02x/%02x", i, ((u8 *)&as)[i], ((u8 *)&vr)[i]);
+                printf("\n");
+            }
+            _fmemcpy(block, &as, sizeof as);
+            return ra;
+        }
+#endif
+        return hz_vox_run(block, resume);
+    }
+#endif
     _fmemcpy(&vr, block, sizeof vr);
     vox = (const u8 far *)MK_FP(v->voxseg, 0);
     vmap = (const u8 far *)MK_FP(v->mapseg, 0);

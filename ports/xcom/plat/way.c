@@ -56,9 +56,11 @@ struct HzPath {
     unsigned short far *next, *bucket;
     unsigned n, mx, my, mz, mxy, start, max_tu, occ, fly;
     int doff[8], ddx[8], ddy[8];
+    unsigned goal, gx, gy, gmode;               /* the goal's early ends (below) */
 };
 _Static_assert(offsetof(struct HzPath, n) == 32 && offsetof(struct HzPath, doff) == 50
-               && sizeof(struct HzPath) == 98, "hz_path.s's H_* offsets");
+               && offsetof(struct HzPath, goal) == 98 && sizeof(struct HzPath) == 106,
+               "hz_path.s's H_* offsets");
 struct HzPath hz_ph;
 void hz_path_run(void);
 extern const signed char g_dir_dx[8], g_dir_dy[8];
@@ -91,6 +93,27 @@ void hz_path_search(struct PathParams *p)
         hz_ph.ddy[d] = g_dir_dy[d];
         hz_ph.doff[d] = g_dir_dx[d] + g_dir_dy[d] * (int)p->mx;
     }
+    /* A search toward a goal (path_search_to; not a missile's, whose failed search
+       ai_way reads all of: aiway.c) ends as soon as its outcome is known, with the
+       same answer and the same path as the whole search (the C reference's):
+       - reached: when no tile waiting in a bucket costs less than the goal, nothing
+         can lower the goal's cost or any cost on its path (a step costs 0 or more,
+         and from[] changes only with a lower cost), so path_build follows the same
+         path. (A tile whose cost fell while it waited stays in its later bucket: the
+         test looks at every waiting tile's cost, not at the bucket.)
+       - not reached: path.c's A* estimate (2 * the longer + the shorter axis
+         distance, x 2: hs 1, while no tile costs less than 4 to enter, so a straight
+         step costs 4 or more and a diagonal one 6 or more) is a lower bound of the
+         rest of any path and changes by at most a step's cost from tile to tile;
+         when every waiting tile has cost + estimate > max_tu, no tile reached from
+         them can reach the goal within max_tu: it is never reached.
+       What the callers read after a search toward a goal: whether it was reached
+       (best) and path_build's path to it; a failed one's tables only ai_way's
+       missile search (excluded). Every other search runs whole, as before. */
+    hz_ph.goal = p->goal;
+    hz_ph.gx = p->gx;
+    hz_ph.gy = p->gy;
+    hz_ph.gmode = p->goal == 0xFFFFu || p->mis ? 0 : p->hs == 1 ? 3 : 1;
     hz_path_run();
     if (p->goal != 0xFFFFu && hz_ph.cost[p->goal] != 0xFF)
         p->best = p->goal;

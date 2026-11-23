@@ -549,6 +549,16 @@ static void bios_clock(unsigned long c)
 
 void timer_run_hook_at(unsigned long now);
 
+/* The clock alone (plat_busy_poll: the engine computing): the BIOS clock and the timer
+   hook, as DOS's timer interrupt keeps them. */
+void xd_clock(void)
+{
+    unsigned long now = plat_counts();
+
+    bios_clock(now);
+    timer_run_hook_at(now);
+}
+
 /* One reading of the clock serves the BIOS clock and the timer hook. */
 void xd_poll(void)
 {

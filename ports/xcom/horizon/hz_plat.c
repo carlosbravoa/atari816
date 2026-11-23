@@ -168,18 +168,24 @@ static void idle_vsync(void)
     PERF_ADD(PF_IDLE, pt0);
 }
 
-/* the engine computing for long (plat/voxrun.c: each voxel line of an alien turn, 45 s of
-   them in a battle's turn): every 32nd call the clock is read and plat_poll runs as at an
-   xd_poll (at most every 8 ms): the pointer follows the mouse, keys are queued. Not with
-   the virtual clock (its readings move it: the tests' runs stay the host's) */
+/* the engine computing for long without looking at the clock or the input (an alien
+   turn: plat/voxrun.c calls this once a voxel line, horizon/hz_path.s every few tiles
+   of a path search): every 8th call is an xd_poll, as DOS's timer interrupt and the
+   engine's own polls would have been: the clock is read, the BIOS clock moves on (so
+   upstream's busy pointer, mouse.c busy_tick, turns its hourglass over: the sprite shows
+   it), the timer hook and the Sound Blaster model run (about every 20-40 ms); every 40
+   ms plat_poll moves the pointer and queues keys (its events cost about 1 ms: as often
+   as at an idle screen, 8 ms, they took 7 % of an alien turn). Not with the virtual
+   clock (its readings move it: the tests' runs stay the host's) */
 void plat_busy_poll(void)
 {
     static unsigned n;
 
-    if (g_plat_virtual || (++n & 31))
+    if (g_plat_virtual || (++n & 7))
         return;
-    plat_counts();
-    plat_poll();
+    xd_clock();
+    if (last_us - poll_us >= 40000UL)
+        plat_poll();
 }
 
 /* a KEYS script's WAIT (patches/src-0006-perf.patch) between two looks at the mouse:
@@ -350,12 +356,66 @@ static void spr_place(int x, int y)
     }
 }
 
+/* The loading screen's hourglass: upstream's busy pointer (mouse.c busy_mask and
+   busy_fill: the same shape, turned over every 0.27 s as there) in the loading screen's
+   colours, below its bar, from the start until the first wait for input; the engine's
+   own pointer meanwhile (its busy_show while it loads) is not shown (its colours are not
+   set yet). frame < 0: away, the engine's pointer made again at its next draw. */
+static const unsigned char glass_m[12] = {
+    0xFF, 0xFF, 0x7E, 0x7E, 0x3C, 0x18, 0x18, 0x3C, 0x7E, 0x7E, 0xFF, 0xFF
+};
+static const unsigned char glass_f[2][12] = {
+    { 0x00, 0x7E, 0x3C, 0x00, 0x00, 0x00, 0x00, 0x18, 0x3C, 0x3C, 0x7E, 0x00 },
+    { 0x00, 0x7E, 0x3C, 0x3C, 0x18, 0x00, 0x00, 0x00, 0x00, 0x3C, 0x7E, 0x00 }
+};
+static unsigned char glass_frame;
+static unsigned long glass_t;
+
+static void glass(int frame)
+{
+    unsigned char __far *im;
+    int r, k;
+
+    if (frame < 0) {
+        if (spr >= 0 && spr_on)
+            hz_spr_show((unsigned)spr, 0);
+        spr_on = 0;
+        spr_kind = -1;
+        return;
+    }
+    if (spr < 0 && (spr = hz_spr_alloc(1, hg_win)) < 0)
+        return;
+    im = spr_img(1);
+    _fmemset(im, 0, 256);
+    for (r = 0; r < 12; r++)
+        for (k = 0; k < 8; k++)
+            if (glass_m[r] & 0x80 >> k)
+                im[r * 16 + k] = glass_f[frame][r] & 0x80 >> k ? 1 : 2;
+    spr_kind = -1;
+    if (!spr_on) {
+        hz_sprite e;
+        e.sprite = (unsigned char)spr;
+        e.ctrl = SPR_EN;
+        e.x = 156;
+        e.y = 136;
+        HZ_U24(e.image, im);
+        e.pal = 0;
+        if (hz_spr_set(1, &e) < 0)
+            return;
+        spr_on = 1;
+        spr_x = 156;
+        spr_y = 136;
+    }
+}
+
 int plat_pointer_draw(int x, int y, int arrow)
 {
     int k = arrow ? 0 : 1, sx, sy;
 
     if (g_plat_virtual || cpu_ptr || !screen_on)
         return 0;
+    if (loading)
+        return 1;                       /* (the loading screen's hourglass) */
     if (spr < 0) {
         spr = hz_spr_alloc(1, hg_win);
         if (spr < 0) {
@@ -404,7 +464,7 @@ int plat_pointer_erase(void)
    without looking (an alien turn: plat_busy_poll) the pointer stays, and moves */
 static void spr_poll(void)
 {
-    if (spr < 0 || !spr_on)
+    if (spr < 0 || !spr_on || loading)
         return;
     if (spr_erased && last_us - spr_erase_t > 300000UL && last_us - eng_look_t < 100000UL) {
         hz_spr_show((unsigned)spr, 0);
@@ -591,6 +651,7 @@ static void ready(void)
         printf("xcom: /E: the first wait for input, the end\n");
         exit(0);
     }
+    glass(-1);
     loading = 0;
     pan = -1;
     xd_dac_dirty = 1;
@@ -720,7 +781,8 @@ static void loading_screen(void)
     hg_view_send();
     loading = 1;
     load_x = 0;
-    load_t0 = load_drawn = plat_us();
+    load_t0 = load_drawn = glass_t = plat_us();
+    glass(glass_frame = 0);
 }
 
 /* after each read: the bar, at most every 50 ms */
@@ -735,6 +797,10 @@ void plat_progress(void)
     if (now - load_drawn < 50000UL)
         return;
     load_drawn = now;
+    if (now - glass_t >= 270000UL) {
+        glass_t = now;
+        glass(glass_frame ^= 1);
+    }
     b = xd_bytes_read > LOAD_BYTES ? LOAD_BYTES : xd_bytes_read;
     x = (unsigned)(b * BAR_W / LOAD_BYTES);
     if (x > load_x) {
@@ -754,6 +820,8 @@ static void message_screen(const char *const *lines, int n)
 
     for (i = 0; i < n; i++)
         printf("xcom: message: %s\n", lines[i]);
+    if (loading)
+        glass(-1);
     loading = 0;
     if (screen_fb() < 0)
         return;

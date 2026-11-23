@@ -6,12 +6,15 @@
 ; "path search ... C n ms, asm n ms, match"). In C it was about 85 % of an
 ; alien turn. plat/way.c hz_path_search fills hz_ph (the tables' far
 ; pointers, the map's sizes, the search's parameters) and calls hz_path_run.
+; A search toward a goal (H_GMODE) ends as soon as its outcome is known, with
+; the whole search's answer and path (way.c says why; PORTING-NOTES.md 4f);
+; every 8th tile it calls plat_busy_poll (the pointer, the clock).
         .p816
         .a16
         .i16
         .include "model.inc"
         .importzp __rg
-        .import _hz_ph
+        .import _hz_ph, _plat_busy_poll
         .export _hz_path_run
 
 ; hz_ph (plat/way.c struct HzPath)
@@ -27,6 +30,11 @@ H_FLY   = _hz_ph+48
 H_DOFF  = _hz_ph+50             ; int[8]
 H_DDX   = _hz_ph+66             ; int[8]
 H_DDY   = _hz_ph+82             ; int[8]
+H_GOAL  = _hz_ph+98             ; the goal's tile (FFFF none)
+H_GX    = _hz_ph+100
+H_GY    = _hz_ph+102
+H_GMODE = _hz_ph+104            ; 1: end once the goal is reached; 3: also once it
+                                ; cannot be (plat/way.c hz_path_search)
 
 PWH     = __rg+0                ; long pointers: walk tables
 PWF     = __rg+4
@@ -80,15 +88,17 @@ pa:     .res 2
 pb:     .res 2
 sum:    .res 2
 pss:    .res 2
+live:   .res 2                  ; waiting tiles with cost + estimate <= max_tu
+hn:     .res 2                  ; the estimate at nidx
+ha:     .res 2
+cg:     .res 2                  ; the goal's cost (scan)
+sb:     .res 2
+npoll:  .res 2                  ; tiles expanded since the last plat_busy_poll
 
 
         FUNC    _hz_path_run
-        ldx     #30
-@cp:    lda     _hz_ph,x
-        sta     __rg,x
-        dex
-        dex
-        bpl     @cp
+        jsr     ptrs
+        stz     npoll
         ldy     #0                      ; cost[] = FF (n bytes)
         lda     #$FFFF
 @c1:    cpy     H_N
@@ -119,13 +129,49 @@ pss:    .res 2
         lda     #$FFFF
         sta     [PNX],y
         stz     cc
+        stz     live
+        lda     H_GMODE
+        cmp     #3
+        bne     @cl
+        lda     H_START                 ; the start: estimate within max_tu?
+        jsr     hidx
+        lda     #0
+        jsr     islive
+        bcc     @cl
+        inc     live
 @cl:    lda     H_MAXTU
         cmp     cc
-        bcs     @wl
-        RET
+        bcs     @cl1
+@ret:   RET
 @nextc: inc     cc
         bra     @cl
-@wl:    lda     cc                      ; while (bucket[c] != NONE)
+@cl1:   lda     H_GMODE                 ; reached, and nothing can lower it: done
+        beq     @wl
+        ldy     H_GOAL
+        lda     [PCO],y
+        and     #$00FF
+        cmp     #$FF
+        beq     @wl
+        jsr     scan
+        bcs     @ret
+@wl:    lda     H_GMODE                 ; cannot be reached any more: done
+        cmp     #3
+        bne     @wl0
+        lda     live
+        bne     @wl0
+        ldy     H_GOAL
+        lda     [PCO],y
+        and     #$00FF
+        cmp     #$FF
+        beq     @ret
+@wl0:   lda     npoll                   ; every 8th tile: plat_busy_poll (the
+        inc     a                       ; pointer, the clock: horizon/hz_plat.c)
+        sta     npoll
+        and     #7
+        bne     @wl1
+        CALL    _plat_busy_poll
+        jsr     ptrs                    ; (C may change __rg)
+@wl1:   lda     cc                      ; while (bucket[c] != NONE)
         asl     a
         tax
         txy
@@ -165,6 +211,18 @@ pss:    .res 2
         bra     @dy
 @dyd:   sta     tx
         stx     ty
+        lda     H_GMODE                 ; no longer waiting
+        cmp     #3
+        bne     @nol
+        lda     tx
+        ldx     ty
+        jsr     hxy
+        sta     hn
+        lda     g
+        jsr     islive
+        bcc     @nol
+        dec     live
+@nol:
         ldy     idx                     ; h: the standing height, or z * 24
         lda     [PWH],y
         and     #$00FF
@@ -193,8 +251,9 @@ pss:    .res 2
         bne     @do
 @wl2:   jmp     @wl
 @do:    jsr     step
-        bcs     @dn
-        clc
+        bcc     @dc
+        jmp     @dn
+@dc:    clc
         adc     g
         sta     nc
         lda     H_MAXTU
@@ -218,7 +277,12 @@ pss:    .res 2
         lda     [PFR],y
         and     #FR_Q
         sta     kq
-@k0:    lda     tz
+@k0:    lda     H_GMODE
+        cmp     #3
+        bne     @k1
+        jsr     liven                   ; live: nidx now waits with cost nc
+        ldy     nidx
+@k1:    lda     tz
         asl     a
         asl     a
         asl     a
@@ -253,6 +317,129 @@ pss:    .res 2
         sta     [PBK],y                 ; bucket[nc] = nidx
 @dn:    inc     dir
         jmp     @dl
+
+; ptrs: the tables' long pointers from hz_ph to the direct page
+ptrs:   ldx     #30
+@cp:    lda     _hz_ph,x
+        sta     __rg,x
+        dex
+        dex
+        bpl     @cp
+        rts
+
+; liven: nidx gets cost nc (it waited with ocost when kq): the live count
+liven:  lda     dir                     ; its x, y: tx, ty + the direction's
+        cmp     #8
+        bcs     @ud
+        asl     a
+        tax
+        lda     ty
+        clc
+        adc     H_DDY,x
+        pha
+        lda     tx
+        clc
+        adc     H_DDX,x
+        plx
+        bra     @h
+@ud:    lda     tx
+        ldx     ty
+@h:     jsr     hxy
+        sta     hn
+        lda     kq
+        beq     @new
+        lda     ocost
+        jsr     islive
+        bcc     @new
+        dec     live
+@new:   lda     nc
+        jsr     islive
+        bcc     @r
+        inc     live
+@r:     rts
+
+; islive: carry set when A + hn <= max_tu
+islive: clc
+        adc     hn
+        sta     ha
+        lda     H_MAXTU
+        cmp     ha
+        rts
+
+; hidx: hn = the estimate at tile A; hxy: A = the estimate at x A, y X
+hidx:   ldx     #0
+@z:     cmp     H_MXY
+        bcc     @y
+        sbc     H_MXY
+        bra     @z
+@y:     cmp     H_MX
+        bcc     @x
+        sbc     H_MX
+        inx
+        bra     @y
+@x:     jsr     hxy
+        sta     hn
+        rts
+hxy:    sec                             ; a = |x - gx|, b = |y - gy|
+        sbc     H_GX
+        bpl     @a
+        eor     #$FFFF
+        inc     a
+@a:     sta     ha
+        txa
+        sec
+        sbc     H_GY
+        bpl     @b
+        eor     #$FFFF
+        inc     a
+@b:     cmp     ha                      ; (2 * the longer + the shorter) x 2
+        bcc     @al
+        asl     a
+        clc
+        adc     ha
+        asl     a
+        rts
+@al:    sta     cg
+        lda     ha
+        asl     a
+        clc
+        adc     cg
+        asl     a
+        rts
+
+; scan: carry set when no tile waiting in buckets cc..max_tu costs less than
+; the goal
+scan:   ldy     H_GOAL
+        lda     [PCO],y
+        and     #$00FF
+        sta     cg
+        lda     cc
+        sta     sb
+@b:     lda     H_MAXTU
+        cmp     sb
+        bcc     @ok
+        lda     sb
+        asl     a
+        tay
+        lda     [PBK],y
+@n:     cmp     #$FFFF
+        beq     @nb
+        tay
+        asl     a
+        tax
+        lda     [PCO],y
+        and     #$00FF
+        cmp     cg
+        bcc     @no
+        txy
+        lda     [PNX],y
+        bra     @n
+@nb:    inc     sb
+        bra     @b
+@ok:    sec
+        rts
+@no:    clc
+        rts
 
 ; step (path_step_idx of idx, tx, ty, tz, dir; hh): carry set: none; else A
 ; the cost, nidx the destination

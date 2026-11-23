@@ -1,6 +1,7 @@
 # Porting notes: XCOM-XT on the Atari816
 
-Stage 1 (assessment and foundation) to stage 5 (a playable app: section 4d), 23 November 2026.
+Stage 1 (assessment and foundation) to stage 5 (a playable app: section 4d), 23 November 2026;
+the board (4e) and the alien turn (4f), 24 November 2026.
 
 Upstream: <https://github.com/fmikowski/xcom-xt> at commit `a53918220c90` (18 November
 2026, alpha 0.5.1), GPL-3. Fetched by `tools/getsrc.sh` into `upstream/` (not in git);
@@ -399,6 +400,9 @@ What it says:
 | 15 | run816.py: the emulator always runs to `--seconds`, also after the program has ended: a test suite pays for the longest run's budget in every run (tests/check.sh gives each run its own `s=N`). Wanted: `--stop-on TEXT` (end the run when the console shows TEXT), or end at the program's exit in shell mode | tool wish | |
 | 16 | console.txt and `--log-lau` have no emulated-time stamps: a test cannot line up the program's phases (an alien turn) with `--log-opl-us` | tool wish | |
 | 17 | The Desktop leaves 3,136 KB free of 8 MB at a program's start (emu816, Files open): an app's `mem=` must fit that | note | `--needs mem=4096K` refused: "XCOM needs 4096 KB of free memory (3136 KB free)" |
+| 18 | **ca65 takes a small constant as a direct-page address**: `lda V_N,x` with `V_N = 62` (a field's offset in a block whose address is in X, DBR the main bank) is assembled as `lda dp,x` (B5 3E): it reads the direct page in bank 0, not the block; a store there trashes the direct page or kills the task (cause 02, an address in bank 0). The SDK's own assembly addresses blocks by symbol (`_hz_ph+44`: absolute), so this only bites a routine that takes the block's address at run time. `a:V_N,x` forces absolute. Wanted: a line in reference.md ("In the large code model" / "Movable assembly"), or a `-W` in hcc's ca65 call for `dp,x` with a constant below 256 in a FUNC segment | doc | `.p816` `.a16` `.i16` `V_N = 62` then `lda V_N,x` assembles to `B5 3E`; `lda a:V_N,x` to `BD 3E 00` |
+| 19 | prof816: `--prof-from/--prof-to` count from the program's start, `--console-times` from the machine's (in shell mode the program starts about 4.75 s later): a window taken from the console lands seconds late. And only exported names (or `_name` labels) become rows: an assembly function's own loops are all charged to its exported entry | tool wish | a console line at 23.07 s marks a phase; `--prof-from 23.07` profiles from 27.8 s of the machine |
+| 20 | The blitter waits and the vertical-blank sleeps show only as "idle (WAI)" and "syscall $0F": which of the program's calls slept is not in the profile (each syscall row could name its callers' functions) | tool wish | |
 
 **Where items 9-17 stand (24 November 2026).**
 
@@ -1001,7 +1005,8 @@ timing was fine all along (at most 26 ms between its wake-ups, no tick lost).
   `plat_busy_poll` once a line: every 32nd call the platform reads its events and moves
   the pointer (real clock only), so the pointer moves and keys queue during the turn (the
   music has its task). NOEXACTAI (the engine's option, XCOM.ARG) makes the same turn 8 s.
-  Next: the voxel line in assembly (and the A* goal search).
+  Next: the voxel line in assembly (and the A* goal search). (Since done: section 4f,
+  the same turn 8.4 s with the exact sight.)
 - **"xdos: FP_OFF of a pointer outside the DOS memory"** (8 lines in a battle): panel.c's
   `FP_OFF(u)` of a unit in `g_units` (a global, in the main bank), only to test it for NULL:
   the expected case the model already answers (non-zero); no longer reported for the main
@@ -1027,6 +1032,172 @@ timing was fine all along (at most 26 ms between its wake-ups, no tick lost).
 | 3 BAT | idle in the battle view, the pointer circling | 18-25 % | 40 % |
 | 3 BAT | an effect's start | 73 ms (206 at most) | 0.9 ms |
 | 3 BAT | the alien turn | 45 s, pointer frozen | 44 s, the pointer moves |
+
+## 4f. The alien turn (24 November 2026)
+
+"The battle is laggy": the aliens' turn took 41 s in the kit's scripted battle (FA1V,
+seed 6), 24 s with an abductor's 11 sectoids, 28 s for the first turn of a small scout
+(FA1V, seed 1), with the exact sight and aim (upstream's default from a 286 on; NOEXACTAI
+is not an option: it changes what the aliens see). Upstream's own figure for an 8 MHz
+286: about 20 s for the first jungle turn in exact mode. Now: 6.5-8.5 s, the game's
+state the same as before (the host's: `make test`, `make test-long`).
+
+### The profile
+
+emu816's counts over the turn alone (`run816 --prof`, `--prof-from/--prof-to` are
+program times: the console's `--console-times` are the machine's, about 4.75 s later in
+shell mode; prof816 names only exported labels, so the assembly's own labels were
+exported as `_hzv_*` / `_hzp_*` for the label-level rows), and the host build's call
+counts (gprof, and a copy of vox.c printing each line's caller, steps and result):
+
+| Turn | What took the time (before) | The work |
+| --- | --- | --- |
+| FA1V seed 6 (the kit's battle: 41 s) | the voxel line's C 82 % (enter_tile 12 %, `__udiv16` 11 %, rows 9 %, run 8 %, skip 7 %, `__mul16` 6 %, room_of 5 %, shift 4 %, check 4 %: the divisions and multiplies of the empty-layer skip, a far pointer at every voxel), the path search 4 %, the rest the music task, interrupts, polling | 2,171 lines, 2,163 of them sight checks (62 `vox_sees`: los_unit_sees for each step of the walking alien, by it and by each soldier who might see it; 37 lines each, almost all blocked: the unit is not seen); a line 199 main steps, 16.6 tiles, 27 voxels checked, about 230,000 cycles (16 ms) |
+| abductor, 11 sectoids (FA5V seed 2: 24 s) | the path search (`hz_path_run`) 70 %, the voxel line 18 % | 33 searches, 27 of them `path_search_to` toward a patrol node, each a whole flood of the map within 254 TU (1,400-1,575 tiles) for goals 8-18 TU away; 848 lines |
+| FA1V seed 1, the first turn (sndai: 28 s) | the voxel line | one alien patrolling: 1,406 lines, every one a sight check that fails (38 checks of 37 lines) |
+
+So both of the hot spots of the notes' "what is next" were right, and they are the whole
+turn: the lines of sight (not aims: 59 lines of fire in the kit's battle) and the path
+search toward a goal.
+
+### What changed, and why each is exact
+
+**1. A search toward a goal ends when its outcome is known** (`horizon/hz_path.s`,
+`plat/way.c hz_path_search`; the host keeps the whole search, the reference). The C
+reference (`vbench.c path_search_c`) floods every tile within max_tu; its bucket lists
+keep a tile whose cost fell in its later bucket, so a cost can still fall after the
+tile's own bucket has passed: the order matters, and an A* order (upstream's DOS
+pathasm) would change ties and paths. Instead the same flood, stopped early:
+- *reached*: at the start of a bucket, when no waiting tile (any bucket from here on)
+  costs less than the goal, no cost on the goal's path can fall any more (a step costs 0
+  or more, from[] changes only with a lower cost): path_build follows the same path as
+  after the whole flood;
+- *cannot be reached*: path.c's own A* estimate ((2 x the longer + the shorter axis
+  distance) x 2, used while no tile costs less than 4 to enter: a straight step then
+  costs 4 or more, a diagonal 6 or more) is a lower bound of any rest of a path and
+  changes by at most a step's cost from a tile to its neighbour; the search counts the
+  waiting tiles whose cost + estimate is within max_tu; at 0 (and the goal not reached)
+  nothing reached later can reach the goal within max_tu.
+- Who reads a search toward a goal: whether it got there (best) and path_build's path
+  (execute's walk, bplayer's long walk: refresh_paths searches again after it); the
+  tables of a failed search only `ai_way` (the blaster bomb's missile search: excluded,
+  it runs whole). Every other search (path_search over the TU) runs whole as before.
+
+Measured (host counts): the abductor's goal searches went from 27,000 expanded tiles to
+about 4,600 (successes stop after 8-485 tiles, failures after 79-1,272). Its turn
+22.2 s → 10.2 s with the C voxel line, the LOG's positions the same.
+
+**2. The voxel line in assembly** (`horizon/hz_vox.s`, called by `plat/voxrun.c` on the
+Atari816; the C stays the host's and the reference). The same walk as the C (and as
+upstream's voxasm.asm): the line in OpenXcom's frame, every voxel it enters checked
+against the tile's four parts' LOFT rows and the unit there, R_CALL for vox.c's
+tile_info, the same block fields at every return (the block is vox.c's static, in the
+main bank: X holds its offset, `a:V_FIELD,x`; long pointers `[dp],y` for the blob, the
+map, the MCD records and the unit table). Two differences in how, none in what (a
+multiply or a divide costs hundreds of cycles here; the C's skip does two of each per
+axis, about 4 a tile):
+- a minor axis's drift r (r -= d each main step; below 0: a move and r += d0) is kept
+  as t, the main steps to its next move (r / d + 1), and b = r mod d: a step is t - 1;
+  a move reloads t from the line's q = d0 / d and rem = d0 mod d (b += rem; at d or more:
+  b -= d and t = q + 1, else t = q). The same moves at the same steps; the start (r =
+  d0 / 2) from one division per minor axis per line (q even: t = q / 2 + 1, b = rem / 2;
+  odd: t = (q - 1) / 2 + 1, b = (d + rem) / 2); r = (t - 1) d + b back in the block at
+  each return.
+- the C's skip (a tile's empty layers passed at once: the main steps that keep the major
+  axis and each minor one in its room) is taken from move to move of the minor axes:
+  the steps between two moves at once, stopping before the first move past a minor
+  axis's room (that axis's room looked at only when one of its moves falls in reach).
+  The same position, drifts and counts after it, no voxel of it checked (as the C).
+Checked: a test program (`build/me/vt`, not kept: synthetic blobs, maps and units with
+lifts, excluded units, units below floors, lines on past their target) ran the assembly
+and the C on 18,000 random lines with every field of the block compared after each
+return: 0 differ (it found the two faults below); BENCH's 720 lines in `make test`
+(BENCH.TXT line for line with the host); every shot and sight line of `make test` and
+`make test-long` (LOGs, pictures, saves); upstream's `voxcheck.py` against OpenXcom on
+the host twin (its C was only rearranged: the line's extension is `extend()`, shared).
+Faults it found while written: a skip with no room took one step (`sta` sets no flags:
+the `bne` after it tested the room's compare), and the line's sign was lost to an `ldy`
+between `sbc` and `bpl`; and before that every `lda V_X,x` with V_X < 256 had been
+assembled as direct page, X (`a:` forces absolute: SDK note 18).
+
+BENCH (real clock): 360 voxel lines 3,457 → 747 ms, the same past the tile 4,110 →
+922 ms, 8 aims (canTargetUnit) 1,963 → 558 ms. A line of the kit's battle: about 40,000
+cycles (2.8 ms) instead of 230,000.
+
+**3. The screen during the turn.** The engine computes for seconds without looking at
+the clock or the input. `plat_busy_poll` (called by each voxel line and every 8th tile
+of a path search) now does, every 8th call (20-40 ms), what DOS's timer interrupt kept
+going: the clock read, the BIOS clock moved on, the timer hook and the Sound Blaster
+model run (`xd_clock`); every 40 ms plat_poll (the events, the pointer's sprite where
+the mouse is, keys queued: its events cost about 1 ms, at 8 ms they took 7 % of a
+turn). With the BIOS clock moving, upstream's busy pointer (mouse.c busy_tick, from the
+AI's thinking) turns its hourglass over every 0.27 s, as on DOS: the sprite shows it
+over the HIDDEN MOVEMENT window (upstream's own screen for the turn; nothing else on
+DOS). Before, the clock stood still: the pointer stayed the arrow (the kit's "ptr 0,
+lag 43190 ms"). The virtual clock (tests): nothing, as before. The music never waited
+for the turn: it is MUSD.PRG's task (4d); over the kit's battle with `/M` its longest
+gap between wake-ups stayed 15-22 ms (no gap above 30 ms, at most one tick late) in
+every period, the alien turn's included.
+
+**4. The loading screen** shows upstream's hourglass (its shape, in the loading screen's
+colours, turned over every 0.27 s) below the bar until the first wait for input; the
+engine's own busy pointer meanwhile (its busy_show while it loads, in colours not set
+yet: half an hourglass at the top) is not shown. Battle setups (the atlas bar), saves
+and loads show the engine's hourglass as before (busy_show).
+
+### Before and after
+
+The app as the board runs it (`tests/perf.sh`: the app's folder, MUSD.PRG, XCOM.ARG, the
+board's card model), the turn as the LOG gives it ("alien turn N ms"):
+
+| Turn (the script) | Before | After |
+| --- | --- | --- |
+| FA1V seed 6, the kit's battle (tests/perf/bat.keys: a walk, shots, a soldier killed, the turn ended) | 41.4 s | **8.5 s** |
+| FA5V seed 2, an abductor's 11 sectoids (tests/prof/alien.keys) | 24.0 s | **7.8 s** |
+| FA3V seed 3 (bturn: a walk, a grenade, kneel, the turn ended) | 14.2 s | **6.8 s** |
+| FA1V seed 1, the first turn (sndai: the turn ended at once) | 28.4 s | **6.5 s** |
+| FA1V seed 1, four turns (bsave: saved, loaded, two more) | 2.3 / 1.2 / 2.7 / 1.4 s | **1.9 / 0.5 / 2.0 / 0.5 s** |
+
+The same in the emulator's shell (`tests/xrun.sh`, no music task), and BENCH (real clock):
+
+| | Before | After |
+| --- | --- | --- |
+| FA1V seed 6 / the abductor / bturn / sndai | 38.1 / 22.2 / 13.1 / 26.1 s | 7.9 / 7.3 / 6.3 / 6.1 s |
+| bsave's four turns | 2.2 / 1.2 / 2.5 / 1.3 s | 1.7 / 0.5 / 1.9 / 0.5 s |
+| (the abductor with only the searches' early ends, the voxel line still C) | 22.2 s | 10.2 s |
+| BENCH: 360 voxel lines / the same on past the tile | 3,457 / 4,110 ms | 751 / 932 ms |
+| BENCH: 8 aims (canTargetUnit) | 1,963 ms | 569 ms |
+| BENCH: path search, unit 0, 60 TU (a whole search: unchanged) | 249 ms | 249 ms |
+| BENCH: average full redraw | 147 ms | 147 ms |
+
+The game's state: every turn's LOG the same as before (positions, shots, hits, the
+same lines; only the "N ms" figures differ), `make test` and `make test-long` pass.
+
+### What limits it now
+
+- The voxel line: about 40,000 cycles a line of 16 tiles; per tile crossing about 1,300
+  (the tile's parts, the skip's rooms and moves, the step across), per minor-axis move
+  about 60, per checked voxel 250-400 (the parts' rows of its layer and y). The sight
+  checks that fail (most of them) run all 37 lines to the obstacle, usually most of the
+  way (two thirds on average). A cache of the tiles' columns by their four records
+  (exact) gained 2 % and was dropped.
+- The path search: about 8,000 cycles a tile expanded (10 directions with path.c's
+  step rules). Searches repeated with the same unit, start, TU and world (an abductor's
+  turn: about 15 % of its tiles) could be skipped with a world version (path.c's
+  tile_update, way.c's door flips, the units' positions): not done.
+- The rest of an alien turn: the AI's own C (patrol_ok, unit_fits_at: 5 % of an
+  abductor's turn), interrupts and the music task (about 10 % of the CPU).
+- So a first turn of a small battle is 5-7 s, not 1-3 s: the lines it must trace for
+  sight are the turn. NOEXACTAI (the engine's option) remains the way to 1-3 s, with
+  the tile-based sight it brings.
+
+### Sizes
+
+The main bank without movable code: 51,687 bytes (code that must stay 9,440, constants
+3,993, data 416, bss 37,838; before 51,462) + heap 2 KB + stack 8 KB = 61,927 of 65,264:
+**3,337 bytes left** (225 taken: hz_vox.s's tables and variables, hz_path.s's few).
+hz_vox.s (about 2 KB) and the rest of the new code are movable (code banks). XCOM.PRG
+about 950 KB.
 
 ## 5. The plan
 
@@ -1072,8 +1243,9 @@ Risks:
 
 | What | Why | Estimate (agent time) |
 | --- | --- | --- |
-| the A* goal search (C reference and `hz_path.s`), as DOS's pathasm.asm | the alien turn: the next big win (an abductor's first turn 20 s now); new references | 1 day |
-| the voxel line and the sight fan in assembly | 360 lines 3.3 s, 8 aims 1.7 s: the shots and the aliens' aiming | 1 day |
+| ~~the A* goal search~~, ~~the voxel line in assembly~~ | done, exact (section 4f): the alien turns 4-5 times faster | |
+| the voxel line's tile crossing (about 1,300 cycles) and checked voxels (250-400); a search skipped when the same one was just done (a world version) | a first turn of a small battle 5-7 s (section 4f, "What limits it now"); 1-3 s needs about twice that | 1-2 days |
+| the sight fan (`plat/losfan.c`) in assembly | not seen in the turns' profiles (X-COM's fog of war, the player's turn) | 0.5 day |
 | the start-up's CPU part (3 s: the palette and picture loaders read through stdio byte by byte) | the start menu sooner | 0.5 day |
 | the main bank: `hgame`'s queues (the `.s` code moved: done, section 4) | room for the next changes | with the SDK |
 | per-cell night lights (OpenXcom's lighting, a table per level at the present) | flares and fires lighting their area | 1 day |

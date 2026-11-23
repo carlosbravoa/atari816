@@ -246,5 +246,6 @@ void xd_exit(int code);
 /* Called by the model whenever the engine waits or polls (BIOS keyboard,
    the clock, the mouse): the platform's events, the timer hook. */
 void xd_poll(void);
+void xd_clock(void);             /* the clock alone: the BIOS clock, the timer hook */
 
 #endif
