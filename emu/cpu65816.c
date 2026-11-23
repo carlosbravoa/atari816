@@ -85,9 +85,25 @@ static inline void am_abs(Cpu65816 *c)
     c->ea = (uint32_t)c->dbr << 16 | fetch16(c);
     c->eam = 0xFFFFFF;
 }
+/* --log-bankwrap: an indexed access whose index carries it out of the data bank into the
+ * next one (abs,X  abs,Y  (dp),Y  (sr,S),Y), in a program's bank: on a 65816 that is almost
+ * always a negative index used unsigned (the bank after it differs from run to run) */
+int cpu_log_bankwrap;
+static unsigned bankwrap_n;
+static void bankwrap(Cpu65816 *c, const char *mode, uint16_t base, uint16_t idx)
+{
+    if (c->dbr < 2 || c->pbr < 2 || bankwrap_n >= 400) return;
+    ++bankwrap_n;
+    fprintf(stderr, "bankwrap %02X:%04X %s base $%04X index $%04X -> %02X:%04X\n", c->pbr,
+            (unsigned)c->pc, mode, base, idx, (c->dbr + 1) & 0xFF, (uint16_t)(base + idx));
+}
+#define BANKWRAP(mode, base, idx) \
+    do { if (cpu_log_bankwrap && (uint32_t)(base) + (idx) > 0xFFFF) bankwrap(c, mode, base, idx); } while (0)
+
 static inline void am_absi(Cpu65816 *c, uint16_t idx, int wr)
 {
     uint16_t w = fetch16(c);
+    BANKWRAP("abs,i", w, idx);
     c->ea = (((uint32_t)c->dbr << 16 | w) + idx) & 0xFFFFFF;
     c->eam = 0xFFFFFF;
     if (wr || !X8 || ((w & 0xFF) + (idx & 0xFF)) > 0xFF) io(c);
@@ -135,6 +151,7 @@ static inline void am_dpindy(Cpu65816 *c, int wr)
     uint16_t p = rd(c, dpaddr(c, o), BUS_DATA);
     p |= rd(c, dpaddr(c, o + 1u), BUS_DATA) << 8;
     if (wr || !X8 || ((p & 0xFF) + (c->y & 0xFF)) > 0xFF) io(c);
+    BANKWRAP("(dp),y", p, c->y);
     c->ea = (((uint32_t)c->dbr << 16 | p) + c->y) & 0xFFFFFF;
     c->eam = 0xFFFFFF;
 }
@@ -162,6 +179,7 @@ static inline void am_sriy(Cpu65816 *c)
     uint16_t p = rd(c, (c->s + o) & 0xFFFF, BUS_DATA);
     p |= rd(c, (c->s + o + 1) & 0xFFFF, BUS_DATA) << 8;
     io(c);
+    BANKWRAP("(sr,s),y", p, c->y);
     c->ea = (((uint32_t)c->dbr << 16 | p) + c->y) & 0xFFFFFF;
     c->eam = 0xFFFFFF;
 }

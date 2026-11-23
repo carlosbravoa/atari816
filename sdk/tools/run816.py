@@ -126,6 +126,7 @@ def main():
         elif w == '--expect':
             opt['expect'].append(val()); i += 2
         elif w in ('--log-sound', '--log-sound-us', '--log-lau', '--log-opl', '--log-opl-us',
+                   '--log-bankwrap',
                    '--window', '--net'):
             opt[w[2:]] = True; i += 1
         elif w.startswith('--'):
@@ -242,6 +243,8 @@ def main():
         cmdl += ['--kbd-release', opt['kbd-release']]
     if opt.get('log-lau'):
         cmdl.append('--log-lau')
+    if opt.get('log-bankwrap'):
+        cmdl.append('--log-bankwrap')
     if opt.get('log-opl'):
         cmdl.append('--log-opl')
     if opt.get('log-opl-us'):

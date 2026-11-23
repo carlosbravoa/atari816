@@ -57,6 +57,8 @@ void cpu_reset(Cpu65816 *c);
 int  cpu_step(Cpu65816 *c);
 /* Execute exactly one instruction, ignoring interrupts (test harness). */
 void cpu_exec(Cpu65816 *c);
+/* --log-bankwrap: report indexed accesses that carry into the next bank (stderr). */
+extern int cpu_log_bankwrap;
 
 /* Disassembly helpers for --trace: mnemonic and instruction length for opcode op. */
 const char *cpu_mnemonic(uint8_t op);

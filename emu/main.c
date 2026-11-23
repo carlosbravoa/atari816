@@ -568,6 +568,7 @@ int main(int argc, char **argv)
         else if (!strcmp(a, "--log-lau")) M.sys.snd_log |= 2;
         else if (!strcmp(a, "--log-lau-us")) M.sys.snd_log |= 4;
         else if (!strcmp(a, "--log-opl")) M.sys.snd_log |= 8;
+        else if (!strcmp(a, "--log-bankwrap")) cpu_log_bankwrap = 1;
         else if (!strcmp(a, "--log-opl-us")) M.sys.snd_log |= 16;
         else if (!strcmp(a, "--wav") && i + 1 < argc) wav_path = argv[++i];
 #ifdef HAVE_SDL
