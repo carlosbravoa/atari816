@@ -257,6 +257,223 @@ to a function in the main bank is a relocation for Horizon's loader (2 or 3 byte
 file). A program whose code moves also has the loader in its main bank (about 2 KB of code, 0.5 KB
 of constants and 900 bytes of bss); one whose code all fits in the main bank has none.
 
+## The far data model
+
+`hcc --code large --data far` builds a program whose plain data pointers are **far** (32
+bits: offset, bank, 0), as a DOS program of Watcom's or Microsoft's large model has them
+(`wcc -ml`): its heap is in other banks, its string literals and `const` tables live in
+banks of far data, and the C library takes and returns far pointers. It is there to port
+DOS-era "large model" C without rewriting its declarations (the acceptance test:
+`ports/xcom`, 49,000 lines of Watcom C). The model described above is called **near data**
+from here on: it stays the default and does not change (a near-data program compiles to the
+same bytes as before the far data model came).
+
+### The option
+
+| | near data (the default) | far data (`hcc --data far`) |
+| --- | --- | --- |
+| Needs | either code model | `--code large` (far data banks are loaded by the large model's loader; a program that needs far data is a big program: hcc refuses `--data far` alone) |
+| `char *p` | 16 bits: an offset in the main bank | 32 bits: offset, bank, 0 |
+| `char __near *p` | the same as `char *p` (`__near` is nothing) | 16 bits: an offset in the main bank |
+| `char __far *p` | 32 bits | 32 bits (the default spelled out) |
+| function pointers | 16 bits (the main-bank entry) | the same: 16 bits |
+| `malloc` | the main bank's heap | far: the main bank's free room first, then banks of 64 KB |
+| string literals, `const` objects | the main bank | banks of far data |
+| other globals and statics | the main bank | the main bank (near: absolute addressing, as fast as near data) unless `__far` |
+| `__CC816_FAR_DATA__` | not defined | defined (1) in C and in assembly (`ca65 -D`; `model.inc`: `FARDATA` 1, `PTRSZ` 4) |
+| libraries | `build/lib/small`, `build/lib/large` | `build/lib/large-far` (the C library and hgame; the controls library is not built for it) |
+
+`HZ_DATA=far` in the environment (`HZ_DATA := far` with c.mk) does the same as the option.
+Every object of a program must be made for the same model: cc816 marks each object
+(`__cc816_large` or `__cc816_largefar`), and the link of a near-data object into a far-data
+program, or the other way round, is refused with "an object made for the large code model
+with near data; this program is linked with far data (hcc --data far): build every file
+with the same --code and --data". A `.s` file carries no mark: it must follow the model's
+convention (below).
+
+### Pointers
+
+A far pointer is 4 bytes: the offset (16 bits), the bank (8 bits) and a zero byte, the same
+`__far` pointers have always had. Code reads through it with `[dp],y` (the pointer in a
+direct-page register: the 65816's own long indirect addressing). The rules:
+
+- **An object never crosses a bank** (a `malloc` block, a far object, a frame: none does),
+  as a DOS object never crosses a 64 KB segment. An object is at most 65,535 bytes.
+- **Arithmetic** (`p + i`, `p++`, `p - q`): `p + i` adds to the whole 24-bit address (a
+  carry goes into the bank, as `__far` pointers always did). For every pointer that stays
+  inside its object, and one past its end or one before its start (`p - 1` in a loop
+  that walks down to the start), that is the same as DOS's offset-only arithmetic, and it
+  keeps a pointer one past an object that ends at a bank's last byte greater than the
+  object's start (DOS's would wrap to offset 0). `p - q` is the difference of the
+  offsets (16 bits, `ptrdiff_t`). Not supported: arithmetic that relies on the offset
+  wrapping inside its segment (DOS's `p + 0xFFFF` as `p - 1`).
+- **Compares**: `==`, `!=`, `<` ... compare the whole 32 bits (the bank first). Pointers
+  into one object compare as their offsets do.
+- **NULL** is 0 (bank 0, offset 0: nothing of a program is there). A near pointer
+  converts to a far one by itself: its bank is the main bank (`__cbank`); a null near
+  pointer stays null. A far pointer converts to a near one by keeping the offset (cc816
+  warns: `-Wfar-pointer`, `-Wfar-cast`).
+- **Integers**: `(unsigned long)p` is the 24-bit address (bank << 16 | offset); `(char
+  *)0x050000L` is bank 5, offset 0; `(unsigned)p` is the offset. A 16-bit integer converted
+  to a far pointer is widened as an integer (bank 0): write `(char *)hz_farptr(bank, off)`
+  or a 32-bit value.
+- **Types**: `sizeof(void *)` is 4, `size_t` is 16 bits (`unsigned int`) and `ptrdiff_t`
+  16 bits (`int`), as in DOS's large model (one object is at most 65,535 bytes);
+  `intptr_t` and `uintptr_t` are 32 bits (`long`, `unsigned long`: they hold a pointer);
+  `PRIdPTR` is `"ld"`.
+- **Structures** that hold pointers grow: each pointer member takes 4 bytes (structures are
+  packed, no padding). Code that reads a structure from a file written by DOS with
+  pointer members (which DOS wrote as 4-byte far pointers too) reads the same layout.
+- **DOS's segment:offset** (`MK_FP`, `FP_SEG`, `FP_OFF`) has no meaning on the 65816; a
+  port maps it (ports/xcom's `compat/xdos.h` models the DOS megabyte as an arena of banks).
+  `HZ_BANK(p)`, `HZ_OFF(p)` and `hz_farptr(bank, off)` are the 65816's own, and cost a
+  word move each: the representation is the 24-bit address.
+- **`huge`** (objects over 64 KB, pointer arithmetic that normalises across segments) is
+  not supported: it would need 24-bit index arithmetic on every access. XCOM-XT has no
+  huge object (its arena keeps every block inside a bank), so it is not done; `huge` and
+  `__huge` are accepted as `__far` in the compatibility spellings (below).
+- **printf `%p`** prints the 24-bit address as 6 hexadecimal digits (`05A3F0`); `scanf
+  %p` reads it back. `%s` takes a far string. Variable arguments: a pointer is 4 bytes.
+- **Function pointers** are as in the large code model: 16 bits, the function's entry in
+  the main bank. Converting one to `void *` gives a far pointer into the main bank, and
+  back.
+
+### Where objects live
+
+The direct page, both stacks, the runtime, the loader, the thunks and every `__near` object
+are in the main bank. So are a function's locals: `&local` (an array, a structure, a local
+whose address is taken) is a far pointer whose bank is the main bank, which the code takes
+from `__cbank` (a direct-page word the startup sets: the bank is known only at load time;
+one `lda __cbank`).
+
+Each object is placed by its declaration, when the file is compiled:
+
+| Object | Where | How the code reaches it by name |
+| --- | --- | --- |
+| a string literal | far data | long addressing (`lda f:L_S3,x`) |
+| a `const` object (the object itself const: `const int t[]`, `const char *const names[]`; not `const char *names[]`, whose elements may change) | far data | long addressing |
+| an object declared `__far` | far data | long addressing |
+| an object declared `__near` | the main bank | absolute addressing (`lda _x,x`) |
+| any other global or static | the main bank | absolute addressing: as fast as near data |
+
+**Far data** is the large code model's banks of far objects, which hcc fills after the code
+banks (first fit, in the order of the files, an object in one bank, an object larger than a
+bank an error) and the startup loads from the program file with the code. A
+literal or a `const` table costs nothing in the main bank. Long addressing (`lda
+f:name,x`, 4 bytes, 5 cycles) is one byte and one cycle more than absolute addressing, so a
+table in far data is read about as fast as one in the main bank; its address is a far
+pointer to its bank. Writable globals stay in the main bank because they are the hot
+scalars and arrays of most programs, and absolute addressing has the forms long addressing
+lacks (`inc`, `stz`, `ldx`, `ldy`, `,y`).
+
+**Consistency without a rule for every file.** A file that only declares an object
+(`extern`) reaches it with absolute addressing only when its declaration says the object
+is near (not `const`, not `__far`); otherwise with long addressing, which reaches either
+place (the bank byte of a main-bank object is relocated by Horizon's loader). So `extern
+const char tbl[];` in one file and `const char tbl[] = ...;` in another always agree, and
+the only declarations that must match are the C ones (`const` and `__far` in the extern
+declaration as in the definition). The C library (built split) keeps its own constants in
+the main bank: it is small, and long addressing finds them there too.
+
+**Control.** `__far` moves a writable object out of the main bank (put it on every
+declaration of it, the header's too); `__near` keeps a `const` table in it (for a hot
+table read with `,y`). `hcc --map` prints the main bank's parts and the far data banks;
+`hcc --sizes` prints every object and every function, its size and where it went, biggest
+first (the budget of the main bank: ports need it).
+
+**The main bank's budget.** startup + runtime + the libraries' assembly + resident code +
+thunks + writable globals + `--heap` + the software stack (`--stack`) must fit 65,264
+bytes. The heap needs no room there (it continues in other banks): `--heap N` with `--data
+far` is only the part of the heap kept in the main bank (default 1024).
+
+### The heap
+
+`malloc`, `calloc`, `realloc` and `free` return and take far pointers. The heap is a list of
+arenas: the main bank's free room first (from the end of bss to the software stack's guard
+zone), then whole banks taken from Horizon (`hz_bank_alloc`) when no arena has room, each a
+first-fit free list as before. A block is at most 65,516 bytes and never crosses a bank
+(DOS's far heap had the same 64 KB limit). A bank whose blocks are all freed goes back to
+Horizon (and every bank at the program's end). `malloc` returns NULL with `errno` ENOMEM
+when no arena has room and Horizon has no free bank. `hz_heap_free()` and
+`hz_heap_largest()` count the arenas a program has (a `long`'s worth: `hz_heap_free()`
+returns `unsigned long` with far data), `hz_heap_peak()` the most in use at once; `hcc
+--debug` reports them at exit. There is no near heap: a `__near` object is a global or a
+local.
+
+### The C library
+
+The library is the same source built a third time: every function that takes or returns an
+object pointer takes a far one (`string.h`, `stdio.h` and `FILE *`, `stdlib.h`, `qsort` and
+`bsearch` with far elements, whose comparison function gets far pointers, `printf`'s `%s`
+and `%p`, `scanf`'s pointers, `setjmp` (a `jmp_buf` anywhere), `time.h`, `dirent.h`,
+`horizon.h`'s helpers and syscall functions). Its assembly (`rt/mem.s`, `setjmp.s`, the
+syscall stubs) has a far-data form (`model.inc`'s `FARDATA`): `memcpy`, `memmove` and
+`memset` are MVN/MVP between any two banks (the instruction built with both banks, about 7
+cycles a byte), `strlen`, `strcpy`, `memcmp` read through `[dp],y`. A syscall takes a
+pointer as X = offset, Y = bank (ABI.md), so the stubs pass a far pointer as it is: every
+syscall takes a pointer into any bank the program owns. The POSIX `read` and `write` move
+the bytes straight between the card and far memory (one `hz_read` / `hz_write` for 512
+bytes or more; smaller reads go through the read-ahead as before). hgame is built for the
+far data model too; the controls library (`hui.h`) is not (hcc refuses `--ui` with
+`--data far`): a window application has no need of DOS's model.
+
+### Calling convention with far data
+
+As in the large code model ("In the large code model"), with one change: **a data pointer
+argument is 4 bytes** (offset, bank, 0: low word first), a pointer result is in A (offset)
+and X (bank). `ARGS+4,s` is the second argument when the first is a pointer. A structure
+passed by value or returned is still a near address of the caller's copy (in its frame).
+`va_list` is a far pointer, as always. An assembly function for both data models uses
+`model.inc`'s `PTRSZ` (2 or 4) for the offsets and `FARDATA` for the code that differs:
+
+```asm
+; unsigned sum8(const unsigned char *p, unsigned n) for every model
+        .include "model.inc"
+_sum8:  lda     ARGS,s          ; p's offset
+        sta     __h0
+.if FARDATA
+        lda     ARGS+2,s        ; p's bank
+.else
+        lda     __cbank         ; (near data: the main bank)
+.endif
+        sta     __h0+2
+        lda     ARGS+PTRSZ,s    ; n
+        ...                     ; then lda [__h0],y
+```
+
+### Compatibility spellings
+
+DOS compilers' keywords are accepted in every model, because ports would otherwise define
+them alike: `far`, `_far`, `__far` (= `__far`), `near`, `_near`, `__near` (= `__near`),
+`huge`, `_huge`, `__huge` (= `__far`: see "huge" above), and `__cdecl`, `_cdecl`,
+`__pascal`, `__loadds`, `__saveregs`, `__interrupt`, `__export`, `_Seg16` (read and
+ignored: there is one calling convention; an interrupt function cannot be written in C
+here). The lower-case `far`, `near` and `huge` are only keywords with `-fdos-keywords`
+(hcc and cc816), since they are ordinary names in other C. Also:
+
+- `T __far *a, __far *b;` and `int n = 1, __far *p;`: a qualifier before a later
+  declarator's `*` applies to that declarator (Watcom and Microsoft C take it so).
+- `void (__far *f)(void);` (a far function pointer): accepted, `__far` ignored with a
+  warning (`-Wfar-function`): a function pointer is the main-bank entry in every model.
+- `#pragma aux name = "..."` (Watcom's inline machine code) and every other pragma cc816 does
+  not know: a warning (`-Wunknown-pragmas`), with a word on `aux` ("Watcom inline code:
+  name needs a C body"). `#pragma pack(1)` / `pack()` / `pack(push, 1)` / `pack(pop)` are
+  accepted silently (structures are always packed); `pack(n)` with n above 1 warns (cc816
+  cannot pad).
+
+### Not supported with far data
+
+- `huge` pointers and objects of 64 KB or more (above).
+- The small code model (`--data far` needs `--code large`), the controls library.
+- Mixing objects of the two data models in one program.
+- An object reached through near addressing in one file and placed far by another file's
+  declaration: give the extern declarations the same `const` and `__far` as the definition.
+
+### What it costs
+
+(Measured at the end of the work: the table of near against far data, the benchmarks and
+micro-cases, is filled in below under "Costs of far data".)
+
 ## Types
 
 | Type | Size | Range / note |
