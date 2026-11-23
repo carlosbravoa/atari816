@@ -210,4 +210,7 @@ emulator should keep it on the board; still check it there.
 - [apps.md](apps.md) (Horizon 0.29): your program as an app: one folder in `/APPS` with
   APP.INF, an `.HZA` archive made with `sdk/tools/hzapp.py` that users install with a
   double click, and `HZ_NEEDS` (`needs.inc`): the program checks what it needs at its start.
+  (0.31) A program started from the Desktop gets arguments too (APP.INF's `args=`, the
+  user's `NAME.ARG` next to it) and, with `console=yes` (or `error`), a Terminal window for
+  what it prints: see "The user's options" there.
 - `sdk/skill/atari-816-dev/`: the same knowledge as a Claude skill.

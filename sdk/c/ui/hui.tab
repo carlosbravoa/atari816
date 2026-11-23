@@ -286,6 +286,24 @@ flags ctl
 doc   Starts a program detached (args, name: NULL for none / from the path) -> 0, or -1
 doc   and hz_errno after an alert that said why.
 
+fn    int ui_run(const char *path, const char *args, const char *name)
+in    path=X:str args=Y:str name=A:str
+ret   err
+flags ctl
+doc   (Horizon 0.31) Starts a program as the Desktop and Files do: an app's program gets
+doc   its APP.INF's console= and (args NULL) args=; then ui_launchx with its PROG.ARG.
+
+fn    int ui_launchx(const char *path, const char *args, const char *name)
+in    path=X:str args=Y:str name=A:str
+ret   err
+flags ctl
+doc   (Horizon 0.31) As ui_launch, with ui_lxmode (LX_TERM: in a Terminal window, kept
+doc   open at its end; LX_TERME: closed when it ends with code 0; LX_NOARG: no options
+doc   file) and the options file PROG.ARG appended (127 characters in all, else an alert).
+
+var   unsigned ui_lxmode
+doc   (Horizon 0.31) ui_launchx's mode (LX_*), 0 again after the call.
+
 fn    void ui_spawnerr(unsigned err, const char *name)
 in    err=A name=X:str
 flags ctl
@@ -494,6 +512,8 @@ unbound ui_apdesc  (Horizon 0.29) the apps (uiapp.s): the Desktop's and Files' o
 unbound ui_apneeds  (Horizon 0.29) the apps (uiapp.s): the Desktop's and Files' own; a C program reads APP.INF with fopen
 unbound ui_approg  (Horizon 0.29) the apps (uiapp.s): the Desktop's and Files' own; a C program reads APP.INF with fopen
 unbound ui_apprg  (Horizon 0.29) the apps (uiapp.s): the Desktop's and Files' own; a C program reads APP.INF with fopen
+unbound ui_apargs  (Horizon 0.31) the apps (uiapp.s): the Desktop's and Files' own; a C program reads APP.INF with fopen
+unbound ui_apcons  (Horizon 0.31) the apps (uiapp.s): the Desktop's and Files' own; a C program reads APP.INF with fopen
 unbound ui_strcpy  strcpy (string.h)
 unbound ui_strlen  strlen (string.h)
 unbound ui_win     zero page: the drawing functions take it as an argument; a row callback gets it in ui_rowinfo

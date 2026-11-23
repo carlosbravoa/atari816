@@ -42,6 +42,19 @@ every key optional; longer values are cut.
 | `types` | 47 | extensions it opens, comma-separated: `types=DIG,LVL`. A double click on such a file starts the app with the full path in quotes as its argument: `"/GAMES/LEVEL1.DIG"`. Horizon's own types keep their programs |
 | `icon` | 31 | a built-in icon name or an icon file in the folder |
 | `needs` | 47 | the same list as `hcc --needs`, for the Installer to show (the program checks itself). Leave it out: `hzapp.py pack` copies the program's list into the archive's APP.INF |
+| `args` | 127 | (0.31) default arguments when the Desktop starts it (menu, double click, a shortcut without its own `args=`); the user's `NAME.ARG` is appended after them |
+| `console` | 7 | (0.31) `yes`: runs in a Terminal window (printf/stderr show there; at the end "--- NAME ended (code N)." and a key closes it); `error`: the same, but the window closes by itself after exit code 0 (shows only failures); `no` (default): output goes to the log only |
+
+**Arguments from the Desktop (0.31).** The Desktop and Files have no command line. A program
+started from the Programs menu, by a double click or a shortcut gets APP.INF's `args=`,
+then the words of **`NAME.ARG`** next to the program (`/APPS/XCOM/XCOM.ARG` for
+`XCOM.PRG`; `#` comments, lines joined): 127 characters in all, else an alert and no
+start. `NAME.ARG` is the user's file: never ship it in the archive (an update would
+replace it; `hzapp.py` warns), and do not read it yourself: it arrives in `argv`.
+Opening a document passes only its path. Files' **Run with...** (pop-up menu of a .PRG)
+runs it with typed arguments in a Terminal window. A failing program started without a
+console shows nothing: for a game, `console=error` makes its messages (stdout, stderr) and
+exit code visible when it exits non-zero; `exit(0)` closes the window silently.
 
 Built-in icon names (`apinames` in `horizon/user/desk.s`): `folder sd atari doc text
 writedoc sheetdoc picture basdoc disk xex cart program edit write sheet paint basic calc
@@ -230,8 +243,10 @@ update would replace the user's file. Let the program create it when missing.
 - It unpacks into `/APPS/.INSTALL`, then renames it to `/APPS/NAME`. On an update it first
   moves the user's files (those not in the archive) into the new folder. Any error deletes
   `/APPS/.INSTALL` and leaves the old app as it was. A full card: "The card is full.
-  Nothing was installed". At the end it writes `/SYSTEM/APPS.NEW` so the Desktop rereads
-  the apps.
+  Nothing was installed". At the end (and after a removal) it tells the Desktop (0.31:
+  sysreq `SR_APPS`; 0.29-0.30 wrote `/SYSTEM/APPS.NEW`), which reads its Programs menu
+  again; the menu itself opens without reading the card. After changing an app by hand
+  (the PC link, editing APP.INF): F5 on the desktop.
 - A need the machine lacks is a warning ("It may not run here: it needs Horizon ... or
   later."); it can still be installed.
 - Refused: no APP.INF ("... has no APP.INF in its folder: it is not a Horizon app."), no

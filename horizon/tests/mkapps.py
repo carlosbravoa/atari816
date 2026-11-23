@@ -21,7 +21,11 @@ MODE desk20  twenty apps (18 without a category, two in Games), and the odd ones
              file that is not there: left out), NOINF (no APP.INF, NOINF.PRG: listed),
              LOOSE.PRG right in /APPS (listed), .HIDDEN (left out); NEEDV (needs 0.99) for
              the needs window; APSCAN.PRG in /T.
-MODE scan20  twenty apps only, and /T/APSCAN.PRG (the scan time)."""
+MODE scan20  twenty apps only, and /T/APSCAN.PRG (the scan time).
+MODE desk31  (0.31) ARGS (args= with a quoted part, and ARGS.ARG: comments, two lines), CONS
+             (console=yes), GAMEC and GAMED (category Games); /T/TOOL.PRG with /T/TOOL.ARG;
+             /ZZNEW.HZA (GAMEN, Games): the Programs menu kept, args=, .ARG, console=, Files'
+             Run with... (tests/menu31.src)."""
 import io
 import os
 import shutil
@@ -165,5 +169,18 @@ elif mode in ("desk20", "scan20"):
         app_dir(apps, "NEEDV", ("NEEDV.PRG", "needv.prg"), inf(name="Needs 0.99"))
     os.makedirs(T, exist_ok=True)
     shutil.copy(os.path.join(build, "apscan.prg"), os.path.join(T, "APSCAN.PRG"))
+elif mode == "desk31":
+    app_dir(apps, "ARGS", ("ARGS.PRG", "apptest.prg"),
+            inf(name="Args App", args='-x "two words"'),
+            [("ARGS.ARG", b"# the user's options (a comment)\r\n-user 1\n   -more   # and one more\n")])
+    app_dir(apps, "CONS", ("CONS.PRG", "apptest.prg"), inf(name="Console App", console="yes"))
+    app_dir(apps, "GAMEC", ("GAMEC.PRG", "apptest.prg"), inf(name="Game C", category="Games"))
+    app_dir(apps, "GAMED", ("GAMED.PRG", "apptest.prg"), inf(name="Game D", category="Games"))
+    os.makedirs(T, exist_ok=True)
+    shutil.copy(os.path.join(build, "apptest.prg"), os.path.join(T, "TOOL.PRG"))
+    open(os.path.join(T, "TOOL.ARG"), "wb").write(b"hello\n")
+    tar(os.path.join(card, "ZZNEW.HZA"),
+        [("GAMEN/", None), ("GAMEN/APP.INF", inf(name="Game N", category="Games")),
+         ("GAMEN/GAMEN.PRG", A)])
 else:
     sys.exit(f"mkapps: unknown mode {mode}")

@@ -1,6 +1,7 @@
 # The Desktop's Programs menu, one "Title=/path" per line, in menu order. A line whose
-# program is not on the card is left out. Read by the Desktop whenever the menu opens: no
-# rebuild or restart needed. (Settings is in the Horizon menu: a line for it is left out.)
+# program is not on the card is left out. Read by the Desktop at its start and on F5 (the
+# desktop focused): no rebuild or restart needed. (Settings is in the Horizon menu: a line
+# for it is left out.)
 Edit=/BIN/EDIT.PRG
 Write=/BIN/WRITE.PRG
 Sheet=/BIN/SHEET.PRG

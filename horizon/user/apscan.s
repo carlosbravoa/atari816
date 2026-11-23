@@ -1,7 +1,8 @@
-; APSCAN - (0.29) measures what the Desktop does with /APPS when its Programs menu opens
+; APSCAN - (0.29) measures what the Desktop does with /APPS when it reads its Programs menu
 ; (make test-29, not on the card): the full scan (READDIR of /APPS, each folder's APP.INF
-; through ui_appinf, as desk.s's appscan) and the quick check it does when nothing changed
-; (READDIR of /APPS and a STAT of /SYSTEM/APPS.NEW). Prints both times (uptime, ms).
+; through ui_appinf, as desk.s's appscan). Prints its time (uptime, ms). (0.31: the quick
+; check of 0.29 and 0.30, a READDIR of /APPS and a STAT of /SYSTEM/APPS.NEW each time the
+; menu opened, is gone: the menu is kept, read at the start and when the apps change.)
         .include "horizon.inc"
         .include "ui.inc"
 
@@ -59,33 +60,11 @@ start:  sys     SYS_UPTIME
         sec
         sbc     z:t0
         sta     z:t1
-        sys     SYS_UPTIME              ; the quick check
-        sta     z:t0
-        stz     z:skip
-:       jsr     rd
-        bcc     :-
-        lda     #.loword(s_new)
-        sta     sb
-        lda     #^s_new
-        sta     sb+2
-        lda     #.loword(st)
-        sta     sb+3
-        lda     #^st
-        sta     sb+5
-        ptr     sb
-        sys     SYS_STAT
-        sys     SYS_UPTIME
-        sec
-        sbc     z:t0
-        sta     z:t2
         print   "apscan: "
         lda     z:napp
         jsr     put_dec
         print   " apps; full scan "
         lda     z:t1
-        jsr     put_dec
-        print   " ms, quick check "
-        lda     z:t2
         jsr     put_dec
         print   " ms\n"
         exit    0
@@ -120,19 +99,15 @@ rd:     lda     #.loword(s_apps0)
         .segment "RODATA"
 s_apps: .byte   "/APPS/"
 s_apps0: .byte  "/APPS", 0
-s_new:  .byte   "/SYSTEM/APPS.NEW", 0
 
         .segment "BSS"
 dbuf:   .res    640
 pth:    .res    130
 rb:     .res    10
-sb:     .res    6
-st:     .res    10
 
         .segment "ZEROPAGE"
 t0:     .res    2
 t1:     .res    2
-t2:     .res    2
 napp:   .res    2
 skip:   .res    2
 cnt:    .res    2

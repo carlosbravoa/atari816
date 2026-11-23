@@ -26,7 +26,8 @@ The shell finds a command word in `/BIN`, then `/SYSTEM`, then `/SYSTEM/TESTS`.
 
 `/SYSTEM/PROGRAMS` is plain text, one `Title=/path` per line (`#` starts a comment), in
 menu order; an entry whose program is not on the card is left out, so a new program needs
-no Desktop rebuild:
+no Desktop rebuild (0.31: the Desktop reads it at its start and on F5, not each time the
+menu opens):
 
 ```
 Edit=/BIN/EDIT.PRG
@@ -426,7 +427,8 @@ the blitter: the software drawing paths; both must pass):
    `install -r` with yes and no, two refused removals. A full card (`emu816 --card-free
    1500`, `tests/app29f.keys`): the install stops, says so, leaves nothing. The scan of 20
    apps at the board's card speed (`tests/app29s.keys`, APSCAN, `user/apscan.s`): the
-   times are printed (275 ms for a full read, 10 ms for the check). The Desktop
+   time is printed (275 ms for a full read; 0.29 and 0.30 also timed the check made at
+   every opening of the menu, 10 ms, gone in 0.31). The Desktop
    (`tests/app29d.src`, pictures compared by `tests/apppic.py` without the status text,
    so one list holds for every revision): two apps with shortcuts showing their APP.INF
    icons (a file, a built-in name), ZZGAMES.HZA and ZZGAMEB.HZA installed from Files
@@ -453,6 +455,19 @@ the blitter: the software drawing paths; both must pass):
    as a group) against the CPU's, and refused groups (in the window, the kernel's bank,
    past $FF00, 1025 elements, stride 0) and a call cut at 2,688 runs (A = the groups taken).
    Before REV $09: ENODEV and nothing else.
+36. **0.31 the Programs menu kept, programs' arguments and console** (`make test-31`,
+   `tests/menu31.src` on the card of `tests/mkapps.py desk31`; pictures by
+   `tests/apppic.py`; the console and the card requests compared with `tests/menu31.txt`).
+   The run logs the mailbox's request ring and the kernel's path buffer (`emu816 --watch`,
+   the addresses from `build/horizon.lbl`), from which `tests/cardreq.py` lists every card
+   request with its path: the second opening of the Programs menu and of its Games pop-up
+   make none, and in the whole run `/SYSTEM/PROGRAMS` is read twice (the Desktop's start,
+   the install) and `/SYSTEM/APPS.NEW` never looked for. Args App's `args=-x "two words"`
+   and its ARGS.ARG (a comment, CR LF, blanks) reach it as one string; Console App
+   (`console=yes`) runs in a Terminal window that says it ended and closes at a key; a .PRG
+   opened in Files gets its TOOL.ARG; Files' Run with... (its dialog, then `-z 5` in a
+   Terminal window); ZZNEW.HZA installed from Files shows in Games at once (the Installer's
+   sysreq SR_APPS).
 
 The Desktop sessions (`DESK=1` in `tests/shots.sh`) get `tests/desk.programs` as their
 Programs menu (the order of 0.12), so programs added to `sdfiles/PROGRAMS` do not change
@@ -857,7 +872,8 @@ INIT starts **DESK** (`user/desk.s`). It starts the window system and opens a ba
 window (borderless, under all others) with the desktop picture; it carries the system
 menus "Horizon" (About Horizon, Settings..., Force quit..., Switch to Atari (F12),
 Restart..., Shut down...; 0.15 wording) and
-"Programs" (read from /SYSTEM/PROGRAMS; 0.29: then the apps of /APPS). The menu bar's right end
+"Programs" (read from /SYSTEM/PROGRAMS; 0.29: then the apps of /APPS; 0.31: kept, read again
+when the apps change or on F5). The menu bar's right end
 shows the time since start, "up H:MM" (the board has no clock). DESK opens **Files** at start.
 Programs started from the menu run detached.
 
@@ -1139,6 +1155,61 @@ bus time (see emu/README.md, "Memory timing"). Expect the same factor on the CPU
   source stride), SYS_WGEOM, SYS_TNAME, WE_DROP's modifiers, the date routines (ui_clk*,
   `user/uidate.s`), shortcuts (ui_lnkread, ui_mklink), program and file icons (ui_prog,
   ui_ficon). See ABI.md and ui.inc.
+
+## Version 0.31 (in progress: the Programs menu kept, arguments and a console from the Desktop)
+
+The version number stays 0.30 until the release (sys_info answers $001E); nothing here
+needs a program to tell (an older Desktop ignores the new APP.INF keys, an older kernel
+answers SR_APPS with EINVAL, an older TERM opens a shell).
+
+- **The Programs menu is kept.** 0.29 and 0.30 read it again each time it opened: a STAT
+  of `/SYSTEM/APPS.NEW`, two READDIRs of `/APPS`, `/SYSTEM/PROGRAMS` (OPEN, READ, CLOSE)
+  and a STAT of each of its 15 programs: 21 card requests, about 0.5 s with the emulator's
+  board model (24 ms a request), about 2 s on the board with 5 apps. Now the Desktop reads it
+  at its start, when the apps change and on **F5** (the desktop focused: the icons and the
+  menu read again), and opening the menu or its pop-ups makes no card request. The apps
+  change: the Installer (an install, a removal) and Files (a change seen in /APPS or a
+  folder in it: an operation, or a reload that finds the listing different) send
+  **sysreq SR_APPS** (4; the kernel accepted 1-3 before); the Desktop reads the menu at its
+  next second (several requests, one reading), or at once when the menu opens first.
+  `/SYSTEM/APPS.NEW` is no longer made or looked for. Choosing an app reads its APP.INF
+  again (its args= and console=, and a check that it is still there): a program that is not
+  on the card any more gets the alert "NAME was not found on the card." and the menu is read
+  again. A card changed while the Desktop runs: F5 (or the alert, at the first missing
+  program).
+- **The Desktop's start**: the programs of `/SYSTEM/PROGRAMS` are checked against one
+  READDIR of their folder (`/BIN`, into the icon bank) instead of a STAT each (15 STATs,
+  about 0.36 s at the board's speed, become one READDIR), and a READDIR whose buffer kept
+  room for one more entry of 255 characters is the last (the "nothing more" READDIR is
+  saved: in the Desktop's /APPS scan and in Files). Files reads its folders 2 KB at a time
+  (512 bytes before: a quarter of the READDIRs for a large folder) and no longer reads its
+  first folder twice (load, then again at its window's first WE_FOCUS). With 5 apps and
+  the card's own PROGRAMS (15 programs), with the emulator's board model: 53 card requests
+  from the boot to the idle desktop instead of 74, Files' window filled at 3.2 s instead of
+  3.7 s (`tests/cardreq.py` lists them).
+- **Arguments for programs started from the Desktop and Files** (ABI.md, "Programs started
+  from the Desktop and Files"): APP.INF's `args=` (the developer's default arguments), then
+  the options file **PROG.ARG** next to the program (the user's: `#` comments, lines joined;
+  any program, not only apps), 127 characters in all; `console=yes` / `error` starts the
+  program in a Terminal window that shows its output and says how it ended. The controls
+  library: `ui_run` (an app's APP.INF, then `ui_launchx`), `ui_launchx` (`ui_lxmode`:
+  LX_TERM, LX_TERME, LX_NOARG), `ui_apargs`, `ui_apcons`. The Programs menu, a double click
+  on a .PRG (Files, the desktop) and shortcuts use `ui_run`.
+- **Files: Run with...** in the pop-up menu of a .PRG: asks for the arguments and runs the
+  program with them in a Terminal window.
+- **TERM [-e] PROG [ARGS]**: the Terminal window runs a program instead of the shell, says
+  `--- NAME ended (code N).` and waits for a key (`-e`: closes by itself after code 0); the
+  log gets `term: NAME ended (code N)`.
+- **Kernel**: input_lend on a terminal no longer lends the keys to a task that has ended
+  already (input_lend on the keyboard refused it before): a program that ended before its
+  terminal's owner lent it the keys kept them, and the owner never read a key again (TERM
+  running a quick program; the shell running a quick command could meet it too). sysreq
+  takes 4. bank $01: 496 -> 488 bytes left (the zombie check), k2.s and k3.s unchanged.
+- **Room**: DESK 2,237 -> 1,049 bytes left in its bank (the controls library's launcher,
+  ui_run and ui_launchx, about 560 bytes of code and 136 of bss in every program that opens
+  files; progok about 260); Files 26,029 -> 23,201 (its 2 KB READDIR buffer); TERM and
+  INSTALL have room.
+- `kpath` is exported (`build/horizon.lbl`, the kernel's labels, for `tests/cardreq.py`).
 
 ## Version 0.30 (many small fills)
 

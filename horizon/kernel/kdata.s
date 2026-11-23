@@ -70,6 +70,7 @@ kq_y:       .res    KQLEN*2     ; mouse: y
 
 kargs:      .res    128         ; spawn arguments being copied
 kpath:      .res    128
+        .export kpath               ; (0.31: in build/horizon.lbl, for tests/cardreq.py)
 kraw:       .res    128
 t_cwd:      .res    NSLOT*128   ; current directory of each task (indexed by slot*128)         ; path being worked on (spawn, file syscalls)
 kblk:       .res    18          ; syscall parameter block copied from user memory

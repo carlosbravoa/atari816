@@ -56,6 +56,274 @@ ui_launch:
         clc
         rts
 
+; (0.31) X = a program's path, Y = its arguments (0: none), A = its name (0: from the path):
+; started as the Desktop and Files start a program (the Programs menu, a double click, a
+; shortcut). An app's program (/APPS/FOLDER/..., the one its APP.INF names) gets the
+; APP.INF's console= (ui_lxmode) and, when Y = 0, its args=; then ui_launchx (which adds the
+; options file PROG.ARG). Returns as ui_launch.
+ui_run:
+        stx     lx_prg
+        sty     lx_arg
+        sta     lx_nm
+        stz     ui_lxmode
+        ldy     #0                      ; "/APPS/FOLDER" -> lx_path (the first '/' after
+:       lda     a:0,x                   ; "/APPS/" ends the folder)
+        and     #$00FF
+        sta     a:lx_path,y
+        jeq     @go                     ; (no folder: not an app's program)
+        cpy     #6
+        bcs     @sl
+        jsr     lx_up
+        sta     op_t
+        lda     lx_sapps,y
+        and     #$00FF
+        cmp     op_t
+        bne     @go
+        bra     @nx
+@sl:    cmp     #'/'
+        beq     @dir
+@nx:    inx
+        iny
+        cpy     #127
+        bcc     :-
+        bra     @go
+@dir:   cpy     #6                      ; ("/APPS//...": no)
+        beq     @go
+        lda     #0
+        sta     a:lx_path,y
+        ldx     #.loword(lx_path)
+        jsr     ui_appinf
+        bcs     @go
+        ldx     lx_prg                  ; its program? (ignoring case)
+        ldy     #0
+:       lda     a:0,x
+        jsr     lx_up
+        sta     op_t
+        lda     ui_approg,y
+        jsr     lx_up
+        cmp     op_t
+        bne     @go
+        inx
+        iny
+        cmp     #0
+        bne     :-
+        lda     ui_apcons               ; console=: yes / error
+        jsr     lx_up
+        cmp     #'Y'
+        bne     :+
+        lda     #LX_TERM
+        sta     ui_lxmode
+:       cmp     #'E'
+        bne     :+
+        lda     #LX_TERME
+        sta     ui_lxmode
+:       lda     lx_arg                  ; args= when none were given
+        bne     @go
+        lda     ui_apargs
+        and     #$00FF
+        beq     @go
+        lda     #.loword(ui_apargs)
+        sta     lx_arg
+@go:    ldx     lx_prg
+        ldy     lx_arg
+        lda     lx_nm
+        ; (falls into ui_launchx)
+
+; (0.31) X = program path, Y = arguments (0: none), A = its name (0: from the path), and
+; ui_lxmode: LX_TERM a Terminal window runs it (/BIN/TERM.PRG "PATH" ARGS; kept open at its
+; end), LX_TERME the same, closed by itself when it ends with code 0, LX_NOARG no options
+; file. Unless LX_NOARG, the options file next to the program (PROG.ARG for PROG.PRG; its
+; first 382 bytes) is appended to the arguments: its words, '#' to the line's end dropped,
+; blanks and line ends between them one space. The whole string: 127 characters at most
+; (longer: an alert, not started). Returns as ui_launch; ui_lxmode is 0 again.
+ui_launchx:
+        stx     lx_prg
+        sty     lx_arg
+        sta     op_name
+        cmp     #0                      ; (the name, as ui_launch finds it)
+        bne     :+
+        stx     op_prg
+        jsr     ui_prog
+        stx     op_name
+        cpx     #0
+        bne     :+
+        jsr     op_pname
+:       lda     op_name
+        sta     lx_nm
+        stz     lx_n
+        stz     lx_sp
+        stz     lx_ovf
+        lda     ui_lxmode
+        bit     #LX_TERM | LX_TERME
+        beq     @args
+        bit     #LX_TERME               ; [-e ]"PATH"
+        beq     :+
+        lda     #'-'
+        jsr     lx_raw
+        lda     #'e'
+        jsr     lx_raw
+        lda     #' '
+        jsr     lx_raw
+:       lda     #'"'
+        jsr     lx_raw
+        ldx     lx_prg
+        jsr     lx_str
+        lda     #'"'
+        jsr     lx_raw
+        inc     lx_sp
+@args:  ldx     lx_arg                  ; the arguments as they are
+        beq     @opt
+        lda     a:0,x
+        and     #$00FF
+        beq     @opt
+        jsr     lx_gap
+        ldx     lx_arg
+        jsr     lx_str
+        inc     lx_sp
+@opt:   lda     ui_lxmode
+        bit     #LX_NOARG
+        jne     @run
+        ldx     lx_prg                  ; PROG.ARG: the path with its extension changed
+        ldy     #0
+        sty     op_dot
+:       lda     a:0,x
+        and     #$00FF
+        sta     a:lx_path,y
+        beq     :+++
+        cmp     #'/'
+        bne     :+
+        stz     op_dot
+:       cmp     #'.'
+        bne     :+
+        sty     op_dot
+:       inx
+        iny
+        cpy     #122
+        bcc     :---
+        jmp     @run
+:       ldx     op_dot                  ; (no extension: ".ARG" added)
+        bne     :+
+        tyx
+:       lda     #'.' | ('A' << 8)
+        sta     a:lx_path,x
+        lda     #'R' | ('G' << 8)
+        sta     a:lx_path+2,x
+        stz     a:lx_path+4,x
+        ptr     lx_path
+        lda     #O_READ
+        sys     SYS_OPEN
+        jcs     @run                    ; (none)
+        sta     op_t
+        sta     op_rw
+        lda     #.loword(op_lbuf)
+        sta     op_rw+1
+        lda     #^op_lbuf
+        sta     op_rw+3
+        lda     #382
+        sta     op_rw+4
+        ptr     op_rw
+        sys     SYS_READ
+        bcc     :+
+        lda     #0
+:       tax
+        stz     op_lbuf,x
+        lda     op_t
+        sys     SYS_CLOSE
+        ldx     #.loword(op_lbuf)       ; its words
+@w:     lda     a:0,x
+        and     #$00FF
+        beq     @run
+        inx
+        cmp     #'#'                    ; a comment: to the line's end
+        bne     @ch
+:       lda     a:0,x
+        and     #$00FF
+        beq     @run
+        inx
+        cmp     #10
+        bne     :-
+        bra     @bl
+@ch:    cmp     #' ' + 1
+        bcs     :+
+@bl:    lda     lx_n                    ; a blank, a line's end: a space before the next
+        beq     @w
+        sta     lx_sp
+        bra     @w
+:       phx
+        pha
+        jsr     lx_gap
+        pla
+        jsr     lx_raw
+        plx
+        bra     @w
+@run:   lda     lx_ovf
+        beq     :+
+        ldx     #.loword(m_long)        ; too long
+        ldy     #.loword(t_start)
+        jsr     op_alert
+        stz     ui_lxmode
+        lda     #EINVAL
+        sec
+        rts
+:       ldx     lx_n
+        stz     lx_buf,x
+        lda     ui_lxmode
+        stz     ui_lxmode
+        bit     #LX_TERM | LX_TERME
+        beq     :+
+        ldx     #.loword(p_term)        ; in a Terminal window
+        bra     @l
+:       ldx     lx_prg
+        lda     lx_n
+        bne     @l
+        ldy     #0
+        bra     @l2
+@l:     ldy     #.loword(lx_buf)
+@l2:    lda     lx_nm
+        jmp     ui_launch
+
+; lx_buf: a space if one is due (lx_sp, and something before it)
+lx_gap: lda     lx_sp
+        beq     :+
+        stz     lx_sp
+        lda     lx_n
+        beq     :+
+        lda     #' '
+        bra     lx_raw
+:       rts
+; lx_buf: the string X (keeps nothing)
+lx_str:
+:       lda     a:0,x
+        and     #$00FF
+        beq     :+
+        phx
+        jsr     lx_raw
+        plx
+        inx
+        bra     :-
+:       rts
+; lx_buf: character A (127 at most: then lx_ovf)
+lx_raw: ldx     lx_n
+        cpx     #127
+        bcc     :+
+        inc     lx_ovf
+        rts
+:       sep     #$20
+        .a8
+        sta     lx_buf,x
+        rep     #$20
+        .a16
+        inc     lx_n
+        rts
+; A (a character, the low byte) -> upper case (keeps X, Y)
+lx_up:  and     #$00FF
+        cmp     #'a'
+        bcc     :+
+        cmp     #'z' + 1
+        bcs     :+
+        and     #$00DF
+:       rts
+
 ; (0.26) /SYSTEM/OPEN.REQ written: op_prg, LF, op_arg, LF (the running program reads it when
 ; its window gets the focus, or within a second, and deletes it: Music)
 op_request:
@@ -274,10 +542,10 @@ ui_open:
         jsr     op_alert
         sec
         rts
-@run:   ldx     op_path
-        ldy     #0
+@run:   ldx     op_path                 ; (0.31) as the Desktop starts it: APP.INF's
+        ldy     #0                      ; args= and console=, its .ARG file
         lda     #0
-        jmp     ui_launch
+        jmp     ui_run
 @data:  cmp     #FT_OTHER
         bne     @known
         ldx     op_path                 ; (0.29) an app that registered its type (APP.INF)?
@@ -498,7 +766,7 @@ op_link:
         beq     :+
         lda     #.loword(ui_lktitl)
 :       ldx     #.loword(ui_lktgt)
-        jmp     ui_launch
+        jmp     ui_run                  ; (0.31: its APP.INF, its .ARG file)
 @open:  ldx     #.loword(ui_lktgt)
         jmp     ui_open
 
@@ -946,6 +1214,9 @@ p_write: .byte  "/BIN/WRITE.PRG", 0
 p_music: .byte  "/BIN/MUSIC.PRG", 0
 p_inst: .byte   "/BIN/INSTALL.PRG", 0
 p_req:  .byte   "/SYSTEM/OPEN.REQ", 0
+p_term: .byte   "/BIN/TERM.PRG", 0      ; (0.31) ui_launchx's Terminal window
+lx_sapps: .byte "/APPS/", 0
+m_long: .byte   "The arguments of % are too long", 10, "(127 characters at most, with its .ARG file).", 0
 n_files: .byte  "Files", 0
 n_edit: .byte   "Edit", 0
 n_basic: .byte  "BASIC", 0
@@ -1005,3 +1276,13 @@ op_end: .res    2                       ; ui_mklink: the end of the link's text
 ui_lktgt: .res  130                     ; ui_lnkread: the target, the title, the arguments
 ui_lktitl: .res 130
 ui_lkargs: .res 130
+ui_lxmode: .res 2                       ; (0.31) ui_launchx: LX_TERM, LX_TERME, LX_NOARG
+lx_prg: .res    2
+lx_arg: .res    2
+lx_nm:  .res    2
+lx_n:   .res    2
+lx_sp:  .res    2
+lx_ovf: .res    2
+lx_path = op_qb                         ; the folder (ui_run), the .ARG file's path
+lx_buf  = op_lbuf + 384                 ; the arguments built (the .ARG file is read into
+                                        ; op_lbuf's first 383 bytes)

@@ -457,6 +457,10 @@ ask the Desktop instead (`SYS_SYSREQ`), which lets every program save first.
 :
 ```
 
+(0.31) `SR_APPS` (4) asks nothing of the user: it tells the Desktop that the apps changed
+(an installer, a tool that copies an app folder into `/APPS`); the Desktop reads its
+Programs menu again within a second. EINVAL before 0.31 and without a Desktop: ignore it.
+
 ### $0B sync (SYS_SYNC)
 In: A bit 0 = end every other program first (shut down). Closes every open file and has
 the I/O processor flush the card; afterwards the power may be cut. Errors: $40 + the I/O

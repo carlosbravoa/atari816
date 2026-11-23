@@ -33,7 +33,7 @@ chdir         | ok       | const char *path:XY | | Change the current directory 
 getcwd        | int      | char *buf:XY, unsigned size:A | | The current directory (absolute, zero-terminated) into buf -> its length. EINVAL if buf is too small.
 restart       | ok       | unsigned full:A | | Restart Horizon (0) or the whole machine (1). Programs should rather use sysreq.
 sync          | ok       | unsigned flags:A | | Close every open file and flush the card; flags bit 0: end every other program first.
-sysreq        | ok       | unsigned what:A | | Ask the Desktop to shut down (SR_SHUTDOWN), restart (SR_RESTART) or fully restart (SR_FULLRESTART).
+sysreq        | ok       | unsigned what:A | | Ask the Desktop to shut down (SR_SHUTDOWN), restart (SR_RESTART) or fully restart (SR_FULLRESTART); (0.31) SR_APPS: the apps changed, the Desktop reads its Programs menu again.
 time_get      | long     | | y | The clock: seconds since 2000-01-01 00:00; hz_y = CLK_NONE / CLK_SAVED / CLK_SET (how it was set).
 time_set      | ok       | long secs:AX32, unsigned state:Y | | Set the clock (state CLK_SAVED or CLK_SET).
 vsync         | unsigned | | | Wait for the next vertical blank (60 Hz) -> the frame counter. Also waits for the caller's draw list.

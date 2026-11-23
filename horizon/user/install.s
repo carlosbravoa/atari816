@@ -16,8 +16,9 @@
 ; (deleted first if a failed install left it), then moved to /APPS/NAME. When that folder is
 ; there already (an update), the files of the old one that the archive does not have (saves,
 ; high scores, settings) are moved into the new one first, then the rest of the old one is
-; deleted. Any error deletes /APPS/.INSTALL: the old app stays as it was. At the end
-; /SYSTEM/APPS.NEW is made: the Desktop reads the apps again when its Programs menu opens.
+; deleted. Any error deletes /APPS/.INSTALL: the old app stays as it was. At the end (and
+; after a removal) the Desktop is told (0.31: sysreq SR_APPS; 0.29, 0.30 made
+; /SYSTEM/APPS.NEW): it reads its Programs menu again.
 ; The archive: 512-byte records; a header (ustar: name + prefix, the "ustar" magic of POSIX
 ; or of GNU tar), then the data in records. Taken: files ('0', NUL, '7'), folders ('5');
 ; pax headers ('x', 'g') are skipped (their data is not read: the name in the ustar header
@@ -1461,12 +1462,9 @@ extract:
         lda     #E_WRITE
         sec
         rts
-:       ptr     s_rescan                ; the Desktop: read the apps again
-        lda     #O_CREATE
-        sys     SYS_OPEN
-        bcs     :+
-        sys     SYS_CLOSE
-:       jsr     progclose
+:       lda     #SR_APPS                ; (0.31) the Desktop: read the apps again (EINVAL
+        sys     SYS_SYSREQ              ; without it: it reads them when it starts)
+        jsr     progclose
         clc
         rts
 
@@ -1862,6 +1860,10 @@ remove: lda     path                    ; NAME or /APPS/NAME
         jcs     cancel
         ldx     #.loword(dest)
         jsr     ui_rmtree
+        php
+        lda     #SR_APPS                ; (0.31) the Desktop: read the apps again
+        sys     SYS_SYSREQ
+        plp
         bcs     @err
         lda     #.loword(o_rmd)
         sta     ocx
@@ -1918,7 +1920,6 @@ prefix: stx     z:p1
 s_apps: .byte   "/APPS/", 0
 s_apps0: .byte  "/APPS", 0
 s_tmp:  .byte   "/APPS/.INSTALL", 0
-s_rescan: .byte "/SYSTEM/APPS.NEW", 0
 s_inf:  .byte   "APP.INF", 0
 s_prg:  .byte   ".PRG", 0
 s_ok:   .byte   "OK", 0

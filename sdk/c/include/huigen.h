@@ -3,7 +3,7 @@
  * ui/hui.tab: do not edit (make -C sdk/c gen). Included by hui.h, which has the
  * structures and the rules (sdk/docs/c/apps.md).
  *
- * 61 functions, 11 variables; 46 names of the library are not bound
+ * 63 functions, 12 variables; 48 names of the library are not bound
  * (hui.tab says why: C has its own way).
  * hui.h includes it three times: the constants, the structure names, then (after its
  * own types) the structures and the prototypes. */
@@ -101,6 +101,9 @@
 #define FT_LINK          9
 #define FT_MUSIC         0xA
 #define FT_APP           0xB
+#define LX_TERM          1
+#define LX_TERME         2
+#define LX_NOARG         4
 #define UI_NAMEMAX       0x40
 #define CK_YEAR          0
 #define CK_MON           2
@@ -381,6 +384,15 @@ int ui_ask(const ui_askblk *ak);
  *  and hz_errno after an alert that said why.
  */
 int ui_launch(const char *path, const char *args, const char *name);
+/** (Horizon 0.31) Starts a program as the Desktop and Files do: an app's program gets
+ *  its APP.INF's console= and (args NULL) args=; then ui_launchx with its PROG.ARG.
+ */
+int ui_run(const char *path, const char *args, const char *name);
+/** (Horizon 0.31) As ui_launch, with ui_lxmode (LX_TERM: in a Terminal window, kept
+ *  open at its end; LX_TERME: closed when it ends with code 0; LX_NOARG: no options
+ *  file) and the options file PROG.ARG appended (127 characters in all, else an alert).
+ */
+int ui_launchx(const char *path, const char *args, const char *name);
 /** The "Cannot start NAME" alert for a spawn error. */
 void ui_spawnerr(unsigned err, const char *name);
 /** A file's type FT_* by its extension. */
@@ -491,6 +503,8 @@ extern hz_event ui_ev;
  *  that kind are listed (the dialog clears it).
  */
 extern unsigned ui_dlfilt;
+/** (Horizon 0.31) ui_launchx's mode (LX_*), 0 again after the call. */
+extern unsigned ui_lxmode;
 /** ui_lnkread: the shortcut's target. */
 extern char ui_lktgt[130];
 /** ui_lnkread: its title ("" when none). */

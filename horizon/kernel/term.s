@@ -922,6 +922,9 @@ term_ilend:
         bcs     @bad
         cpx     cur
         beq     @bad
+        lda     t_state,x               ; (0.31) not to a task that has ended already (as
+        cmp     #TS_ZOMBIE              ; input_lend): its keys would stay with it
+        beq     @bad
         lda     cur
         sta     t_lender,x
         ldy     cur

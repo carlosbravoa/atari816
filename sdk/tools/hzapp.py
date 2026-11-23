@@ -17,7 +17,10 @@ unpacks it to /APPS/NAME.
 
 pack checks the folder first (an error stops it, a warning does not):
   - APP.INF is there; its keys are known ones; name is at most 24 characters, category 15,
-    version 15, description 63, types and needs 47, program 63.
+    version 15, description 63, types and needs 47, program 63, (0.31) args 127, console
+    yes / error / no. A PROG.ARG file (the user's options, appended to the arguments when
+    the Desktop or Files starts the program) in the archive: a warning (an update would
+    replace the user's).
   - the program: program=NAME.PRG, else FOLDER.PRG, else the folder's only .PRG; it must be
     a Horizon program (an o65 file). Its requirements block (HZ_NEEDS, hcc --needs) is read
     and compared with APP.INF's needs= line. When APP.INF has no needs= line, the APP.INF
@@ -56,7 +59,8 @@ import sys
 import tarfile
 
 KEYS = {"name": 24, "program": 63, "icon": 31, "types": 47, "category": 15,
-        "version": 15, "description": 63, "needs": 47}
+        "version": 15, "description": 63, "needs": 47, "args": 127, "console": 7}
+CONSOLE = ("yes", "error", "no")       # (Horizon 0.31) console=: a Terminal window, kept / closed at code 0
 BAD = set('\\:*?"<>|')
 NEEDS_MAGIC = b"HZNEEDS\x01"
 NEED_FLAGS = [(0x01, "lau"), (0x02, "opl2"), (0x04, "sprites"), (0x08, "blitter"),
@@ -275,7 +279,26 @@ def check_inf(text, rep):
             rep.warn(f"APP.INF: {k} is {len(v)} characters; Horizon keeps {KEYS[k]}")
     if "name" not in inf:
         rep.warn("APP.INF has no name=: the menu shows the folder's name")
+    if inf.get("console") and inf["console"].lower() not in CONSOLE:
+        rep.warn(f"APP.INF: console={inf['console']}: Horizon knows yes, error and no "
+                 f"(anything else is no)")
     return inf
+
+
+def check_argfile(prg, files, inf, rep):
+    """(0.31) PROG.ARG is the user's options file (appended to the arguments when the Desktop
+    or Files starts PROG.PRG): shipped in the archive, an update replaces the user's"""
+    if not prg:
+        return
+    arg = prg.rsplit(".", 1)[0].lower() + ".arg"
+    if arg in files:
+        rep.warn(f"{arg.upper()} is the user's options file; shipped in the archive, an update "
+                 f"replaces the user's (put the defaults in APP.INF's args= instead)")
+    n = len(inf.get("args", ""))
+    if inf.get("console", "").lower() in ("yes", "error"):
+        n += len(prg) + 16              # (the Terminal's "/APPS/NAME/PROG.PRG" before them)
+    if n > 100:
+        rep.warn(f"args= leaves {127 - n} characters for the user's {arg.upper()} (127 in all)")
 
 
 def summary(root, inf, nfiles, total, prg=None, blk=False):
@@ -291,6 +314,10 @@ def summary(root, inf, nfiles, total, prg=None, blk=False):
         print(f"  opens: {inf['types']}")
     if inf.get("needs"):
         print(f"  needs: {inf['needs']}")
+    if inf.get("args"):
+        print(f"  args: {inf['args']}")
+    if inf.get("console"):
+        print(f"  console: {inf['console']}")
     print(f"  {nfiles} files, {(total + 1023) // 1024} KB, into /APPS/{root}")
     if prg and blk is not False:
         print(f"  {prg} checks: {blk}" if blk else
@@ -352,6 +379,8 @@ def scan_folder(folder, rep, fix=None):
     check_icon(inf, {rel.lower(): os.path.getsize(full) for rel, full, isdir in entries
                      if not isdir and "/" not in rel}, rep)
     prg = pick_program(root, inf, prgs, rep)
+    check_argfile(prg, {rel.lower() for rel, full, isdir in entries if not isdir and "/" not in rel},
+                  inf, rep)
     blk = None
     if prg:
         blk = check_program(prg, open(os.path.join(folder, prg), "rb").read(), inf, rep, fix)

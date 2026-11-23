@@ -12,6 +12,7 @@
 #define SR_SHUTDOWN      1
 #define SR_RESTART       2
 #define SR_FULLRESTART   3
+#define SR_APPS          4
 #define CLK_NONE         0
 #define CLK_SAVED        1
 #define CLK_SET          2
@@ -376,7 +377,7 @@ int hz_restart(unsigned full);
 /** sync (SYS_SYNC, $0B): Close every open file and flush the card; flags bit 0: end every other program first.
  *  [flags: A] */
 int hz_sync(unsigned flags);
-/** sysreq (SYS_SYSREQ, $0C): Ask the Desktop to shut down (SR_SHUTDOWN), restart (SR_RESTART) or fully restart (SR_FULLRESTART).
+/** sysreq (SYS_SYSREQ, $0C): Ask the Desktop to shut down (SR_SHUTDOWN), restart (SR_RESTART) or fully restart (SR_FULLRESTART); (0.31) SR_APPS: the apps changed, the Desktop reads its Programs menu again.
  *  [what: A] */
 int hz_sysreq(unsigned what);
 /** time_get (SYS_TGET, $0D): The clock: seconds since 2000-01-01 00:00; hz_y = CLK_NONE / CLK_SAVED / CLK_SET (how it was set).

@@ -6,13 +6,16 @@
 ;   Programs: read from /SYSTEM/PROGRAMS, one "Title=/path" per line (# comments); an entry
 ;     whose program is not on the card is left out (and Settings, which is in the Horizon
 ;     menu), so new programs need no rebuild (a built-in list when the file is missing).
-;     Read again each time the menu opens (WE_MENUOPEN): the kernel shows the new list.
 ;     (0.29) Then the apps of /APPS (sdk/docs/apps.md): a folder with APP.INF (or FOLDER.PRG,
 ;     or one .PRG) and a .PRG right in /APPS, behind a line, by category ("Games  >": a
 ;     pop-up menu of its apps) and name; "More apps  >" when they do not fit (see apmenu).
-;     /APPS is listed each time the menu opens; the APP.INF files are read again when the
-;     listing changed or /SYSTEM/APPS.NEW is there (the Installer makes it). An app starts
-;     in its folder. A desktop shortcut to an app shows the app's icon= (apicon).
+;     (0.31) The menu is kept: read at the start, when the apps change (sysreq SR_APPS from
+;     the Installer or Files: at the next second's tick, or at once when the menu opens
+;     first) and on F5; opening it reads nothing (0.14-0.30 read it at every WE_MENUOPEN).
+;     A choice is started with ui_run: an app's APP.INF is read again then (args=,
+;     console=, still there?), and its .ARG file; a program not on the card any more: the
+;     alert, and the menu read again (gone). An app starts in its folder. A desktop
+;     shortcut to an app shows the app's icon= (apicon).
 ;   (the kernel adds "Windows" after them)
 ; The menu bar's right end shows the free memory and the time: "5632K free  up 0:05" (the
 ; time since start) until the clock is set, then "5632K free  14:05" (every 5 s). A click
@@ -267,16 +270,21 @@ loop:   lda     #0
 @nost:
         cmp     #WE_MENUOPEN
         bne     :+
-        lda     ui_ev+2                 ; Programs opens: the list read again
-        cmp     #1
+        lda     ui_ev+2                 ; Programs opens: (0.31) the list is kept; read
+        cmp     #1                      ; again only when something changed it (mdirty)
         jne     loop
-        jsr     mkmenu
-        jsr     setmenu
+        lda     mdirty
+        jeq     loop
+        jsr     remenu
         jmp     loop
 :       cmp     #WE_SYSREQ
         bne     :+
         lda     ui_ev+2                 ; a program asks (no confirmation)
-        jsr     sysdown
+        cmp     #SR_APPS                ; (0.31) the Installer, Files: /APPS changed (read
+        bne     @sr                     ; at the next second's tick, or when the menu opens:
+        sta     mdirty                  ; several such requests together, one reading)
+        jmp     loop
+@sr:    jsr     sysdown
         jmp     loop
 :       cmp     #WE_MENU
         jne     @key
@@ -295,7 +303,8 @@ loop:   lda     #0
         tax
         pla
         ldy     #0
-        jsr     ui_launch
+        jsr     ui_run                  ; (0.31: its .ARG file)
+        jsr     gone                    ; (not on the card: the menu read again)
         jsr     clock
         jmp     loop
 @sys:   lda     ui_ev+4                 ; Horizon: About, Settings, -, Force quit, -, Atari,
@@ -365,6 +374,11 @@ loop:   lda     #0
         jeq     loop
         jsr     openicon
         jmp     loop
+:       cmp     #$3E                    ; (0.31) F5: the icons and the Programs menu
+        bne     :+                      ; read again
+        jsr     rescan
+        jsr     remenu
+        jmp     loop
 :       cmp     #$FF                    ; the system key (F12, $FF, down)
         jne     loop
 @atari: sys     SYS_CLASSIC             ; until F12 there
@@ -392,6 +406,14 @@ dither: lda     #C_DESK2
 ; is on the card (ptitle / ppath: their strings in pool); Settings is left out (it is in
 ; the Horizon menu)
 mkmenu: jsr     appscan                 ; (0.29) /APPS
+        lda     z:icbank                ; (0.31) progok lists the folders again
+        beq     :+
+        sta     z:aq+2
+        lda     #LSDIR
+        sta     z:aq
+        lda     #0
+        sta     [aq]
+:
         ldx     #.loword(m_sys)         ; the Horizon menu and the "Programs" title
         ldy     #.loword(menu)
         lda     #m_sys_end - m_sys
@@ -506,8 +528,7 @@ mkmenu: jsr     appscan                 ; (0.29) /APPS
         adc     #2
         cmp     #.loword(pool + POOLL)
         jcs     @end
-        ldx     #.loword(pth)           ; on the card?
-        jsr     statx
+        jsr     progok                  ; on the card? (0.31: its folder listed once)
         jcs     @skip
         lda     z:nprog                 ; keep it
         asl     a
@@ -562,9 +583,8 @@ mkmenu: jsr     appscan                 ; (0.29) /APPS
 ; with the apps of the rows that did not fit. A pop-up holds 24: a longer one ends with
 ; "All apps in Files" (Files at /APPS). An app starts with its folder as the current folder.
 ; The records (APREC bytes: the name, the category, the program's path) live in the icon
-; bank from APBASE. /APPS is read (READDIR) each time the menu opens; the APP.INF files only
-; when its listing changed (a sum of its entries) or /SYSTEM/APPS.NEW is there (the Installer
-; makes it; deleted here); with no icon bank, no apps.
+; bank from APBASE. (0.31) /APPS and its APP.INF files are read when the menu is (mkmenu:
+; the start, SR_APPS, F5), not when it opens; with no icon bank, no apps.
 APMAX   = 64                            ; apps at most
 APREC   = 128                           ; a record: the name (25 + 0),
 AP_CAT  = 26                            ; the category (15 + 0),
@@ -629,69 +649,172 @@ apnext: ldx     apdp
         tax
         rts
 
-; /APPS read: A = a sum of its entries (those not starting with '.')
-apsum:  stz     apsk
-        stz     apsg
-@call:  jsr     aprd
-        bcs     @end
-        ldx     #0
-@ent:   stx     apdp
-        lda     pbuf+6,x
+; (0.31) C clear if the program pth is on the card: its folder is listed once (READDIR into
+; the icon bank from LSBUF; the folder's name kept at LSDIR) and the name looked for there,
+; instead of a STAT for each entry of /SYSTEM/PROGRAMS (15 of them: about 0.4 s at the
+; board's card speed). A STAT when there is no icon bank or the listing did not fit.
+LSBUF   = $7800                         ; (the icons end at ICO_COUNT * 1024 = $7800)
+LSLEN   = 1920
+LSDIR   = $7F80                         ; (128 bytes)
+progok: lda     z:icbank
+        jeq     @stat
+        sta     z:aq+2
+        ldx     #0                      ; the folder: pth up to its last '/'
+        ldy     #0
+:       lda     pth,x
         and     #$00FF
-        cmp     #'.'
-        beq     @nx
-@sum:   lda     pbuf+5,x                ; every byte of the entry: size, attribute, name
+        beq     :+
+        inx
+        cmp     #'/'
+        bne     :-
+        txy
+        bra     :-
+:       sty     z:t0                    ; (the name's start)
+        lda     #LSDIR                  ; the folder listed already?
+        sta     z:aq
+        ldy     #0
+:       cpy     z:t0
+        bcs     @cmpe
+        lda     [aq],y
+        eor     pth,y
+        and     #$00FF
+        bne     @list
+        iny
+        bra     :-
+@cmpe:  lda     [aq],y
+        and     #$00FF
+        jeq     @find
+@list:  ldy     #0                      ; its name -> LSDIR (with the '/'), listed
+:       cpy     z:t0
+        bcs     :+
+        lda     pth,y
+        sep     #$20
+        .a8
+        sta     [aq],y
+        rep     #$20
+        .a16
+        iny
+        bra     :-
+:       lda     #0
+        sep     #$20
+        .a8
+        sta     [aq],y
+        rep     #$20
+        .a16
+        stz     lscnt
+        lda     #$FFFF                  ; (until it is read: a STAT)
+        sta     lsfull
+        lda     #.loword(pth)
+        sta     rblk
+        lda     #^pth
+        sta     rblk+2
+        lda     #LSBUF
+        sta     rblk+3
+        lda     z:icbank
+        sta     rblk+5
+        lda     #LSLEN
+        sta     rblk+6
+        stz     rblk+8
+        ldx     z:t0                    ; (the folder alone: "/BIN"; "/" for the root)
+        cpx     #2
+        bcs     :+
+        inx
+:       stx     lsx
+        lda     pth-1,x
+        sta     lssav
+        and     #$FF00
+        sta     pth-1,x
+        ptr     rblk
+        sys     SYS_READDIR
+        php
+        ldx     lsx
+        pha
+        lda     lssav
+        sta     pth-1,x
+        pla
+        plp
+        bcs     @rdno
+        sta     lscnt
+        stz     lsfull                  ; did it all fit? (room left for another entry
+        jsr     @walk                   ; of 255 characters and the path: then yes)
+        lda     z:aq
+        clc
+        adc     #.loword(6 + 255 + 128 - LSBUF)
+        cmp     #LSLEN
+        bcc     @find
+        dec     lsfull
+        bra     @stat
+@rdno:  stz     lsfull                  ; (no such folder: nothing in it)
+@find:  lda     lsfull
+        bne     @stat
+        jsr     @walk0
+:       cpx     #0
+        beq     @no
+        phx
+        ldy     #4                      ; a file
+        lda     [aq],y
+        and     #$0010
+        bne     @nx
+        iny                             ; its name, ignoring case
+        lda     [aq],y
+        and     #$00FF
+        sta     z:t
+        ldx     z:t0
+        ldy     #6
+:       lda     [aq],y
+        jsr     lower
+        sta     z:tl
+        lda     pth,x
+        jsr     lower
+        cmp     z:tl
+        bne     @nx
+        inx
+        iny
+        dec     z:t
+        bne     :-
+        lda     pth,x
+        and     #$00FF
+        bne     @nx
+        plx
+        clc
+        rts
+@nx:    jsr     @next
+        plx
+        dex
+        bra     :--
+@no:    sec
+        rts
+@stat:  ldx     #.loword(pth)
+        jmp     statx
+; aq past every entry (lscnt of them); @walk0: aq at the first, X = lscnt
+@walk:  jsr     @walk0
+:       cpx     #0
+        beq     :+
+        jsr     @next
+        dex
+        bra     :-
+:       rts
+@walk0: lda     #LSBUF
+        sta     z:aq
+        ldx     lscnt
+        rts
+@next:  ldy     #5
+        lda     [aq],y
         and     #$00FF
         clc
         adc     #6
-        tay
-:       lda     apsg                    ; (rotated left, then added)
-        asl     a
-        adc     #0
-        sta     apsg
-        lda     pbuf,x
-        and     #$00FF
-        clc
-        adc     apsg
-        sta     apsg
-        inx
-        dey
-        bne     :-
-@nx:    jsr     apnext
-        dec     apcnt
-        bne     @ent
-        bra     @call
-@end:   lda     apsg
+        adc     z:aq
+        sta     z:aq
         rts
 
-; the apps found again when /APPS changed (or at the first time, or after APPS.NEW)
+; (0.31) the apps found: /APPS listed, each folder's APP.INF read (mkmenu: at start, after
+; an install or a removal, F5)
 appscan:
+        stz     apn
         lda     z:icbank
         bne     :+
-        stz     apn
         rts
-:       stz     aprs                    ; /SYSTEM/APPS.NEW: the Installer asks
-        ldx     #.loword(p_rescan)
-        jsr     statx
-        bcs     :+
-        inc     aprs
-:       jsr     apsum
-        ldx     aprs
-        bne     @full
-        ldx     apok
-        beq     @full
-        cmp     apsig
-        bne     @full
-        rts
-@full:  sta     apsig
-        lda     #1
-        sta     apok
-        lda     aprs
-        beq     :+
-        ptr     p_rescan                ; (read: the request is done)
-        sys     SYS_DELETE
-:       stz     apn
-        stz     apsk
+:       stz     apsk
 @call:  jsr     aprd
         jcs     apsort
         ldx     #0
@@ -781,6 +904,11 @@ appscan:
 @nx:    jsr     apnext
         dec     apcnt
         jne     @ent
+        txa                             ; (0.31) room left for one more entry of 255
+        clc                             ; characters: that was all (one READDIR less)
+        adc     #6 + 255
+        cmp     #APDBL - 1
+        jcc     apsort
         jmp     @call
 
 ; sorted (insertion): apidx by category, then name, ignoring case
@@ -1252,13 +1380,27 @@ aplaunch:
         sta     apth,y
 :       ptr     apth
         sys     SYS_CHDIR
-        ldx     #.loword(pth)
-        ldy     #0
-        lda     #.loword(lbuf)
-        jsr     ui_launch
+        ldx     #.loword(pth)           ; (0.31) its APP.INF's args= and console=, its
+        ldy     #0                      ; .ARG file (ui_run reads APP.INF again: the app
+        lda     #.loword(lbuf)          ; is still there)
+        jsr     ui_run
+        jsr     gone
         ptr     p_root                  ; (the Desktop's own: the root)
         sys     SYS_CHDIR
         jmp     clock
+
+; (0.31) after ui_run: C set and A = $44 / $45 (the program is not on the card any more: the
+; alert said so): the Programs menu read again
+gone:   bcc     @out
+        cmp     #$44
+        beq     remenu
+        cmp     #$45
+        beq     remenu
+@out:   rts
+; (0.31) the Programs menu read again (/SYSTEM/PROGRAMS, /APPS) and given to the kernel
+remenu: stz     mdirty
+        jsr     mkmenu
+        jmp     setmenu
 
 ; the menus to the kernel, unless they are what it has already (mold)
 setmenu:
@@ -4452,7 +4594,10 @@ fd_row: asl     a
 ; numbers; every 5 s (as before 0.23: at the timer's 5th, 10th, ... second, by the uptime,
 ; so a tick lost while a dialog was open does not move them) the status, /Desktop and what
 ; the Atari has loaded
-tick:   jsr     svcheck                 ; (0.24) the screen saver
+tick:   lda     mdirty                  ; (0.31) the apps changed: the Programs menu
+        beq     :+
+        jsr     remenu
+:       jsr     svcheck                 ; (0.24) the screen saver
         sys     SYS_UPTIME              ; the timer's second this tick belongs to (first:
         sec                             ; the uptime before anything waits for the I/O
         sbc     tm0                     ; processor)
@@ -5818,7 +5963,6 @@ d_progs: .byte  "Edit=/BIN/EDIT.PRG", 10, "Write=/BIN/WRITE.PRG", 10, "Sheet=/BI
         .byte   "Files=/BIN/WFILES.PRG", 10, "Printer=/BIN/PRINTER.PRG", 10, 0
 p_progs: .byte  "/SYSTEM/PROGRAMS", 0
 p_apps: .byte   "/APPS", 0              ; (0.29) the apps
-p_rescan: .byte "/SYSTEM/APPS.NEW", 0
 p_root: .byte   "/", 0
 s_none: .byte   0
 s_sep:  .byte   "-", 0
@@ -6175,6 +6319,11 @@ bt_dtc: .byte   UT_BUTTON, 0
         .addr   b_cancel
 
         .segment "BSS"
+mdirty: .res    2                       ; (0.31) the Programs menu is to be read again
+lscnt:  .res    2                       ; (0.31) progok: the entries listed, all of them?
+lsfull: .res    2
+lsx:    .res    2
+lssav:  .res    2
 DBUFLEN = 1024
 FBUFL   = 1024
 POOLL   = 1200
@@ -6255,10 +6404,6 @@ fdtmp:  .res    64
 apn:    .res    2                       ; how many
 apn2:   .res    2                       ; (x 2)
 apidx:  .res    APMAX * 2               ; their records in sorted order
-apok:   .res    2                       ; /APPS read once
-apsig:  .res    2                       ; its listing's sum then
-apsg:   .res    2
-aprs:   .res    2                       ; /SYSTEM/APPS.NEW seen
 apsk:   .res    2                       ; READDIR's skip
 apcnt:  .res    2
 apdp:   .res    2

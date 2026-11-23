@@ -21,10 +21,11 @@ SYS_CHDIR     = $08   ; X, Y = path: the current directory
 SYS_GETCWD    = $09   ; X, Y = buffer, A = its size -> A = length
 SYS_RESTART   = $0A   ; A = 0 Horizon only, 1 full restart (/atari.ini, the classic core, Horizon); never returns when it works
 SYS_SYNC      = $0B   ; A = bit 0: end every other program first (except INIT); every file closed, the card flushed (I/O op $1C)
-SYS_SYSREQ    = $0C   ; A = SR_SHUTDOWN / SR_RESTART / SR_FULLRESTART: asks the Desktop (its backdrop gets WE_SYSREQ); EINVAL: no Desktop
+SYS_SYSREQ    = $0C   ; A = SR_SHUTDOWN / SR_RESTART / SR_FULLRESTART / (0.31) SR_APPS: asks the Desktop (its backdrop gets WE_SYSREQ); EINVAL: no Desktop
 SR_SHUTDOWN   = 1
 SR_RESTART    = 2
 SR_FULLRESTART = 3
+SR_APPS       = 4     ; (0.31) the apps changed (the Installer, Files): the Desktop reads its Programs menu again
 SYS_TGET      = $0D   ; (0.14) -> A = seconds low, X = high (since 2000-01-01 00:00), Y = CLK_* (how the clock was set)
 SYS_TSET      = $0E   ; (0.14) A = seconds low, X = high, Y = CLK_SAVED / CLK_SET: the clock counts from there
 CLK_NONE      = 0     ; time_get Y: never set (it counts from 0 = 2000-01-01 at start)

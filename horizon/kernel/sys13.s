@@ -231,14 +231,15 @@ sy_other:
 @no:    clc
         rts
 
-; ---- $0C sysreq(A = 1 shut down, 2 restart, 3 full restart): asks the Desktop ----
+; ---- $0C sysreq(A = 1 shut down, 2 restart, 3 full restart, (0.31) 4 the apps changed):
+; asks the Desktop ----
 ; The backdrop window gets WE_SYSREQ (a = the request, c = the caller's id). EINVAL without
 ; the window system or a backdrop.
 sys_sysreq:
         ldx     cur
         lda     t_a,x
         beq     @bad
-        cmp     #4
+        cmp     #5
         bcs     @bad
         sta     kg_t
         lda     ws_on

@@ -1,0 +1,69 @@
+# (0.31) the Programs menu kept, and how programs get arguments and a console (DESK=1;
+# tests/mousegen.py makes tests/menu31.keys from this; the card: tests/mkapps.py desk31;
+# make test-31). Shots (the script's 'shot' lines), compared by tests/apppic.py:
+#   1  Programs: the built-in programs, a line, "Args App", "Console App", "Games  >"
+#   2  Programs opened again, Games' pop-up (Game C, Game D): no card request for either
+#      (tests/cardreq.py: the requests between 7.9 s and 10.4 s)
+#   3  Console App (console=yes) chosen: a Terminal window titled CONS with apptest's line,
+#      "--- CONS ended (code 0)." and "Press a key to close."
+#   4  Files: /T/TOOL.PRG's pop-up menu, Run with...: the dialog
+#   5  "-z 5" typed: TOOL runs in a Terminal window
+#   6  /ZZNEW.HZA installed from Files: Programs > Games holds Game N (the Installer told the
+#      Desktop: sysreq SR_APPS)
+# The console (tests/menu31.txt): Args App from the menu with args= and ARGS.ARG; Console
+# App's and TOOL's ends (TERM's log lines); TOOL.PRG opened in Files with TOOL.ARG.
+6000 M -100:-100:0:0
+6050 M -100:-72:0:0
+6100 M -15:0:0:0
+6200 M 0:0:0:1
+6280 M 0:0:0:0
+6500 shot
+7000 {esc}
+8000 M 0:0:0:1
+8080 M 0:0:0:0
+8500 {up}
+9000 {right}
+9500 shot
+10000 {esc}
+11000 M 0:0:0:1
+11080 M 0:0:0:0
+11500 M 0:100:0:0
+11550 M 0:14:0:0
+11800 M 0:0:0:1
+11880 M 0:0:0:0
+13000 M 0:-100:0:0
+13050 M 0:-14:0:0
+13300 M 0:0:0:1
+13380 M 0:0:0:0
+13800 M 0:100:0:0
+13850 M 0:28:0:0
+14100 M 0:0:0:1
+14180 M 0:0:0:0
+14100 wait term: CONS ended
+14900 shot
+15200 x
+16700 t\n
+17700 tool.p
+18500 \n
+18500 wait apptest: /T/TOOL.PRG
+19500 {d65}{u65}
+20100 {down}\n
+20900 shot
+21200 -z 5\n
+21200 wait term: TOOL ended
+22000 shot
+22300 x
+23800 \b
+24800 zznew\n
+24800 wait install: asks: Install /APPS/GAMEN
+25300 \n
+25300 wait install: installed /APPS/GAMEN
+25800 \n
+27300 M 0:-100:0:0
+27350 M 0:-28:0:0
+27500 M 0:0:0:1
+27580 M 0:0:0:0
+28000 {up}
+28500 {right}
+29300 shot
+29800 {esc}

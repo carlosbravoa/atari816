@@ -40,7 +40,7 @@ PBR:PC-1.
 | $09 | getcwd | X, Y = buffer, A = its size | A = length | The current directory, absolute, zero-terminated. EINVAL if the buffer is too small |
 | $0A | restart | A = 0 Horizon only, 1 full restart | - | (0.13) Every open file is closed and the card synced (I/O op $1C), then the I/O processor's SYS_RESTART (op $1B, ARG0 = A): 0 reloads and restarts Horizon, 1 re-reads /atari.ini, cold boots the classic core and reloads Horizon. It does not come back when it works; an error is the I/O result + $40 ($C2: a firmware without the op). Programs should rather ask the Desktop (sysreq), which lets every program save first. EINVAL for A > 1 |
 | $0B | sync | A = bit 0: end every other program first | - | (0.13) Bit 0 (shutting down): every task except INIT, the caller and the window system's thread is killed, and the call waits until they are gone (3 s at most). Then every open file (of any task) is closed and the I/O processor flushes and closes everything on the card (I/O op $1C SYS_SYNC); afterwards the card may be removed or the power cut. Errors: the I/O result + $40 |
-| $0C | sysreq | A = 1 shut down, 2 restart, 3 full restart | - | (0.13) Asks the Desktop: the backdrop window gets WE_SYSREQ (a = A, c = the caller's task id); the Desktop asks every program to close, then restarts or shuts down (no confirmation: the asker confirmed). EINVAL without the window system or a backdrop. The shell's `restart` and `shutdown` use it |
+| $0C | sysreq | A = 1 shut down, 2 restart, 3 full restart, (0.31) 4 SR_APPS | - | (0.13) Asks the Desktop: the backdrop window gets WE_SYSREQ (a = A, c = the caller's task id); the Desktop asks every program to close, then restarts or shuts down (no confirmation: the asker confirmed). EINVAL without the window system or a backdrop. The shell's `restart` and `shutdown` use it. (0.31) SR_APPS: the apps changed (the Installer after an install or a removal, Files after a change in /APPS): the Desktop reads its Programs menu again at its next second, or at once if the menu opens first (several requests, one reading). Before 0.31: EINVAL |
 | $0D | time_get | - | A = seconds low, X = seconds high, Y = state | (0.14) The clock: seconds since 2000-01-01 00:00, counted by the 10 ms tick from the value time_set gave (the board has no battery clock). Y: 0 CLK_NONE never set (it counts from 0 since the start), 1 CLK_SAVED a provisional value (the last one saved, loaded at start by the Desktop or the shell), 2 CLK_SET set in this session. The controls library turns it into a date (ui_clk*, ui.inc) |
 | $0F | vsync | - | A = the frame counter (as frame, $9E) | (0.15) Blocks until the next vertical blank begins (NV_LINE 360; 60.03 a second), for games that draw once a frame. (0.18) From REV $09 Marga's VBLANK interrupt ends the wait and A is NV_FRAME, so a program sees the frames it missed (a difference above 1); before REV $09 the moment is derived from the raster line with a one-shot TIMER1 (the VBLANK interrupt as well) and A counts the vertical blanks waited for by any task. (0.18) Then it also waits until the caller's draw list is done and makes the CPU see what Ali wrote. Interruptible by kill |
 | $0E | time_set | A = seconds low, X = high, Y = 1 CLK_SAVED or 2 CLK_SET | - | (0.14) The clock counts from there (the second starts now). EINVAL for another Y. Programs keep the value across restarts themselves: the Desktop and the shell save it to `/SYSTEM/CLOCK` (one line `YYYY-MM-DD HH:MM:SS`) when it is set and before a restart or shut down, and load it at start (ui_clkload / ui_clksave). (0.19) The kernel also gives the time to the I/O processor (op $1D SYS_TIME), which counts on from it and stamps the files it writes with it (STAT's FAT time; `ls` in the shell and Files' footer show it); until a time is given, files get the firmware's build date (an older firmware: a fixed date). (0.20) With the PC volume there, the Desktop and the shell set the clock from the PC (stat of `/PC:`; CLK_SET, saved) at start, and the Desktop again whenever the PC volume comes back (ui_clkpc) |
@@ -533,6 +533,38 @@ its sprites; entering again writes them back. One program at a time is in full-s
 Drawing: the framebuffer is the program's own memory, so the CPU may draw into it directly;
 Ali draws into it through draw lists (below), with coordinates in the framebuffer (all of its
 rows and its whole stride, so the parts off the screen can be prepared before they scroll in).
+
+
+### Memory a full-screen program could get back (a note for later; not done)
+
+While a full-screen program is in front, about 1.1 MB stays allocated for screens nobody
+sees: the text console's framebuffer (4 kernel banks, kept from the boot so that ws_stop
+brings the console back as it was), the window system's screen (6 banks,
+640x360 at 8 bpp with a stride of 1024, kept current by the compositor meanwhile) and the
+Desktop's backdrop window's bitmap (6 banks: every window's bitmap is its own memory). A
+game that wants 1-2 MB more (X-COM, Prince of Persia) could get them back:
+
+- **The console's 4 banks**: not needed while the window system runs at all (ws_start to
+  ws_stop). Freed at ws_start, taken again at ws_stop with the console cleared, or with its
+  text kept as characters (78 x 29 x 2 bytes in a kernel bank) and drawn again. Cost: the
+  kernel's screen code (screen.s) must accept "no framebuffer" (skip drawing, keep the
+  cursor) and ws_stop must handle "no 4 banks free" (the console then waits, or ws_stop
+  refuses). Small and self-contained: the cheapest of the three.
+- **The window system's 6 banks**: freed at fs_enter, taken again (contiguous) and the
+  whole desktop repainted from the window bitmaps at fs_leave and at every switch back
+  (Alt+Tab, F12, a dialog). Cost: the switch is no longer instant (a full repaint, about
+  0.1 s with the blitter), the compositor must skip all work while there is no screen, and
+  6 contiguous banks may not be free when the program leaves (its memory fragmented the
+  pool): the kernel must then keep them reserved, or leave full screen only when they are
+  there, or repaint into what it can get (a second, scattered layout the compositor does
+  not have). Medium.
+- **The backdrop's 6 banks** (and the bitmaps of other programs' windows): the kernel
+  cannot redraw them, only their programs can. It needs a protocol: an event telling a
+  program that its window's bitmap was dropped (when a full-screen program enters) and
+  another one asking it to draw everything again (when the desktop comes back); the
+  Desktop can (it draws the backdrop from its icons), most programs cannot yet. Large: a
+  new event pair, a "bitmap gone" state in the window system, and every program that
+  wants to take part.
 
 ### Draw lists
 
@@ -1063,6 +1095,45 @@ so a 16-bit read of the terminator stays inside the window.
 A task must end with `exit`; RTL/RTS from the entry point are not supported. Window bank
 $0000-$7FFF is private. The rest of the window and of the code bank (past bss) is
 undefined.
+
+## Programs started from the Desktop and Files (0.31)
+
+The shell passes what was typed after the command. The Desktop and Files have no command
+line; they start a program (the Programs menu, a double click on a .PRG, a shortcut) with
+the controls library's `ui_run` (`user/uiopen.s`), which builds the argument string so:
+
+1. **APP.INF's `args=`** (an app's program: `/APPS/NAME/...`, the one its APP.INF names):
+   the developer's default arguments, 127 characters at most; a shortcut (.LNK) with its own
+   `args=` gives those instead.
+2. **The options file `PROG.ARG`** next to the program (`/APPS/XCOM/XCOM.ARG` for
+   `XCOM.PRG`; any folder, also `/BIN`): the user's own options, appended after one space.
+   Its words: `#` to the line's end is a comment, line ends and runs of blanks become one
+   space, only its first 382 bytes are read. Absent: nothing (one OPEN that fails, about
+   25 ms on the board). The whole string is at most 127 characters (the kernel's limit,
+   spawn): longer, an alert says so and the program is not started.
+3. **APP.INF's `console=`**: `yes` starts the program in a Terminal window
+   (`/BIN/TERM.PRG "PATH" ARGS`): its output (putc, puts, printf, stderr) and its console
+   keys are there, and at its end the window says `--- NAME ended (code N).` and waits for a
+   key or its close box; `error` the same, but the window closes by itself when the
+   program ends with code 0, so it only stays when something went wrong. Without it (or
+   `no`) the program is started detached as before: its console output goes to the log
+   (DBG_OUT) and the hidden text console, where nobody sees it. A program with its own
+   windows or a full screen still gets its keys from its windows (win_event): only the
+   console calls (input_*) read the Terminal's keys.
+
+Opening a document (a file by its type) passes the document's path alone: no `args=`, no
+options file. Files' **Run with...** (the pop-up menu of a .PRG) asks for the arguments and
+starts the program with exactly those in a Terminal window (no options file).
+
+`TERM [-e] PROG [ARGS]` (`user/term.s`): the Terminal window runs PROG ("quoted" when it
+has spaces) with ARGS instead of the shell, titled with PROG's file name; at the end
+`--- NAME ended (code N).` in the window (`NAME was stopped` when killed) and
+`term: NAME ended (code N)` in the log; `-e`: closed at once after code 0. The close box
+kills the program.
+
+Before 0.31 the Desktop and Files passed no arguments (a .LNK's `args=` only); programs
+such as ports/xcom read an options file themselves when started without arguments, and
+keep working (they get the options as arguments now).
 
 ## Faults
 

@@ -242,7 +242,7 @@ $(SD)/SYSTEM/HORIZON.SYS: $(KSRC) user/version.inc kernel/font.inc kernel/pointe
 	$(CA65) -I kernel -I user -o $(B)/horizon.o kernel/horizon.s
 	$(CA65) -I kernel -I user -o $(B)/k2.o kernel/k2.s
 	$(CA65) -I kernel -I user -o $(B)/k3.o kernel/k3.s
-	$(LD65) -C kernel/kernel.cfg -m $(B)/horizon.map -o $(B)/horizon.sys $(B)/horizon.o $(B)/k2.o $(B)/k3.o
+	$(LD65) -C kernel/kernel.cfg -m $(B)/horizon.map -Ln $(B)/horizon.lbl -o $(B)/horizon.sys $(B)/horizon.o $(B)/k2.o $(B)/k3.o
 	@# (0.18) the I/O processor reads at most $$FF00 bytes of the file (bank $$01 image + k2.s
 	@# + (0.19) k3.s)
 	@python3 tools/kspace.py $(B)/horizon.map $(B)/horizon.sys
@@ -506,6 +506,7 @@ test: all $(EMU)
 	@$(MAKE) --no-print-directory test-27
 	@$(MAKE) --no-print-directory test-28
 	@$(MAKE) --no-print-directory test-29
+	@$(MAKE) --no-print-directory test-31
 	@rm -rf build/run-sd; cp -r $(SD) build/run-sd; rm -rf build/run-sd/Music; touch build/run-sd/SYSTEM/NODESK; cp tests/basic.bas build/run-sd/BT.BAS
 	@$(EMU) $(EMUFLAGS) $(CARDDATE) --headless --sd build/run-sd --max-seconds $(BASSECS) \
 	    --keys "$$(python3 tests/keyscript.py tests/basic-t.keys)" \
@@ -1112,13 +1113,29 @@ test-29: all $(EMU) $(APP29PRGS)
 	@if diff -u tests/pictures/app30k.md5 $(B)/app30k.pic; then echo "PASS  0.30 the keyboard on a submenu item: Right opens More apps' pop-up as Enter does"; \
 	else echo "FAIL  0.30 Right on a submenu item (look at $(B)/app30k*.ppm, then make pictures-29)"; exit 1; fi
 
+# (0.31) the Programs menu is kept: read at the Desktop's start and when the apps change (the
+# Installer's sysreq SR_APPS), not each time it opens; APP.INF's args= and console=, the
+# options file PROG.ARG, Files' Run with... and TERM's run mode (tests/menu31.src on the card
+# of tests/mkapps.py desk31). emu816 --watch logs the mailbox's requests and the kernel's path
+# buffer (tests/cardreq.py): the second opening of the menu and its Games pop-up make no card
+# request, and the menu is read twice in the run (the start, the install).
+test-31: all $(EMU) $(APP29PRGS)
+	@PREP='python3 ../../tests/mkapps.py desk31 ../../$(B) .' DESK=1 sh tests/shots.sh "$(EMU) $(EMUFLAGS) $(CARDDATE) $$(python3 tests/cardreq.py --watch $(B)/horizon.lbl)" $(SD) menu31 60
+	@python3 tests/apppic.py menu31
+	@if diff -u tests/pictures/menu31.md5 $(B)/menu31.pic; then echo "PASS  0.31 the Desktop: the Programs menu, a console=yes app in a Terminal window, Files' Run with..., an install seen by the menu"; \
+	else echo "FAIL  0.31 the Desktop's menu pictures (look at $(B)/menu31*.ppm, then make pictures-29)"; exit 1; fi
+	@(grep -a '^apptest: \|^term: ' $(B)/menu31.out; python3 tests/cardreq.py --menu $(B)/horizon.lbl $(B)/menu31.err 7.9 10.4) > $(B)/menu31.txt
+	@if python3 tests/compare.py tests/menu31.txt $(B)/menu31.txt; then echo "PASS  0.31 the Programs menu opened again: no card request; args= and NAME.ARG, console=yes, a .PRG opened in Files with its .ARG"; \
+	else echo "FAIL  0.31 the menu's requests or the programs' arguments ($(B)/menu31.txt, $(B)/menu31.out)"; exit 1; fi
+
 pictures-29:
+	cp $(B)/menu31.pic tests/pictures/menu31.md5
 	cp $(B)/app29d.pic tests/pictures/app29d.md5
 	cp $(B)/app29m.pic tests/pictures/app29m.md5
 	cp $(B)/app30k.pic tests/pictures/app30k.md5
-	python3 -c "from PIL import Image; import glob; [Image.open(f).save('tests/pictures/' + f.split('/')[-1][:-4] + '.png') for f in sorted(glob.glob('$(B)/app29[dm][0-9]*.ppm') + glob.glob('$(B)/app30k[0-9]*.ppm'))]"
+	python3 -c "from PIL import Image; import glob; [Image.open(f).save('tests/pictures/' + f.split('/')[-1][:-4] + '.png') for f in sorted(glob.glob('$(B)/app29[dm][0-9]*.ppm') + glob.glob('$(B)/app30k[0-9]*.ppm') + glob.glob('$(B)/menu31[0-9]*.ppm'))]"
 
-.PHONY: test-29 pictures-29
+.PHONY: test-29 test-31 pictures-29
 
 pictures-net:
 	cp $(B)/download.md5 tests/pictures/$(call REV7,download)

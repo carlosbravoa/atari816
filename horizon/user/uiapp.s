@@ -8,6 +8,10 @@
 ;   types=DIG,DLV               the file types (extensions) the app opens
 ;   category=Games              a submenu of Programs
 ;   version=1.2  description=...  needs=...   shown by the installer
+;   args=-fast                  (0.31) the arguments the Desktop starts it with (127
+;                               characters; the user's NAME.ARG is added after them)
+;   console=yes                 (0.31) started in a Terminal window (yes: kept open at the
+;                               end; error: closed by itself when it ends with code 0)
 ; Lines starting with '#' and unknown keys are ignored; keys ignore case; blanks around the
 ; key and the value are dropped; CR LF or LF; only the first 1023 bytes are read.
 ; Uses the library's zero page (ui_p, ui_q) and ui_strcpy. See ui.inc.
@@ -559,6 +563,12 @@ ap_keys:
         .byte   "needs", 0
         .addr   ui_apneeds
         .byte   47, 0
+        .byte   "args", 0               ; (0.31)
+        .addr   ui_apargs
+        .byte   127, 0
+        .byte   "console", 0
+        .addr   ui_apcons
+        .byte   7, 0
         .byte   0
 
         .segment "BSS"
@@ -571,6 +581,8 @@ ui_apcat:   .res 16
 ui_apver:   .res 16
 ui_apdesc:  .res 64
 ui_apneeds: .res 48
+ui_apargs:  .res 128                    ; (0.31)
+ui_apcons:  .res 8
 ap_fend:
 ui_approg:  .res 128
 ap_dir:     .res 128

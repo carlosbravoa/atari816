@@ -57,7 +57,7 @@ it yourself (`dec5` / `digit` in `sdk/templates/game/main.s`: A -> ASCII digits)
 | $09 | SYS_GETCWD | X,Y buf, A size | A len |
 | $0A | SYS_RESTART | A 0/1 | (no return) |
 | $0B | SYS_SYNC | A bit0 end others | |
-| $0C | SYS_SYSREQ | A 1 shutdown 2 restart 3 full | |
+| $0C | SYS_SYSREQ | A 1 shutdown 2 restart 3 full, (0.31) 4 SR_APPS (the apps changed: the Desktop rereads its menu) | |
 | $0D | SYS_TGET | | A, X seconds since 2000, Y CLK_* |
 | $0E | SYS_TSET | A, X seconds, Y CLK_SAVED / CLK_SET | |
 | $0F | SYS_VSYNC | (blocks to the next vertical blank, 60 Hz; 0.18: also until your draw list is done) | A frame counter (REV $09: a jump > 1 = missed frames) |

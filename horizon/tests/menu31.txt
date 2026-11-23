@@ -1,0 +1,6 @@
+apptest: /APPS/ARGS/ARGS.PRG in /APPS/ARGS args [-x "two words" -user 1 -more]
+term: CONS ended (code 0)
+apptest: /T/TOOL.PRG in /T args [hello]
+term: TOOL ended (code 0)
+menu: 7.9-10.4 s: 0 card requests besides the timers
+menu: /SYSTEM/PROGRAMS read 2 times, /APPS listed 2 times, /SYSTEM/APPS.NEW looked for 0 times

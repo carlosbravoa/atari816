@@ -100,6 +100,7 @@ start:  sta     argl
         sta     z:ch
         jsr     geom
         jsr     load
+        inc     fresh                   ; (0.31) the first WE_FOCUS: no second read
         jsr     findcame                ; (0.15) a file named by the argument: selected
         bcs     :+
         sta     z:sel
@@ -445,7 +446,11 @@ doreload:
         jsr     refresh
         jmp     loop
 onfocus:
-        lda     z:dragging              ; (not in the middle of a drag, nor while the footer
+        lda     fresh                   ; (0.31) just read (the window's first focus, within
+        beq     :+                      ; 2 s of the start): not again
+        stz     fresh
+        jmp     loop
+:       lda     z:dragging              ; (not in the middle of a drag, nor while the footer
         ora     z:msg                   ; says something: an operation's error stays; F5)
         jne     loop
         jsr     refresh
@@ -534,7 +539,8 @@ reload: lda     z:sel
         lda     z:top
         sta     rf_top
         jsr     load
-rl_2:   lda     rf_top                  ; (refresh: after its load)
+rl_2:   jsr     apnote                  ; (0.31)
+        lda     rf_top                  ; (refresh: after its load)
         sta     z:top
         jsr     findcame
         bcc     @sel
@@ -548,6 +554,32 @@ rl_2:   lda     rf_top                  ; (refresh: after its load)
 @sel:   sta     z:sel
         jsr     showsel
         jmp     redraw
+
+; (0.31) the folder changed (an operation here, or seen by a reload) and it is /APPS or in
+; it: the Desktop is told (sysreq SR_APPS: it reads its Programs menu again)
+apnote: ptr     rwbuf
+        lda     #128
+        sys     SYS_GETCWD
+        bcs     @out
+        ldy     #0
+:       lda     rwbuf,y
+        jsr     lower
+        sta     z:tmp
+        lda     s_apps,y
+        jsr     lower
+        cmp     z:tmp
+        bne     @out
+        iny
+        cpy     #5
+        bcc     :-
+        lda     rwbuf+5
+        and     #$00FF
+        beq     :+
+        cmp     #'/'
+        bne     @out
+:       lda     #SR_APPS
+        sys     SYS_SYSREQ
+@out:   rts
 
 quit:   lda     z:dragging              ; (the pointer as it was)
         beq     :+
@@ -892,7 +924,12 @@ ctxmenu:
 :       lda     #A_SEP
         jsr     additem
         bra     @desk
-@file:  cmp     #FT_TEXT
+@file:  cmp     #FT_PRG                 ; (0.31) a program: Run with...
+        bne     :+
+        lda     #A_RUNW
+        jsr     additem
+        lda     z:pk
+:       cmp     #FT_TEXT
         beq     :+
         cmp     #FT_WRITE
         bne     :++
@@ -1116,6 +1153,22 @@ a_runat:
         jcs     oops
         jsr     footer                  ; the footer says what is mounted
         jmp     loop
+; (0.31) Run with...: the arguments asked, the program started with them in a Terminal
+; window (ui_launchx LX_TERM: its output shows there; no .ARG file)
+a_runw: jsr     fullsel
+        jcs     long
+        stz     rwbuf
+        ldx     #.loword(ak_runw)
+        jsr     ui_ask
+        jcs     loop
+        lda     #LX_TERM | LX_NOARG
+        sta     ui_lxmode
+        ldx     #.loword(pth)
+        ldy     #.loword(rwbuf)
+        lda     #0
+        jsr     ui_launchx
+        jmp     loop
+
 ; (0.29) Remove app...: the Installer removes the app (it asks first): INSTALL -w -r "PATH"
 a_rmapp:
         jsr     fullsel
@@ -1305,7 +1358,8 @@ ondrop: lda     z:win
         jmp     domove
 
 ; the timer after a drag to another window: read the folder again (once)
-ontick: lda     z:win                   ; (back to the slow period)
+ontick: stz     fresh                   ; (0.31)
+        lda     z:win                   ; (back to the slow period)
         ldx     #TICKP
         sys     SYS_WTIMER
         lda     z:rl                    ; a reload after a drop
@@ -2265,10 +2319,17 @@ load:   lda     #$FFFF                  ; (0.19) the footer's date: looked at ag
         stz     z:hasup
         stz     z:atroot
         stz     ld_err
+        lda     #1                      ; (0.31: not known: as on the PC)
+        sta     ldpc
         ptr     tbuf                    ; at the root?
         lda     #128
         sys     SYS_GETCWD
         bcs     @call
+        ldx     #.loword(tbuf)          ; (0.31) on the card (not the PC): a batch with
+        jsr     ispc                    ; room left was the last one
+        lda     #0
+        rol     a
+        sta     ldpc
         lda     tbuf
         cmp     #'/'                    ; ("/", 0)
         bne     @call
@@ -2322,7 +2383,14 @@ load:   lda     #$FFFF                  ; (0.19) the footer's date: looked at ag
         tax
         dec     z:cnt
         bne     @ent
-        bra     @call
+        lda     ldpc                    ; (0.31) room for one more entry of 255 characters
+        jne     @call                   ; left on the card: no more (one READDIR less)
+        txa
+        clc
+        adc     #6 + 255
+        cmp     #DBUFLEN + 1
+        jcs     @call
+        bra     @out
 @full:  inc     z:trunc
 @out:   lda     z:atroot                ; outside the root: ".." first
         bne     @sel
@@ -3264,11 +3332,12 @@ A_PRINT = 13                            ; (0.23)
 A_RUNAT = 14
 A_NEWT  = 15                            ; (0.27) New text file...
 A_RMAPP = 16                            ; (0.29) Remove app...
+A_RUNW  = 17                            ; (0.31) Run with...
 acttab: .addr   open, a_neww, a_edit, a_write, a_load, loop, copy, addesk, rename, delete
-        .addr   newdir, paste, parent, a_print, a_runat, newtxt, a_rmapp
+        .addr   newdir, paste, parent, a_print, a_runat, newtxt, a_rmapp, a_runw
 acttxt: .addr   s_aopen, s_aneww, s_aedit, s_awrite, s_aload, s_asep, s_acopy, s_adesk
         .addr   s_aren, s_adel, s_anewf, s_apaste, s_aup, s_aprint, s_arunat, s_anewt
-        .addr   s_armapp
+        .addr   s_armapp, s_arunw
 s_aopen: .byte  "Open", 9, "Enter", 0
 s_aneww: .byte  "Open in new window", 0
 s_aedit: .byte  "Open with Edit", 0
@@ -3286,6 +3355,13 @@ s_aprint: .byte "Print", 0
 s_arunat: .byte "Run in Atari", 0
 s_anewt: .byte  "New text file...", 0
 s_armapp: .byte "Remove app...", 0      ; (0.29)
+s_arunw: .byte  "Run with...", 0        ; (0.31)
+t_runw: .byte   "Run with", 0
+l_runw: .byte   "Arguments (in a Terminal window):", 0
+ak_runw: .addr  t_runw, l_runw, rwbuf
+        .word   128
+        .addr   s_run
+s_run:  .byte   "Run", 0
 s_apps: .byte   "/APPS/", 0
 p_inst: .byte   "/BIN/INSTALL.PRG", 0
 n_inst: .byte   "Installer", 0
@@ -3459,6 +3535,9 @@ m_show: .byte   MS_STATE, "Show system files", 0, "-", 0, "Parent folder", 9, "B
         .res    256 - (* - menus)
 
         .segment "BSS"
+rwbuf:  .res    130                     ; (0.31) Run with...'s arguments; apnote's folder
+fresh:  .res    2                       ; (0.31) the folder was just read at the start
+ldpc:   .res    2                       ; (0.31) load: the folder is on the PC volume
 rmarg:  .res    140                     ; (0.29) the Installer's arguments
 tbx:    .res    2                       ; (0.25) tbtn: the button's x, its picture, dimmed
 rf_h:   .res    2                       ; (0.25) refresh: the listing before (check value,
@@ -3474,7 +3553,7 @@ rf_l:   .res    2
 ld_err: .res    2
 tgl:    .res    2
 tdim:   .res    2
-DBUFLEN = 512
+DBUFLEN = 2048                          ; (0.31: 512 before: 4 times the READDIRs)
 idx:    .res    MAXENT * 2
 dbuf:   .res    DBUFLEN + 2
 rblk:   .res    10

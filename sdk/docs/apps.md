@@ -126,10 +126,31 @@ needs=horizon=0.28
 | `description` | 63 | One line, shown by the Installer. |
 | `types` | 47 | The file types (extensions) the app opens, separated by commas: `types=DIG,LVL`. A double click on such a file in Files (or on the Desktop) starts the app with the file's full path as its argument, in quotes: `"/GAMES/LEVEL1.DIG"`. Horizon's own types keep their programs (`.TXT` opens in Edit, whatever an app says). When several apps register a type, the first app folder the card lists wins. |
 | `icon` | 31 | The app's icon on the desktop (for a shortcut to the app). Either the name of a built-in icon (`folder`, `sd`, `atari`, `doc`, `text`, `writedoc`, `sheetdoc`, `picture`, `basdoc`, `disk`, `xex`, `cart`, `program`, `edit`, `write`, `sheet`, `paint`, `basic`, `calc`, `solitaire`, `terminal`, `files`, `settings`, `about`, `pc`, `freecell`, `music`, `musicdoc`; case is ignored), or the name of an icon file in the folder: 32 x 32 pixels, 8 bits a pixel (one index of the Desktop's palette each, row by row), 255 for transparent: exactly 1024 bytes. `hzapp.py icon ART.png NAME.ICN` makes one from any picture (below); Horizon's `tools/mkicons.py` makes one from a text drawing (a file with one icon in the format of `sdfiles/icons.txt`). (The SDK's test checks this list against the Desktop's own, `apinames` in `horizon/user/desk.s`.) |
+| `args` | 127 | (Horizon 0.31) The arguments the Desktop starts the program with (the Programs menu, a double click on the program in Files, a shortcut without its own `args=`): `args=-fast "two words"`. The user's options file is added after them (below). Not used when a file of the app's type is opened (that passes the file's path alone). Older Desktops ignore it. |
+| `console` | 7 | (Horizon 0.31) `yes`: the program runs in a Terminal window: what it prints (printf, stderr) shows there, the console's keys (getchar, conio) come from there, and at its end the window says `--- NAME ended (code N).` and waits for a key. `error`: the same, but the window closes by itself when the program ends with code 0, so it only stays when something went wrong (a game that prints why it stopped). `no` (the default): no window; what the program prints goes to the log, where nobody sees it. A program with windows or a full screen keeps getting its keys from them. |
 | `needs` | 47 | What the program needs, for the Installer to show (the same list as `hcc --needs`, below). The program checks it itself; this line only informs. You need not write it: `hzapp.py pack` puts the program's own list into the archive's APP.INF when the line is missing (and warns when the two differ; `--needs-from-program` then takes the program's). |
 
 Values longer than the size are cut. A broken APP.INF never stops the Desktop: a folder
 whose `program=` file is missing is left out of the menu; junk lines are ignored.
+
+### The user's options: NAME.ARG
+
+(Horizon 0.31) A program started from the Desktop or Files without a command line (the
+Programs menu, a double click, a shortcut) also gets the words of the text file next to it
+named like it with `.ARG`: `/APPS/XCOM/XCOM.ARG` for `XCOM.PRG`. `#` starts a comment to
+the line's end; line ends and blanks between words become one space; the first 382 bytes
+are read. It comes after APP.INF's `args=`, so a program that takes the last of two
+repeated options lets the user's win. The whole argument string is at most 127 characters
+(the kernel's limit): a longer one gets an alert and the program does not start. Any
+program has it, not only apps (`/BIN/EDIT.ARG` for Edit), and nothing has to be written for
+it: the program just gets more arguments. This is the place for the user's settings that
+a game takes as options (skip the intro, a measuring mode). **Do not ship a NAME.ARG in
+the archive**: it is the user's file, and an update would replace it (`hzapp.py` warns);
+put your defaults in `args=`. Opening a document passes no options file.
+
+Files' **Run with...** (the pop-up menu of any .PRG) asks for arguments and runs the
+program with exactly those, in a Terminal window (no options file): the quick way to try
+options and see what the program prints.
 
 ### What a program needs
 
@@ -289,12 +310,19 @@ card (a folder on the PC) follows the same rules. A full path is at most 127 cha
 
 ### How the Desktop finds the apps
 
-The Desktop lists `/APPS` each time its Programs menu opens. That is one READDIR, plus one
-check of `/SYSTEM/APPS.NEW`. The APP.INF files are read again only when the list of
-`/APPS` changed, or when the Installer left `/SYSTEM/APPS.NEW`. Measured in the emulator
-at the board's card speed (`--card-kbps 170:100`), with 20 apps: 10 ms for the check,
-275 ms for a full read. After you edit an APP.INF by hand, the menu shows the change after
-the next install or removal, or after a restart.
+(Horizon 0.31) The Desktop reads `/APPS` and every app's APP.INF when it starts, and again
+when the apps change: the Installer tells it after an install or a removal (sysreq
+`SR_APPS`), and so does Files after a change it sees in `/APPS` or in an app's folder (a
+copy, a delete, a rename there, or a reload that finds the listing different). Opening the
+Programs menu reads nothing: it opens at once. A full read of 20 apps takes about 275 ms at
+the board's card speed (four card requests an app: OPEN, READ and CLOSE of APP.INF, a STAT
+of the program). When you choose an app its APP.INF is read again (its `args=` and
+`console=` as they are now, and a check that it is still there): a program that is not on
+the card any more gets an alert, and the menu is read again. After you edit an APP.INF by
+hand or change the card behind Horizon's back (the PC link, another machine), press **F5**
+on the desktop: the menu and the icons are read again. (0.29 and 0.30 listed `/APPS` and
+read `/SYSTEM/PROGRAMS` every time the menu opened, and the Installer left
+`/SYSTEM/APPS.NEW`: about 2 s on the board with 5 apps.)
 
 The Desktop keeps 64 apps at most.
 

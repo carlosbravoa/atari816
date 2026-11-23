@@ -231,6 +231,8 @@ s_msg:  .byte   "Saved.", 0
 | Routine | In | Does |
 | --- | --- | --- |
 | `ui_launch` | X = path, Y = argument string (0: none), A = name for messages (0: from the path) | starts a program detached; on an error an alert says why (C set) |
+| `ui_run` | as `ui_launch` | (Horizon 0.31) starts it as the Desktop and Files do: an app's program (`/APPS/NAME/...`, the one its APP.INF names) gets APP.INF's `console=` and, when Y = 0, its `args=`; then `ui_launchx` |
+| `ui_launchx` | as `ui_launch`, and `ui_lxmode` (0 again after the call) | (0.31) `LX_TERM`: in a Terminal window (`/BIN/TERM.PRG "PATH" ARGS`, kept open at its end), `LX_TERME`: the same, closed by itself after exit code 0, `LX_NOARG`: no options file. Unless `LX_NOARG` the options file `PROG.ARG` next to the program is appended (its words, `#` comments dropped); 127 characters in all, else an alert (C set, A = EINVAL) |
 | `ui_spawnerr` | A = a spawn error, X = name | the "Cannot start NAME" alert |
 | `ui_ftype` | X = name or path | -> A = `FT_*` by the extension |
 | `ui_open` | X = full path | opens it with its program (a folder in Files, .BAS in BASIC, an Atari file in the classic machine, ...) |
