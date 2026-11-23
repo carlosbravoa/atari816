@@ -176,7 +176,7 @@ cannot hold it:
 There is no useful partial VBXE (every feature software uses depends on the 512 KB VRAM).
 The Atari816's own video (Marga) is the way forward on this board.
 
-## FIXED IN THE PC TOOL (to confirm on the board): `shot816` showed a black picture for Xargon
+## FIXED IN THE PC TOOL (confirmed on the board, 2026-11-22): `shot816` showed a black picture for Xargon
 
 2026-11-22. Xargon on the board plays correctly (picture, OPL2 music, speed: seen on the
 monitor), but `atari.py shot816` returned an all-black 320x180 picture while it runs (video
