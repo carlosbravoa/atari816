@@ -63,6 +63,9 @@ void spi_writeblock(const uint8_t *ptr, int length) {
     }
 }
 
+#ifndef SD_FAST_CLKDIV
+#define SD_FAST_CLKDIV 1
+#endif
 #define CMD0_GO_IDLE_STATE              0
 #define CMD1_SEND_OP_COND               1
 #define CMD8_SEND_IF_COND               8
@@ -252,8 +255,11 @@ __attribute__((section(".coldtext"))) int sd_init() {
     }
 
     DEBUG("SD init complete. sdhc_card=%d, sd_version=%d\n", sdhc_card, sd_version);
-    // Set fast SPI clock (div=8 -> 1.34 MHz) for normal reads/writes
-    reg_spimaster_clkdiv = 8;
+    // The clock for normal reads and writes: sys_clk / (2 * div). Measured from Horizon on the
+    // board (a 32 KB read; opening a file one folder down): div 8, 1.34 MHz: 197 ms, 40 ms;
+    // div 2, 5.4 MHz: 78 ms, 19 ms; div 1, 10.7 MHz: 56 ms, 16 ms. Checksums of 2.2 MB read
+    // and of 1.7 MB written were right at each. What is left is this CPU's work a sector
+    reg_spimaster_clkdiv = SD_FAST_CLKDIV;
     return 0;
 }
 
