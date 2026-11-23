@@ -139,8 +139,9 @@ all format strings; Xargon none in its logic.
 ## The main bank budget and far data
 
 With `--code large` the C functions (yours and the libraries') move to other banks, but
-the **main bank** still holds: the startup and all assembly (`.s` files, functions with
-inline asm), constants (string literals, `const` tables), initialised data, bss, the heap
+the **main bank** still holds: the startup and the assembly (`.s` files, except functions
+opened with `FUNC`: references/c-language.md, "Movable assembly"; functions with inline
+asm), constants (string literals, `const` tables), initialised data, bss, the heap
 (`--heap N`, default 4096) and the software stack (`--stack N`, default 8192). That is the
 real limit of a big port. `hcc --map` prints its parts:
 
@@ -213,6 +214,12 @@ Steps for the port:
    it went, biggest first). If bss does not fit, declare the biggest arrays `__far` in
    every declaration (the header's too).
 6. Compare with the PC build (LOG lines, pictures): XCOM-XT's 816 LOG equals the host's.
+7. DOS's behaviour where C leaves it open: `-fargs-right-to-left` (arguments evaluated
+   right to left, as Watcom/Microsoft/Borland; `-Wsequence-args` lists the calls whose
+   arguments both call functions) and `-ffar-wrap` (far pointer arithmetic on the offset
+   alone: an `int` that overflowed, `p + 4 * T`, lands where it did on DOS; one past an
+   object that ends at a bank's last byte then wraps to offset 0, as on DOS). `-w` does
+   not silence `-Woverflow`.
 
 Costs measured (`sdk/c/tests/bench/farbench.c`, cycles a step, near data / far data):
 a byte copy loop through pointers 85 / 96, the masked sprite loop 95 / 105, an `int`

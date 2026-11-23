@@ -11,6 +11,7 @@ are caller-saved, __rg+SCR.. callee-saved."""
 import re
 
 from .ir import V, Imm, Sym, Frame
+from .ctypes816 import MODEL
 from .regalloc import SCR, CS
 
 # the software stack's check at a function's entry (gen): on for every frame of at least
@@ -440,6 +441,13 @@ class Gen:
         """d(4) = the far pointer a(4) with the 16-bit b added to its offset alone (the far
         data model's p[i] with a signed i: the bank stays)"""
         d, a, b = i.d, i.a, i.b
+        if a is d and isinstance(b, Imm) and b.val in (1, 2, 0xFFFF, 0xFFFE) and \
+                d.loc[0] == 'dp':
+            # (-ffar-wrap's p++ / p--: the offset stepped in place, the bank stays)
+            m = 'inc' if b.val in (1, 2) else 'dec'
+            for _ in range(1 if b.val in (1, 0xFFFF) else 2):
+                self.I(m, self.vaddr(d, 0))
+            return
         self.lda(a, 0)
         self.I('clc')
         self.I('adc', self.opsrc(b))
@@ -1500,8 +1508,9 @@ class Gen:
                 if p == 0:
                     self.I('clc')
                     self.I('adc', '#' + hexw(off))
-                else:
+                elif not MODEL['far_wrap']:
                     self.I('adc', '#' + hexw(-1 if off < 0 else 0))
+                # (-ffar-wrap: on the offset alone, the bank stays)
                 self.I('sta', f'__h2+{2 * p}')
             self.I('ldy', '#$0000')
             return self.yseq('[__h2],y' if base.size == 4 else '(__h2),y', 0)

@@ -31,14 +31,17 @@ class LinkError(Exception):
 
 
 def flags_of(src):
-    """a test's compiler options, from a '// FLAGS: ...' line near its start ->
+    """a test's compiler options, from a '// FLAGS: ...' line near its start (and
+    $CC816_FLAGS) ->
     (include dirs, defines, opts)"""
     incs, defs, opts = [], [], driver.default_opts()
     try:
         head = open(src, encoding='latin-1').read(4000).splitlines()[:40]
     except OSError:
         return incs, defs, opts
-    words = []
+    # ($CC816_FLAGS: options for every test program too, e.g. the random programs built
+    # with -fargs-right-to-left or -ffar-wrap, which must not change their results)
+    words = os.environ.get('CC816_FLAGS', '').split()
     for ln in head:
         ln = ln.strip()
         if ln.startswith('// FLAGS:'):
@@ -55,9 +58,7 @@ def flags_of(src):
         elif w == '-include':
             i += 1
             opts['includes'].append(os.path.join(os.path.dirname(src), words[i]))
-        elif w == '-fsigned-char':
-            opts['signed_char'] = True
-        else:
+        elif not driver.parse_f_flag(w, opts):
             driver.parse_warning_flag(w, opts)
         i += 1
     return incs, defs, opts

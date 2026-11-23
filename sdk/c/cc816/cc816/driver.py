@@ -9,10 +9,14 @@
       -I DIR    include directory      -D NAME[=VAL]  define a macro   -U NAME  undefine
       -include FILE                    include FILE before the source
       -O0 / -O1 / -O2 (default)        optimisation level
-      -w        no warnings            -Wall  more warnings (unused variables, ...)
+      -w        no warnings but -Woverflow  -Wall  more warnings (unused variables, ...)
       -Werror   warnings are errors    -WNAME / -Wno-NAME  one warning on / off
       -fsigned-char                    plain char is signed (default: unsigned)
       -fdos-keywords                   far, near and huge are keywords (DOS compilers')
+      -fargs-right-to-left             a call's arguments evaluated right to left (DOS's
+                                       compilers' order; default: left to right)
+      -ffar-wrap                       far pointer arithmetic on the offset alone, the bank
+                                       never changes (DOS's far pointers)
       --code small|large, --data near|far   the code and data models (hcc's options)
       --ir      print the IR after optimisation (stderr)
       --time    print the time each phase took (stderr)
@@ -260,6 +264,10 @@ def preprocess(path, incs, defs, diag=None, opts=None):
         predef = [PREDEF_FAR.get(x, x) for x in predef] + ['__CC816_FAR_DATA__ 1']
     if o.get('dos_keywords'):
         predef += PREDEF_DOS
+    if o.get('far_wrap'):
+        predef.append('__CC816_FAR_WRAP__ 1')   # -ffar-wrap
+    if o.get('args_rtl'):
+        predef.append('__CC816_ARGS_RTL__ 1')   # -fargs-right-to-left
     if o.get('signed_char'):
         predef.remove('__CHAR_UNSIGNED__ 1')
     for u in o.get('undefs') or ():         # (opts' undefs: after the predefined ones)
@@ -316,6 +324,8 @@ def compile_c(path, incs=(), defs=(), level=2, dump_ir=False, split=False, opts=
     diag = Diag(o)
     CHAR.signed = bool(o.get('signed_char'))
     MODEL['far_data'] = bool(o.get('far_data'))
+    MODEL['far_wrap'] = bool(o.get('far_wrap'))
+    MODEL['args_rtl'] = bool(o.get('args_rtl'))
     old_limit = sys.getrecursionlimit()
     sys.setrecursionlimit(max(old_limit, 20000))
     try:
@@ -1017,6 +1027,20 @@ def parse_warning_flag(a, opts):
     return True
 
 
+def parse_f_flag(a, opts):
+    """the -f options (-fsigned-char, -fdos-keywords, -fargs-right-to-left, -ffar-wrap and
+    their opposites) into opts; False if a is not one"""
+    f = {'-fsigned-char': ('signed_char', True), '-fno-unsigned-char': ('signed_char', True),
+         '-funsigned-char': ('signed_char', False), '-fno-signed-char': ('signed_char', False),
+         '-fdos-keywords': ('dos_keywords', True),
+         '-fargs-right-to-left': ('args_rtl', True), '-fargs-left-to-right': ('args_rtl', False),
+         '-ffar-wrap': ('far_wrap', True), '-fno-far-wrap': ('far_wrap', False)}.get(a)
+    if f is None:
+        return False
+    opts[f[0]] = f[1]
+    return True
+
+
 def main(argv=None):
     argv = list(sys.argv[1:] if argv is None else argv)
     mode = 'asm'
@@ -1051,12 +1075,8 @@ def main(argv=None):
             i += 0 if a[2:] else 1
         elif a.startswith('-O'):
             level = {'0': 0, '1': 1}.get(a[2:], 2)
-        elif a in ('-fsigned-char', '-fno-unsigned-char'):
-            opts['signed_char'] = True
-        elif a in ('-funsigned-char', '-fno-signed-char'):
-            opts['signed_char'] = False
-        elif a == '-fdos-keywords':
-            opts['dos_keywords'] = True
+        elif parse_f_flag(a, opts):
+            pass
         elif a in ('--code', '--data') and i + 1 < len(argv):
             i += 1
             if a == '--code':

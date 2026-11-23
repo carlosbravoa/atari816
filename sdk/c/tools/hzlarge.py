@@ -32,6 +32,10 @@ The steps (ld65 runs four to six times; each is quick):
      each JSL's, JML's and MVN's bank bytes), whose value in link A says which bank it
      names (0 the main bank, k bank k). A byte that differs and was not recorded stops the
      link (hand-written assembly naming a bank in a movable function).
+     A fourth link, D, has the main bank 2 bytes further: in a movable segment a JSR or JMP
+     (abs, (abs,x)) whose address moves with the main bank, or with another bank than the
+     segment's own, reaches outside the segment, which is refused (PBR is the segment's bank
+     wherever it goes: CALL / TAILJ, rt/model.inc, are JSL / JML).
   6. NAME.PRG is link A's o65 file (o65strip), then the block of the other banks' images and
      their relocations, then an 8-byte trailer: the block's offset (u32) and "HZPX"
      (lib/xload.c has the layout). The o65 must stay below 64 KB (Horizon's loader reads
@@ -93,12 +97,13 @@ def movable_segments(paths, rx=MOVABLE):
 
 
 def config(place, nbanks, tmp, room, trial=False, fake=FAKE["A"], off=0, dplace=(),
-           ndata=0):
+           ndata=0, main=0x100):
     """the ld65 configuration: place maps each movable segment to 'MAIN', 'POOL' or a bank
     number (1..); dplace each far object's segment to 'POOL' or a far-data bank (1..),
-    which follow the nbanks code banks"""
+    which follow the nbanks code banks; main: the main bank's start (link D's is not
+    $0100)"""
     mem = ["    ZP:   start = $0000, size = $0100, type = rw;",
-           f"    MAIN: start = $0100, size = ${room:X}, file = %O;",
+           f"    MAIN: start = ${main:04X}, size = ${room:X}, file = %O;",
            f'    XR:   start = $0000, size = $1000000, file = "{tmp}/xrel.bin";']
     files = ["    %O: format = o65;", f'    "{tmp}/xrel.bin": format = bin;']
     if trial:
@@ -413,6 +418,22 @@ def link(objs, out, sstack, debug=False, mapfile=None, libs=(), keep=None, heap=
                 res[tag] = (open(o65, "rb").read(), imgs,
                             open(xr, "rb").read() if os.path.exists(xr) else b"", mp)
             relocs = relocations(res, nb + nd, name)
+            # link D (the main bank 2 bytes further): the movable segments' JSR and JMP
+            if moved:
+                sub = os.path.join(tmp, "D")
+                os.makedirs(sub, exist_ok=True)
+                o65d = os.path.join(tmp, "linkD.o65")
+                rc, msg = run_ld65(config(place, nb, sub, room, dplace=dplace, ndata=nd,
+                                          main=0x100 + MAIN_SHIFT),
+                                   tmp, "linkD", head + [g] + tail, defs, o65d,
+                                   os.path.join(tmp, "linkD.map"))
+                if rc:
+                    raise HccError(link_error(msg, name, sstack, os.path.join(tmp, "linkD.map")))
+                imgs = []
+                for k in range(1, nb + 1):
+                    p = os.path.join(sub, f"bank{k}.bin")
+                    imgs.append(open(p, "rb").read() if os.path.exists(p) else b"")
+                check_jumps(res, open(o65d, "rb").read(), imgs, nb, name)
             # (every function's 16-bit address in the main bank: a thunk or the function)
             bad = [x for x, a in map_exports(res["A"][3]).items() if x.startswith("__T_") and
                    a > 0xFFFF]
@@ -472,6 +493,87 @@ def link(objs, out, sstack, debug=False, mapfile=None, libs=(), keep=None, heap=
     finally:
         if not keep:
             shutil.rmtree(tmp, ignore_errors=True)
+
+
+MAIN_SHIFT = 2                  # link D: the main bank at $0102
+# JSR abs, JMP abs, JMP (abs,x), JSR (abs,x): their 16-bit address is in PBR's bank
+JUMPS = {0x20: "JSR", 0x4C: "JMP", 0x7C: "JMP (abs,x)", 0xFC: "JSR (abs,x)"}
+
+
+def where(mp, a):
+    """'segment S, function f + n' for the address a of link A (its map)"""
+    seg = None
+    for n, (lo, sz) in seg_sizes(mp).items():
+        if lo <= a < lo + sz:
+            seg = n
+            break
+    best = None
+    for x, v in map_exports(mp).items():
+        if v <= a and (a >> 16) == (v >> 16) and (best is None or v > best[1]) and \
+                not x.startswith("__T"):
+            best = (x, v)
+    out = f"segment {seg}" if seg else "no segment"
+    if best and (seg is None or a - best[1] < 0x10000):
+        out += f", {best[0]} + {a - best[1]}"
+    return out
+
+
+def check_jumps(res, o65d, imgs_d, nb, name):
+    """a movable segment's JSR and JMP (16-bit: PBR's bank) must stay in the segment: one
+    whose address moves with the main bank (link D against A) or with another code bank
+    (link C, the banks at offset 1) is refused. res: links A, B, C; o65d, imgs_d: link D's
+    o65 and code banks"""
+    import o65strip
+    mp = res["A"][3]
+    import bisect
+    segs = sorted((lo, lo + sz, n) for n, (lo, sz) in seg_sizes(mp).items()
+                  if MOVABLE.match(n) and sz)
+    los = [x[0] for x in segs]
+
+    def seg_at(a):
+        j = bisect.bisect_right(los, a) - 1
+        return segs[j] if j >= 0 and a < segs[j][1] else None
+
+    def refuse(a, op, tgt, why):
+        raise HccError(
+            f"{name}: ${a:06X} ({where(mp, a)}): a {JUMPS[op]} to ${tgt:04X}, {why}. A "
+            f"movable function's JSR and JMP reach only its own segment (PBR is the bank it "
+            f"is placed in): call another function with CALL (JSL) and jump to one with TAILJ "
+            f"(JML) (rt/model.inc; docs/c/reference.md, \"Movable assembly\")")
+
+    def scan(img_a, img_x, img_d, base):
+        """img_a: link A's bytes at address base; img_x: link C's (a code bank, None for the
+        main bank); img_d: link D's"""
+        for i in range(1, len(img_a) - 1):
+            op = img_a[i - 1]
+            if op not in JUMPS:
+                continue
+            s = seg_at(base + i - 1)
+            if not s:
+                continue
+            wa = img_a[i] | img_a[i + 1] << 8
+            wd = img_d[i] | img_d[i + 1] << 8
+            if img_x is None:                   # the main bank: its addresses move in D
+                if wd == (wa + MAIN_SHIFT) & 0xFFFF and not s[0] <= wa < s[1]:
+                    refuse(base + i - 1, op, wa, f"outside its segment {s[2]}")
+                continue
+            if wd == (wa + MAIN_SHIFT) & 0xFFFF:
+                refuse(base + i - 1, op, wa, "an address in the main bank, while the code "
+                       f"is in bank {base >> 16}")
+            wc = img_x[i] | img_x[i + 1] << 8
+            if wc == (wa + 1) & 0xFFFF and not s[0] <= (base & 0xFF0000 | wa) < s[1]:
+                refuse(base + i - 1, op, wa, f"outside its segment {s[2]}")
+    # the main bank (link A's text from $0100, link D's from $0102: the same bytes)
+    pa = o65strip.parse(res["A"][0])
+    pd = o65strip.parse(o65d)
+    ta = res["A"][0][pa["toff"]:pa["toff"] + pa["tlen"]]
+    td = o65d[pd["toff"]:pd["toff"] + pd["tlen"]]
+    if len(ta) == len(td):
+        scan(ta, None, td, 0x100)
+    for k in range(1, nb + 1):
+        a, c, d = res["A"][1][k - 1], res["C"][1][k - 1], imgs_d[k - 1]
+        if len(a) == len(c) == len(d):
+            scan(a, c, d, k << 16)
 
 
 def relocations(res, nb, name):
@@ -542,9 +644,11 @@ def relocations(res, nb, name):
         for i in range(len(a)):
             if a[i] != b[i] and i not in rec:
                 raise HccError(
-                    f"{name}: bank {k} ${i:04X}: a bank byte the compiler did not record "
-                    f"(assembly in a function that is not in the main bank names a bank: "
-                    f"^name, .faraddr, JSL)")
+                    f"{name}: bank {k} ${i:04X} ({where(res['A'][3], k << 16 | i)}): a bank "
+                    f"byte not recorded in XREL: hand-written assembly naming a bank in a "
+                    f"movable function (jsl, jml, ^name, .faraddr, lda f:name). Call with "
+                    f"CALL, jump with TAILJ, or put XBANK n after the instruction (rt/model.inc; "
+                    f"docs/c/reference.md, \"Movable assembly\")")
     for v in rel.values():
         v.sort()
     return rel
@@ -579,7 +683,9 @@ def link_error(msg, name, sstack, mp):
     if m and "Range" in msg:
         return (f"{msg.strip()}\n(in the large code model a function in another bank has "
                 f"a 24-bit address: its 16-bit one, a function pointer, is __T<name> "
-                f"(docs/c/reference.md, \"The two code models\"))")
+                f"(docs/c/reference.md, \"The two code models\"); in a movable assembly "
+                f"function a 16-bit address of a label of its own segment, a jump table's "
+                f"entry, is .loword(label))")
     over = re.findall(r"Segment [‘'](\w+)[’'] overflows memory area [‘'](\w+)[’'] by (\d+) bytes",
                       msg)
     for seg, area, by in over:

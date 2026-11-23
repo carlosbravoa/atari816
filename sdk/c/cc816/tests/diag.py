@@ -79,8 +79,8 @@ def compile_messages(path, flags):
         elif f == '-include':
             k += 1
             opts['includes'].append(os.path.join(os.path.dirname(path), flags[k]))
-        elif f == '-fsigned-char':
-            opts['signed_char'] = True
+        elif driver.parse_f_flag(f, opts):
+            pass
         elif not driver.parse_warning_flag(f, opts):
             raise SystemExit(f'{path}: unknown FLAGS option {f}')
         k += 1

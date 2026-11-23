@@ -146,9 +146,7 @@ void sys_write(uint32_t a, uint8_t v)
     case 0x20: s->kb_route = v & 1; break;
     case 0xF0:
         if (M.cpu.cycles < s->dbg_busy_until) { s->dbg_dropped++; break; }   /* dropped, as on hardware */
-        putchar(v);
-        if (v == 10) fflush(stdout);
-        emu_console_byte(v);
+        emu_console_byte(v);                    /* (main.c) stdout, --shot-on, --stop-on ... */
         if (s->console_cycles) s->dbg_busy_until = M.cpu.cycles + s->console_cycles;
         break;
     }

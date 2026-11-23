@@ -54,7 +54,7 @@ static inline void phys_wr(uint32_t a, uint8_t v)
 
 /* bring every device up to the CPU's current cycle (cheap when nothing is due) */
 void machine_sync_slow(void);
-void emu_console_byte(uint8_t v);       /* (main.c) --shot-on: the console's lines watched */
+void emu_console_byte(uint8_t v);       /* (main.c) DBG_OUT: stdout, the console's lines watched */
 static inline void machine_sync(void) { if (M.cpu.cycles >= M.next_event) machine_sync_slow(); }
 void machine_reschedule(void);
 void machine_update_irq(void);

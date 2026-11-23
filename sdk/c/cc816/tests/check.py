@@ -29,6 +29,10 @@ in far data; results in build/cc816-largefar).
   cts       the c-testsuite (git clone https://github.com/c-testsuite/c-testsuite), when
             --cts DIR (or $CTS) points at a checkout: its single-exec tests
 
+CC816_FLAGS="-fargs-right-to-left" (or -ffar-wrap) in the environment builds every program
+with those options too: the random programs do not depend on the order of evaluation or on
+far pointer arithmetic leaving an object, so their results must not change.
+
 Every program runs under emu816 --log-bankwrap: an indexed access that carries into the
 next bank fails it (conform.py's status bankwrap).
 Prints a summary line for each part and every program that did not pass; exit code 1 when

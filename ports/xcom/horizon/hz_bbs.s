@@ -61,9 +61,8 @@ BB_ROWS = 144
 BB_ROW0 = 205
 SH_KEY  = 2
 
-        .segment "CODE"
 
-_plat_bb_sprite:
+        FUNC    _plat_bb_sprite
         lda     _hzb_ready
         bne     @on
         lda     #0
@@ -404,9 +403,8 @@ skind:  .res 2
 sn:     .res 2
 sx:     .res 2
 slen:   .res 2
-        .segment "CODE"
 PSC     = __rg+0
-_hzb_scan:
+        FUNC    _hzb_scan
         lda     ARGS,s
         sta     PSC
         lda     ARGS+2,s

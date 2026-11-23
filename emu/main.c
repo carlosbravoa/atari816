@@ -15,6 +15,16 @@
 
 Machine M;
 
+/* --stop-on TEXT (repeatable), --stop-on-delay MS: the run ends when the program prints a
+ * console line holding one of the texts (MS ms of emulated time later; --max-seconds stays
+ * the upper limit); exit code 4 and a line on stderr say so (run816.py reads it). The line
+ * is matched in emu_console_byte */
+#define MAXSTOP 16
+static const char *stop_text[MAXSTOP];
+static int nstop, stop_hit = -1;                /* the text met (-1: none yet) */
+static double stop_delay_ms;
+static uint64_t run_limit = UINT64_MAX, stop_cycle;
+
 #define MAXSHOTS 16
 static const char *shot_path[MAXSHOTS];
 static double shot_at[MAXSHOTS];
@@ -211,6 +221,7 @@ void machine_reschedule(void)
     if (se < n) n = se;
     if (!key_wait && nextkey < nkeys && keys[nextkey].cycle < n) n = keys[nextkey].cycle;
     if (kbd_release && kbd_last && kbd_last + kbd_release < n) n = kbd_last + kbd_release;
+    if (stop_hit >= 0 && run_limit < n) n = run_limit;  /* (a WAI ends the run on time) */
     M.next_event = n;
 }
 
@@ -345,11 +356,43 @@ void watch_hit(uint32_t a, uint8_t v, int dma)
                 a, v, M.ram[a]);
 }
 
+
+/* --console-times: every console line on stdout starts with the emulated time of its first
+ * byte, "[SSSS.UUUUUU] ", in seconds since power-on: the base of --log-lau-us, --log-opl-us,
+ * --log-sound-us and --watch (their microseconds are SSSSUUUUUU) */
+static int console_times, con_bol = 1, con_esc;
+
+static unsigned long long emu_us(void) { return (unsigned long long)(M.cpu.cycles * 1e6 / CPU_HZ); }
+
+/* a byte written to DBG_OUT (sysblock.c): stdout, and the console's lines watched */
 void emu_console_byte(uint8_t v)
 {
-    if (!shoton_text && !nkeys && !dumpon_text) return;
+    if (console_times) {
+        /* a line starts after LF, CR or FF (the shell's clear screen) outside an escape
+         * (ESC x, ESC Y r c); empty lines get no time */
+        if (con_esc) con_esc = con_esc == 1 && v == 'Y' ? 3 : con_esc - 1;
+        else if (v == 10 || v == 13 || v == 12) con_bol = 1;
+        else {
+            if (con_bol) {
+                unsigned long long us = emu_us();
+                printf("[%4llu.%06llu] ", us / 1000000, us % 1000000);
+                con_bol = 0;
+            }
+            if (v == 27) con_esc = 1;
+        }
+    }
+    putchar(v);
+    if (v == 10) fflush(stdout);
+    if (!shoton_text && !nkeys && !dumpon_text && !nstop) return;
     if (v == 10 || v == 13) {
         shoton_line[shoton_len] = 0;
+        for (int i = 0; i < nstop && stop_hit < 0 && shoton_len; i++)
+            if (strstr(shoton_line, stop_text[i])) {
+                stop_hit = i;
+                stop_cycle = M.cpu.cycles;
+                uint64_t at = M.cpu.cycles + (uint64_t)(stop_delay_ms * CPU_HZ / 1000.0);
+                if (at < run_limit) run_limit = at;
+            }
         if (shoton_text && shoton_len && strstr(shoton_line, shoton_text) && !shoton_req) shoton_req = 3;
         if (dumpon_text && shoton_len && strstr(shoton_line, dumpon_text)) {
             char path[1024];
@@ -479,7 +522,7 @@ static void usage(void)
         "usage: emu816 [options] PROGRAM.BIN\n"
         "  --sd DIR             host directory served as the SD card (mailbox)\n"
         "  --load FILE@ADDR     load FILE at 24-bit hex address ADDR (e.g. data.bin@02:0000)\n"
-        "  --max-seconds N      stop after N seconds of emulated time (exit code 3)\n"
+        "  --max-seconds N      stop after N seconds of emulated time (exit code 3; STP: 0)\n"
         "  --trace              one line per instruction on stderr\n"
         "  --prof FILE          the CPU's cycles by instruction address, syscall, kernel, idle (at exit)\n"
         "  --prof-from S, --prof-to S  only between these emulated seconds\n"
@@ -498,6 +541,12 @@ static void usage(void)
         "  --shot-at SECONDS    emulated time for the preceding --shot (first VBLANK at or after it)\n"
         "  --shot-on TEXT       a screenshot each time the program prints a console line holding TEXT\n"
         "                       (two frames later): PREFIXn.ppm, n = 1, 2, ... (--shot-on-prefix PREFIX)\n"
+        "  --stop-on TEXT       end the run when the program prints a console line holding TEXT\n"
+        "                       (repeatable: any of them; --max-seconds stays the upper limit): exit\n"
+        "                       code 4 and on stderr: emu816: stopped on \"TEXT\" at S.UUUUUU s\n"
+        "  --stop-on-delay MS   ... MS ms of emulated time after that line (default 0: at once)\n"
+        "  --console-times      each console line on stdout starts with its emulated time since\n"
+        "                       power-on, \"[SSSS.UUUUUU] \" (the base of the --log-*-us microseconds)\n"
         "  --stats              print speed and counters on stderr at exit\n"
         "  --boot-cart PATH     a cartridge (FAT path on --sd) the I/O processor loaded at power-on\n"
         "                       (boot=ash): CLASSIC_STATE ($1E) reports it\n"
@@ -632,6 +681,15 @@ int main(int argc, char **argv)
         else if (!strcmp(a, "--log-sound-us")) M.sys.snd_log |= 32;
         else if (!strcmp(a, "--shot-on") && i + 1 < argc) shoton_text = argv[++i];
         else if (!strcmp(a, "--shot-on-prefix") && i + 1 < argc) shoton_prefix = argv[++i];
+        else if (!strcmp(a, "--stop-on") && i + 1 < argc) {
+            if (nstop == MAXSTOP) usage();
+            stop_text[nstop++] = argv[++i];
+        }
+        else if (!strcmp(a, "--stop-on-delay") && i + 1 < argc) {
+            stop_delay_ms = atof(argv[++i]);
+            if (stop_delay_ms < 0) usage();
+        }
+        else if (!strcmp(a, "--console-times")) console_times = 1;
         else if (!strcmp(a, "--kbd-release") && i + 1 < argc) kbd_release = (uint64_t)(atof(argv[++i]) * CPU_HZ / 1000.0);
         else if (!strcmp(a, "--log-lau")) M.sys.snd_log |= 2;
         else if (!strcmp(a, "--log-lau-us")) M.sys.snd_log |= 4;
@@ -732,6 +790,7 @@ int main(int argc, char **argv)
 #endif
 
     uint64_t limit = max_sec >= 0 ? (uint64_t)(max_sec * CPU_HZ) : UINT64_MAX;
+    run_limit = limit;                  /* (lowered by a --stop-on line) */
     clock_t t0 = clock();
     Cpu65816 *c = &M.cpu;
     int rc = 0;
@@ -754,7 +813,7 @@ int main(int argc, char **argv)
             c->cycles = M.next_event > c->cycles ? M.next_event : c->cycles + 1;
             wai_cycles += c->cycles - w0;
             if (prof_u && w0 >= prof_c0 && w0 < prof_c1) prof_i += c->cycles - w0;
-            if (c->cycles >= limit) { rc = 3; break; }
+            if (c->cycles >= run_limit) break;
             continue;
         }
         if (M.trace) {
@@ -789,7 +848,13 @@ int main(int argc, char **argv)
         if (M.trace && c->n_abort != na)
             fprintf(stderr, "%10llu *** ABORT at %06X cause %02X\n", (unsigned long long)c->cycles,
                     M.fr.abort_addr, M.fr.abort_cause);
-        if (c->cycles >= limit) { rc = 3; break; }
+        if (c->cycles >= run_limit) break;
+    }
+    if (c->cycles >= run_limit) rc = stop_hit >= 0 && run_limit < limit ? 4 : 3;
+    if (stop_hit >= 0) {                                /* (run816.py looks for this line) */
+        unsigned long long us = (unsigned long long)(stop_cycle * 1e6 / CPU_HZ);
+        fprintf(stderr, "emu816: stopped on \"%s\" at %llu.%06llu s%s\n", stop_text[stop_hit],
+                us / 1000000, us % 1000000, rc == 4 ? "" : " (the run ended before its delay)");
     }
     fflush(stdout);
     audio_wav_close();
@@ -797,7 +862,7 @@ int main(int argc, char **argv)
     if (key_wait)                                       /* (run816.py looks for this line) */
         fprintf(stderr, "emu816: the script still waits for \"%s\"\n", key_wait);
 
-    for (int i = 0; i < nshots; i++) if (!shot_done[i]) {
+    for (int i = 0; i < nshots; i++) if (!shot_done[i] && (rc != 4 || shot_at[i] > 1e29)) {
         nvc_render();
         if (nvc_write_ppm(shot_path[i])) fprintf(stderr, "emu816: cannot write %s\n", shot_path[i]);
     }
@@ -805,7 +870,7 @@ int main(int argc, char **argv)
     if (stats) {
         double host = (double)(clock() - t0) / CLOCKS_PER_SEC, emu = c->cycles / CPU_HZ;
         fprintf(stderr, "emu816: %s after %.3f s emulated (%llu cycles), %.3f s host: %.1f MHz (%.1fx real time)\n",
-                rc == 3 ? "time limit" : "STP", emu, (unsigned long long)c->cycles, host,
+                rc == 3 ? "time limit" : rc == 4 ? "--stop-on" : "STP", emu, (unsigned long long)c->cycles, host,
                 host > 0 ? c->cycles / host / 1e6 : 0, host > 0 ? emu / host : 0);
         fprintf(stderr, "emu816: the CPU waited (WAI) %llu cycles: busy %.1f%%\n", (unsigned long long)wai_cycles,
                 c->cycles ? 100.0 * (c->cycles - wai_cycles) / c->cycles : 0.0);

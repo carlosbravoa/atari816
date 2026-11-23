@@ -13,7 +13,8 @@ printf '0 wait xcom: end\n' > $O/end.script
 fail=0
 run() {         # NAME SECONDS ARGS [run816 options]
   n=$1 s=$2 a=$3; shift 3
-  PRG=$PRG sh tests/xrun.sh $O/$n $s "$a" "$@" > /dev/null
+  PRG=$PRG sh tests/xrun.sh $O/$n $s "$a" --stop-on "xcom: files: at most" \
+    --stop-on-delay 1000 "$@" > /dev/null
 }
 run day 400 "VGA NOINTRO BENCH MISSION FA1V.PAK RACE RSV.PAK LOG BENCHLOG.TXT" --script $O/end.script &
 run night 400 "VGA NOINTRO BENCH NIGHT MISSION FA1V.PAK RACE RSV.PAK LOG BENCHLOG.TXT" --script $O/end.script &

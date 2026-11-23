@@ -81,9 +81,8 @@ pb:     .res 2
 sum:    .res 2
 pss:    .res 2
 
-        .segment "CODE"
 
-_hz_path_run:
+        FUNC    _hz_path_run
         ldx     #30
 @cp:    lda     _hz_ph,x
         sta     __rg,x

@@ -34,11 +34,15 @@ Options worth knowing (all from `run816.py --help`):
 | `--shot S` | screenshot at S seconds after the start (repeatable; at most 16 with the script's `shot` lines) |
 | `--shot-on TEXT` | `autoN.png` two frames after each console line holding TEXT |
 | `--seconds N` | run length after the start (default: last event + 2 s, + 20 s per `wait`) |
+| `--stop-on TEXT` | end the run at the first console line holding TEXT (repeatable: any of them); `--seconds` stays the limit. Prints `run816: stopped on 'TEXT' at T s`. Later shots are not taken |
+| `--stop-on-delay MS` | end it MS ms after that line (default 0). Better: print the line after the program has closed its files |
+| `--must-stop` | fail (exit 1) when the run reached `--seconds` without a `--stop-on` text |
+| `--console-times` | each `console.txt` line starts with its emulated time since power-on: `[   3.785939] text` |
 | `--out DIR` | output folder (default `run-NAME`); old shots in it are deleted |
 | `--file SRC[:DEST]` | copy a file onto the card (default: the root, its name in capitals: `main.c` → `/MAIN.C`; repeatable) |
 | `--expect TEXT` | fail unless `console.txt` contains TEXT (repeatable) |
 | `--log-sound` / `--log-sound-us` | POKEY writes in `emu.err`: `sound $DB08 = $78` / `sound 149861 $DB01 = $00` (µs) |
-| `--log-lau` | Lau writes: `lau $DBxx = $yy` |
+| `--log-lau` / `--log-lau-us` | Lau writes: `lau $DBxx = $yy` / `lau 3785939 $DBxx = $yy` (µs) |
 | `--wav FILE` | record Lau + OPL2 (48 kHz stereo, as the board mixes; no POKEY) |
 | `--rev N` | hardware: 12 default (OPL2), 11 no OPL2, 10 no sprites/scrolling, 9 no Lau, 8 no command lists, 7 no blitter |
 | `--kbd-release MS` | release held keys MS ms after the last key change (the board's old firmware: 1000) |
@@ -47,7 +51,12 @@ Options worth knowing (all from `run816.py --help`):
 | `--window` | SDL window, real time, play by hand (emu816 built with `make SDL=1`) |
 
 Exit code 1 when the program was killed (`[kill]`), an `--expect` text is missing, a
-`wait` never ended, or emu816 reported a blitter rule broken. A run of 20 emulated seconds
+`wait` never ended, emu816 reported a blitter rule broken, or `--must-stop` saw no
+`--stop-on` text. A run stopped by `--stop-on` and one that ran to `--seconds` both exit 0;
+the printed line tells them apart (`run816: stopped on ...` / `run816: no --stop-on text
+came`). Times: `--console-times`, `--log-lau-us`, `--log-opl-us` and `--log-sound-us` count
+from power-on (`[   3.785939]` is `lau 3785939`); `--shot`, `--prof-from` and script times
+count from the program's start, which run816 prints (`started at 3.9 s`). A run of 20 emulated seconds
 takes about a second. Facts: emu816 runs at the board's speed (`--ideal-timing`: the old,
 faster model); joysticks read "nothing pressed" (they cannot be scripted); POKEY is not
 heard (only logged); `SYS_UPTIME` is the same at the same point of every run, so a random

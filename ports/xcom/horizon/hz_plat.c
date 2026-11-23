@@ -44,19 +44,9 @@ static int screen_on, pan = -1, mx = 160, my = 100, mb;
 static int presses[2], press_x[2], press_y[2];
 static unsigned vpolls;
 
-/* hgame sends a scroll at hg_end (the frame's end); this program has no frames
-   (it keeps its own time and polls: hg_poll): the scroll is sent at once
-   (PORTING-NOTES.md, SDK needs: an hgame call for it) */
-extern hz_fsscroll hg__scr;
-extern unsigned char hg__scr_dirty;
-
-static void send_view(void)
-{
-    if (hg__scr_dirty) {
-        hz_fs_scroll(&hg__scr);
-        hg__scr_dirty = 0;
-    }
-}
+/* hgame sends a scroll at hg_end (the frame's end) or at hg_poll; this program has
+   no frames (it keeps its own time and polls): the view is sent at once,
+   hg_view_send() */
 
 int plat_arena(void)
 {
@@ -223,7 +213,7 @@ static void show(void)
             hg_scroll(0, k);
         }
         pan = k;
-        send_view();
+        hg_view_send();
     }
     if (xd_dac_dirty) {
         static unsigned char __far rgb[768];  /* (__far: out of the main bank, which is full) */
@@ -278,18 +268,12 @@ void plat_poll(void)
             keyq[keyn++] = (unsigned)scan_of(k & 0xFF) << 8 | (ch & 0xFF);
         }
     if (screen_on) {
-        /* the pointer in 320 x 200: the 180 rows shown follow it. Its position
-           now (ws_mouse: hgame's full screen gets motion events only while a
-           button is held), halved from the kernel's 640 x 360 */
-        hz_mouse m;
-        b = hz_ws_mouse(0xFF, &m);
-        if (b == 0xFFFF)
-            b = hg_mouse_b;
-        else {
-            hg_mouse_x = m.sx >> 1;
-            hg_mouse_y = m.sy >> 1;
-        }
-        b |= hg_mouse_b & 3;            /* (a click between two polls) */
+        /* the pointer in 320 x 200: the 180 rows shown follow it. hgame's
+           hg_mouse_x/y follow the mouse in 320 x 180 (halved from the kernel's
+           640 x 360), a button held or not; the presses are counted here, from the
+           buttons held at each poll (not hg_mouse_clicked: the engine's INT 33h
+           counts presses per button, with the place of the last one) */
+        b = hg_mouse_b;
         mx = hg_mouse_x;
         show();                         /* (the rows shown move first) */
         my = row_of(hg_mouse_y);
@@ -419,7 +403,7 @@ static void loading_screen(void)
     hg_rect(BAR_X - 2, BAR_Y - 2, BAR_W + 4, 12, 2);
     hg_flush(0);
     hg_scroll(0, LOAD_Y);
-    send_view();
+    hg_view_send();
     loading = 1;
     load_x = 0;
     load_t0 = load_drawn = plat_us();
@@ -463,7 +447,7 @@ static void message_screen(const char *const *lines, int n)
         hz_bb_screen(0);
         hg_split(0, 0, 0);
         hg_scroll(0, 0);
-        send_view();
+        hg_view_send();
     }
     hg_color(0, 0, 0, 0);
     hg_color(1, 0xE0, 0xE0, 0xE0);

@@ -347,6 +347,71 @@ if [ "$(at "$TMP/r7a.ram" 0x050000 16)" = "$(at "$TMP/r7b.ram" 0x050000 16)" ] &
     ok "--ram-random: the same seed the same RAM, another seed another; the default pattern \$EA ^ address"
 else bad "--ram-random" "$(at "$TMP/r7a.ram" 0x050000 16) $(at "$TMP/r8.ram" 0x050000 16) $(at "$TMP/rp.ram" 0x0500FE 4)"; fi
 
+# ── --stop-on (the run ends at a console line; exit 4 and a line on stderr), --stop-on-delay,
+# --console-times (each console line with its emulated time since power-on: the base of --keys
+# and of the --log-*-us microseconds). kbtest prints a line at once for each key event; the
+# keys come at 100, 150, 300 and 350 ms ──
+KS="100:04:1,150:04:0,300:05:1,350:05:0"
+out=$($EMU --max-seconds 10 --stats --stop-on "KEY 05" --keys "$KS" $T/asm/kbtest.bin 2>"$TMP/s.err"); rc=$?
+end=$(sed -n 's/^emu816: --stop-on after \([0-9.]*\) s emulated.*/\1/p' "$TMP/s.err")
+if [ $rc -eq 4 ] && grep -q '^emu816: stopped on "KEY 05" at 0\.30[0-9]* s$' "$TMP/s.err" && \
+   [ "$(printf '%s\n' "$out" | tail -1)" = "KEY 05 00 01" ] && [ -n "$end" ] && awk "BEGIN { exit !($end < 0.31) }"; then
+    ok "--stop-on: the run ends at the line (exit 4, stopped at 0.30 s of 10, $end s emulated)"
+else bad "--stop-on (rc $rc, end $end)" "$out
+$(cat "$TMP/s.err")"; fi
+out=$($EMU --max-seconds 1 --stop-on "KEY 06" --keys "$KS" $T/asm/kbtest.bin 2>"$TMP/s.err"); rc=$?
+out2=$($EMU --max-seconds 10 --stop-on "nothing" --stop-on "KEY 04 00 00" --keys "$KS" $T/asm/kbtest.bin 2>"$TMP/s2.err"); rc2=$?
+if [ $rc -eq 3 ] && ! grep -q stopped "$TMP/s.err" && [ "$(printf '%s\n' "$out" | tail -1)" = "KEY 05 00 00" ] && \
+   [ $rc2 -eq 4 ] && grep -q '^emu816: stopped on "KEY 04 00 00" at 0\.15' "$TMP/s2.err"; then
+    ok "--stop-on: a text that never comes runs to the limit (exit 3); of two texts the first to come"
+else bad "--stop-on: limit / two texts (rc $rc, $rc2)" "$out
+$(cat "$TMP/s.err" "$TMP/s2.err")"; fi
+out=$($EMU --max-seconds 10 --stats --stop-on "KEY 05" --stop-on-delay 200 --keys "$KS" $T/asm/kbtest.bin 2>"$TMP/s.err"); rc=$?
+end=$(sed -n 's/^emu816: --stop-on after \([0-9.]*\) s emulated.*/\1/p' "$TMP/s.err")
+if [ $rc -eq 4 ] && [ "$(printf '%s\n' "$out" | tail -1)" = "KEY 05 00 00" ] && [ -n "$end" ] && \
+   awk "BEGIN { exit !($end >= 0.5 && $end < 0.501) }"; then
+    ok "--stop-on-delay 200: the run ends 200 ms after the line ($end s), the lines meanwhile printed"
+else bad "--stop-on-delay (rc $rc, end $end)" "$out"; fi
+out=$($EMU --max-seconds 0.5 --console-times --keys "$KS" $T/asm/kbtest.bin 2>/dev/null)
+k4=$(printf '%s\n' "$out" | sed -n 's/^\[ *\([0-9]*\.[0-9]\{6\}\)\] KEY 04 00 01$/\1/p')
+mono=$(printf '%s\n' "$out" | awk '{ t = substr($0, 2, 11) + 0; if (substr($0, 1, 1) != "[" || substr($0, 13, 2) != "] " || t < p) bad = 1; p = t } END { print bad ? "no" : "yes" }')
+if [ "$mono" = yes ] && [ "$(printf '%s\n' "$out" | wc -l)" -eq 5 ] && [ -n "$k4" ] && awk "BEGIN { exit !($k4 >= 0.1 && $k4 < 0.11) }"; then
+    ok "--console-times: every line \"[SSSS.UUUUUU] \", rising; the key at 100 ms (--keys' base) at $k4 s"
+else bad "--console-times" "$out"; fi
+# a program of a few bytes: LDA #1; STA $00:DB80 (Lau's parameter RAM); LDA #'A'; STA DBG_OUT;
+# LDA #10; STA DBG_OUT; STP. The Lau write's microseconds and the line's time: a few us apart
+if [ $REVN -ge 10 ]; then
+    printf '\251\001\217\200\333\000\251\101\217\360\336\000\251\012\217\360\336\000\333' > "$TMP/l.bin"
+    out=$($EMU --max-seconds 1 --console-times --log-lau-us "$TMP/l.bin" 2>"$TMP/l.err")
+    lu=$(sed -n 's/^lau \([0-9]*\) \$DB80 = \$01$/\1/p' "$TMP/l.err")
+    cu=$(printf '%s\n' "$out" | sed -n 's/^\[ *\([0-9]*\)\.\([0-9]\{6\}\)\] A$/\1\2/p' | sed 's/^0*\(.\)/\1/')
+    if [ -n "$lu" ] && [ -n "$cu" ] && [ "$cu" -ge "$lu" ] && [ "$cu" -le $((lu + 10)) ]; then
+        ok "--console-times and --log-lau-us: one time base (Lau write at $lu us, the line at $cu us)"
+    else bad "--console-times / --log-lau-us" "$out
+$(cat "$TMP/l.err")"; fi
+else skip "--console-times with --log-lau-us (needs Lau, REV 10)"; fi
+# the same through run816.py: CAT prints /README.TXT in the text shell (about 3.8 s after
+# power-on); --must-stop fails a run that never saw its text
+R816=../sdk/tools/run816.py
+if [ -f $HSD/SYSTEM/HORIZON.SYS ] && [ -f $HSD/BIN/CAT.PRG ] && [ -f $R816 ] && command -v python3 >/dev/null && [ -z "$EMUFLAGS" ]; then
+    RUN="python3 $R816 $HSD/BIN/CAT.PRG --mode shell --args /README.TXT --emu ./emu816 --horizon ../horizon --out $TMP/r816"
+    out=$($RUN --seconds 30 --shot 20 --console-times --log-lau-us --stop-on "in chunks" --must-stop --expect "CAT reads it"); rc=$?
+    last=$(tail -1 "$TMP/r816/console.txt" | sed -n 's/^\[ *\([0-9.]*\)\] in chunks of 40 bytes\.$/\1/p')
+    if [ $rc -eq 0 ] && printf '%s\n' "$out" | grep -q "^run816: stopped on 'in chunks' at " && \
+       printf '%s\n' "$out" | grep -q '^run816: 1 screenshot(s) due after the stop not taken' && \
+       [ -n "$last" ] && awk "BEGIN { exit !($last < 5) }" && [ ! -e "$TMP/r816/shot1.png" ] && [ ! -e "$TMP/r816/shot1.ppm" ]; then
+        ok "run816 --stop-on --must-stop --console-times: stopped at $last s of 33.9 (exit 0), the later shot not taken"
+    else bad "run816 --stop-on (rc $rc)" "$out
+$(tail -3 "$TMP/r816/console.txt")"; fi
+    out=$($RUN --seconds 1 --stop-on "never printed"); rc=$?
+    out2=$($RUN --seconds 1 --stop-on "never printed" --must-stop); rc2=$?
+    if [ $rc -eq 0 ] && printf '%s\n' "$out" | grep -q '^run816: no --stop-on text came: ran to the limit' && \
+       [ $rc2 -eq 1 ] && printf '%s\n' "$out2" | grep -q "^run816: FAIL: --must-stop: the program never printed 'never printed'"; then
+        ok "run816: no --stop-on text: exit 0 and a line saying so; with --must-stop exit 1"
+    else bad "run816 --must-stop (rc $rc, $rc2)" "$out
+$out2"; fi
+else skip "run816 --stop-on (no Horizon card, run816.py or python3; or EMUFLAGS set)"; fi
+
 # ── 4. CPU: SingleStepTests/65816 sample (tests/fetch_sst.py downloads it) ──
 if ls $T/sst/*.txt >/dev/null 2>&1; then
     res=$($T/cputest $T/sst/*.txt | tail -1)

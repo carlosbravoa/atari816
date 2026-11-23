@@ -4,14 +4,17 @@
     file.c:LINE:COL: warning: message [-Wname]
 
 The place is the user's file and line (through #include and #line). Warnings are on by
-default (-w: none); some only with -Wall (unused variables, ...); -Werror makes every
-warning an error. -Wno-NAME turns one off, -WNAME on.
+default; some only with -Wall (unused variables, ...), some only when named (-WNAME);
+-Werror makes every warning an error. -Wno-NAME turns one off, -WNAME on. -w silences
+every warning but the 16-bit ones (PORTABILITY: a value that a 16-bit int changes is a
+wrong value on this machine, not a matter of style); -Wno-NAME silences those too.
 """
 import re
 
 from .ctypes816 import where
 
-# the warnings, by name: True = on by default, False = only with -Wall
+# the warnings, by name: True = on by default, False = only with -Wall, None = only when
+# named (-WNAME)
 WARNINGS = {
     'implicit-function-declaration': True,
     'int-conversion': True,             # integer <-> pointer without a cast
@@ -37,7 +40,13 @@ WARNINGS = {
     'parentheses': False,               # if (a = b)
     'tautological-compare': False,      # x <= 32767 with an int x, u >= 0, ...
     'far-cast': False,                  # a far pointer cast to a near one
+    'sequence-args': None,              # two arguments of one call that call functions
 }
+
+# the warnings -w leaves on (only -Wno-NAME turns them off): where cc816's 16-bit int
+# gives another value than the source's arithmetic says (docs/c/reference.md, "Errors and
+# warnings")
+PORTABILITY = {'overflow'}
 
 
 class Diag:
@@ -45,7 +54,8 @@ class Diag:
         o = opts or {}
         self.quiet = bool(o.get('w'))
         self.werror = bool(o.get('werror'))
-        self.on = {k: v or bool(o.get('wall')) for k, v in WARNINGS.items()}
+        self.on = {k: bool(v) or (v is False and bool(o.get('wall')))
+                   for k, v in WARNINGS.items()}
         for name, val in (o.get('wflags') or {}).items():
             if name in self.on:
                 self.on[name] = val
@@ -67,7 +77,9 @@ class Diag:
         self.unsupported = self.unsupported or unsupported
 
     def warning(self, coord, msg, name):
-        if self.quiet or not self.on.get(name, True):
+        if not self.on.get(name, True):
+            return
+        if self.quiet and name not in PORTABILITY:
             return
         if self.werror:
             line = f'{_place(coord)}error: {msg} [-Werror={name}]'

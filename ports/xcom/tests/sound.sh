@@ -47,6 +47,7 @@ run() {
     --dest /GAMES/XCOM/XCOM.PRG --cd /GAMES/XCOM --args "@$U.ARG" $FILES \
     --file tests/$name.keys:/GAMES/XCOM/$U.KEY --file $O/$name/$U.ARG:/GAMES/XCOM/$U.ARG \
     --script $O/$name/end.script --seconds ${SECONDS816:-200} --log-opl-us --wav $O/$name/816.wav \
+    --stop-on "xcom: files: at most" --stop-on-delay 1000 \
     --out $O/$name/816 "$@" > $O/$name/run816.log 2>&1
   wait
 }

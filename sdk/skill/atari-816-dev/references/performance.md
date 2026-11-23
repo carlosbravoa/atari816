@@ -99,6 +99,9 @@ Rules that follow:
   in an `int` (`HG_FIX8`) or 16.16 in a `long` only where needed (references/hgame.md).
 - Hot data near (globals, statics, malloc: the main bank). `__far` data is for bulk
   storage; copy what a loop needs into a near buffer first.
+- Hot loops in assembly cost no main-bank room in a `--code large` program when opened
+  with `FUNC` (references/c-language.md, "Movable assembly"): they run as fast in any
+  bank (calls are JSL either way).
 - No `printf` in the frame loop: `printf` of one character took 220 us here; a console line
   about 2 ms (SDK/docs/c/games.md). Under the Desktop it goes to the log anyway.
 

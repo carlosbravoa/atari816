@@ -1,7 +1,7 @@
 # Horizon ABI cheat sheet for assembly (Horizon 0.30)
 
 Read this when writing 65816 assembly for Horizon (a whole program, or a .s file next to
-C: then also references/c-language.md, "Assembly called from C"). Full text:
+C: then also references/c-language.md, "Assembly called from C" and "Movable assembly"). Full text:
 `sdk/docs/reference/*.md`, `horizon/ABI.md`, `horizon/user/horizon.inc`,
 `horizon/user/ui.inc`, `horizon/user/needs.inc`.
 

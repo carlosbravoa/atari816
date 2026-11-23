@@ -114,9 +114,8 @@ r1:     .res 2
 dst:    .res 2
 ft:     .res 2
 
-        .segment "CODE"
 
-_rd_cols:
+        FUNC    _rd_cols
         ldx     #0
 @sv:    lda     P_MAP,x
         pha

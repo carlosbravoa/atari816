@@ -2637,6 +2637,14 @@ class Front:
         else:
             p = self.rv(arr)
             base = self.mem_at(p.op, el, p.t.isfar)
+        wrap = MODEL['far_wrap'] and isinstance(base.base, (V, Imm)) and \
+            base.base.size == 4 and not base.farobj and base.idx is None
+        if wrap and kv is not None and not 0 <= base.off + (kv + koff) * size < 0x8000:
+            # (-ffar-wrap: a constant index that is negative or 32 KB or more, p[-1],
+            # p[40000u]: on the offset alone, the bank stays)
+            nb = self.addlo(base.base, Imm((base.off + (kv + koff) * size) & 0xFFFF),
+                            PtrT(el, far=True))
+            return LV('mem', el, base=nb.op, off=0)
         if kv is not None:
             lv = LV('mem', el, base=base.base, idx=base.idx, off=base.off + (kv + koff) * size)
             lv.farobj = base.farobj
@@ -2656,14 +2664,15 @@ class Front:
             nv = self.newv(2)
             self.emit(Ins('add', nv, base.idx, sc))
             sc = nv
-        if isinstance(base.base, V) and base.base.size == 4 and \
+        if wrap or isinstance(base.base, V) and base.base.size == 4 and \
                 not base.farobj and iv.t.signed and MODEL['far_data']:
             # (far data: a far pointer + a signed index: the index added to the offset
             # alone, as DOS's far pointers do (the element is in the pointer's object, so
             # in its bank): 20 cycles less than widening the index to 32 bits and adding).
             # The constant part of the index goes into the offset too: p[d + 1] with
             # d = -1 at a bank's start would put p + d out of the bank (the offset wraps
-            # to $FFFE, and [p],y with Y = 2 carries into the next bank)
+            # to $FFFE, and [p],y with Y = 2 carries into the next bank). -ffar-wrap: every
+            # index, signed or unsigned, so (DOS's p[0xFFFF] is p[-1])
             if koff:
                 k = self.newv(2)
                 self.emit(Ins('add', k, sc, Imm((koff * size) & 0xFFFF)))
@@ -2701,7 +2710,10 @@ class Front:
     def finish(self, lv):
         if lv.post is not None:
             v, k = lv.post
-            self.emit(Ins('add', v, v, Imm(k, v.size) if v.size == 4 else Imm(k & 0xFFFF)))
+            if v.size == 4 and MODEL['far_wrap']:
+                self.emit(Ins('addlo', v, v, Imm(k & 0xFFFF)))
+            else:
+                self.emit(Ins('add', v, v, Imm(k, v.size) if v.size == 4 else Imm(k & 0xFFFF)))
             lv.post = None
 
     def load(self, lv, dst=None, final=True):
@@ -2835,7 +2847,12 @@ class Front:
                 n = self.newv(4)
                 self.emit(Ins('add', n, a, z))
                 a = n
-            if off:
+            if off and MODEL['far_wrap'] and not lv.farobj:
+                # (-ffar-wrap: &p[1], &p->m on the offset alone)
+                n = self.newv(4)
+                self.emit(Ins('addlo', n, a, Imm(off & 0xFFFF)))
+                a = n
+            elif off:
                 n = self.newv(4)
                 self.emit(Ins('add', n, a, Imm(off, 4)))
                 a = n
@@ -3031,6 +3048,8 @@ class Front:
                     self.emit(Ins('mov', lv.op, Imm(1)))
                 else:
                     self.emit(Ins('xor', lv.op, lv.op, Imm(1)))
+            elif t.is_ptr and t.isfar and MODEL['far_wrap']:
+                self.emit(Ins('addlo', lv.op, lv.op, Imm(step if op == 'add' else -step)))
             else:
                 self.emit(Ins(op, lv.op, lv.op, Imm(step, size)))
             if t.is_int and t.size == 1 and not t.is_bool:
@@ -3045,6 +3064,8 @@ class Front:
                 self.emit(Ins('mov', nv, Imm(1)))
             else:
                 self.emit(Ins('xor', nv, cur.op, Imm(1)))
+        elif t.is_ptr and t.isfar and MODEL['far_wrap']:
+            self.emit(Ins('addlo', nv, cur.op, Imm(step if op == 'add' else -step)))
         else:
             self.emit(Ins(op, nv, cur.op, Imm(step, size)))
         if lv.fld is not None:
@@ -3401,11 +3422,13 @@ class Front:
         size = pt.to.size if not pt.to.is_void else 1
         if pt.to.is_func:
             size = 1
-        if pt.isfar and b.t.is_int and b.t.size == 4 and (
-                isinstance(b.op, Imm) or MODEL['far_data']):
+        if pt.isfar and MODEL['far_wrap']:
+            return self.far_wrap_add(op, a, b, size, pt, dst)
+        if pt.isfar and b.t.is_int and b.t.size == 4:
             # a far pointer plus a long (p + 39999: a decimal constant over 32,767 is a
             # long): the whole 32-bit value, not its low word as an int (which made
-            # 39999 -25537)
+            # 39999 -25537); a long variable too, in both data models (before, in the
+            # near one, its low word as an int: r048)
             if isinstance(b.op, Imm):
                 k = self.wrap(b.op.val, b.t) * size
                 return self.binop('add', a.op, Imm(-k if op == '-' else k, 4), pt, dst)
@@ -3429,6 +3452,43 @@ class Front:
             self.emit(Ins('sx' if i.t.signed else 'zx', z, sc))
             return self.binop('add' if op == '+' else 'sub', a.op, z, pt, dst)
         return self.binop('add' if op == '+' else 'sub', a.op, sc, pt, dst)
+
+    def far_wrap_add(self, op, a, b, size, pt, dst=None):
+        """-ffar-wrap: far pointer a + (or -) the integer b scaled by size, on the offset
+        alone (mod 65536): the bank never changes, as with DOS's far pointers; b of any
+        width (a long's low word: Watcom's far + long does the same)"""
+        if b.t.size > 2:
+            b = self.convert(b, ULONG if not b.t.signed else LONG)
+            b = RV(self.tr16(b.op), UINT)
+        i = self.convert(b, INT if b.t.signed else UINT)
+        if isinstance(i.op, Imm):
+            k = (i.op.val * size) & 0xFFFF
+            return self.addlo(a.op, Imm((-k) & 0xFFFF if op == '-' else k), pt, dst)
+        sc = self.scale(i.op, size)
+        if op == '-':
+            n = self.newv(2)
+            self.emit(Ins('neg', n, sc))
+            sc = n
+        return self.addlo(a.op, sc, pt, dst)
+
+    def tr16(self, op):
+        """the low word of a 32-bit operand"""
+        if isinstance(op, Imm):
+            return Imm(op.val & 0xFFFF)
+        d = self.newv(2)
+        self.emit(Ins('tr', d, op))
+        return d
+
+    def addlo(self, p, k, t, dst=None):
+        """the far pointer p with the 16-bit k added to its offset alone"""
+        if isinstance(k, Imm) and k.val == 0:
+            return self.to_dst(RV(p, t), dst)
+        if isinstance(p, Imm) and isinstance(k, Imm):
+            v = (p.val & ~0xFFFF) | ((p.val + k.val) & 0xFFFF)
+            return self.to_dst(RV(Imm(v, 4), t), dst)
+        d = dst if dst is not None and dst.size == 4 else self.newv(4)
+        self.emit(Ins('addlo', d, p, k))
+        return self.to_dst(RV(d, t), dst)
 
     def bool_value(self, e, dst):
         d = dst if dst is not None and dst.size == 2 else self.newv(2)
@@ -3572,12 +3632,10 @@ class Front:
                 if 'll' in kinds:
                     self.uses_ll = True
                     setattr(self, 'fmt_ll_scanf' if scan else 'fmt_ll_printf', True)
-        ops = []
         sret = None
         if ft.ret.is_struct:
             slot = self.new_slot('ret', ft.ret.size)
             sret = Frame(slot)
-            ops.append(sret)
         params = ft.params
         fname = name or 'the function'
         if ft.proto and not ft.variadic and len(args) > len(params):
@@ -3588,7 +3646,16 @@ class Front:
                      f"takes {len(params)}{' or more' if ft.variadic else ''}", e)
         if name in FORMATS and ft.variadic:
             self.check_format(name, args, e)
-        for i, a in enumerate(args):
+        if len(args) > 1:
+            self.check_sequence(args, name, e)
+        parts = {}
+        order = range(len(args) - 1, -1, -1) if MODEL['args_rtl'] else range(len(args))
+        for i in order:
+            # (-fargs-right-to-left: the arguments evaluated last first, as DOS's compilers
+            # do; each one's operands kept in parts[i], pushed in the same order: the
+            # stack's layout does not depend on the order of evaluation)
+            a = args[i]
+            ops = parts[i] = []
             r = self.rv(a)
             if r.t.is_void:
                 self.err(f"a void value given as argument {i + 1} of {_q(name)}", a)
@@ -3633,6 +3700,9 @@ class Front:
             if isinstance(op, Imm) and op.size == 1:
                 op = Imm(op.val, 2)
             ops.append(op)
+        ops = [sret] if sret is not None else []
+        for i in range(len(args)):
+            ops += parts[i]
         rt = ft.ret
         d = None
         if not rt.is_void and not rt.is_struct:
@@ -3656,6 +3726,23 @@ class Front:
             self.emit(Ins('x8s' if rt.signed else 'x8u', nd, d))
             r = RV(nd, rt)
         return self.to_dst(r, dst)
+
+    def check_sequence(self, args, name, e):
+        """-Wsequence-args: two or more arguments of one call that call functions: their
+        side effects (a shared random number generator) happen in the order the compiler
+        evaluates the arguments, which C leaves open"""
+        if not self.diag.on.get('sequence-args'):
+            return
+        k = [i + 1 for i, a in enumerate(args) if _has_call(a)]
+        if len(k) < 2:
+            return
+        which = ', '.join(str(x) for x in k[:-1]) + ' and ' + str(k[-1])
+        how = ('right to left here (-fargs-right-to-left)' if MODEL['args_rtl'] else
+               'left to right (DOS\'s compilers and gcc on x86 right to left: '
+               '-fargs-right-to-left)')
+        self.warn(f"arguments {which} of {_q(name) if name else 'a call through a pointer'} "
+                  f"call functions: C leaves the order "
+                  f"unspecified; cc816 evaluates them {how}", e, 'sequence-args')
 
     # ------------------------------------------------------------------ inline assembly
     def asm_text(self, e, top=False, fn_vars=None):
@@ -3899,7 +3986,10 @@ class Front:
             return RV(Imm(0), VOID)
         if name == '__cop':
             n = self.const_int(args[0])
-            ops = [self.convert(self.rv(a), UINT).op for a in args[1:4]]
+            if MODEL['args_rtl']:
+                ops = [self.convert(self.rv(a), UINT).op for a in args[3:0:-1]][::-1]
+            else:
+                ops = [self.convert(self.rv(a), UINT).op for a in args[1:4]]
             d = dst if dst is not None and dst.size == 2 else self.newv(2)
             self.emit(Ins('cop', d, n=n, ra=ops[0], rx=ops[1], ry=ops[2]))
             return self.to_dst(RV(d, UINT), dst)
@@ -4445,6 +4535,23 @@ def _at(sy):
 STATEMENTS = {'If', 'While', 'DoWhile', 'For', 'Switch', 'Return', 'Break', 'Continue',
               'Goto', 'Label', 'Case', 'Default', 'Compound', 'EmptyStatement', 'Pragma',
               'StaticAssert'}
+
+
+def _has_call(node):
+    """a function call in the expression node (one that is evaluated: not in sizeof, not a
+    built-in but a syscall)"""
+    if node is None:
+        return False
+    if isinstance(node, c_ast.UnaryOp) and node.op in ('sizeof', '_Alignof', '__alignof__'):
+        return False
+    if isinstance(node, c_ast.FuncCall):
+        n = node.name.name if isinstance(node.name, c_ast.ID) else None
+        if n not in BUILTINS and n not in ('__cc816_asm', '__cc816_asm_ops') or n == '__cop':
+            return True
+    for _, c in node.children():
+        if _has_call(c):
+            return True
+    return False
 
 
 def _has_labels(node):

@@ -15,7 +15,8 @@ Options:
   -I DIR            look for #include files in DIR too
   -D NAME[=VALUE]   define a macro         -U NAME   undefine one
   -include FILE     include FILE before each source
-  -w                no warnings
+  -w                no warnings but the 16-bit ones (-Woverflow: a constant that int's
+                    16 bits change); -Wno-overflow turns those off too
   -Wall             more warnings (unused variables and labels, x <= 32767 with an
                     int x, if (a = b), a far pointer cast to a near one)
   -Werror           warnings are errors;  -Wno-NAME: one warning off (the NAME is the
@@ -35,6 +36,14 @@ Options:
                     other banks, string literals and const objects go to banks of far
                     data: DOS's large model (docs/c/reference.md, "The far data model")
   -fdos-keywords    far, near and huge are keywords (as __far, __near, __far)
+  -fargs-right-to-left
+                    a call's arguments are evaluated right to left, as DOS's compilers
+                    (Watcom, Microsoft, Borland) and gcc on x86 do; the default is left to
+                    right (C leaves the order unspecified; ports of DOS programs that
+                    call two functions sharing a state in one call's arguments need it)
+  -ffar-wrap        far pointer arithmetic (p + n, p++, p[i]) on the offset alone: the
+                    bank never changes, as with DOS's far pointers (docs/c/reference.md,
+                    "The far data model", "Pointers")
   --sizes           print every object and function, its size and where it went
                     (main bank, code bank k, far data bank k), biggest first
   --stack N         bytes for the software stack (arrays, structures and locals whose
@@ -87,6 +96,11 @@ sys.path.insert(0, os.path.join(os.path.dirname(HERE), "game"))
 import hgbuild  # noqa: E402
 
 VERSION = "hcc 3.0 (Horizon C SDK: cc816)"
+
+
+def _f_flag(a, ccopts):
+    from cc816 import driver as _drv     # (tools/hzc816.py put cc816 on the path)
+    return _drv.parse_f_flag(a, ccopts)
 
 
 def die(msg, code=1):
@@ -144,10 +158,8 @@ def main(argv):
             o["ccopts"]["includes"].append(val("-include"))
         elif a.startswith("-U"):
             o["defs"].append("-U" + (a[2:] or val("-U")))   # (cc816: in order with -D)
-        elif a in ("-fsigned-char", "-fno-unsigned-char"):
-            o["ccopts"]["signed_char"] = True
-        elif a in ("-funsigned-char", "-fno-signed-char"):
-            o["ccopts"]["signed_char"] = False
+        elif a.startswith("-f") and _f_flag(a, o["ccopts"]):
+            pass
         elif a == "-w" or (a.startswith("-W") and len(a) > 2):
             from cc816 import driver as _drv     # (tools/hzc816.py put cc816 on the path)
             _drv.parse_warning_flag(a, o["ccopts"])
@@ -170,8 +182,6 @@ def main(argv):
             o["data"] = a.split("=", 1)[1] if "=" in a else val("--data")
             if o["data"] not in hzc816.DATAS:
                 die(f"--data is near or far, not {o['data']}")
-        elif a == "-fdos-keywords":
-            o["ccopts"]["dos_keywords"] = True
         elif a == "--sizes":
             o["sizes"] = True
         elif a in ("--heap", "--bank-room", "--main-room", "--spread") or \

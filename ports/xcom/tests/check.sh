@@ -15,9 +15,10 @@
 #
 # --refs: write RUNS.md5 anew (look at the pictures first). The packs must be in
 # data/packs (make data).
-# A run's line may start with s=N: its emulator run's length (default XCOM_SECONDS, 400:
-# the emulator runs that long whatever the program does; "xcom: end ... (machine N s)"
-# tells what a run needs).
+# A run's line may start with s=N: its emulator run's longest length (default
+# XCOM_SECONDS, 400). A run ends 1 s of emulated time after the program's last line
+# ("xcom: files: at most ...", printed at its exit: run816 --stop-on), not at that limit;
+# "xcom: end ... (machine N s)" tells what a run needs.
 # RUNS=FILE: the runs of FILE instead of tests/runs (make test-long: tests/runs-long; the
 # real input's run only with tests/runs); O=DIR the output folder (build/test).
 HZ=${1:-../../horizon}
@@ -28,6 +29,9 @@ fail=0
 ok() { echo "PASS  $1"; }
 bad() { echo "FAIL  $1"; fail=1; }
 O=${O:-build/test}
+# (the program's last line: its exit's files report, after the LOG and the saves are
+# closed; then 1 s for stdio's own closes and the shell)
+STOP_TEXT='xcom: files: at most'
 rm -rf $O
 mkdir -p $O
 
@@ -72,7 +76,7 @@ while read -r name args; do
   python3 ../../sdk/tools/run816.py XCOM.PRG --horizon "$HZ" --mode shell \
     --dest /GAMES/XCOM/XCOM.PRG --cd /GAMES/XCOM --args "@$U.ARG" $FILES \
     $( [ -f tests/$name.keys ] && echo --file tests/$name.keys:/GAMES/XCOM/$U.KEY) --file $O/$name/$U.ARG:/GAMES/XCOM/$U.ARG \
-    --script $O/$name/end.script --shot-on "xcom: shot" --seconds $secs \
+    --script $O/$name/end.script --shot-on "xcom: shot" --seconds $secs --stop-on "$STOP_TEXT" --stop-on-delay 1000 \
     --out $O/$name/816 > $O/$name/run816.log 2>&1 &
   pids="$pids $!"
   # (at most JOBS emulators at once: the machine is shared)
@@ -96,7 +100,7 @@ if [ "$RUNS" = tests/runs ]; then
   python3 ../../sdk/tools/run816.py XCOM.PRG --horizon "$HZ" --mode shell \
     --dest /GAMES/XCOM/XCOM.PRG --cd /GAMES/XCOM --args "@FULL.ARG" $FILES \
     --file tests/save.keys:/GAMES/XCOM/SAVE.KEY --file $O/full/FULL.ARG:/GAMES/XCOM/FULL.ARG \
-    --script $O/full/end.script --emu-arg --card-free --emu-arg 8000 --seconds 150 \
+    --script $O/full/end.script --emu-arg --card-free --emu-arg 8000 --seconds 150 --stop-on "$STOP_TEXT" --stop-on-delay 1000 \
     --out $O/full/816 > $O/full/run816.log 2>&1 &
   fpid=$!
 fi

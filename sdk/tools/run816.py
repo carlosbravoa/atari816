@@ -50,11 +50,25 @@ Options:
   --log-sound     log every write to POKEY 2 / the DACs in emu.err
   --log-sound-us  the same with the emulated time in microseconds ("sound US $DBxx = $yy")
   --log-lau       log every write to Lau, the sample player, in emu.err ("lau $DBxx = $yy")
+  --log-lau-us    the same with the emulated time in microseconds ("lau US $DBxx = $yy")
   --log-opl       log every OPL2 register write in emu.err ("opl $RR = $yy"); --log-opl-us
                   with the emulated time in microseconds ("opl US $RR = $yy")
   --shot-on TEXT  a screenshot (OUT/autoN.png) each time the program prints a console line
                   holding TEXT, taken two frames later: pictures at points of the program's
                   own progress (hold the picture a few frames after printing the line)
+  --stop-on TEXT  end the run when the program prints a console line holding TEXT
+                  (repeatable: any of them); --seconds stays the upper limit. Prints
+                  "run816: stopped on 'TEXT' at T s (S s after the start)" (T since
+                  power-on, as console times, S as --shot's times). Screenshots due after
+                  the stop are not taken; console.txt, the card, --wav, --prof are complete.
+                  Files the program still has open are not finished: print the line after
+                  closing them (or give --stop-on-delay)
+  --stop-on-delay MS  end the run MS ms of emulated time after that line (default 0)
+  --must-stop     fail (exit 1) when the run reached --seconds without a --stop-on text
+  --console-times each line of console.txt starts with its emulated time in seconds since
+                  power-on, "[  12.345678] text": the base of the --log-*-us microseconds
+                  (lau 12345678 ... is that moment); --shot and script times count from
+                  the program's start, printed as "started at T0 s" (subtract T0)
   --kbd-release MS  release the keys held when no key changed for MS ms: the board's
                   firmware before 2026-11 did so after 1000 ms (a held key went up)
   --wav FILE      (Horizon 0.26) record Lau's output (48 kHz stereo WAV): listen on the PC;
@@ -77,8 +91,11 @@ Options:
   --window        open the emulator's SDL window instead (needs emu816 built with SDL=1;
                   real time; type and click yourself)
 Exit code 0 when the run went as expected; 1 when the program was killed by the kernel
-("[kill]" on the console), an --expect text is missing, or emu816 reported a blitter
-rule broken (only the kernel drives the blitter, so that would be a kernel bug).
+("[kill]" on the console), an --expect text is missing, emu816 reported a blitter
+rule broken (only the kernel drives the blitter, so that would be a kernel bug), or
+--must-stop was given and no --stop-on text came. A run that stopped on a --stop-on
+text and one that ran to --seconds both exit 0: the line "run816: stopped on ..." or
+"run816: no --stop-on text came" tells them apart.
 """
 import os
 import re
@@ -112,7 +129,8 @@ def main():
     if not a or a[0] in ('-h', '--help'):
         print(__doc__)
         return 0
-    opt = {'mode': 'desktop', 'shots': [], 'files': [], 'expect': [], 'args': '', 'emu-args': []}
+    opt = {'mode': 'desktop', 'shots': [], 'files': [], 'expect': [], 'args': '', 'emu-args': [],
+           'stop-on': []}
     prog = None
     i = 0
     while i < len(a):
@@ -123,7 +141,7 @@ def main():
             return a[i + 1]
         if w in ('--horizon', '--emu', '--dest', '--args', '--script', '--seconds', '--out',
                  '--rev', '--mode', '--net-root', '--wav', '--cd', '--prof', '--prof-from',
-                 '--prof-to', '--kbd-release', '--shot-on'):
+                 '--prof-to', '--kbd-release', '--shot-on', '--stop-on-delay'):
             opt[w[2:]] = val(); i += 2
         elif w == '--shot':
             opt['shots'].append(float(val())); i += 2
@@ -131,10 +149,12 @@ def main():
             opt['files'].append(val()); i += 2
         elif w == '--expect':
             opt['expect'].append(val()); i += 2
+        elif w == '--stop-on':
+            opt['stop-on'].append(val()); i += 2
         elif w == '--emu-arg':
             opt['emu-args'].append(val()); i += 2
-        elif w in ('--log-sound', '--log-sound-us', '--log-lau', '--log-opl', '--log-opl-us',
-                   '--log-bankwrap',
+        elif w in ('--log-sound', '--log-sound-us', '--log-lau', '--log-lau-us', '--log-opl',
+                   '--log-opl-us', '--log-bankwrap', '--must-stop', '--console-times',
                    '--window', '--net'):
             opt[w[2:]] = True; i += 1
         elif w.startswith('--'):
@@ -143,6 +163,10 @@ def main():
             prog = w; i += 1
     if not prog:
         die('no program given')
+    if opt.get('must-stop') and not opt['stop-on']:
+        die('--must-stop needs --stop-on')
+    if opt.get('stop-on-delay') and not opt['stop-on']:
+        die('--stop-on-delay needs --stop-on')
     if opt['mode'] not in ('desktop', 'shell', 'none'):
         die('--mode is desktop, shell or none')
 
@@ -251,6 +275,14 @@ def main():
         cmdl += ['--kbd-release', opt['kbd-release']]
     if opt.get('log-lau'):
         cmdl.append('--log-lau')
+    if opt.get('log-lau-us'):
+        cmdl.append('--log-lau-us')
+    for t in opt['stop-on']:
+        cmdl += ['--stop-on', t]
+    if opt.get('stop-on-delay'):
+        cmdl += ['--stop-on-delay', opt['stop-on-delay']]
+    if opt.get('console-times'):
+        cmdl.append('--console-times')
     if opt.get('log-bankwrap'):
         cmdl.append('--log-bankwrap')
     cmdl += opt['emu-args'] + os.environ.get('EMU816_ARGS', '').split()
@@ -312,12 +344,30 @@ def main():
         pngs = [p for p in ppms if os.path.exists(p)]
 
     ok = True
-    print(f'run816: {name} at {dest}, started at {t0 / 1000:g} s, ran to {secs:g} s '
-          f'(emu816 exit {r.returncode}; 3 = time limit, the normal end)')
+    err = open(os.path.join(out, 'emu.err'), encoding='latin-1').read()
+    stop = re.search(r'^emu816: stopped on "(.*)" at ([0-9.]+) s', err, re.M)
+    end = ('stopped by --stop-on (emu816 exit 4)' if r.returncode == 4 else
+           f'ran to {secs:g} s (emu816 exit {r.returncode}; 3 = time limit, the normal end)')
+    print(f'run816: {name} at {dest}, started at {t0 / 1000:g} s, {end}')
     for p in pngs:
         print(f'  {p}')
     print(f'  {os.path.join(out, "console.txt")}')
-    if r.returncode not in (0, 3):
+    if stop:
+        ts = float(stop.group(2))
+        print(f'run816: stopped on {stop.group(1)!r} at {stop.group(2)} s '
+              f'({ts - t0 / 1000.0:.6f} s after the start)'
+              + ('' if r.returncode == 4 else '; the run reached --seconds before --stop-on-delay ended'))
+        secs = ts
+        missing = sum(1 for p in ppms if not os.path.exists(p) and not os.path.exists(p[:-4] + '.png'))
+        if missing and r.returncode == 4:
+            print(f'run816: {missing} screenshot(s) due after the stop not taken')
+    elif opt['stop-on']:
+        print(f'run816: no --stop-on text came: ran to the limit, {secs:g} s')
+        if opt.get('must-stop'):
+            print('run816: FAIL: --must-stop: the program never printed '
+                  + ' or '.join(repr(t) for t in opt['stop-on']) + ' (--seconds for more)')
+            ok = False
+    if r.returncode not in (0, 3, 4):
         print('run816: emu816 failed:', open(os.path.join(out, 'emu.err')).read()[-500:])
         ok = False
     for ln in open(os.path.join(out, 'emu.err'), encoding='latin-1').read().splitlines():
@@ -329,7 +379,6 @@ def main():
         if '[kill]' in ln:
             print(f'run816: CRASH: {ln.strip()}  (ABI.md, "Faults"; docs/reference/program.md)')
             ok = False
-    err = open(os.path.join(out, 'emu.err'), encoding='latin-1').read()
     if 'emu816: blitter:' in err:
         print('run816: emu816 reported a blitter rule broken (see emu.err)')
         ok = False

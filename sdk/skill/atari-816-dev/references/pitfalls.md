@@ -13,7 +13,7 @@ agents' own. "Fixed" means the SDK changed since; the lesson still holds.
 
 | Symptom | Cause | Fix | Cost |
 | --- | --- | --- | --- |
-| Link fails "does not fit in its code bank (the main bank)" even with `--code large` (Digger by 8.5 KB; Xargon by 1.8 KB) | code moves to other banks, but constants, data, bss, heap, stack and all assembly stay in the main bank | big tables `__far`, big buffers from `hz_far_alloc`, no `sscanf` (it pulled 7.6 KB of scanf + float), `--stack 4096`; read `hcc --map` | 30 min each |
+| Link fails "does not fit in its code bank (the main bank)" even with `--code large` (Digger by 8.5 KB; Xargon by 1.8 KB) | code moves to other banks, but constants, data, bss, heap, stack and assembly stay in the main bank | big tables `__far`, big buffers from `hz_far_alloc`, no `sscanf` (it pulled 7.6 KB of scanf + float), `--stack 4096`, `.s` functions opened with `FUNC` (movable); read `hcc --map` | 30 min each |
 | Every `malloc` after start-up fails; text drawn from address 0 (Xargon) | one early `malloc` of 900 names (8.5 KB) took the whole heap | do not keep what the port does not need; check every `malloc` for NULL; `hz_heap_free()` | in the 30 min above |
 | The second `fopen` fails, ENOMEM (Digger) | `--heap 1024`: each `fopen` wanted 1 KB of heap | `--heap 4096` (default). Fixed: `fopen` now falls back to 128 bytes or none | 10 min |
 | Sound effects do not load; a 32 KB read "fails" (Xargon) | `hz_read` returns an `int`: 32,768 bytes read is -32,768 | read in 16 KB pieces, or compare with `(int)len` | 20 min, still open |
@@ -37,6 +37,8 @@ agents' own. "Fixed" means the SDK changed since; the lesson still holds.
 | No keys, music stops when frames run late (Xargon) | a late game never waits, never calls `hg_frame` | `hg_poll()` once a game frame | 20 min |
 | A mouse-driven full-screen game's pointer does not follow the mouse (X-COM) | `hg_screen` opened its window without `WF_HOVER`, and Horizon 0.30's kernel loses the window in full-screen motion events (`k2_fsmove`: none at all, a button held or not) | fixed in hgame: `WF_HOVER`, and on a kernel that sends no motion the pointer is read (`ws_mouse`) at each `hg_frame` / `hg_poll`: `hg_mouse_x/y` follow the mouse always (`gt_poll`) | in the port |
 | `hg_scroll` / `hg_split` never reach the screen in a DOS port (X-COM) | it keeps its own time and calls only `hg_poll`; the view was sent only at `hg_end` | fixed: `hg_poll` sends a changed view outside a frame; `hg_view_send()` sends it at once | in the port |
+| Every alien path different from DOS's (X-COM) | `cost + 4 * TILES` with `TILES` 10,000: 40,000 is -25,536 in 16-bit `int`; DOS's far pointer wrapped the offset back to 40,000, cc816's 24-bit one went 25 KB back and `memset` wrote over other tables. The port builds with `-w`, which hid `-Woverflow` | `-w` no longer silences `-Woverflow`; write `4u * T`, or build with `-ffar-wrap` (far pointer arithmetic on the offset alone, as DOS) | found by comparing with the PC build |
+| Different damage than DOS (X-COM) | `hurt(u, roll_damage(), rl_side())`, both drawing random numbers: cc816 evaluates arguments left to right, Watcom right to left | `-fargs-right-to-left`; `-Wsequence-args` lists such calls | found by comparing with the PC build |
 | `read(fd, p, 40000u)` "fails" (X-COM) | `ssize_t` is a 16-bit `int`: 40,000 looks negative | fixed: one `read`/`write` moves at most 32,767 bytes and returns that (a short count); loop until done (`tests/libc/bigio.c`) | in the port |
 | Music clips (1-2 % of samples) | the board mixes the OPL2 3x louder than a Lau voice | convert songs 13.5 dB quieter | 20 min |
 | No sound in the emulator from POKEY | emu816 only logs POKEY | `--log-sound` checks; listen on the board | - |
@@ -108,7 +110,9 @@ agents' own. "Fixed" means the SDK changed since; the lesson still holds.
 - **Inline assembly** is ca65 text; C variables as `%[name]`; scratch is `__rg+0` ..
   `__rg+47` (no cc65 `sp`/`ptr1`/`tmp1`). With `--code large` a function with inline asm
   stays in the main bank, and `.addr _func` in a `.s` file for a function in another bank
-  stops the build. `__CC816_LARGE__` tells the models apart.
+  stops the build. A `.s` function opened with `FUNC` moves like C: it leaves with
+  `CALL`/`TAILJ` only, never a bare `jsl`/`jsr` (references/c-language.md, "Movable
+  assembly"). `__CC816_LARGE__` tells the models apart.
 - **No code runs in interrupts.** Fine timing comes from the music timer
   (`hz_sample_timer`), frames from `hz_frame()`/`hg_frame()`, `hz_uptime()` in 10 ms.
 - **A file misbehaves after compiling**: try `-O1`, `-O0`, and the other code model; a

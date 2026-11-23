@@ -8,8 +8,9 @@ Structures are packed (no padding), as the SDK's parameter blocks need.
 import re
 
 # the data model of the compile (driver.compile_c sets it): far_data, the far data model
-# (hcc --data far: plain data pointers are far)
-MODEL = {'far_data': False}
+# (hcc --data far: plain data pointers are far); far_wrap, -ffar-wrap (far pointer
+# arithmetic on the offset alone); args_rtl, -fargs-right-to-left
+MODEL = {'far_data': False, 'far_wrap': False, 'args_rtl': False}
 
 
 def where(coord):

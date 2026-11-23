@@ -46,6 +46,9 @@ emu816 [--sd DIR] [--load FILE@ADDR]... [--max-seconds N] [--trace]
 | `--log-sound` | Print every accepted write to the sound page ($00:DB00-$DB13; from REV $0C $DB00-$DB0F) on stderr |
 | `--log-sound-us` | The same as `--log-sound`, each line with the emulated time in microseconds: `sound 1234567 $DB01 = $AA` (ports/digger/tests/sndtime.py measures a game's sound steps from it) |
 | `--shot-on TEXT`, `--shot-on-prefix PATH` | A screenshot (PATH1.ppm, PATH2.ppm, ...) each time the program prints a console line holding TEXT, taken two vertical blanks later: pictures at points of the program's own progress, whatever its timing (the program shows what it wants seen, prints the line, holds the picture a few frames; `run816.py --shot-on`, ports/digger/tests/frames.sh) |
+| `--stop-on TEXT` | End the run when the program prints a console line holding TEXT (repeatable: any of the texts). `--max-seconds` stays the upper limit. Exit code 4, and on stderr `emu816: stopped on "TEXT" at 12.345678 s` (the time of the line's end, since power-on). At the end, as at the limit: stdout flushed, the `--wav` file closed, the `--prof` file written, `--dump-ram` written, the `--shot` files without a time written; a `--shot` whose `--shot-at` lies after the stop is not taken. Files the program still has open on the card keep what was written so far, but not their date: let the program print the line after it has closed its files, or give a delay. `run816.py --stop-on` |
+| `--stop-on-delay MS` | End the run MS ms of emulated time after the `--stop-on` line instead of at once (default 0) |
+| `--console-times` | Each console line on stdout starts with the emulated time of its first byte since power-on, `[  12.345678] ` (seconds, 6 decimals). This is the base of `--log-lau-us`, `--log-opl-us`, `--log-sound-us` and `--watch`: their microseconds are these digits without the point (`[  12.345678]` = `lau 12345678 ...`). A line starts after LF, CR or FF outside an escape sequence; empty lines get no time |
 | `--log-lau` | Print every write to Lau, the sample player ($00:DB20-$DBFF, REV $0A), on stderr as `lau $DBxx = $yy` (Horizon's sample-call test compares it) |
 | `--log-lau-us` | The same as `--log-lau`, each line with the emulated time in microseconds: `lau 1234567 $DB89 = $12` (the music tests rebuild Lau's voice state at every tick from it) |
 | `--kbd-release MS` | Release the keys held when no key has changed for MS ms. The I/O processor's firmware did so after 1,000 ms until 2026-11: a USB keyboard (the CH9350 or the Pico/TinyUSB bridge) reports only when its keys change, so on the board a key held longer than a second went up by itself. With this the emulator shows that board's behaviour (`--kbd-release 1000`); without it, the firmware's of now |
@@ -70,8 +73,8 @@ emu816 [--sd DIR] [--load FILE@ADDR]... [--max-seconds N] [--trace]
 | `--classic-print FILE@SECONDS` | (Horizon 0.23) At that emulated time the classic Atari prints FILE (ATASCII bytes as P: sends them, e.g. `HELLO` $9B): a print job `/Printouts/YYYY-MM-DD HH.MM.SS Atari.txt`, converted by the firmware's own `core/firmware/prnconv.c` (in records of 40 bytes, a record ending at its EOL), written at once under its `.` name and finished 3 s later (the firmware ends a job after 3 s without data); stderr: `emu816: P: job /Printouts/...`. Repeatable (8 at most) |
 | `--boot-cart PATH` | A cartridge (a FAT path on `--sd`) that the I/O processor loaded by itself at power-on (`boot=ash` in /atari.ini): CLASSIC\_STATE ($1E) reports it, from power-on and after a full restart |
 
-Exit codes: 0 when the program executes STP, 3 at the `--max-seconds` limit, 1 on a usage
-or file error. Output written to DBG_OUT ($00:DEF0) goes to stdout.
+Exit codes: 0 when the program executes STP, 3 at the `--max-seconds` limit, 4 at a
+`--stop-on` line (after its delay), 1 on a usage or file error. Output written to DBG_OUT ($00:DEF0) goes to stdout.
 
 ### Boot
 

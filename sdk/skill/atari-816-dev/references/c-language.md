@@ -82,8 +82,9 @@ Use `--code large` when hcc says "program too big by N bytes: build with --code 
 (code is the big part). It does **not** help when data is too big: the main bank must
 still hold constants + data + bss + 4 KB heap (`--heap N`) + the software stack. Nothing
 in the C changes. All objects and libraries of a program must be built for one model
-(hcc refuses a mix; it builds its libraries for both). `.s` files and functions with
-inline asm always stay in the main bank. One function must fit in 65,535 bytes.
+(hcc refuses a mix; it builds its libraries for both). Functions with inline asm and
+`.s` code stay in the main bank, except `.s` functions opened with `FUNC` ("Movable
+assembly", below). One function must fit in 65,535 bytes.
 
 ## Far data
 
@@ -315,10 +316,34 @@ The convention:
 - See the compiler's own code: `hcc -S file.c` writes `file.s` next to it.
 - Syscalls, blocks and assembly macros: references/abi-cheatsheet.md.
 
+## Movable assembly (large model)
+
+`.s` code in `.segment "CODE"` stays in the main bank. Open a function with `FUNC _name`
+(model.inc) instead and hcc places it as a C function: in the main bank while there is
+room, else in another bank (segment `F_name`; in the small model `FUNC` is `CODE`, so one
+file serves both). Tested: `sdk/c/examples/asmfar` (`make -C sdk/c test`: small, and large
+with every function in other banks). The rules (docs/c/reference.md, "Movable assembly"):
+
+- PBR is the function's bank, DBR the main bank: `lda _global` works; a table the code
+  reads with `lda` goes in `RODATA`, not in the code segment.
+- Leave the function only with `CALL _name` / `TAILJ _name` (they record the JSL's / JML's
+  bank byte for hcc). A bare `jsl _name` is refused ("a bank byte not recorded in XREL").
+- `jsr` / `jmp` / `jmp (tab,x)` only to labels of the same `FUNC` (jump table entries:
+  `.addr label` or `.word .loword(label)`); to `CODE` or another `FUNC` they are refused.
+- Any other bank byte of the program: `XBANK n` after it (`lda #^name`: `XBANK 2`; `lda
+  f:name`, `.faraddr`: `XBANK 1`). Never for a fixed bank. The main bank's number is
+  also `__cbank`.
+- A function's 16-bit address: `FNADDR _name`, then `__T_name` (both models).
+- Entry points the system calls with JSR or by a vector stay in `CODE`.
+- Test with `hcc --code large --main-room 0`: an unrecorded bank byte naming the main
+  bank is not seen while the function is in the main bank.
+
 ## Warnings worth heeding
 
 On by default unless marked -Wall; `-Wno-NAME` turns one off, `-Werror` makes them errors
-(`[-Werror=overflow]`), `-w` silences all. From one `hcc -Wall` run:
+(`[-Werror=overflow]`), `-w` silences all but `-Woverflow` (16-bit `int` changing a value
+is never noise; `-w -Wno-overflow` silences it too). `-Wsequence-args` is only on when
+named (not in -Wall). From one `hcc -Wall` run:
 
 ```
 warn.c:5:13: warning: the conversion to int changes the value 40000 to -25536 (int is 16 bits in cc816: use long) [-Woverflow]
@@ -332,7 +357,8 @@ warn.c:10:9: warning: unused variable 'unused' [-Wunused-variable]
 
 | Warning | On this machine it usually means |
 | --- | --- |
-| `overflow` | a real bug: 16-bit `int` (`320 * 200`, `int x = 40000`): use `long` / `320L` |
+| `overflow` | a real bug: 16-bit `int` (`320 * 200`, `int x = 40000`): use `long` / `320L`. Added to a far pointer (`p + 4 * T`, 40,000 as -25,536) it moves the pointer 25 KB back, where DOS wrapped the offset: `4u * T`, or `-ffar-wrap` |
+| `sequence-args` (named) | two arguments of one call call functions: their side effects come in cc816's order (left to right; DOS's compilers right to left: `-fargs-right-to-left`) |
 | `type-limits` | a real bug: `char c = getchar(); c != EOF` never ends; `x > 40000` with an int |
 | `format` | a real bug: `%d` with a `long` prints garbage and shifts later arguments; use `%ld`, `%lu` |
 | `far-pointer`, `far-cast` (-Wall) | a real bug: the bank is dropped, the pointer now points into the main bank |
@@ -355,6 +381,8 @@ Build a port once with `-Wall` and read every warning.
 | `-O0`, `-O1`, `-O2` | optimisation; `-O2` default (`-O3`, `-Os` = `-O2`); `-O1` no loop optimisations |
 | `-w`, `-Wall`, `-Werror`, `-Wno-NAME`, `-WNAME` | warnings |
 | `-fsigned-char` | plain `char` signed |
+| `-fargs-right-to-left` | a call's arguments evaluated right to left (DOS's compilers' order; default left to right); the stack layout is the same |
+| `-ffar-wrap` | far pointer arithmetic on the offset alone, the bank never changes (DOS's far pointers; reference.md "The far data model") |
 | `--code small\|large` | the code model (default `$HZ_CODE`, else small) |
 | `--data near\|far` | the data model (default `$HZ_DATA`, else near); far needs `--code large`: plain data pointers 32 bits (DOS's large model, below) |
 | `-fdos-keywords` | `far`, `near`, `huge` are keywords (`__far`, `__near`, `__far`) |

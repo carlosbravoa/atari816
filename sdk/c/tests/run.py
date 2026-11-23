@@ -45,6 +45,11 @@ Tests (in tests/):
            its bank, an undefined function, options it does not have (no emulator)
   bigprog  the large code model on its own (tests/bigprog): a program with 180 KB of
            code, the messages, the failed starts
+  asmfar   movable assembly (examples/asmfar: rt/model.inc's FUNC): small, and large with
+           every function in other banks (--main-room 0 --spread 3: the assembly calls C
+           and C the assembly across banks); hand-written assembly that names a bank
+           without recording it, JSR / JMP out of its segment, lda #label: refused, in
+           words
   ui       the controls library from C (tests/ui/uitest.c, uitest.script; desktop mode):
            every kind of argument and result of the bindings, the callbacks, the controls,
            dialogs and events; pixel checks of its screenshots; the block's size
@@ -697,6 +702,67 @@ def bigprog(only, horizon):
            else (out2 + out4).strip()[-300:])
 
 
+def asmfar(only, horizon):
+    """movable assembly (examples/asmfar: asmfar.c and asmfar.s, rt/model.inc's FUNC, CALL,
+    XBANK, FNADDR) in the small code model and in the large one with every function in
+    other banks, three of them in turn (the assembly calls C, C the assembly, through
+    pointers too, across banks); and hcc's refusals of movable assembly that names a bank
+    without recording it, jumps out of its segment with JSR or JMP, or takes a label's
+    address as an immediate (lda #label: ld65's range error, with the advice)"""
+    if only and "asmfar" not in only:
+        return
+    b = os.path.join(SDKC, "build", "tests", "asmfar")
+    os.makedirs(b, exist_ok=True)
+    ex = os.path.join(SDKC, "examples", "asmfar")
+    srcs = [os.path.join(ex, "asmfar.c"), os.path.join(ex, "asmfar.s")]
+    for model, extra in (("small", []), ("large", ["--spread", "3"])):
+        prg = os.path.join(b, f"ASMFAR{model[0].upper()}.PRG")
+        rc, out = hcc(prg, srcs, model, ["--map"] + extra)
+        if rc:
+            report("asmfar", model, False, "build: " + out.strip()[-300:])
+            continue
+        rc, con, _ = emu(prg, os.path.join(b, "run-" + model), horizon, seconds=3)
+        m = re.search(r"asm_where in bank \$([0-9A-F]{2}), the main bank \$([0-9A-F]{2})",
+                      con)
+        # (small: the code bank, the main bank; large: another bank)
+        bank = int(m.group(1), 16) if m else None
+        where_ok = bank is not None and (bank == int(m.group(2), 16)) == (model == "small") \
+            and (model == "small" or "in 3 other bank(s)" in out)
+        ok = "ASMFAR PASS" in con and "[kill]" not in con and where_ok
+        report("asmfar", model, ok, grab(con, r"asmfar: \d+ checks, \d+ failures") +
+               (", " + m.group(0) if m else "") +
+               (", " + grab(out, r"[\d,]+ in \d+ other bank\(s\)") if model == "large"
+                else "") +
+               ("" if ok else " | " + " | ".join(l for l in con.splitlines() if "FAIL" in l)
+                + " " + out.strip()[-200:]))
+    # the refusals (--main-room 0 --spread 2: the functions in two other banks)
+    W = lambda n, t: (open(os.path.join(b, n), "w").write(t), os.path.join(b, n))[1]  # noqa: E731
+    cf = W("bad.c", "int twice(int x) { return 2 * x; }\nint bad(void);\n"
+                    "int main(void) { return bad() + twice(1); }\n")
+    head = ('\t.p816\n\t.a16\n\t.i16\n\t.include "model.inc"\n\t.import _twice\n')
+    cases = [
+        ("unrecorded", "\tFUNC _bad\n\tjsl _twice\n\tRET\n",
+         ["not recorded in XREL", "hand-written assembly naming a bank in a movable function",
+          "F_bad", "XBANK"]),
+        ("jsrmain", "\tFUNC _bad\n\tjsr helper\n\tRET\n\t.segment \"CODE\"\nhelper:\trts\n",
+         ["a JSR to $", "an address in the main bank", "F_bad", "CALL (JSL)"]),
+        ("jmpother", "\tFUNC _bad\n\tjmp _bad2\n\tFUNC _bad2\n\tRET\n",
+         ["a JMP to $", "outside its segment F_bad", "TAILJ"]),
+        ("addr", "\tFUNC _bad\n\tlda #@r\n@r:\tRET\n", ["Range error", ".loword(label)"]),
+    ]
+    bad = []
+    for tag, body, want in cases:
+        sf = W(f"bad_{tag}.s", head + body)
+        rc, out = sh([sys.executable, HCC, "--code", "large", "--main-room", "0", "--spread",
+                      "2", "-o", os.path.join(b, "BAD.PRG"), cf, sf])
+        miss = [w for w in want if w not in out]
+        if rc == 0 or miss:
+            bad.append(f"{tag}: " + (f"missing {miss}: " if miss else "built: ") +
+                       out.strip()[-200:])
+    report("asmfar", "refused", not bad, f"{len(cases)} kinds of wrong movable assembly "
+           "refused, in words" if not bad else " | ".join(bad)[:600])
+
+
 # pixels of uitest's screenshots (1280 x 720): (shot, x, y, RGB, what)
 UI_PIXELS = [
     (1, 112, 181, (200, 52, 44), "row 0's icon, drawn by the row function (C_RED)"),
@@ -1068,6 +1134,8 @@ def main():
     sh([sys.executable, HCC, "--build-lib"] + [LIBNAME[m] for m in models])
     if "large" in models:
         bigprog(only, horizon)
+    if "large" in models:
+        asmfar(only, horizon)
     if "largefar" in models:
         farprog(only, horizon)
     import concurrent.futures as cf

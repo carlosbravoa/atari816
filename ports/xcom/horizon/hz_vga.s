@@ -25,9 +25,8 @@ col     = __rg+12
 right   = __rg+14
 bpr     = __rg+16
 
-        .segment "CODE"
 
-_hz_zoom_row:
+        FUNC    _hz_zoom_row
         lda     ARGS,s
         sta     PD
         lda     ARGS+2,s
@@ -75,7 +74,7 @@ _hz_zoom_row:
         bne     @z2
         RET
 
-_hz_glyph:
+        FUNC    _hz_glyph
         lda     ARGS,s
         sta     PD
         lda     ARGS+2,s
@@ -138,8 +137,7 @@ _hz_glyph:
 PT      = __rg+18
         .segment "BSS"
 stab:   .res 256
-        .segment "CODE"
-_hz_shade_rect:
+        FUNC    _hz_shade_rect
         lda     ARGS,s
         sta     PD
         lda     ARGS+2,s

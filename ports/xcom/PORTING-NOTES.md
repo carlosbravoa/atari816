@@ -400,14 +400,36 @@ What it says:
 | 16 | console.txt and `--log-lau` have no emulated-time stamps: a test cannot line up the program's phases (an alien turn) with `--log-opl-us` | tool wish | |
 | 17 | The Desktop leaves 3,136 KB free of 8 MB at a program's start (emu816, Files open): an app's `mem=` must fit that | note | `--needs mem=4096K` refused: "XCOM needs 4096 KB of free memory (3136 KB free)" |
 
-Items 9-11 are fixed in the SDK (not yet committed when this round was made; the port
-keeps its workarounds until it is): `hg_view_send()` and `hg_poll()` sending a changed
-view, full-screen pointer motion without a button in `hg_mouse_x/y`, and `read()`/`write()`
-moving at most 32,767 bytes a call. The port's switch, after the commit: in
-`horizon/hz_plat.c` replace `send_view()` (and `hg__scr`/`hg__scr_dirty`) by
-`hg_view_send()`; in `plat_poll` use `hg_mouse_x/y/b` instead of `hz_ws_mouse` (keep the
-port's own press counting; not `hg_mouse_clicked()`). The reads already loop
-(`plat/xdos.c read_all`/`write_all`: pieces of 32,767 bytes until n, the end or an error).
+**Where items 9-17 stand (24 November 2026).**
+
+- 9-11 are in the SDK and the port uses them: `horizon/hz_plat.c` sends the view with
+  `hg_view_send()` (no `hg__scr`, no `hz_fs_scroll` of its own) and reads the pointer from
+  `hg_mouse_x/y/b` (hgame's 320 x 180 coordinates, halved from the kernel's 640 x 360 as the
+  port's own `ws_mouse` reading was: the pan's maths and the clicks are unchanged; the
+  presses are still counted by the port at each poll, not by `hg_mouse_clicked()`). The
+  reads loop as before (`read_all`/`write_all`).
+- 12: `-Woverflow` is no longer silenced by `-w` (the build now prints `geo.c:180`'s
+  `WMAP_W * WMAP_H`, 51,200 into an `unsigned`: harmless); cc816 has `-ffar-wrap` (far
+  pointer arithmetic on the offset alone, DOS's), not used by the port, whose upstream fix
+  (`4u * TILES`, src-0005) stays (reference.md, "The far data model", "Pointers").
+- 13: cc816 has `-fargs-right-to-left` (DOS's order) and `-Wsequence-args`, which names 44
+  calls in the port's sources (most of them `log_printf`/`sprintf` of getters; battle.c's
+  `hurt` is the one known to matter, fixed by src-0003's `HURT`). The port keeps
+  left-to-right: its tests compare with the host build, whose order is gcc's.
+- 14: no change (Horizon: a bank shared by two tasks; noted for a later revision).
+- 15: run816 `--stop-on TEXT` (with `--stop-on-delay MS`, `--must-stop`): every emulator
+  run of `tests/check.sh`, `tests/sound.sh` and `tests/speed.sh` ends 1 s after the
+  program's last line ("xcom: files: at most ...", printed at its exit after the LOG and
+  the saves are closed) instead of at its `--seconds`.
+- 16: run816 `--console-times` (each console line with the emulated time, the same base as
+  `--log-opl-us`) and `--log-lau-us`.
+- 17: measured: the Desktop with Files open leaves 62 banks (3,968 KB) to a program at its
+  start; the "3,136 KB free" of the needs check is after XCOM.PRG's own 13 banks (832 KB)
+  were taken by its loader (the check runs as a constructor, after `__hz_xload`). So
+  `mem=` counts free memory beside the program's own image.
+- The speed's assembly (`horizon/hz_*.s`) is movable now (`FUNC`, sdk/c/rt/model.inc):
+  hcc places it in a code bank like C (reference.md, "Movable assembly"): 3,824 bytes out
+  of the main bank's fixed part ("Sizes", below).
 
 ## 4b. Stage 3's gate: the far data model (done, 23 November 2026)
 
@@ -866,6 +888,13 @@ tests' battles, + MUSD.PRG's 3. The port's own code: about 10,300 lines of C and
 with 4 assembly files, host/, mus/, compat/) besides the tests, 5 upstream patches of 369 added
 lines.
 
+**Since the SDK's movable assembly (24 November 2026):** the four `horizon/hz_*.s` files
+open each exported function with `FUNC` (sdk/c/rt/model.inc), so hcc places them in a code
+bank like C. XCOM.PRG 875,022 bytes; the main bank without movable code 50,597 bytes (code
+that must stay 9,299, constants 3,881, data 374, bss 37,043) + heap 2 KB + stack 8 KB =
+60,837 of 65,264: **4,427 bytes left** (3,850 more than before; hcc fills the room with
+4,387 bytes of movable C until a change needs it). `make test`: 91 PASS lines.
+
 ## 5. The plan
 
 Principle: **upstream's code runs unchanged** on a model of the machine it was written for;
@@ -913,9 +942,8 @@ Risks:
 | the A* goal search (C reference and `hz_path.s`), as DOS's pathasm.asm | the alien turn: the next big win (an abductor's first turn 20 s now); new references | 1 day |
 | the voxel line and the sight fan in assembly | 360 lines 3.3 s, 8 aims 1.7 s: the shots and the aliens' aiming | 1 day |
 | the start-up's CPU part (3 s: the palette and picture loaders read through stdio byte by byte) | the start menu sooner | 0.5 day |
-| the main bank (600 bytes left): the speed's `.s` code to a far code segment (SDK wish), `hgame`'s queues | room for the next changes | with the SDK |
+| the main bank: `hgame`'s queues (the `.s` code moved: done, section 4) | room for the next changes | with the SDK |
 | per-cell night lights (OpenXcom's lighting, a table per level at the present) | flares and fires lighting their area | 1 day |
-| switch to the SDK's fixes of needs 9-11 (section 4) once committed | less port code | 15 min |
 | the FLI's runs in assembly | the intro's explosion scene (1.1 s behind at worst) | 0.5 day |
 | report upstream: faults 1, 2, 3, 5, 6, 8 above, the GOG data, voxcheck.py | | |
 

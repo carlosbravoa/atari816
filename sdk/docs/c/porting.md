@@ -83,8 +83,9 @@ hcc: undefined: fire_laser (used in game.c)
   file first, so all of a file's errors come in one run. Fix the first one first: a
   later error can come from an earlier one. After a syntax error cc816 stops at once.
 - A **warning** does not stop the build, but it is usually a real fault in ported code.
-  The name in brackets turns it off (`-Wno-format`); `-w` turns all of them off,
-  `-Werror` makes them errors. reference.md ("Compiler notes", "Errors and warnings")
+  The name in brackets turns it off (`-Wno-format`); `-w` turns all of them off but
+  `-Woverflow` (a constant that 16-bit `int` changes: a wrong value here, never noise;
+  `-Wno-overflow` turns it off too), `-Werror` makes them errors. reference.md ("Compiler notes", "Errors and warnings")
   lists them.
 - In a header, the place is the header's file and line. A message about a macro is at
   the line where the macro is used.
@@ -121,7 +122,8 @@ Makefile made with c.mk: `HZ_CODE := large` (or
 `make HZ_CODE=large`). The whole of it is in reference.md, "The two code models".
 
 **What still must fit in the main bank** (the PRG's bank): the startup, the assembly
-(the C library's runtime, your `.s` files) and the functions with inline assembly, the
+(the C library's runtime, your `.s` files except their `FUNC` functions: reference.md,
+"Movable assembly") and the functions with inline assembly, the
 constants (string literals and `const` tables), the initialised data, the bss, the heap
 and the software stack. C functions move to other banks: yours and the libraries' (the C
 library, hgame, the controls library's C part). If hcc then says "does not fit in its code
@@ -194,7 +196,17 @@ model", has the whole of it. The steps:
   16 bits (as on DOS), structures with pointer members are 2 bytes bigger a pointer
   (structures read from DOS files with far pointers in them keep their layout),
   `intptr_t` is a `long`. Pointer arithmetic carries into the bank; DOS's wrapped inside
-  the segment, which only matters for code that relies on the wrap.
+  the segment, which matters for code that relies on the wrap, and for **an `int` that
+  overflowed** added to a pointer: `p + 4 * T` with `T` 10,000 reached offset 40,000 on
+  DOS and goes 25,536 bytes back here (X-COM's path search: every alien path different).
+  `-Woverflow` (on even with `-w`) finds the constant cases; **`-ffar-wrap`** makes every
+  far pointer's arithmetic DOS's, on the offset alone, for the variable ones too
+  (reference.md, "The far data model", "Pointers": what it costs at a bank's ends).
+- [ ] **The order of a call's arguments**: DOS's compilers evaluate them right to left,
+  cc816 left to right. `hurt(roll_damage(), rl_side())`, both drawing random numbers,
+  drew them in the other order (X-COM: different damage than DOS). `-Wsequence-args`
+  lists every call with two arguments that call functions; **`-fargs-right-to-left`**
+  gives them DOS's order (it costs nothing: only the order of evaluation changes).
 - [ ] **Speed**: a far pointer is 4 bytes in every register, argument and structure; loops
   through far pointers cost about 8-20 % more than through near ones, a call with
   pointer arguments about twice as much (reference.md, "What it costs"). Hot loops can
@@ -288,7 +300,8 @@ scrolling in 256 colours with FM music; its `PORTING-NOTES.md` has the same list
   (`%lu` for unsigned). Digger had four, three found by the warning.
 - [ ] **Counters that pass 32,767**: frame counts, scores, times in milliseconds, file
   sizes. Make them `long`. `-Wtype-limits` warns about `x > 40000` with an `int` x.
-- [ ] **Constants**: `int x = 40000;` and `320 * 200` overflow (`-Woverflow`).
+- [ ] **Constants**: `int x = 40000;` and `320 * 200` overflow (`-Woverflow`; `-w`
+  leaves it on: build a port with `-w` if you must, but read these).
 - [ ] **Products of two ints**: `a * b` is 16 bits. Write `(long)a * b`.
 - [ ] **Sizes**: `size_t` is 16 bits. One object, one `malloc`, one `fread` is at most
   65,535 bytes.
@@ -298,8 +311,9 @@ scrolling in 256 colours with FM music; its `PORTING-NOTES.md` has the same list
 ### 4. Memory: what goes where
 
 With `--code large` the code goes to other banks: the program's functions and the
-libraries' (the C library's, hgame's). What stays in the **main bank** (64 KB with
-everything else) is the startup and the assembly, the constants (string literals and
+libraries' (the C library's, hgame's), and assembly functions opened with `FUNC`
+(reference.md, "Movable assembly"). What stays in the **main bank** (64 KB with
+everything else) is the startup and the other assembly, the constants (string literals and
 `const` tables), the initialised data, the bss, the heap and the software stack. That is
 the real limit of a big port. `hcc --map` prints its parts:
 
@@ -350,7 +364,9 @@ calls the same functions as before.
 - [ ] **Do not squash a 400-row picture into 360 rows.** The PC's pixels were not square
   either; show it at its size and scroll (`hg_split`).
 - [ ] **Hot drawing loops in assembly.** Digger's six blit routines are short ca65 loops
-  (`hz_blit.s`); a copy of whole rows uses MVN.
+  (`hz_blit.s`); a copy of whole rows uses MVN. With `--code large`, open each routine
+  with `FUNC` (rt/model.inc) so it can leave the main bank (reference.md, "Movable
+  assembly").
 - [ ] **Or let the blitter draw.** Every CPU write to the framebuffer waits for the SDRAM
   (about 12 cycles a byte even with MVN): a 320 x 200 game that redraws 50 tiles and 16
   sprites a frame spends 15-20 ms on it. Xargon (`ports/xargon/horizon/hz_vga.c`) keeps
@@ -393,6 +409,12 @@ calls the same functions as before.
   stops there and prints a line; `run816.py --shot-on TEXT` takes the picture then:
   `ports/digger/tests/frames.sh`). Look at new pictures before you accept them
   (`make refs`).
+- [ ] **End each run at the program's last line.** The emulator otherwise runs to
+  `--seconds`, also after the program has ended. Print a line when the test's work is
+  done and its files are closed, and give it to `run816.py --stop-on TEXT --must-stop`:
+  the run ends there, and fails if the line never comes. `--console-times` puts the
+  emulated time before each console line (seconds since power-on, the base of
+  `--log-lau-us` and `--log-opl-us`).
 - [ ] **Check the files it writes**: the high-score file on the emulated card
   (`build/test/card/`), a saved recording played back to the same score.
 - [ ] **Sound**: POKEY is silent in the emulator. Check its register writes

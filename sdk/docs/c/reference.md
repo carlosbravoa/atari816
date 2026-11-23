@@ -94,7 +94,8 @@ linked for the large one").
 
 **The main bank** (the .PRG, loaded by Horizon as any program) holds the startup, the
 assembly (the C library's runtime: arithmetic, memory and string routines, floating point;
-the syscall stubs; hgame's and the controls library's assembly; your `.s` files), the C
+the syscall stubs; hgame's and the controls library's assembly; your `.s` files, except
+their functions opened with `FUNC`: "Movable assembly", below), the C
 functions that have inline assembly or are `naked`, the constructors and destructors
 (`_INIT_n_name`, `_EXIT_n_name`), the loader of the other banks (`xload.c`, with
 `misc.c`: they run before the other banks are there), the thunks, the constants (string
@@ -103,7 +104,8 @@ heap and the software stack. These are limited to the main bank, as in the small
 `__far` objects are not: they go to banks of their own ("Far objects", below).
 
 **The other C functions can move**: the program's and the libraries' alike (the C
-library's, hgame's, the controls library's C part). cc816 puts each one in a segment of
+library's, hgame's, the controls library's C part), and assembly functions opened with
+`FUNC` (rt/model.inc). cc816 puts each one in a segment of
 its own (in a file of more than 100 of them, runs of consecutive functions share one:
 ca65 and ar65 take only so many segments a module), and hcc places them after it has
 linked the rest:
@@ -162,7 +164,7 @@ Test: `sdk/c/cc816/tests/regress/r028_far_objects.c`.
 | --- | --- |
 | Code | the main bank's room, plus 64 banks of 64 KB (about 4 MB); an 8 MB machine has about 80 free banks when nothing else runs |
 | One function | 65,535 bytes |
-| The main bank | startup + the libraries' assembly + `.s` files + functions with inline assembly + constructors + thunks (4 bytes for each function in another bank whose address is used) + constants + data + bss + 4 KB of heap (`--heap N`) + the software stack (`--stack N`) must fit in 65,264 bytes |
+| The main bank | startup + the libraries' assembly + `.s` files (but not their `FUNC` functions) + functions with inline assembly + constructors + thunks (4 bytes for each function in another bank whose address is used) + constants + data + bss + 4 KB of heap (`--heap N`) + the software stack (`--stack N`) must fit in 65,264 bytes |
 | Far data | `__far` objects: up to 64 banks together with the code banks |
 | The .PRG file | its o65 part (the main bank and its relocations) below 64 KB: Horizon's loader reads only the first 65,535 bytes of a larger file. The whole file has no limit |
 | Horizon | 0.28 or later when code went to other banks (it loads a file of 64 KB or more, and tells the program its own path) |
@@ -299,17 +301,49 @@ direct-page register: the 65816's own long indirect addressing). The rules:
 
 - **An object never crosses a bank** (a `malloc` block, a far object, a frame: none does),
   as a DOS object never crosses a 64 KB segment. An object is at most 65,535 bytes.
-- **Arithmetic** (`p + i`, `p++`, `p - q`): `p + i` adds to the whole 24-bit address (a
-  carry goes into the bank, as `__far` pointers always did). For every pointer that stays
-  inside its object, and one past its end or one before its start (`p - 1` in a loop
-  that walks down to the start), that is the same as DOS's offset-only arithmetic, and it
-  keeps a pointer one past an object that ends at a bank's last byte greater than the
-  object's start (DOS's would wrap to offset 0). An element `p[i]` (an access, not a
-  pointer value) is reached as DOS reaches it: an unsigned `i` in Y (`[p],y`), a signed
-  one added to the offset alone, with its constant part (`p[d + 1]`: the element is in
-  `p`'s object, so in its bank: cheaper than widening `i` to 32 bits). `p - q` is the difference of the offsets (16 bits,
-  `ptrdiff_t`). Not supported: arithmetic that relies on the offset wrapping inside its
-  segment (DOS's `p + 0xFFFF` as `p - 1`).
+- **Arithmetic** (`p + i`, `p++`, `p - q`). Two rules, by the default and by an option:
+  - **The default: a pointer value is its 24-bit address.** `p + n`, `p - n`, `p++`,
+    `p += n` and `&p[n]` add to the whole address: a carry goes into the bank, as
+    `__far` pointers always did, so a pointer one past an object that ends at a bank's
+    last byte is the next bank's offset 0 (greater than the object's start) and one
+    before an object at offset 0 is the bank before (smaller). An `int` is sign-extended
+    first, an `unsigned` zero-extended, a `long` added whole. For every pointer that stays
+    inside its object, one past its end or one before its start, this is the same as
+    DOS's offset-only arithmetic. **An element** `p[i]` (an access, not a pointer value)
+    is reached as DOS reaches it: an unsigned `i` in Y (`[p],y`), a signed one added to
+    the offset alone, with its constant part (`p[d + 1]`; the element is in `p`'s object,
+    so in its bank: cheaper than widening `i` to 32 bits). `p - q` is the difference of
+    the offsets (16 bits, `ptrdiff_t`). **Where the two differ: an `int` that overflowed.**
+    DOS code that adds a 16-bit result of 32,768 or more meant as unsigned (`p + 4 * T`
+    with `enum { T = 10000 }`: 40,000 is -25,536 in a 16-bit `int`) reached offset 40,000
+    on DOS, whose offset wraps; here the pointer goes 25,536 bytes back, out of its object
+    and maybe out of its bank (X-COM's path search wrote over another table so).
+    `-Woverflow` reports such a constant (and `-w` does not silence it: "Errors and
+    warnings"); a variable one cannot be seen. Write `4u * T`, or build with
+    `-ffar-wrap`.
+  - **`-ffar-wrap` (hcc and cc816): the offset alone, the bank never changes**, as with
+    DOS's far pointers: `p + n`, `p - n`, `p++`, `p--`, `p += n`, `&p[n]`, `&p->m`, and
+    an element `p[i]` with any variable index, signed or unsigned (`p[0xFFFF]` is
+    `p[-1]`), or a constant one that is negative or 32,768 or more, compute the offset
+    modulo 65,536 and keep the bank. The integer's width does not matter: a `long` adds its
+    low word (as Watcom's `far + long`). So an `int` that overflowed lands where it did on
+    DOS, for every object inside a bank (every object is). A constant offset of 0 to
+    32,767 (`p->m`, `p[3]`) is reached with Y as before: it cannot leave an object that
+    lies in one bank. What it costs a program: one past an object that ends at a bank's
+    last byte wraps to the bank's offset 0, and one before an object at offset 0 to the
+    bank's offset $FFFF, so a loop `for (q = a; q < a + n; q++)` over such an object, or
+    one that walks down past its start, does not end (DOS had the same rule and the same
+    limits, its compilers and allocators kept objects off the segment's ends). The heap's
+    blocks never touch either end of a bank (`malloc`'s banks are used from offset 2 to
+    $FFFD, a block's bytes start after its 4-byte header), nor does anything in the main
+    bank; a bank from `hz_far_alloc` or a far data bank does start
+    at offset 0 and may end at $FFFF. To cross banks on purpose, build the address:
+    `hz_farptr(bank, off)`, or `(char *)((unsigned long)p + n)`. It is a per-file
+    option: the arithmetic follows the file's option, pointers mean the same in both, and
+    files built either way link together (the SDK's libraries are built without it).
+    `__CC816_FAR_WRAP__` is defined. The code is a little smaller and quicker (`p++` is
+    one `inc` of the offset, a signed index is not widened). Test:
+    `r047_far_wrap.c` (and `r048_far_carry.c`, the default, on the same cases).
 - **Compares**: `==`, `!=`, `<` ... compare the whole 32 bits (the bank first). Pointers
   into one object compare as their offsets do.
 - **NULL** is 0 (bank 0, offset 0: nothing of a program is there). A near pointer
@@ -628,6 +662,10 @@ every program with it.
   or `double` too: its IEEE bits, the sign in bit 15 of X). A `long long` result is in
   the direct page, 8 bytes at `__h0`: `__h0` the low word, `__h0+2`, `__h1`, `__h1+2` the
   high word (A and X are then undefined).
+- **The order of evaluation** of the arguments is left to right by default, right to
+  left with `-fargs-right-to-left` (DOS's compilers' order); either way they are pushed
+  last first and lie on the stack as above: the order of evaluation is not tied to the
+  pushes (cc816 computes each argument into a register, then pushes them all at the call).
 - **Registers** (direct page, `.importzp` them): `__rg` is 96 bytes: `__rg+0` to
   `__rg+47` may be changed by any function, `__rg+48` to `__rg+95` must be kept (save and
   restore what you use). `__h0`, `__h1`, `__h2`, `__h3` (4 bytes each) and `__rv` (4)
@@ -709,13 +747,16 @@ registers).
 - Functions are called with **JSL** and return with **RTL**: the first argument is at
   `4,s` (above the 3-byte return address). A `.s` function called from C ends with `rtl`;
   it calls a C function with `jsl _name` (any C function, wherever it is: hcc patches the
-  bank). PBR is the bank of the code that runs; DBR is the main bank, always: keep it.
+  bank; in a movable function, `CALL _name`: "Movable assembly", below). PBR is the bank
+  of the code that runs; DBR is the main bank, always: keep it.
 - hcc assembles `.s` files with `-D __CC816_LARGE__=1` and with `sdk/c/rt` on the
   include path: `.include "model.inc"` gives `ARGS` (3 or 4: the first argument's offset),
   `RET` (`rts` / `rtl`), `CALL name` (`jsr` / `jsl`) and `LARGE` (0 / 1), so one file
   suits both models: `lda ARGS+2,s` is the second argument. The C library's assembly is
   written so.
-- `.s` files stay in the main bank. Their labels are 16-bit addresses there as before.
+- A `.s` file's code is in the main bank (segment `CODE`): its labels are 16-bit
+  addresses there as before. A function opened with `FUNC name` instead (rt/model.inc) can
+  move as a C function does: "Movable assembly", below.
 - A **function's 16-bit address** (a function pointer, what C's `&f` and `f` give) is its
   entry in the main bank: `__T_name` (`__T` before the assembler name). It is the
   function itself when the function is in the main bank, else a thunk (`jml _name`) that
@@ -745,6 +786,107 @@ _add3:  lda     ARGS,s
         adc     ARGS+4,s
         RET
 ```
+
+### Movable assembly
+
+In the large code model an assembly function can move as a C function does: hcc puts it
+in the main bank while there is room, else in another bank, so it no longer counts in what
+the main bank must hold. `FUNC name` (rt/model.inc) opens it:
+
+| | small code model | large code model |
+| --- | --- | --- |
+| `FUNC _name` | `.segment "CODE"`, `.export _name`, `_name:` | `.segment "F_name"` (a segment of its own, as cc816 gives each C function), `.export _name`, `_name:` |
+| `RET` | `rts` | `rtl` |
+| `CALL x` | `jsr x` | `jsl x`, its bank byte recorded (segment `XREL`) after a `FUNC` |
+| `TAILJ x` | `jmp x` | `jml x`, recorded the same way |
+| `XBANK n` | nothing | records the byte `n` bytes back as a bank byte of the program |
+| `FNADDR _name` | `__T_name = _name` | `.import __T_name` |
+
+So one file serves both models. The name is a C name (`_name`); C declares and calls the
+function as any other. The function ends at the next `FUNC` or `.segment`. A function's
+code is at most 65,535 bytes.
+
+What a movable function may do, and what it may not:
+
+- **Data**: DBR is the main bank, always. Absolute addressing of main-bank data
+  (`lda _global`, `lda (__rg+0),y` with a near pointer) works wherever the function is.
+  Data the function reads itself (`lda table,x`) must be in `RODATA` or `DATA`, not in
+  its code segment: a data access reads DBR's bank, not PBR's.
+- **Calls and jumps out of the function**: `CALL _name` (a C function, a runtime helper,
+  another `FUNC`, `__icall` for a call through a pointer) and `TAILJ _name`. In a movable
+  function hcc patches a bank byte only where it was recorded: a bare `jsl _name` or
+  `jml _name` is refused ("a bank byte not recorded in XREL: hand-written assembly naming
+  a bank in a movable function"). A call of Horizon at a fixed address needs no record.
+- **Inside the function**: branches, `jmp label`, `jsr label` ... `rts`, and `jmp
+  (table,x)` with the table in the same segment: PBR is the function's bank, and JMP,
+  JSR and `jmp (abs,x)` use PBR's bank. A table's entries are `.addr label` (or `.word
+  .loword(label)`): a label's 16-bit offset in the bank. A `jsr` or `jmp` to a label of
+  another segment (`CODE`, another `FUNC`) is refused ("a JSR to ..., outside its segment"
+  or "an address in the main bank").
+- **Other bank bytes**: `lda #^name` (16-bit A: then `XBANK 2`), `lda f:name` (`XBANK
+  1`), `.faraddr name` (`XBANK 1`), a `jsl` or `jml` written out (`XBANK 1`), `mvn` /
+  `mvp` with a program's bank (one `XBANK` for each bank byte). The main bank's number is
+  also in the direct page: `__cbank`. Do not record a constant bank (Horizon's, the
+  hardware's): hcc would patch it.
+- **Its address**: the function's 16-bit address, for a function pointer or a callback,
+  is `__T_name` after `FNADDR _name` (a thunk in the main bank when the function is in
+  another bank). `lda #_name` is refused by ld65 ("Range error": the function may be at a
+  24-bit address), `.addr _name` in the main bank by hcc; `.addr _name` in another
+  movable function is not seen (ld65 keeps the low 16 bits): use `__T_name`. Something that
+  enters the function with JSR, a hardware vector, or another return convention: keep it
+  in `CODE`.
+- **Direct page, registers, arguments**: as in any function (the calling convention
+  above).
+
+hcc cannot see a bank byte left unrecorded when it names the main bank (it is the same in
+every trial link): use `CALL`, `TAILJ` and `XBANK` for every bank byte. `hcc --code large
+--main-room 0` puts every movable function in another bank: a test build that way finds
+the rest.
+
+Example (sdk/c/examples/asmfar: a C program and its assembly; the test builds it for both
+models, and for the large one with every function in one of three other banks):
+
+```asm
+        .include "model.inc"
+        .importzp __rg
+        .import _scale, _twice
+        FNADDR  _twice                  ; __T_twice, twice's 16-bit address
+
+; int asm_sum(const int *v, int n): twice(v[0] * scale + ... + v[n-1] * scale)
+        FUNC    _asm_sum
+        lda     ARGS,s
+        sta     __rg+0                  ; v: main-bank data (DBR)
+        ...
+        jsr     times_scale             ; a subroutine in this segment: JSR is fine
+        ...
+        pha
+        CALL    _twice                  ; a C function, wherever it is
+        ply
+        RET
+times_scale:                            ; A * scale
+        ...
+        ldx     _scale                  ; a main-bank global
+        ...
+        rts
+
+; int asm_op(int op, int a, int b): a jump table in the function's own segment
+        FUNC    _asm_op
+        ...
+        jmp     (@tab,x)                ; read in PBR's bank: this segment
+@tab:   .word   .loword(@add), .loword(@sub), .loword(@max)
+        ...
+
+        FUNC    _asm_twice_ptr          ; int (*asm_twice_ptr(void))(int)
+        lda     #__T_twice
+        RET
+```
+
+To make a `.s` file movable: `.include "model.inc"`, `FUNC` instead of `.segment "CODE"`
+and the label for each entry point, `CALL` / `TAILJ` / `RET` for every `jsr`, `jmp`,
+`rts` (`jsl`, `jml`, `rtl`) that leaves the function, `XBANK` after every other bank
+byte, tables the code reads moved to `RODATA`. A subroutine several entry points share
+goes in a `FUNC` of its own, called with `CALL` (it then ends with `RET`), or is copied
+into each. `hcc --sizes` shows where each one went.
 
 ### Inline assembly
 
@@ -1351,8 +1493,12 @@ An internal compiler error (a fault of cc816, not of the program) is one line:
 shows where)`. `CC816_TRACE=1 hcc ...` (or `cc816.py --trace`) shows the Python
 traceback.
 
-The warnings, on by default unless marked -Wall. The name in brackets after each
-message turns it off: `-Wno-format`.
+The warnings, on by default unless marked -Wall (or "named": only with `-WNAME`). The
+name in brackets after each message turns it off: `-Wno-format`. **`-w` silences every
+warning but `overflow`**: on a machine whose `int` is 16 bits a constant that overflows is
+a wrong value, not a matter of style (gcc's `-w` silences it too; cc816 does not, because
+a port built with `-w` hid the fault of `p + 4 * T`: "The far data model", "Pointers").
+`-w -Wno-overflow` silences it as well.
 
 | Name | What |
 | --- | --- |
@@ -1363,7 +1509,7 @@ message turns it off: `-Wno-format`.
 | `far-pointer` | a `__far` pointer given to a near one: only the offset is kept |
 | `type-limits` | a comparison whose result the type decides: `c == EOF` with a `char` (plain `char` is unsigned), `x > 40000` with an `int` |
 | `return-type` | the end of a non-void function can be reached; `return;` in a non-void function; `return x;` in a void one |
-| `overflow` | a constant that a conversion changes (`int x = 40000;`, `unsigned char c = 300;`); a constant expression that overflows its type (`320 * 200` in a 16-bit `int`); a `case` value the switch's type cannot hold |
+| `overflow` | a constant that a conversion changes (`int x = 40000;`, `unsigned char c = 300;`); a constant expression that overflows its type (`320 * 200` in a 16-bit `int`); a `case` value the switch's type cannot hold. Given with `-w` too |
 | `shift-count-overflow` | a shift by the type's width or more, or by a negative count |
 | `div-by-zero` | a division by a constant 0 |
 | `format` | `printf`, `fprintf`, `sprintf`, `snprintf`, `scanf`, `fscanf`, `sscanf` with a constant format: each conversion against its argument's size and kind, too few or too many arguments, `scanf` without `&` |
@@ -1380,6 +1526,7 @@ message turns it off: `-Wno-format`.
 | `parentheses` (-Wall) | `if (a = b)`: an assignment as a condition |
 | `tautological-compare` (-Wall) | a comparison always true at the type's edges: `u >= 0` with an unsigned `u`, `x <= 32767` with an `int` |
 | `far-cast` (-Wall) | a cast of a `__far` pointer to a near one (only the offset is kept) |
+| `sequence-args` (named) | two or more arguments of one call that call functions (`f(a(), b())`, a syscall too; not in `sizeof`): their side effects come in the order the compiler evaluates the arguments, which C leaves open; the message says cc816's order (left to right, or right to left with `-fargs-right-to-left`). Not in -Wall: it would name every `printf` of two calls. For a port of a DOS program: `-Wsequence-args` lists the calls, `-fargs-right-to-left` gives them DOS's order |
 
 The link's errors are said in C's words too: `undefined: fire_laser (used in
 game.c)` for a function or a variable no file defines, and for a program too big for
@@ -1397,11 +1544,13 @@ hcc passes these to cc816 (`cc816.py`, the compiler alone, takes the same):
 | `-I DIR` | look for `#include` files in DIR too |
 | `-include FILE` | include FILE before the source |
 | `-O0`, `-O1`, `-O2` | optimisation (`-O2` the default; `-O3` and `-Os` are `-O2`) |
-| `-w` | no warnings |
+| `-w` | no warnings, except `-Woverflow` (the 16-bit ones: "Errors and warnings"); `-w -Wno-overflow` gives none |
 | `-Wall` | the -Wall warnings too |
 | `-Werror` | warnings are errors (the build stops) |
 | `-Wno-NAME`, `-WNAME` | one warning off or on (the names above) |
 | `-fsigned-char` | plain `char` is signed (-128 to 127): `CHAR_MIN` is -128, `__CHAR_UNSIGNED__` is not defined. The SDK's library is built with unsigned `char` and takes characters as `int`, so it works with both |
+| `-fargs-right-to-left` | a call's arguments are evaluated right to left, as DOS's compilers (Watcom, Microsoft, Borland) and gcc on x86 do; the default is left to right. C leaves the order unspecified; a DOS port whose calls draw from one state in two arguments (`hurt(roll(), side())`, both calling the random number generator) needs DOS's order to behave as DOS did. Only the order of evaluation changes: the arguments are pushed and laid out on the stack as always ("Calling convention"), so files built either way call each other, and it costs nothing (the code is the same size). `__CC816_ARGS_RTL__` is defined. `-Wsequence-args` finds the calls that depend on it. Test: `r050_args_rtl.c` (`r049_args_order.c` the default) |
+| `-ffar-wrap` | far pointer arithmetic on the offset alone, the bank never changes, as DOS's far pointers ("The far data model", "Pointers"); `__CC816_FAR_WRAP__` is defined |
 | `-E` (`cc816.py` only) | preprocess only |
 
 hcc's own: `--code small|large` (the code model, "The two code models"; `HZ_CODE` in the
@@ -1421,7 +1570,7 @@ Its regression set (`make -C sdk/c/cc816 check`) has five parts, and runs them i
 configurations: the small code model, the large one, and the large one with far data
 (`CODES=small large large-far`; `tests/check.py --code large-far`: every data pointer 32
 bits, every string literal and constant in far data, every function in another bank: the
-same programs give the same results). `tests/diag/` (109
+same programs give the same results). `tests/diag/` (114
 files, no emulator; `make -C sdk/c/cc816 diag` runs it alone): each file says the errors
 and warnings it must give, and nothing else may be said; a Python traceback fails the
 test. Then 400 test programs, each with one random change (a token taken out, doubled
@@ -1565,6 +1714,11 @@ the c-testsuite when `CTS=` points at a checkout. Every program runs under emu81
     Y = 2 after `p + d` it carried from an object at a bank's offset 0 into the next bank)
     (`r046_negative_index.c`, the random programs' `index` shape; found by the far data
     model's `r045`, whose first version failed in the small model).
+32. **A `__far` pointer plus a `long` variable in the near data model** took the long's
+    low word as an `int` (fault 28 fixed only constants there, and the far data model):
+    `p + n` with `long n = 0x10000` did not move. The whole value is added in both data
+    models now (`r048_far_carry.c`; found while `-ffar-wrap` was made). No SDK or port
+    source had the case: their code is the same as before.
 
 Faster code from the same port (its profile: 13 % of the time in `__mul16` and
 `__sdiv16`, and its board, a `__far` array of arrays, read through 32-bit address
@@ -1615,7 +1769,15 @@ each at -O0, -O1 and -O2 too, and the random programs' `constop` shape: division
 remainders and shifts by constants of every width, compares with constants, operands at
 the edges.) Not done: a `long` divided by another constant (it would need a 32 x 32 ->
 64-bit multiply: about as slow as `__udiv32`), inlining of `static inline` functions (each
-is a call: `cell_is_empty` in SkyRoads' probes), and the copy of a structure returned
+is a call: `cell_is_empty` in SkyRoads' probes; `inline` is read and ignored. What it
+would take: an IR pass that copies a small callee's blocks into the caller, its
+parameters becoming the argument values, its virtual registers and frame slots renamed
+into the caller's, each `return` a jump to a join block; a rule for when (a body of a
+few dozen IR instructions, or a `static` function called once), and what is never
+inlined (recursion, `setjmp`, inline assembly, variable arguments, a function whose
+address is taken keeps its body too); about 300-500 lines in opt.py with its tests at
+every level. The gain is the call itself: for a three-line accessor the pushes, the
+JSL/RTL and the stack's clean-up, 20-40 cycles a call), and the copy of a structure returned
 by value (it is built in the callee's frame and copied to the caller's).
 
 Bugs 4-6 were found by the random programs once they learnt structures, bit-fields and

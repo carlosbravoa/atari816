@@ -11,7 +11,7 @@
 #                   FAIL per test and code model: small, large; the controls library's
 #                   tests and the c-window-app template), the examples and the c-console
 #                   template, the game library's tests (game/Makefile), the large code
-#                   model with two examples (LARGE_EXAMPLES), and the skill's examples
+#                   model with three examples (LARGE_EXAMPLES), and the skill's examples
 #                   (sdk/skill/atari-816-dev/examples)
 #   make clean
 #
@@ -25,11 +25,13 @@ EXAMPLES := examples/hello examples/window examples/wc ../templates/c-console
 # the controls library (hui.h): the tutorial's steps, an example (c-window-app is in
 # tests/run.py's uitwin)
 EXAMPLES += examples/guests examples/viewer
+# movable assembly (rt/model.inc's FUNC): C and assembly calling each other
+EXAMPLES += examples/asmfar
 
 # built with cc816's large code model too (hcc --code large, every function that can move
 # in another bank: a controls-library program and a game; the game library's tests run in
-# that model too: game/Makefile)
-LARGE_EXAMPLES := examples/viewer examples/glimmer
+# that model too: game/Makefile; asmfar: assembly that moves as C does)
+LARGE_EXAMPLES := examples/viewer examples/glimmer examples/asmfar
 # built with far data too (hcc --code large --data far): a console program and a game
 FAR_EXAMPLES := examples/hello examples/wc examples/glimmer
 
