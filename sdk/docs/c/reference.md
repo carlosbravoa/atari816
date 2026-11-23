@@ -286,10 +286,10 @@ same bytes as before the far data model came).
 `HZ_DATA=far` in the environment (`HZ_DATA := far` with c.mk) does the same as the option.
 Every object of a program must be made for the same model: cc816 marks each object
 (`__cc816_large` or `__cc816_largefar`), and the link of a near-data object into a far-data
-program, or the other way round, is refused with "an object made for the large code model
-with near data; this program is linked with far data (hcc --data far): build every file
-with the same --code and --data". A `.s` file carries no mark: it must follow the model's
-convention (below).
+program, or the other way round, is refused with "an object made for the large code
+model; this program is linked for the large code model with far data (hcc --data far):
+build every file with the same --code and --data (a library too)". A `.s` file carries no
+mark: it must follow the model's convention (below).
 
 ### Pointers
 
@@ -380,7 +380,10 @@ the main bank: it is small, and long addressing finds them there too.
 
 **Control.** `__far` moves a writable object out of the main bank (put it on every
 declaration of it, the header's too); `__near` keeps a `const` table in it (for a hot
-table read with `,y`). `hcc --map` prints the main bank's parts and the far data banks;
+table read with `,y`). There is no size threshold (Watcom's `-zt`: "objects of N bytes or
+more are far"): a file that sees only `extern int t[];` cannot know the size, and the
+declaration alone must say how to reach the object; the attribute on the declaration
+does it, and `hcc --sizes` says which objects are worth it. `hcc --map` prints the main bank's parts and the far data banks;
 `hcc --sizes` prints every object and every function, its size and where it went, biggest
 first (the budget of the main bank: ports need it).
 
@@ -474,6 +477,8 @@ here). The lower-case `far`, `near` and `huge` are only keywords with `-fdos-key
 - Mixing objects of the two data models in one program.
 - An object reached through near addressing in one file and placed far by another file's
   declaration: give the extern declarations the same `const` and `__far` as the definition.
+- (A limit, not a fault: a `__far` object without an initialiser still takes its bytes,
+  zeros, in the program file, as before; a big zeroed buffer is better from `malloc`.)
 
 ### What it costs
 
