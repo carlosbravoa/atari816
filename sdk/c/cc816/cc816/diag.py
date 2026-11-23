@@ -30,6 +30,8 @@ WARNINGS = {
     'multichar': True,                  # 'abc'
     'attributes': True,                 # a GNU attribute cc816 does not honour
     'frame-larger-than': True,          # a function's software-stack frame over 1 KB
+    'unknown-pragmas': True,            # a #pragma cc816 does not know (Watcom's aux, ...)
+    'far-function': True,               # void (__far *f)(void): __far ignored
     'unused-variable': False,
     'unused-label': False,
     'parentheses': False,               # if (a = b)

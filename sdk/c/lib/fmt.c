@@ -196,11 +196,19 @@ int __hz_vformat(hz_outfn out, void *ctx, const char *fmt, va_list ap)
             total += (int)(pad + plen + zeros + len);
             break;
         case 'p':
+#ifdef __CC816_FAR_DATA__
+            v = (unsigned long)va_arg(ap, void *);      /* (far data: bank and offset) */
+            prefix = "0x";
+            base = 16;
+            hasprec = 1;
+            prec = 6;
+#else
             v = (unsigned)va_arg(ap, void *);
             prefix = "0x";
             base = 16;
             hasprec = 1;
             prec = 4;
+#endif
             goto number;
         case 'c':
             num[0] = (char)va_arg(ap, int);

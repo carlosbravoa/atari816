@@ -12,6 +12,8 @@
       -w        no warnings            -Wall  more warnings (unused variables, ...)
       -Werror   warnings are errors    -WNAME / -Wno-NAME  one warning on / off
       -fsigned-char                    plain char is signed (default: unsigned)
+      -fdos-keywords                   far, near and huge are keywords (DOS compilers')
+      --code small|large, --data near|far   the code and data models (hcc's options)
       --ir      print the IR after optimisation (stderr)
       --time    print the time each phase took (stderr)
       --trace   a Python traceback with an internal compiler error (or CC816_TRACE=1)
@@ -36,7 +38,7 @@ from pycparser import c_parser                     # noqa: E402
 from pcpp.preprocessor import Preprocessor         # noqa: E402
 from pcpp.parser import OutputDirective, Action    # noqa: E402
 
-from .ctypes816 import CError, Unsupported, ICE, CHAR   # noqa: E402
+from .ctypes816 import CError, Unsupported, ICE, CHAR, MODEL   # noqa: E402
 from .diag import Diag                             # noqa: E402
 from .front import Front                           # noqa: E402
 from . import opt as optmod                        # noqa: E402
@@ -50,7 +52,18 @@ HORIZON = os.path.abspath(os.environ.get('HORIZON') or os.path.join(SDKC, '..', 
 
 PREDEF = ['__CC816__ 1', '__65816__ 1', '__HORIZON__ 1', '__ATARI816__ 1', '__far _Atomic',
           '__STDC__ 1', '__STDC_VERSION__ 199901L', '__CHAR_UNSIGNED__ 1', '__SIZE_T_INT 1',
-          '__near ', '__builtin_expect(x, y) (x)', '__extension__ ']
+          '__near ', '__builtin_expect(x, y) (x)', '__extension__ ',
+          # DOS compilers' spellings (docs/c/reference.md, "Compatibility spellings"):
+          # _far, __huge and _huge are __far; _near is __near; the calling conventions
+          # and the rest are nothing (cc816 has one convention)
+          '_far _Atomic', '__huge _Atomic', '_huge _Atomic', '_near __near',
+          '__cdecl ', '_cdecl ', '__pascal ', '_pascal ', '__loadds ', '_loadds ',
+          '__saveregs ', '_saveregs ', '__interrupt ', '_interrupt ', '__export ',
+          '_export ', '_Seg16 ']
+# the far data model (hcc --data far): __near is a keyword, __CC816_FAR_DATA__ is defined
+PREDEF_FAR = {'__near ': '__near __cc816_near'}
+# -fdos-keywords: far, near and huge too (ordinary names in other C)
+PREDEF_DOS = ['far _Atomic', 'near __near', 'huge _Atomic']
 
 TIMES = {}
 
@@ -243,6 +256,10 @@ def preprocess(path, incs, defs, diag=None, opts=None):
     predef = list(PREDEF)
     if o.get('large'):
         predef.append('__CC816_LARGE__ 1')      # hcc --code large (docs/c/reference.md)
+    if o.get('far_data'):
+        predef = [PREDEF_FAR.get(x, x) for x in predef] + ['__CC816_FAR_DATA__ 1']
+    if o.get('dos_keywords'):
+        predef += PREDEF_DOS
     if o.get('signed_char'):
         predef.remove('__CHAR_UNSIGNED__ 1')
     for u in o.get('undefs') or ():         # (opts' undefs: after the predefined ones)
@@ -285,7 +302,8 @@ _PARSE = re.compile(r'^(.*?):(\d+):(\d+): (.*)$', re.S)
 
 def default_opts():
     return {'w': False, 'wall': False, 'werror': False, 'wflags': {}, 'signed_char': False,
-            'undefs': [], 'includes': [], 'trace': bool(os.environ.get('CC816_TRACE'))}
+            'undefs': [], 'includes': [], 'trace': bool(os.environ.get('CC816_TRACE')),
+            'large': False}
 
 
 def compile_c(path, incs=(), defs=(), level=2, dump_ir=False, split=False, opts=None):
@@ -297,6 +315,7 @@ def compile_c(path, incs=(), defs=(), level=2, dump_ir=False, split=False, opts=
     o = dict(default_opts(), **(opts or {}))
     diag = Diag(o)
     CHAR.signed = bool(o.get('signed_char'))
+    MODEL['far_data'] = bool(o.get('far_data'))
     old_limit = sys.getrecursionlimit()
     sys.setrecursionlimit(max(old_limit, 20000))
     try:
@@ -319,6 +338,7 @@ def compile_c(path, incs=(), defs=(), level=2, dump_ir=False, split=False, opts=
     finally:
         sys.setrecursionlimit(old_limit)
         CHAR.signed = False
+        MODEL['far_data'] = False
         _CURRENT.clear()
 
 
@@ -363,6 +383,7 @@ def _compile(path, incs, defs, level, dump_ir, split, o, diag):
     # __far objects in banks of their own: a large-model program's file (a library's
     # stay in the main bank, reached by far pointers as any object there)
     fr.unit.fardata = bool(o.get('large')) and not o.get('resident') and not split
+    fr.unit.far_model = MODEL['far_data']   # (hcc --data far: f: addressing, the mark)
     fr.compound_end = parser.compound_end
     _CURRENT['front'] = fr
     unit = fr.translate(ast)
@@ -627,6 +648,7 @@ def _tag(path):
 
 
 MAXSEG = 100            # movable segments a module
+FARGROUP = 16384        # the far data model: a file's far objects in segments of this size
 
 
 def movable(f):
@@ -653,6 +675,12 @@ def far_lines(lines, fname, recs):
             lab = f'L{fname[1:]}_x{len(recs)}'
             out.append(('L', lab))
             recs.append(f'\t.faraddr {lab}-2')
+            continue
+        if l[0] == 'I' and len(l) > 2 and str(l[2]).startswith('f:'):
+            # (far data: long addressing, lda f:name / f:name,x: the bank its last byte)
+            lab = f'L{fname[1:]}_x{len(recs)}'
+            out.append(('L', lab))
+            recs.append(f'\t.faraddr {lab}-1')
             continue
         if l[0] == 'I' and l[1] in ('jsl', 'jml', 'mvn', 'mvp'):
             lab = f'L{fname[1:]}_x{len(recs)}'
@@ -719,11 +747,23 @@ def emit(unit, funcs, helpers, path='?', far=False, large=False):
     top_asm(len(funcs) + 1)
     segs = {'RODATA': [], 'DATA': [], 'BSS': []}
     ftag = _tag(path)
+    group = {}                  # (the far data model: a far object -> its group's segment)
+    if getattr(unit, 'far_model', False):
+        # far data: the file's far objects (string literals, constants, __far ones) in
+        # groups of about 16 KB, each a segment hcc places in a bank (a segment each would
+        # pass ca65's limit of segments in a module); a bigger object is a group alone
+        k, used = 0, None
+        for d in unit.data:
+            if getattr(d, 'far', False):
+                if used is not None and used + d.size > FARGROUP:
+                    k, used = k + 1, None
+                group[d.name] = f'FD{ftag}g{k}'
+                used = (used or 0) + d.size
     for d in unit.data:
         if getattr(d, 'far', False):
             # a __far object (the large model): a segment of its own, FD_name (a static
             # one's FD<tag>_name), which hcc places in a bank of far data
-            sg = 'FD' + ('' if d.export else ftag) + d.name
+            sg = group.get(d.name) or 'FD' + ('' if d.export else ftag) + d.name
             lines = segs.setdefault(sg, [])
         else:
             lines = segs[d.section]
@@ -774,7 +814,8 @@ def emit(unit, funcs, helpers, path='?', far=False, large=False):
     if exports:
         out.append('\t.export ' + ', '.join(sorted(exports)))
     # the code model: a link of objects made for different ones fails (hcc says why)
-    out.append('\t.forceimport __cc816_' + ('large' if large else 'small'))
+    out.append('\t.forceimport __cc816_' + ('largefar' if getattr(unit, 'far_model', False)
+                                             else 'large' if large else 'small'))
     # a unit with floating point that calls a printf (or gives a float to any variadic
     # function: a printf wrapper) links printf's float conversions, one that calls a scanf
     # scanf's (rt/fp_hookp.s, fp_hooks.s: a constructor installs them); the
@@ -1014,6 +1055,15 @@ def main(argv=None):
             opts['signed_char'] = True
         elif a in ('-funsigned-char', '-fno-signed-char'):
             opts['signed_char'] = False
+        elif a == '-fdos-keywords':
+            opts['dos_keywords'] = True
+        elif a in ('--code', '--data') and i + 1 < len(argv):
+            i += 1
+            if a == '--code':
+                opts['large'] = argv[i] == 'large'
+            else:
+                opts['far_data'] = argv[i] == 'far'
+                opts['large'] = opts['large'] or opts['far_data']
         elif parse_warning_flag(a, opts):
             pass
         elif a == '--ir':

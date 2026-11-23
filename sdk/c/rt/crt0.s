@@ -49,9 +49,15 @@
 	.import	__CONSTRUCTOR_TABLE__, __CONSTRUCTOR_COUNT__
 	.import	__DESTRUCTOR_TABLE__, __DESTRUCTOR_COUNT__
 .if LARGE
+.if FARDATA
+	.export	__icall, __cc816_largefar
+	.import	___hz_xload
+__cc816_largefar = 1		; (every object cc816 makes with far data imports it)
+.else
 	.export	__icall, __cc816_large
 	.import	___hz_xload
 __cc816_large = 1		; (every object cc816 makes for the large code model imports it)
+.endif
 .else
 	.export	__cc816_small
 __cc816_small = 1

@@ -15,13 +15,14 @@ from pycparser import c_ast
 from .ctypes816 import (CError, Unsupported, ICE, where, T, VoidT, IntT, PtrT, ArrT, StructT, FuncT,
                         Field, VOID, BOOL, CHAR, SCHAR, UCHAR, SHORT, USHORT, INT, UINT,
                         LONG, ULONG, LLONG, ULLONG, FLOAT, DOUBLE, LDOUBLE, promote,
-                        arith_conv, same, cname, compatible, vsz)
+                        arith_conv, same, cname, compatible, vsz, MODEL)
 from .ir import V, Imm, Sym, Frame, FrameSlot, Ins, Block, Func
 from . import fp
 from .fp import FV
 from .diag import Diag
 
 FAR_QUAL = '_Atomic'      # the preprocessor maps __far to _Atomic (pycparser knows it)
+NEAR_QUAL = '__cc816_near'  # ... and __near to __cc816_near (cc816's own keyword)
 
 
 class RV:
@@ -434,11 +435,26 @@ class Front:
         if isinstance(node, c_ast.TypeDecl):
             t = self.base_type(node.type)
             q = node.quals or []
+            if NEAR_QUAL in q:
+                return t.qual('const' in q, 'volatile' in q, FAR_QUAL in q, True)
             return t.qual('const' in q, 'volatile' in q, FAR_QUAL in q)
         if isinstance(node, c_ast.PtrDecl):
             to = self.decl_type(node.type)
             q = node.quals or []
+            if 'lead:' + FAR_QUAL in q or 'lead:' + NEAR_QUAL in q:
+                # __far / __near before the '*' (`void (__far *f)(void)`, Watcom's and
+                # Microsoft's): of a data pointer, the same as `T __far *`
+                if to.is_func:
+                    self.warn("'__far' on a function pointer is ignored (a function pointer "
+                              "is the function's entry in the main bank in every model)",
+                              node, 'far-function')
+                elif 'lead:' + FAR_QUAL in q:
+                    to = to.qual(far=True)
+                else:
+                    to = to.qual(near=True)
             p = PtrT(to)
+            if NEAR_QUAL in q:
+                return p.qual('const' in q, 'volatile' in q, FAR_QUAL in q, True)
             return p.qual('const' in q, 'volatile' in q, FAR_QUAL in q)
         if isinstance(node, c_ast.ArrayDecl):
             el = self.decl_type(node.type)
@@ -478,6 +494,8 @@ class Front:
                          f'hz_far_alloc and a __far pointer)', node)
             a = ArrT(el, n)
             # (an array of __far elements is a __far object: &a is a far pointer too)
+            if el.near and not el.far:
+                return a.qual(near=True)
             return a.qual(far=True) if el.far else a
         if isinstance(node, c_ast.FuncDecl):
             ret = self.decl_type(node.type)
@@ -995,7 +1013,13 @@ class Front:
         if b not in self.strings:
             name = f'L_S{len(self.strings)}'
             self.strings[b] = name
-            self.unit.data.append(DataObj(name, 'RODATA', [('b', list(b))], len(b), False))
+            o = DataObj(name, 'RODATA', [('b', list(b))], len(b), False)
+            if MODEL['far_data']:
+                # (the far data model: a string literal lives in far data, reached with
+                # long addressing; a library's (split) stay in the main bank)
+                self.unit.farsyms.add(name)
+                o.far = self.unit.fardata
+            self.unit.data.append(o)
         return self.strings[b]
 
     # ================================================================== top level
@@ -1170,8 +1194,8 @@ class Front:
         self.note_float(t)
         if t.is_arr and t.n is None:
             t = ArrT(t.elem, 1)
-        far = self.unit.fardata and _far_obj(t)
-        if far:
+        far = self.unit.fardata and _far_place(t)
+        if far or (MODEL['far_data'] and _far_place(t)):
             self.unit.farsyms.add(asm)
         if init is None:
             o = DataObj(asm, 'BSS', [], t.size, export)
@@ -1855,10 +1879,40 @@ class Front:
         self.pragma(s)
 
     def pragma(self, s):
-        words = (s.string or '').split()
+        text = (s.string or '').strip()
+        words = text.split()
         if words[:2] == ['cc816', 'internal_error_test']:
             # (tests/diag: the internal compiler error path, on purpose)
             raise ZeroDivisionError('a test of the internal compiler error message')
+        head = re.match(r'[A-Za-z_]\w*', text)
+        head = head.group(0) if head else ''
+        if head in ('once', 'GCC', 'clang', 'STDC', 'cc816', 'push_macro', 'pop_macro',
+                    'ident', 'message', 'warning', 'disable_message', 'enable_message',
+                    'off', 'on', 'library', 'comment', 'inline_depth', 'inline_recursion',
+                    'intrinsic', 'function', 'region', 'endregion', 'optimize') or not head:
+            # (harmless: they change no code; Watcom's messages and options)
+            return
+        if head == 'pack':
+            # structures are always packed: pack(1), pack(), pack(push, 1), pack(pop)
+            # are what cc816 does anyway; a bigger alignment it cannot give
+            m = re.search(r'\d+', text)
+            if m and int(m.group(0)) > 1:
+                self.warn(f'#pragma {text}: cc816 packs every structure (no padding): an '
+                          f'alignment of {m.group(0)} is not honoured', s, 'unknown-pragmas')
+            return
+        if head == 'aux':
+            m = re.match(r'aux\s+([A-Za-z_]\w*)', text)
+            name = m.group(1) if m else '?'
+            if '=' in text:
+                self.warn(f"#pragma aux {name} = ...: Watcom inline code is ignored: "
+                          f"'{name}' needs a C body (or an asm statement)", s,
+                          'unknown-pragmas')
+            else:
+                self.warn(f"#pragma aux {name}: Watcom's calling convention for it is "
+                          f"ignored (cc816 has one: arguments on the stack)", s,
+                          'unknown-pragmas')
+            return
+        self.warn(f'#pragma {text}: unknown, ignored', s, 'unknown-pragmas')
 
     def st_StaticAssert(self, s):
         self.static_assert(s)
@@ -1962,7 +2016,7 @@ class Front:
                               f'characters for {t.n})', s, 'excess-initializers')
                 n = min(len(b) + es, t.size)
                 sym = self.string_sym(s)
-                self.emit(Ins('copy', a=Sym(sym), b=base, n=n))
+                self.copy_mem(Sym(sym), base, n)
                 if t.size > n:
                     self.emit(Ins('zero', a=_addoff(base, n), n=t.size - n))
                 return
@@ -2001,7 +2055,7 @@ class Front:
                                  f'braces or a string', e)
                     b = self.strbytes(s)
                     n = min(len(b) + et.elem.size, et.size)
-                    self.emit(Ins('copy', a=Sym(self.string_sym(s)), b=_addoff(base, off), n=n))
+                    self.copy_mem(Sym(self.string_sym(s)), _addoff(base, off), n)
                     written.append((off, n))
                     return
                 lv = LV('mem', et, base=base, off=off)
@@ -2293,10 +2347,26 @@ class Front:
         r = self.rv_nodecay(e, dst)
         t = r.t
         if t.is_arr:
-            return RV(r.op, PtrT(t.elem))
+            pt = PtrT(t.elem)
+            return RV(self.far_op(r.op, pt), pt)
         if t.is_func:
             return RV(r.op, PtrT(t))
         return r
+
+    def far_op(self, op, pt):
+        """the far data model: the address op (a near one: a symbol, a frame object, a
+        16-bit value) as the far pointer the type pt says it is (4 bytes)"""
+        if MODEL['far_data'] and pt.is_ptr and pt.isfar and (
+                isinstance(op, (Sym, Frame)) or (isinstance(op, V) and op.size == 2)):
+            d = self.newv(4)
+            self.emit(Ins('mkfar', d, op))
+            return d
+        return op
+
+    def is_far_addr(self, o):
+        """o is the address of far memory: a far pointer, or (far data) a far symbol"""
+        return (isinstance(o, V) and o.size == 4) or (
+            MODEL['far_data'] and isinstance(o, Sym) and o.name in self.unit.farsyms)
 
     def rv_nodecay(self, e, dst=None):
         if getattr(e, 'coord', None) is not None:
@@ -2387,7 +2457,12 @@ class Front:
             if s.cval is not None:
                 return self.to_dst(RV(self.cimm(s.cval, s.t.unqual()), s.t.unqual()), dst)
             self.unit.externs.add(s.asm)
-            if s.t.is_arr and _far_obj(s.t):
+            if s.t.is_arr and _far_place(s.t):
+                if MODEL['far_data']:
+                    # (far data: the address of a far object is its symbol, reached with
+                    # long addressing; rv() makes the far pointer when it decays)
+                    self.unit.farsyms.add(s.asm)
+                    return RV(Sym(s.asm), s.t)
                 return RV(self.far_addr(s), s.t)
             if s.t.is_func or s.t.is_arr:
                 return RV(Sym(s.asm), s.t)
@@ -2409,6 +2484,10 @@ class Front:
                 return LV('mem', s.t, base=s.base, off=0)
             if s.kind == 'global':
                 self.unit.externs.add(s.asm)
+                if not s.t.is_func and _far_place(s.t) and MODEL['far_data']:
+                    # (far data: long addressing, f:name, gen.py)
+                    self.unit.farsyms.add(s.asm)
+                    return LV('mem', s.t, base=Sym(s.asm), off=0)
                 if not s.t.is_func and _far_obj(s.t):
                     lv = LV('mem', s.t, base=self.far_addr(s), off=0)
                     lv.farobj = True
@@ -2692,7 +2771,7 @@ class Front:
     def copy_mem(self, src, dst, n):
         """a structure copy: MVN in the code bank, or through far addresses (any banks)
         when either side is a far pointer"""
-        if src.size == 4 or dst.size == 4:
+        if self.is_far_addr(src) or self.is_far_addr(dst):
             def far(o):
                 if o.size == 4:
                     return o
@@ -2713,6 +2792,11 @@ class Front:
         if lv.kind == 'reg':
             self.err('address of a register variable')
         base, idx, off = lv.base, lv.idx, lv.off
+        if self.is_far_addr(base) and isinstance(base, Sym):
+            # (far data: a far object's element or member: its far address)
+            f = self.newv(4)
+            self.emit(Ins('mkfar', f, _addoff(base, off)))
+            base, off = f, 0
         if isinstance(base, V) and base.size == 4:
             a = base
             if idx is not None:
@@ -2991,7 +3075,8 @@ class Front:
             # address is far (4 bytes) and its type says so (a near parameter or variable
             # given it now gets -Wfar-pointer; it lost the bank silently before)
             far = self.far_lvalue(e.expr) or (isinstance(lv.base, V) and lv.base.size == 4)
-            return self.to_dst(RV(self.addr_of(lv), PtrT(t, far=far)), dst)
+            pt = PtrT(t, far=far)
+            return self.to_dst(RV(self.far_op(self.addr_of(lv), pt), pt), dst)
         if op == '*':
             pt = decay(self.expr_type(e.expr))
             if pt.is_ptr and pt.to.is_func:
@@ -3479,6 +3564,10 @@ class Front:
                 pt = params[i][1]
             else:
                 pt = promote(r.t) if r.t.is_int else r.t
+                if MODEL['far_data'] and pt.is_ptr and not pt.isfar and not pt.to.is_func:
+                    # (far data: a near pointer among the variable arguments goes as a
+                    # far one, as a float goes as a double: va_arg(ap, char *) reads 4)
+                    pt = PtrT(pt.to, far=True)
             if pt.is_struct and ft.variadic and i >= len(params):
                 # a variadic argument: the structure's bytes themselves on the stack
                 # (va_arg(ap, struct s) reads them there), in words, the last one padded
@@ -3721,12 +3810,15 @@ class Front:
             if conv == 's':
                 if pt.is_ptr and not pt.isfar and pt.to.is_int and pt.to.size == 1:
                     return None
+                if MODEL['far_data']:   # (far data: any string, a near one goes far)
+                    return None if pt.is_ptr and pt.to.is_int and pt.to.size == 1 else \
+                        'takes a char * (a string)'
                 if pt.is_ptr and pt.isfar:
                     return 'takes a near char * (a far string must be copied into the ' \
                            'code bank first: hz_far_copy)'
                 return 'takes a char * (a string)'
             if conv == 'p':
-                if pt.is_ptr and not pt.isfar:
+                if pt.is_ptr and (not pt.isfar or MODEL['far_data']):
                     return None
                 if pt.is_ptr:
                     return 'takes a near pointer (print a far one with %lx and (unsigned ' \
@@ -4216,6 +4308,27 @@ def _far_obj(t):
             return True
         t = t.elem
     return t.far
+
+
+def _near_obj(t):
+    """a __near object (the far data model)"""
+    while t.is_arr:
+        if t.near:
+            return True
+        t = t.elem
+    return t.near
+
+
+def _far_place(t):
+    """an object of type t is placed in far data (and reached by long addressing): a
+    __far one; in the far data model also a constant one, unless __near (docs/c/
+    reference.md, "Where objects live"). The rule depends on the type alone, so a file
+    that only declares the object reaches it as the defining file placed it"""
+    if not MODEL['far_data']:
+        return _far_obj(t)
+    if _near_obj(t):
+        return False
+    return _far_obj(t) or _is_const(t)
 
 
 def _is_const(t):

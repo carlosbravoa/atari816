@@ -129,6 +129,7 @@ class Gen:
         self.large = bool(opts.get('large'))
         self.RA = 3 if self.large else 2       # the return address's size
         self.funcnames = getattr(unit, 'funcnames', ()) if self.large else ()
+        self.far_model = bool(getattr(unit, 'far_model', False))
 
     # ------------------------------------------------------------------ emit
     def I(self, m, o=''):
@@ -154,6 +155,11 @@ class Gen:
     def hname(self, name):
         """a symbol as a value: in the large model a function's is its main-bank entry"""
         return '__T' + name if name in self.funcnames else name
+
+    def farsym(self, name):
+        """the far data model: the object name is reached by long addressing (it lies in
+        far data, or may: front.py's farsyms)"""
+        return self.far_model and name in self.unit.farsyms
 
     # ------------------------------------------------------------------ operands
     def vaddr(self, v, part=0):
@@ -1359,8 +1365,8 @@ class Gen:
 
     def g_mkfar(self, i):
         """a near address -> far: the code bank as the high word (0 for a null pointer)"""
-        if isinstance(i.a, Sym) and getattr(self.unit, 'fardata', False) and \
-                i.a.name in self.unit.farsyms:
+        if isinstance(i.a, Sym) and (getattr(self.unit, 'fardata', False) or self.far_model) \
+                and i.a.name in self.unit.farsyms:
             # a __far object in a bank of its own (the large model): its offset, and its
             # bank, which hcc's link patches (the bank byte is recorded: driver.far_lines)
             a = self.symoff(i.a.name, i.a.off)
@@ -1403,12 +1409,15 @@ class Gen:
         if isinstance(base, Sym):
             name = base.name
             o = base.off + off
+            # (the far data model: a far object by long addressing, f:name and
+            # f:name,x: one byte and one cycle more than absolute addressing)
+            fa = 'f:' if self.farsym(name) else ''
             if idx is None:
-                return lambda p: self.symoff(name, o + 2 * p)
+                return lambda p: fa + self.symoff(name, o + 2 * p)
             if isinstance(idx, Imm):
-                return lambda p: self.symoff(name, o + idx.val + 2 * p)
+                return lambda p: fa + self.symoff(name, o + idx.val + 2 * p)
             self.ldx(idx)
-            return lambda p: self.symoff(name, o + 2 * p) + ',x'
+            return lambda p: fa + self.symoff(name, o + 2 * p) + ',x'
         if isinstance(base, Frame):
             k = base.slot.off + base.off + off
             if idx is None:
@@ -1499,7 +1508,8 @@ class Gen:
                 self.sta(d, p)
             return
         base = i.x['base']
-        if sz == 1 and ((isinstance(base, V) and base.size == 4) or i.x.get('vol')):
+        if sz == 1 and ((isinstance(base, V) and base.size == 4) or i.x.get('vol') or
+                        (isinstance(base, Sym) and self.farsym(base.name))):
             # a byte through a far pointer, or a volatile byte: an 8-bit read (a 16-bit
             # one would also read the next byte: past the end of a bank, an I/O register)
             self.I('sep', '#$20')
@@ -1522,7 +1532,8 @@ class Gen:
         if sz == 1:
             self.I('sep', '#$20')
             t = acc(0)
-            if isinstance(a, Imm) and a.val & 0xFF == 0 and not t.startswith('(') and not t.startswith('['):
+            if isinstance(a, Imm) and a.val & 0xFF == 0 and not t.startswith('(') and \
+                    not t.startswith('[') and not t.startswith('f:'):
                 self.I('stz', t)
             else:
                 self.lda8(a)
@@ -1532,7 +1543,7 @@ class Gen:
         for p in range(max(sz // 2, 1)):
             t = acc(p)
             if isinstance(a, Imm) and (a.val >> (16 * p)) & 0xFFFF == 0 and \
-                    not t.startswith('(') and not t.startswith('['):
+                    not t.startswith('(') and not t.startswith('[') and not t.startswith('f:'):
                 self.I('stz', t)
                 continue
             self.lda(a, p)
@@ -1588,7 +1599,7 @@ class Gen:
             acc = self.addr(dst, None, 0)
             for p in range(n // 2):
                 t = acc(p)
-                if t.startswith('('):
+                if t.startswith('(') or t.startswith('f:'):
                     self.I('lda', '#0')
                     self.I('sta', t)
                 else:

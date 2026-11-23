@@ -20,6 +20,258 @@
 
 	.segment "CODE"
 
+.if FARDATA
+; The far data model (hcc --data far): every pointer is far (offset, bank, 0: 4 bytes),
+; d at ARGS, s at ARGS+4, n (or c) after them; a pointer result in A (offset) and X (bank).
+; MVN / MVP take their two banks in the instruction: it is built on the stack (MVN dst,
+; src; RTL) and called there (as far.s's hz_far_copy); MVN leaves DBR at the destination's
+; bank, so it is saved around. strlen, strcpy, memcmp read through [dp],y.
+
+; void *memcpy(void *d, const void *s, size_t n)
+_memcpy:
+	lda	ARGS+8,s		; n
+	beq	retd
+	dec	a
+	sta	__h0		; n - 1
+	lda	#$0054		; MVN
+movefwd:			; A = the opcode, __h0 = n - 1: X = s, Y = d (offsets)
+	sta	__h2
+	lda	ARGS+6,s		; the source bank, then the RTL
+	and	#$00FF
+	ora	#$6B00
+	pha
+	lda	ARGS+4,s		; the destination bank (ARGS+2, + 2 pushed)
+	xba
+	and	#$FF00
+	ora	__h2		; the opcode
+	pha
+	lda	ARGS+8,s		; s (ARGS+4, + 4 pushed)
+	tax
+	lda	ARGS+4,s		; d (ARGS, + 4 pushed)
+	tay
+	lda	__h2
+	cmp	#$0044
+	bne	@go
+	txa			; MVP: from the last bytes
+	clc
+	adc	__h0
+	tax
+	tya
+	clc
+	adc	__h0
+	tay
+@go:	tsc
+	inc	a
+	sta	__h1		; the instruction's address: bank 0 (the stack)
+	stz	__h1+2
+	lda	__h0
+	phb
+	phk			; a JSL's return address, for its RTL
+	per	@back - 1
+	jml	[__h1]
+@back:	plb
+	pla
+	pla
+retd:	lda	ARGS+2,s		; d: X = its bank, A = its offset
+	tax
+	lda	ARGS,s
+	RET
+
+; void *memmove(void *d, const void *s, size_t n)
+_memmove:
+	lda	ARGS+8,s		; n
+	beq	retd
+	dec	a
+	sta	__h0
+	lda	ARGS+6,s		; another bank: no overlap
+	cmp	ARGS+2,s
+	bne	@fwd
+	lda	ARGS+4,s
+	cmp	ARGS,s
+	bcs	@fwd		; s >= d: upwards is safe
+	lda	#$0044		; MVP: downwards
+	bra	movefwd
+@fwd:	lda	#$0054
+	bra	movefwd
+
+; void *memset(void *d, int c, size_t n)
+_memset:
+	lda	ARGS+6,s		; n
+	beq	retd
+	lda	ARGS,s
+	sta	__h2
+	lda	ARGS+2,s
+	sta	__h2+2
+	sep	#$20
+	.a8
+	lda	ARGS+4,s		; c
+	sta	[__h2]		; the first byte
+	rep	#$20
+	.a16
+	lda	ARGS+6,s
+	dec	a
+	beq	retd		; n = 1
+	dec	a
+	sta	__h0		; MVN's count - 1 = n - 2
+	lda	ARGS+2,s		; MVN dst bank, dst bank; RTL
+	and	#$00FF
+	ora	#$6B00
+	pha
+	lda	ARGS+4,s		; (ARGS+2 + 2)
+	xba
+	and	#$FF00
+	ora	#$0054
+	pha
+	lda	ARGS+4,s		; from d (ARGS + 4) ...
+	tax
+	tay
+	iny			; ... to d + 1: the byte repeats along
+	tsc
+	inc	a
+	sta	__h1
+	stz	__h1+2
+	lda	__h0
+	phb
+	phk
+	per	@back - 1
+	jml	[__h1]
+@back:	plb
+	pla
+	pla
+	bra	retd
+
+; size_t strlen(const char *s)
+_strlen:
+	lda	ARGS,s
+	sta	__h0
+	lda	ARGS+2,s
+	sta	__h0+2
+	ldy	#0
+	lda	__h0
+	lsr	a
+	bcc	@w
+	sep	#$20		; an odd address: one byte first
+	.a8
+	lda	[__h0]
+	rep	#$20
+	.a16
+	beq	@zero
+	iny
+@w:	lda	[__h0],y
+	bit	#$00FF
+	beq	@d
+	bit	#$FF00
+	beq	@d1
+	iny
+	iny
+	lda	[__h0],y
+	bit	#$00FF
+	beq	@d
+	bit	#$FF00
+	beq	@d1
+	iny
+	iny
+	bra	@w
+@d1:	iny
+@d:	tya
+	RET
+@zero:	lda	#0
+	RET
+
+; char *strcpy(char *d, const char *s)
+_strcpy:
+	lda	ARGS,s
+	sta	__h1
+	lda	ARGS+2,s
+	sta	__h1+2
+	lda	ARGS+4,s
+	sta	__h0
+	lda	ARGS+6,s
+	sta	__h0+2
+	ldy	#0
+	lda	__h0
+	lsr	a
+	bcc	@w
+	sep	#$20		; an odd source address: one byte first
+	.a8
+	lda	[__h0]
+	sta	[__h1]
+	rep	#$20
+	.a16
+	beq	@ret
+	iny
+@w:	lda	[__h0],y
+	bit	#$00FF
+	beq	@z0
+	bit	#$FF00
+	beq	@z1
+	sta	[__h1],y
+	iny
+	iny
+	bra	@w
+@z1:	sta	[__h1],y		; the last character and the 0
+	bra	@ret
+@z0:	sep	#$20
+	.a8
+	sta	[__h1],y		; the 0
+	rep	#$20
+	.a16
+@ret:	jmp	retd
+
+; int memcmp(const void *a, const void *b, size_t n): -1, 0 or 1 (unsigned bytes)
+_memcmp:
+	lda	ARGS,s
+	sta	__h0
+	lda	ARGS+2,s
+	sta	__h0+2
+	lda	ARGS+4,s
+	sta	__h1
+	lda	ARGS+6,s
+	sta	__h1+2
+	ldy	#0
+	lda	ARGS+8,s
+	beq	@ret0
+	and	#$FFFE
+	sta	__h2		; where the pairs end
+	beq	@tail
+@w:	lda	[__h0],y
+	cmp	[__h1],y
+	bne	@diff
+	iny
+	iny
+	cpy	__h2
+	bne	@w
+@tail:	lda	ARGS+8,s
+	lsr	a
+	bcc	@ret0
+	sep	#$20
+	.a8
+	lda	[__h0],y
+	cmp	[__h1],y
+	rep	#$20
+	.a16
+	beq	@ret0
+	bcc	@lt
+	lda	#1
+	RET
+@diff:	sep	#$20		; the first byte (the low one) decides if it differs
+	.a8
+	cmp	[__h1],y
+	bne	@bd
+	iny
+	lda	[__h0],y
+	cmp	[__h1],y
+@bd:	rep	#$20
+	.a16
+	bcc	@lt
+	lda	#1
+	RET
+@lt:	lda	#$FFFF
+	RET
+@ret0:	lda	#0
+	RET
+
+.else
 ; void *memcpy(void *d, const void *s, size_t n)
 _memcpy:
 	lda	ARGS+4,s		; n
@@ -222,3 +474,4 @@ _memcmp:
 	RET
 @ret0:	lda	#0
 	RET
+.endif

@@ -30,6 +30,13 @@ Options:
                     (JSL/RTL; data, constants and stacks stay in the main bank): still
                     one file, NAME.PRG: the other code banks follow its o65 (it needs
                     Horizon 0.28 then; docs/c/reference.md, "The two code models")
+  --data near|far   the data model (default: $HZ_DATA, else near). far (with --code large
+                    only): plain data pointers are 32-bit far pointers, malloc takes
+                    other banks, string literals and const objects go to banks of far
+                    data: DOS's large model (docs/c/reference.md, "The far data model")
+  -fdos-keywords    far, near and huge are keywords (as __far, __near, __far)
+  --sizes           print every object and function, its size and where it went
+                    (main bank, code bank k, far data bank k), biggest first
   --stack N         bytes for the software stack (arrays, structures and locals whose
                     address is taken; default 8192, taken from the main bank)
   --heap N          --code large: bytes of the main bank kept free for malloc (and
@@ -96,9 +103,9 @@ def main(argv):
         return 0
     if argv[0] == "--build-lib":            # the SDK's Makefile: (re)build the library
         try:
-            for m in argv[1:] or hzc816.CODES:  # the code models: small, large
-                if m not in hzc816.CODES:
-                    die(f"--build-lib takes the code models small and large, not {m}")
+            for m in argv[1:] or hzc816.LIBS:   # small, large, large-far
+                if m not in hzc816.LIBS:
+                    die(f"--build-lib takes small, large and large-far, not {m}")
                 hzc816.build_lib(code=m)
         except HccError as e:
             die(str(e))
@@ -107,6 +114,7 @@ def main(argv):
          "compile_only": False, "asm_too": False, "want_map": False,
          "debug": False, "ui": False, "game": False, "stack": None, "keep": None,
          "code": os.environ.get("HZ_CODE") or "small", "heap": None,
+         "data": os.environ.get("HZ_DATA") or "near", "sizes": False,
          "bank_room": _env_int("HZ_BANK_ROOM"), "main_room": _env_int("HZ_MAIN_ROOM"),
          "spread": _env_int("HZ_SPREAD"), "needs": [],
          "ccopts": {"w": False, "wall": False, "werror": False, "wflags": {},
@@ -158,6 +166,14 @@ def main(argv):
             o["code"] = a.split("=", 1)[1] if "=" in a else val("--code")
             if o["code"] not in hzc816.CODES:
                 die(f"--code is small or large, not {o['code']}")
+        elif a == "--data" or a.startswith("--data="):
+            o["data"] = a.split("=", 1)[1] if "=" in a else val("--data")
+            if o["data"] not in hzc816.DATAS:
+                die(f"--data is near or far, not {o['data']}")
+        elif a == "-fdos-keywords":
+            o["ccopts"]["dos_keywords"] = True
+        elif a == "--sizes":
+            o["sizes"] = True
         elif a in ("--heap", "--bank-room", "--main-room", "--spread") or \
                 a.split("=", 1)[0] in ("--heap", "--bank-room", "--main-room", "--spread"):
             k = a.split("=", 1)[0]
@@ -194,6 +210,11 @@ def main(argv):
 
     if o["code"] not in hzc816.CODES:
         die(f"$HZ_CODE is small or large, not {o['code']}")
+    if o["data"] not in hzc816.DATAS:
+        die(f"$HZ_DATA is near or far, not {o['data']}")
+    if o["data"] == "far" and o["code"] != "large":
+        die("--data far needs --code large (far data banks are loaded with the large code "
+            "model's banks: docs/c/reference.md, \"The far data model\")")
     srcs = o["srcs"]
     if not srcs:
         die("no source files")
@@ -258,7 +279,7 @@ def needs_object(o, tmp, code):
     n = o["needs"]
     if not n:
         return None
-    if code == "large" and (n["major"], n["minor"]) < (0, 28):
+    if hzc816.is_large(code) and (n["major"], n["minor"]) < (0, 28):
         n["major"], n["minor"] = 0, 28          # (its code banks follow the o65: task_path)
     out = o["out"] or os.path.basename(os.path.splitext(o["srcs"][0])[0]).upper() + ".PRG"
     name = os.path.splitext(os.path.basename(out))[0][:15]
@@ -329,8 +350,8 @@ def build(o):
     o["ccopts"]["sstack"] = stack
     opt = o["opt"] or "2"
     incs = o["incs"]
-    code = o["code"]
-    if code != "large" and o["heap"] is not None:
+    code = hzc816.config(o["code"], o["data"])     # small, large or large-far
+    if not hzc816.is_large(code) and o["heap"] is not None:
         die("--heap is for the large code model (hcc --code large)")
     tmp = None
     try:
@@ -351,6 +372,8 @@ def build(o):
             libs.insert(0, hgbuild.lib_for(code))
         out = o["out"] or os.path.basename(os.path.splitext(o["srcs"][0])[0]).upper() + ".PRG"
         mapfile = os.path.splitext(out)[0] + ".map" if o["want_map"] else None
+        if o["sizes"] and not mapfile:
+            o["keep"] = o["keep"] or os.path.join(tmp, "link")
         ui = o["ui"]
         while True:
             try:
@@ -366,6 +389,8 @@ def build(o):
                 ui = True               # only hui.h names missing: the controls library
         if o["want_map"]:
             print(hzc816.size_report(out, sizes))
+        if o["sizes"]:
+            print(hzc816.object_sizes(out, sizes))
         return 0
     except HccError as e:
         die(str(e))

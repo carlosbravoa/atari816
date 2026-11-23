@@ -9,6 +9,9 @@
 ;   TAILJ x  a tail call of a C function (the same arguments, the same return): jmp, or
 ;            jml in the large code model (the function may be in another bank)
 ;   LARGE    1 in the large code model, else 0
+;   FARDATA  1 in the far data model (hcc --data far: ca65 -D __CC816_FAR_DATA__), else 0
+;   PTRSZ    a data pointer argument's bytes on the stack: 2, or 4 with far data (offset,
+;            bank, 0)
 ;
 ; Only the routines generated code calls change: a routine the library's assembly calls
 ; by itself (jsr ... rts) stays as it is.
@@ -36,4 +39,11 @@ ARGS	= 3
 .macro	TAILJ target
 	jmp	target
 .endmacro
+.endif
+.ifdef __CC816_FAR_DATA__
+FARDATA	= 1
+PTRSZ	= 4
+.else
+FARDATA	= 0
+PTRSZ	= 2
 .endif

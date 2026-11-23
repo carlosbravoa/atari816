@@ -92,6 +92,25 @@ SSTACK = 8192                   # the software stack's default size
 # several banks, JSL/RTL; tools/hzlarge.py); $HZ_CODE sets the default (the tests use it)
 CODE = os.environ.get("HZ_CODE") or "small"
 CODES = ("small", "large")
+# the data model: "near" (every data pointer an offset in the main bank) or "far" (hcc
+# --data far, with --code large only: plain data pointers are 32-bit far pointers; the
+# library's third build, build/lib/large-far); $HZ_DATA sets the default
+DATA = os.environ.get("HZ_DATA") or "near"
+DATAS = ("near", "far")
+# the library's builds: a code model, or "large-far" (the large code model, far data)
+LIBS = ("small", "large", "large-far")
+
+
+def config(code=None, data=None):
+    """the library build of a code model and a data model: small, large or large-far"""
+    code = code or CODE
+    if code.endswith("-far"):
+        return code
+    return "large-far" if code == "large" and (data or DATA) == "far" else code
+
+
+def is_far(code=None, data=None):
+    return config(code, data) == "large-far"
 SSTOP = 0xFFF0                  # its top
 ZONE = 256                      # its guard zone
 CODE_ROOM = SSTOP - 0x100       # the code bank from $0100 to the software stack's top
@@ -111,13 +130,13 @@ def cc():
     return _cc
 
 
-def libdir(code=None):
+def libdir(code=None, data=None):
     return os.path.join(os.environ.get("HZ_BUILD") or os.path.join(SDKC, "build"), "lib",
-                        "large" if (code or CODE) == "large" else "small")
+                        config(code, data))
 
 
 def is_large(code=None):
-    return (code or CODE) == "large"
+    return (code or CODE) in ("large", "large-far")
 
 
 def tool(name):
@@ -128,15 +147,19 @@ def includes(incs=()):
     return list(incs) + [os.path.join(CC816, "include"), os.path.join(SDKC, "include")]
 
 
-def compile_c(src, obj, opt="2", incs=(), defs=(), asm_out=None, opts=None, code=None):
+def compile_c(src, obj, opt="2", incs=(), defs=(), asm_out=None, opts=None, code=None,
+              data=None):
     """C -> ca65 assembly -> object. Warnings are printed; errors raise HccError
     ('file:line:col: error: ...', a line each). opts: cc816's options (driver.default_opts:
-    -w, -Wall, -Werror, -fsigned-char, -U, -include). code: the code model"""
+    -w, -Wall, -Werror, -fsigned-char, -U, -include). code: the code model; data: the data
+    model (near, far)"""
     from cc816.ctypes816 import CError
     level = {"0": 0, "1": 1}.get(opt, 2)
     opts = dict(opts or {})
     if is_large(code):
         opts["large"] = True
+    if is_far(code, data):
+        opts["far_data"] = True
     if VERBOSE:
         print(f"  cc816 -O{level} {src}", file=sys.stderr)
     try:
@@ -152,7 +175,7 @@ def compile_c(src, obj, opt="2", incs=(), defs=(), asm_out=None, opts=None, code
         with open(path, "w") as f:
             f.write(asm)
         if obj:
-            assemble(path, obj, src_name=src, code=code)
+            assemble(path, obj, src_name=src, code=config(code, data))
 
 
 # the library files whose code must stay in the main bank in the large code model: the
@@ -169,6 +192,8 @@ def compile_split(src, outdir, opt="2", incs=(), defs=(), code=None, resident=No
     if resident is None:
         resident = os.path.basename(src) in RESIDENT
     opts = {"large": True, "resident": bool(resident)} if is_large(code) else None
+    if is_far(code):
+        opts["far_data"] = True
     try:
         mods, warns = cc().compile_c(src, list(incs) + [os.path.join(SDKC, "include")], defs,
                                      level, split=True, opts=opts)
@@ -202,6 +227,8 @@ def assemble(src, obj, incs=(), defs=(), src_name=None, code=None):
     cmd += ["-I", RT]
     if is_large(code):
         cmd += ["-D", "__CC816_LARGE__=1"]
+    if is_far(code):
+        cmd += ["-D", "__CC816_FAR_DATA__=1"]
     for d in defs:
         cmd += ["-D", d]
     cmd += ["-o", obj, src]
@@ -268,7 +295,7 @@ def lib_stale(code=None):
 
 def build_lib(quiet=False, code=None):
     import gensys
-    code = code or CODE
+    code = config(code)
     d = libdir(code)
     od = os.path.join(d, "obj")
     if os.path.exists(od):
@@ -276,9 +303,10 @@ def build_lib(quiet=False, code=None):
     os.makedirs(od)
     if not quiet:
         print(f"hcc: building the C library for the {'large' if is_large(code) else 'small'} "
-              f"code model ({d})", file=sys.stderr)
+              f"code model{' with far data' if is_far(code) else ''} ({d})", file=sys.stderr)
     objs = []
-    for s in gensys.write_stubs816(os.path.join(d, "stubs"), large=is_large(code)):
+    for s in gensys.write_stubs816(os.path.join(d, "stubs"), large=is_large(code),
+                                   far=is_far(code)):
         o = os.path.join(od, os.path.splitext(os.path.basename(s))[0] + ".o")
         assemble(s, o, code=code)
         objs.append(o)
@@ -319,9 +347,9 @@ class locked:
 
 
 def ensure_lib(code=None):
-    code = code or CODE
+    code = config(code)
     if lib_stale(code):
-        with locked("lib-" + ("large" if is_large(code) else "small")):
+        with locked("lib-" + code):
             if lib_stale(code):
                 build_lib(code=code)
 
@@ -339,7 +367,7 @@ def link(objs, out, sstack=SSTACK, debug=False, mapfile=None, extra_libs=(), kee
     (tools/hzlarge.py) also writes the other code banks after the o65, in the same file, when
     code goes to other banks: heap (the main bank's room kept for malloc), bank_room,
     main_room (the tests: how much code a bank, and the main bank, may take)"""
-    code = code or CODE
+    code = config(code)
     ensure_lib(code)
     for o in objs:
         if object_kind(o) == "?":
@@ -356,15 +384,20 @@ def link(objs, out, sstack=SSTACK, debug=False, mapfile=None, extra_libs=(), kee
         spread = spread or env("HZ_SPREAD")
         libs = list(extra_libs)
         if ui:
+            if is_far(code):
+                raise HccError("the controls library (hui.h, --ui) is not built for the far "
+                               "data model (hcc --data far): build a window application "
+                               "with near data")
             import hui816
             libs += hui816.link_inputs("large")
         try:
             return hzlarge.link(objs, out, sstack, debug=debug, mapfile=mapfile, libs=libs,
-                                keep=keep, heap=hzlarge.HEAP if heap is None else heap,
+                                keep=keep, heap=(hzlarge.HEAP_FAR if is_far(code) else
+                                                 hzlarge.HEAP) if heap is None else heap,
                                 bank_room=bank_room or hzlarge.BANK, main_room=main_room,
-                                spread=spread)
+                                spread=spread, lib=code)
         except HccError as e:
-            raise HccError(model_error(str(e), "large"))
+            raise HccError(model_error(str(e), code))
     d = libdir()
     tmp = keep or tempfile.mkdtemp(prefix="hcc")
     os.makedirs(tmp, exist_ok=True)
@@ -410,12 +443,22 @@ def link(objs, out, sstack=SSTACK, debug=False, mapfile=None, extra_libs=(), kee
 
 def model_error(msg, code):
     """an object made for the other code model: say so (cc816's objects import
-    __cc816_small or __cc816_large, which only that model's crt0.o defines)"""
-    other = "large" if code == "small" else "small"
-    if re.search(r"(undefined: _|Unresolved external\W+__)cc816_" + other + r"\b", msg):
-        return (f"an object made for the {other} code model; this program is linked for "
-                f"the {code} one: build every file with the same --code (hcc --code {code}; "
-                f"a library too)")
+    __cc816_small, __cc816_large or __cc816_largefar, which only that model's crt0.o
+    defines)"""
+    names = {"small": "the small code model", "large": "the large code model",
+             "largefar": "the large code model with far data (hcc --data far)"}
+    mine = code.replace("-", "")
+    for other in names:
+        if other == mine:
+            continue
+        if re.search(r"(undefined: _|Unresolved external\W+__)cc816_" + other + r"\b", msg):
+            if other != "largefar" and mine != "largefar":
+                return (f"an object made for the {other} code model; this program is linked "
+                        f"for the {code} one: build every file with the same --code (hcc "
+                        f"--code {code}; a library too)")
+            return (f"an object made for {names[other]}; this program is linked for "
+                    f"{names[mine]}: build every file with the same --code and --data (a "
+                    f"library too)")
     return msg
 
 
