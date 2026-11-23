@@ -1,0 +1,40 @@
+# tests/app.script - the app installed, played and updated as a user would (make test-app;
+# --mode none: time 0 = the Desktop is up, Files open at the card's root):
+#  1. DIGGER.HZA found in Files by typing its name and opened: the Installer asks (shot 1);
+#     Install; its message (shot 2);
+#  2. the Programs menu (F10, Right): "Games >" last, End to it, Enter opens its pop-up at
+#     the pointer (shot 3), Down, Enter: Digger starts; its title (shot 4);
+#  3. a game: up the middle column (125 points), three lives lost, the initials APP: the
+#     high score file is written in the app's folder; Esc: back to the Desktop;
+#  4. DIGGER.HZA opened again: the Installer offers Replace (shot 5): the update, which
+#     must keep DIGGER.SCO (tests/app.sh checks the card).
+1000 digger\n
++3000 shot
++500 \n
++5000 shot
++500 \n
++1500 {f10}
++400 {right}
++600 {end}
++400 \n
++600 shot
++400 {down}
++300 \n
++0 wait digger: title
++1500 shot
++500 key enter 100
++0 wait digger: play
++500 key up 4500
++0 wait digger: dead
++0 wait digger: play
++0 wait digger: dead
++0 wait digger: play
++0 wait digger: dead
++0 wait digger: initials
++500 APP
++0 wait digger: title
++1500 key esc 100
++3000 digger\n
++3000 shot
++500 \n
++5000 \n

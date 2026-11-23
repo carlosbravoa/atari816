@@ -1,6 +1,7 @@
 /* hz_kbd.c - Digger's keyboard and joysticks for Horizon (upstream's sdl_kbd.c): the keys
  * are HID usages, which are SDL's scancodes, so upstream's key table stays as it is; a
  * queue of the keys pressed (getkey, kbhit) from hgame's hg_key_next. */
+#include <stdio.h>
 #include <string.h>
 #include <hgame.h>
 #include "def.h"

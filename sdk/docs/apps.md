@@ -281,20 +281,16 @@ The Desktop keeps 64 apps at most.
 
 ## Example: Digger
 
-Digger (`ports/digger`) is a C program with its data in a second file. To make it an app:
+Digger (`ports/digger`) is a C program with its data in a second file, the first real app.
+`make -C ports/digger app` makes `DIGGER.HZA`; `make -C ports/digger test-app` installs it
+in the emulator and plays it (below). What it took:
 
-1. Build it: `make -C ports/digger` (DIGGER.PRG and DIGGER.DAT). To let it check its
-   needs itself, add `--needs horizon=0.28` to its hcc line (its large code model needs
-   0.28; on 0.27 and older such a program already stops with "needs Horizon 0.28 or
-   later", from its loader of code banks).
-2. Make the folder:
-
-   ```
-   mkdir -p build/DIGGER
-   cp ports/digger/DIGGER.PRG ports/digger/DIGGER.DAT build/DIGGER/
-   ```
-
-3. Write `build/DIGGER/APP.INF`:
+1. **Its needs, on the hcc line** (`ports/digger/Makefile`): `--needs
+   horizon=0.28,sprites,mem=1280K`. 0.28 for its large code model; `sprites` for Marga's
+   scrolling (its split view: REV $0B); about 1.2 MB of free memory (19 banks: the shown
+   framebuffer and the one it draws into, its pictures, tables and code). Lau is not a
+   need: without it the sound keeps time by the frame counter; a joystick is optional.
+2. **APP.INF** (`ports/digger/app/APP.INF`):
 
    ```
    name=Digger
@@ -302,18 +298,32 @@ Digger (`ports/digger`) is a C program with its data in a second file. To make i
    description=Windmill Software's Digger (1983), from Digger Remastered
    category=Games
    program=DIGGER.PRG
-   icon=program
-   needs=horizon=0.28
+   icon=DIGGER.ICN
+   needs=horizon=0.28,sprites,mem=1280K
    ```
 
-   Do not register `types=DRF` for its recordings: Digger takes a recording as `/P:file`,
-   not as a bare path, so a double click could not play it.
+   Not `types=DRF` for its recordings: Digger takes a recording as `/P:file`, not as a
+   bare path, so a double click could not play it.
+3. **Its icon** is made at build time from the game's own art (`tools/mkdata.py --icon`):
+   the VGA digger sprite (32 x 30 with its mask), its 16 colours as the nearest of the
+   palette's colour cube, transparent where the mask is, the house style's drop shadow
+   (colour 15). 1024 bytes, `DIGGER.ICN`.
+4. **The folder and the archive**: `build/app/DIGGER/` gets APP.INF, DIGGER.PRG, DIGGER.DAT
+   and DIGGER.ICN, and `hzapp.py pack build/app/DIGGER -o DIGGER.HZA --mtime 0` packs it
+   (420 KB). No `DIGGER.SCO` or `DIGGER.INI` in it: the program makes them.
+5. **Saves**: at its start the program goes to its own folder (`hz_prog_dir` and `hz_chdir`)
+   and keeps its high scores (`DIGGER.SCO`), `DIGGER.INI` and its recordings there, by the
+   relative names upstream uses: an update keeps them.
+6. **The test** (`ports/digger/tests/app.script`, `run816.py --mode none`: the Desktop with
+   nothing started): `DIGGER.HZA` opened in Files (its name typed, Enter), Install, then
+   Programs (F10, Right), End to "Games >", Enter (its pop-up at the pointer), Down, Enter:
+   Digger's title; a game to a high score; Esc; the archive opened again: Replace. Then
+   the card: the four files in `/APPS/DIGGER`, and `DIGGER.SCO` with the new score still
+   there after the update. The script waits for the program's console lines (`wait
+   digger: title`), not for fixed times.
 
-4. Pack it: `python3 sdk/tools/hzapp.py pack build/DIGGER -o DIGGER.HZA`.
-5. Copy `DIGGER.HZA` to the card and double-click it in Files (or `install DIGGER.HZA`).
-
-Digger already keeps its high scores (`DIGGER.SCO`), `DIGGER.INI` and its recordings in
-its own folder, so an update keeps them. Do not put `DIGGER.SCO` into the archive.
+Install it on a card: copy `DIGGER.HZA` anywhere on the card, double-click it in Files (or
+`install DIGGER.HZA` in the shell), then Programs > Games > Digger.
 
 ## Older Horizon versions
 

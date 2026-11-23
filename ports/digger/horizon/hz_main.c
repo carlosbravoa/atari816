@@ -66,7 +66,15 @@ int main(int argc, char *argv[])
     {                                   /* the pictures' test (hz_timer.c): SHOTS.TXT */
         extern unsigned long hzt_shots[16];
         extern unsigned hzt_nshots;
-        FILE *f = fopen("SHOTS.TXT", "r");
+        FILE *f = fopen("DELAY.TXT", "r");
+        if (f) {                        /* (a test: the start delayed by so many ms) */
+            unsigned long ms = 0, t;
+            if (fscanf(f, "%lu", &ms) == 1)
+                for (t = hz_uptime(); (unsigned long)hz_uptime() - t < ms;)
+                    hz_yield();
+            fclose(f);
+        }
+        f = fopen("SHOTS.TXT", "r");
         unsigned long v;
         if (f) {
             while (hzt_nshots < 16 && fscanf(f, "%lu", &v) == 1)

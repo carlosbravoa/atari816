@@ -65,6 +65,7 @@ void graphicsoff(void)
 }
 
 extern bool hzt_title;
+static bool initials_said;          /* (vgawrite) */
 
 /* ---------------------------------------------------------------- what changed */
 
@@ -157,6 +158,7 @@ void hzv_show(void)
 void vgaclear(void)
 {
     hzt_title = false;
+    initials_said = false;
     hzb_fill(0, 0, 320, HZ_PIC_ROWS, 0);
     alldirty = true;
 }
@@ -239,6 +241,10 @@ int16_t vgagetpix(int16_t x, int16_t y)
 void vgawrite(int16_t x, int16_t y, int16_t ch, int16_t c)
 {
     unsigned long a;
+    if (ch == '_' && !initials_said) {  /* (only the initials draw '_': for test scripts) */
+        initials_said = true;
+        printf("digger: initials\n");
+    }
     if (!isvalchar(ch) || !OK(x, y))
         return;
     a = hzd_char((unsigned)ch - 32, (unsigned)c);
@@ -252,6 +258,7 @@ void vgawrite(int16_t x, int16_t y, int16_t ch, int16_t c)
 void vgatitle(void)
 {
     hzt_title = true;
+    printf("digger: title\n");         /* (for test scripts: run816.py's wait) */
     hzb_copy(0, 0, hzd_title(0), 320, 200);
     hzb_copy(0, 200, hzd_title(1), 320, 200);
     alldirty = true;

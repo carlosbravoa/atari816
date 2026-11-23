@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """mkdata.py - Digger's pictures for the Atari816: DIGGER.DAT, from the upstream C files.
 
-    mkdata.py SRCDIR -o DIGGER.DAT --c alpha_ok.c [--preview DIR]
+    mkdata.py SRCDIR -o DIGGER.DAT --c alpha_ok.c [--icon DIGGER.ICN] [--preview DIR]
 
 SRCDIR holds upstream's vgagrafx.c (the VGA sprites: 640 x 400 pixels at 8 bits, 0xFF
 transparent, each with a mask), alpha.c (the VGA font, 24 x 24) and title_gz.c (the title
@@ -25,6 +25,11 @@ images' lengths, nspr x (u8 bank, u16 off, u16 bytes), nchars x 4 x (u8 bank, u1
 
 alpha_ok.c: upstream's ascii2vga[] for the game's isvalchar(): a pointer for each
 character that has a picture (the pictures themselves are in DIGGER.DAT).
+
+DIGGER.ICN: the app's icon (APP.INF's icon=, sdk/docs/apps.md): 32 x 32 bytes, the Desktop's
+palette, 255 transparent: upstream's VGA digger (vgardigger1, 32 x 30, with its mask), its
+16 colours (palette 1) as the nearest of the palette's colour cube, the house style's drop
+shadow (colour 15) one pixel right and down.
 """
 import re
 import struct
@@ -91,6 +96,7 @@ def main():
     out = a[a.index('-o') + 1]
     cout = a[a.index('--c') + 1]
     prev = a[a.index('--preview') + 1] if '--preview' in a else None
+    icn = a[a.index('--icon') + 1] if '--icon' in a else None
 
     vga = open(os.path.join(src, 'vgagrafx.c')).read()
     va = arrays(vga)
@@ -176,6 +182,28 @@ def main():
                      ',\n')
         fh.write('};\n')
 
+    if icn:
+        vgapal = [(0, 0, 0), (0, 0, 128), (0, 128, 0), (0, 128, 128), (128, 0, 0), (128, 0, 128),
+                  (128, 64, 0), (128, 128, 128), (64, 64, 64), (0, 0, 255), (0, 255, 0),
+                  (0, 255, 255), (255, 0, 0), (255, 0, 255), (255, 255, 0), (255, 255, 255)]
+
+        def cube(rgb):
+            r, g, b = (min(5, (v + 25) // 51) for v in rgb)
+            return 16 + 36 * r + 6 * g + b
+        pix, msk = va[vt[2]], va[vt[3]]            # vgardigger1 and its mask: 32 x 30
+        assert len(pix) == 960
+        ic = [[255] * 32 for _ in range(32)]
+        for y in range(30):
+            for x in range(32):
+                p = pix[y * 32 + x]
+                if p != 0xFF:
+                    ic[y + 1][x] = cube(vgapal[p & 15])
+        for y in range(31, 0, -1):                 # the shadow
+            for x in range(31, 0, -1):
+                if ic[y][x] == 255 and ic[y - 1][x - 1] not in (255, 15):
+                    ic[y][x] = 15
+        with open(icn, 'wb') as fh:
+            fh.write(bytes(v for row in ic for v in row))
     if prev:
         try:
             from PIL import Image

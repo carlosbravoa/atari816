@@ -31,6 +31,15 @@ given to run816.py, 0 is the moment the program was started.
                       with 'press', end with 'release' after the drag's time has passed)
     T wheel N         wheel steps (positive = up / away from you: ui.lib scrolls up)
     T shot            a screenshot at this time
+    T wait TEXT       wait for the program: from T on nothing more happens until the program
+                      prints a console line that holds TEXT (printf, hz_puts), or at once if
+                      it printed one since the script's step before; then the script goes
+                      on, every later time moved by as long as the wait took. A wait comes
+                      after the key presses and releases of the lines before it
+                      (a script that follows the program's progress, not the clock: "wait
+                      digger: title", then "+500 key enter 100"). Screenshots after a wait
+                      move with it too. run816.py gives each wait 20 s more run time and
+                      fails the run when a wait never ended
 """
 import sys
 
@@ -119,6 +128,7 @@ def strokes(text):
 def parse(lines, offset=0):
     """-> (keys, mouse, shots): emu816 list items and screenshot times in seconds."""
     keys, mouse, shots = [], [], []
+    waited = False                      # (a shot after a wait goes into the keys' list)
     t = 0
     x, y = 320, 180
     held = 0
@@ -152,7 +162,16 @@ def parse(lines, offset=0):
                 mouse.append(f'{t + offset}:{rest[2:].strip()}')
                 x = max(0, min(639, x + int(d[0], 0))); y = max(0, min(359, y + int(d[1], 0)))
             elif cmd == 'shot' and len(words) == 1:
-                shots.append((t + offset) / 1000.0)
+                if waited:
+                    keys.append((t, 'S', len(shots)))
+                shots.append((t + offset) / 1000.0 if not waited else -1.0)
+            elif cmd == 'wait' and len(words) >= 2:
+                # (after every key event of the lines before: a key held from that line's
+                # time on is let go first, so "+0 wait" after "key x 100" means "then wait")
+                last = max([k[0] for k in keys if k[1] not in ('W', 'S')] + [t - 1])
+                t = max(t, last + 1)
+                keys.append((t, 'W', rest.split(None, 1)[1]))
+                waited = True
             elif cmd == 'move' and len(words) == 3:
                 mv(t, int(words[1]), int(words[2]), 100, 20, held)
             elif cmd == 'drag' and len(words) == 3:
@@ -203,13 +222,20 @@ def parse(lines, offset=0):
         except ScriptError as e:
             raise ScriptError(f'line {no}: {e}')
     keys.sort(key=lambda e: e[0])
-    klist = [f'{k + offset}:{u:02x}:{d}' for k, u, d in keys]
+    klist = []
+    for k, u, d in keys:
+        if u == 'W':
+            klist.append(f'{k + offset}:W:{d.encode("latin-1").hex()}')
+        elif u == 'S':                  # (run816.py puts the file's name in: @SHOTn@)
+            klist.append(f'{k + offset}:S:@SHOT{d}@')
+        else:
+            klist.append(f'{k + offset}:{u:02x}:{d}')
     return klist, mouse, shots
 
 
 def end_time(keys, mouse, shots):
     """The last event or shot, in ms."""
-    ts = [float(k.split(':')[0]) for k in keys + mouse] + [s * 1000 for s in shots]
+    ts = [float(k.split(':')[0]) for k in keys + mouse] + [s * 1000 for s in shots if s >= 0]
     return max(ts) if ts else 0
 
 

@@ -15,6 +15,9 @@ How the program is started:
   --mode desktop  (default) the Desktop boots; the program is put first in its Programs
                   menu (/SYSTEM/PROGRAMS) and chosen with the keyboard (F10, Right, Enter).
                   For window programs. No argument string.
+  --mode none     the Desktop boots and nothing is started (time 0 of the script: the
+                  Desktop is up, 4 s): a script that installs an app, opens menus ... The
+                  program is put on the card all the same (--dest), unless it is '-'
   --mode shell    the text shell (/SYSTEM/NODESK on the card); the path and --args are
                   typed at the prompt. For console programs (their output is on the screen
                   and in console.txt) and for window programs that take arguments.
@@ -31,7 +34,9 @@ Options:
   --cd DIR        (shell mode) type "cd DIR" first; the program's path is then typed
                   relative to DIR when it lies in it (--dest /GAMES/MINE/X.PRG --cd /GAMES
                   types "MINE/X.PRG")
-  --script FILE   input script (see inputscript.py; 'T shot' lines add screenshots)
+  --script FILE   input script (see inputscript.py; 'T shot' lines add screenshots; 'T wait
+                  TEXT' waits until the program prints a line holding TEXT: a script that
+                  follows the program's progress instead of the clock, as a test should)
   --shot SECONDS  a screenshot at that time (repeatable; at most 16 in all)
   --seconds N     how long to run after the start (default: the last event + 2 s)
   --out DIR       output folder (default: run-NAME)
@@ -123,8 +128,8 @@ def main():
             prog = w; i += 1
     if not prog:
         die('no program given')
-    if opt['mode'] not in ('desktop', 'shell'):
-        die('--mode is desktop or shell')
+    if opt['mode'] not in ('desktop', 'shell', 'none'):
+        die('--mode is desktop, shell or none')
 
     hz = opt.get('horizon') or os.environ.get('HORIZON') or os.path.join(HERE, '..', '..', 'horizon')
     hz = os.path.abspath(hz)
@@ -153,12 +158,18 @@ def main():
         p = os.path.join(card, dst.lstrip('/'))
         os.makedirs(os.path.dirname(p), exist_ok=True)
         shutil.copy(src, p)
-    put(prog, dest)
+    if prog != '-':
+        put(prog, dest)
     for f in opt['files']:
         src, _, d = f.partition(':')
         put(src, d or '/' + os.path.basename(src).upper())
 
-    if opt['mode'] == 'desktop':
+    if opt['mode'] == 'none':           # the Desktop only: the script does the rest
+        if opt['args']:
+            die('--args needs --mode shell')
+        boot = []
+        t0 = DESK_BOOT_MS
+    elif opt['mode'] == 'desktop':
         if opt['args']:
             die('--args needs --mode shell (the Programs menu passes no argument)')
         pfile = os.path.join(card, 'SYSTEM', 'PROGRAMS')
@@ -196,13 +207,20 @@ def main():
         die(str(e))
     keys, mouse = bk + uk, bm + um
     keys.sort(key=lambda s: float(s.split(':')[0]))
-    shots = sorted(us + [t0 / 1000.0 + s for s in opt['shots']])
+    # the script's screenshots: at times (emu816 --shot-at), numbered first in time order;
+    # after a 'wait' line they come in the keys' list (they move with the wait), numbered on
+    shots = sorted([s for s in us if s >= 0] + [t0 / 1000.0 + s for s in opt['shots']])
+    later = [i for i, s in enumerate(us) if s < 0]
     if len(shots) > 16:
         die('at most 16 screenshots per run (an emu816 limit)')
+    for k, i in enumerate(later, len(shots) + 1):
+        p = os.path.join(out, f'shot{k}.ppm')
+        keys = [x.replace(f'@SHOT{i}@', p.encode('latin-1').hex()) for x in keys]
+    nwait = sum(1 for x in keys if ':W:' in x)
     if 'seconds' in opt:
         secs = t0 / 1000.0 + float(opt['seconds'])
     else:
-        secs = inputscript.end_time(uk, um, shots) / 1000.0 + 2.0
+        secs = inputscript.end_time(uk, um, shots) / 1000.0 + 2.0 + 20.0 * nwait
         secs = max(secs, t0 / 1000.0 + 3.0)
 
     cmdl = [emu, '--sd', card, '--max-seconds', f'{secs:g}']
@@ -242,6 +260,8 @@ def main():
         p = os.path.join(out, f'shot{n}.ppm')
         ppms.append(p)
         cmdl += ['--shot', p, '--shot-at', f'{s:g}']
+    for k in range(len(shots) + 1, len(shots) + len(later) + 1):
+        ppms.append(os.path.join(out, f'shot{k}.ppm'))
     if opt.get('shot-on'):
         cmdl += ['--shot-on', opt['shot-on'], '--shot-on-prefix', os.path.join(out, 'auto')]
     cmdl.append(os.path.join(card, 'SYSTEM', 'HORIZON.SYS'))
@@ -278,6 +298,11 @@ def main():
     if r.returncode not in (0, 3):
         print('run816: emu816 failed:', open(os.path.join(out, 'emu.err')).read()[-500:])
         ok = False
+    for ln in open(os.path.join(out, 'emu.err'), encoding='latin-1').read().splitlines():
+        if 'the script still waits for' in ln:
+            print(f'run816: FAIL: {ln[8:]}: the program never printed it (the run ended at '
+                  f'{secs:g} s; --seconds for more)')
+            ok = False
     for ln in con.splitlines():
         if '[kill]' in ln:
             print(f'run816: CRASH: {ln.strip()}  (ABI.md, "Faults"; docs/reference/program.md)')

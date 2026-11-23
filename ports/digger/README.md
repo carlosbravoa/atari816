@@ -19,16 +19,27 @@ POKEY, recording and playing back games (`.DRF`), pause, the speed keys.
 
 ```
 make            # DIGGER.PRG (hcc --code large) and DIGGER.DAT (the pictures)
-make run        # in the emulator, a scripted game (tests/play.script): build/run/shot*.png
+make run        # in the emulator, a scripted game (tests/play.script)
 make test       # the checks below
+make app        # DIGGER.HZA: the app, for Horizon 0.29's Installer
+make test-app   # DIGGER.HZA installed, started, played and updated in the emulator
 ```
+
+**Install it (Horizon 0.29 and later):** copy `DIGGER.HZA` anywhere on the card, double
+click it in Files (or type `install DIGGER.HZA` in the shell) and click Install. Digger goes
+to `/APPS/DIGGER` and is in the Desktop's Programs menu under Games. Installing a newer
+`DIGGER.HZA` the same way replaces the program and keeps the high scores. To remove it:
+Files, `/APPS`, the folder DIGGER, Remove app... (that deletes the high scores too). On
+Horizon 0.28: unpack the archive on a PC (any `tar`) and copy the folder DIGGER to `/APPS`,
+or copy DIGGER.PRG and DIGGER.DAT into any folder; start DIGGER.PRG from Files.
 
 The pictures are made from upstream's C files (`src/data/vgagrafx.c`, `alpha.c`,
 `title_gz.c`) by `tools/mkdata.py` into `DIGGER.DAT`. Copy **DIGGER.PRG and DIGGER.DAT**
 into the same folder on the card and start DIGGER.PRG from the Desktop (Programs, or
 Files). It needs **Horizon 0.28** or later (a program with more than one bank of code in
-one file). The high scores (`DIGGER.SCO`), `DIGGER.INI` and saved
-recordings go into the program's folder.
+one file), a REV $0B board (scrolling) and 1.2 MB of free memory: it checks these at its
+start and says what is missing (`hcc --needs`). The high scores (`DIGGER.SCO`),
+`DIGGER.INI` and saved recordings go into the program's folder.
 
 Upstream's options work from the shell: `DIGGER.PRG /Q` (no sound), `/M` (no music), `/S:N`
 (a frame of N x 2 ms: the default is 40, 80 ms; `/S:0` as fast as it goes), `/L:file` (a
@@ -125,10 +136,14 @@ PORTING-NOTES.md ("Speed", "The board's report") has the figures before and afte
 
 `make test` (`HORIZON=DIR` for another Horizon tree):
 
-1. the scripted game, `tests/play.script`: title, a game, two emeralds, a shot, three
-   lives lost, game over, initials HZD, the title with the new high score, F8, Esc;
+1. the scripted game, `tests/play.script`: title, a game, the five emeralds of the middle
+   column, three lives lost, game over, initials HZD, the title with the new high score,
+   F8, Esc; each step waits for the program's console line for that state (`digger:
+   title`, `digger: play`, `digger: dead`, `digger: initials`: run816.py's `wait`), not a
+   fixed time, so a slower or quicker start changes nothing (checked with the start
+   delayed by 1.5 and 3 s: a file `DELAY.TXT` with the milliseconds, next to the program);
    the console's frame statistics are expected (no pictures: see 2);
-2. `tests/check.sh`: `DIGGER.SCO` has HZD 50; POKEY's 16-bit voices were set up and
+2. `tests/check.sh`: `DIGGER.SCO` has HZD 125; POKEY's 16-bit voices were set up and
    played (the logged writes); the game's own recording (F8) plays back to the same
    score; `tests/frames.sh`: the game's recording of that game (`tests/play.drf`) played
    back, a picture at each game frame of `tests/frames.txt` (the program stops there and
@@ -140,14 +155,22 @@ PORTING-NOTES.md ("Speed", "The board's report") has the figures before and afte
    (score, level, frame count: `tests/drf/*.out`, from upstream's CI). The game logic
    looks at the screen's pixels, so this checks the drawing too.
 
+`make test-app` (`tests/app.sh`, `tests/app.script`): the Desktop with nothing started
+(`run816.py --mode none`), `DIGGER.HZA` opened in Files, Install, Programs > Games > Digger,
+its title, a game to a high score (APP 125), back to the Desktop, the archive opened again:
+Replace. The card must then hold `/APPS/DIGGER` with APP.INF, DIGGER.PRG, DIGGER.DAT,
+DIGGER.ICN, and DIGGER.SCO with the score, kept by the update.
+
 ## Files
 
 | | |
 | --- | --- |
 | `src/` | upstream's game (GPL; see below), `src/data/` its pictures as C arrays (unchanged) |
 | `horizon/` | the platform layer: `hz_vid.c` + `hz_blit.s` (video), `hz_data.c` (DIGGER.DAT), `hz_timer.c` (frames, the view), `hz_snd.c` (sound), `hz_kbd.c` (keys, joysticks), `hz_main.c` (start, files) |
-| `tools/mkdata.py` | upstream's pictures to DIGGER.DAT |
-| `tests/` | the scripted game, the checks, upstream's recordings, the reference pictures |
+| `tools/mkdata.py` | upstream's pictures to DIGGER.DAT, and the app's icon DIGGER.ICN (from the VGA digger) |
+| `tools/keyhold.c` | a board test: every key event with its time (the held-key fault, PORTING-NOTES.md) |
+| `app/APP.INF` | the app's description (`make app`) |
+| `tests/` | the scripted game, the checks, upstream's recordings, the reference pictures, the app's test |
 | `upstream.patch` | every change to upstream's files |
 | `PORTING-NOTES.md` | what the port needed, the SDK problems met, timings |
 | `COPYING` | the GNU GPL version 2 (upstream's `pkg/windows/LICENSE`) |

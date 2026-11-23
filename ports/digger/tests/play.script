@@ -1,14 +1,23 @@
-# tests/play.script - a game by keys (make test): the title, a game started, the digger
-# digging up the middle column (two emeralds), a shot fired up, then left alone until the
-# nobbins have taken its three lives; game over, the initials; the title again with the
-# new high score, Esc. (Time 0: the program started.) No pictures: those are of a recorded
-# game, at game frames (tests/frames.sh), so that they do not move with the program's timing.
-2500 key enter 100
-6500 key up 2500
-9300 key f1 100
-# the third life ends at about 56 s: game over, the initials (50 points is a high score)
-59000 HZD
-# the title with the new high score; F8 saves the game's recording (HZD50.DRF: check.sh
-# plays it back); then Esc (upstream's Exit key is F10; Esc too here)
-68000 key f8 100
-70000 key esc 100
+# tests/play.script - a game by keys (make test), each step after the program says it is
+# ready for it (run816.py's "wait": the console lines the port prints), not at fixed
+# seconds: a slower or faster start, Horizon or SDK changes the time things take, not what
+# happens. The title; a game; the digger up the middle column through its five emeralds
+# (125 points); then left alone until the nobbins have taken its three lives; game over,
+# the initials HZD (125 is a high score); the title with the new high score; F8 saves the
+# game's recording (HZD125.DRF, check.sh plays it back); Esc. No pictures: those are of a
+# recorded game at game frames (tests/frames.sh).
+0 wait digger: title
++1000 key enter 100
++0 wait digger: play
++500 key up 4500
++0 wait digger: dead
++0 wait digger: play
++0 wait digger: dead
++0 wait digger: play
++0 wait digger: dead
++0 wait digger: initials
++500 HZD
++0 wait digger: title
++1500 key f8 100
++0 wait digger: title
++1500 key esc 100

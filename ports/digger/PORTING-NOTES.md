@@ -331,6 +331,28 @@ initials: none in play. In `thevoids.drf` at the game's pace: 298 late frames of
 (0.7 %; 97 before: the looks at the clock and the vertical blanks' work in the middle of a frame add to the busiest frames), the whole game
 3,365 s against 3,358 s before and 3,325 s at exactly 80 ms a frame.
 
+## Round 4: a test that follows the program, and the app
+
+**The scripted keyboard game broke on Horizon 0.29** ("DIGGER.SCO has not HZD 50", "no
+recording HZD50.DRF saved"): its keys were at fixed seconds, the Desktop now starts the
+program a little later, the "up" key fell during the level's drawing (its recording was
+`___0.drf`: score 0, no high score, no initials). Not a fault of Digger on 0.29. Now each
+step waits for the program: the port prints `digger: title` (the title drawn), `digger:
+play` / `digger: dead` (the digger alive or not), `digger: initials` (the initials' `_`
+drawn), and `tests/play.script` says `+0 wait digger: play` before its keys. The SDK's
+input scripts gained that step (`inputscript.py`, `run816.py`, emu816's `--keys` entries
+`t:W:HEX` and, for screenshots after a wait, `t:S:HEX`): a wait is met by a line printed
+since the script's step before, and every later time moves by as long as it took. Checked
+on a clean checkout and with the program's start delayed by 1.5 and 3 s (`DELAY.TXT`): the
+same game, the same score (125: the five emeralds of the middle column).
+
+**The app.** `make app` makes `DIGGER.HZA` (APP.INF in `app/`, the icon made from the VGA
+digger by `tools/mkdata.py --icon`, `hzapp.py pack`); the program checks its needs itself
+(`hcc --needs horizon=0.28,sprites,mem=1280K`); `make test-app` installs it in the
+emulator through Files and the Installer, starts it from Programs > Games, plays a game to
+a high score, installs it again (Replace) and checks that `/APPS/DIGGER/DIGGER.SCO` stayed.
+`run816.py --mode none` (the Desktop, nothing started) is new for that.
+
 ## Suggestions for the porting guide (sdk/docs/c/porting.md)
 
 1. **Start with the recorded-game or replay test if the game has one.** A deterministic

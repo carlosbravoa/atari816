@@ -363,6 +363,14 @@ void gethrt(bool minsleep, int mult)
     clock_init();
     if (hzt_nshots && mult == 1)
         shot_check();
+    if (mult == 1) {                    /* (the digger's life, for test scripts) */
+        static bool alive;
+        bool now = !hzt_title && digalive(0);
+        if (now != alive) {
+            alive = now;
+            printf(now ? "digger: play\n" : "digger: dead\n");
+        }
+    }
     service(true, false);
     if (frame_t && mult == 1 && dgstate.ftime > 1) {
         busy = clk - frame_t;

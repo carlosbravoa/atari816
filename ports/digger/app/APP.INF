@@ -1,0 +1,9 @@
+# APP.INF of Digger (sdk/docs/apps.md): make app packs it with DIGGER.PRG, DIGGER.DAT and
+# DIGGER.ICN into DIGGER.HZA
+name=Digger
+version=1.0
+description=Windmill Software's Digger (1983), from Digger Remastered
+category=Games
+program=DIGGER.PRG
+icon=DIGGER.ICN
+needs=horizon=0.28,sprites,mem=1280K

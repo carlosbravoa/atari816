@@ -68,18 +68,68 @@ static void host_key(int usage, int down)
     mailbox_key(usage, down);
 }
 
-/* scripted input (--keys, --mouse), sorted by time */
-typedef struct { uint64_t cycle; int seq; uint8_t mouse, usage, down, btn; int16_t dx, dy, wheel; } KeyAt;
+/* scripted input (--keys, --mouse), sorted by time. Two more kinds in --keys: a wait
+ * ("t:W:HEX": from t on, nothing more until the program prints a console line holding that
+ * text; then the rest comes as late as the wait took) and a screenshot ("t:S:HEX": that file,
+ * two vertical blanks later), so a script can follow the program's progress */
+enum { K_KEY, K_MOUSE, K_WAIT, K_SHOT };
+typedef struct { uint64_t cycle; int seq; uint8_t mouse, usage, down, btn; int16_t dx, dy, wheel; uint8_t kind; char *text; } KeyAt;
 static KeyAt *keys;
 static int nkeys, nextkey;
+static const char *key_wait;            /* the text being waited for, NULL: none */
+static uint64_t key_wait_at;
+static const char *key_shot;            /* a screenshot due (its file), in key_shot_req frames */
+static int key_shot_req;
+/* the console's lines since the script's last step: a wait is also met by a line that came
+ * before its own time (the program may be quicker than the script thought) */
+#define KH_N 32
+static char key_hist[KH_N][128];
+static int key_hist_n;
+
+static int key_hist_has(const char *text)
+{
+    for (int i = 0; i < key_hist_n; i++) if (strstr(key_hist[i], text)) return 1;
+    return 0;
+}
 
 static void keys_due(uint64_t now)
 {
-    while (nextkey < nkeys && keys[nextkey].cycle <= now) {
+    while (!key_wait && nextkey < nkeys && keys[nextkey].cycle <= now) {
         KeyAt *k = &keys[nextkey++];
-        if (k->mouse) mailbox_mouse(k->btn, k->dx, k->dy, k->wheel);
+        if (k->kind == K_WAIT) {
+            if (key_hist_has(k->text)) { key_hist_n = 0; continue; }   /* met already */
+            key_wait = k->text; key_wait_at = k->cycle;
+            continue;
+        }
+        key_hist_n = 0;
+        if (k->kind == K_SHOT) { key_shot = k->text; key_shot_req = 3; }
+        else if (k->mouse) mailbox_mouse(k->btn, k->dx, k->dy, k->wheel);
         else host_key(k->usage, k->down);
     }
+}
+
+/* (a console line) the wait is over: the rest of the script moves on by the time it took */
+static void keys_wait_line(const char *line)
+{
+    if (!key_wait) {                                    /* (kept for a wait to come) */
+        if (key_hist_n == KH_N) { memmove(key_hist, key_hist + 1, sizeof key_hist[0] * (KH_N - 1)); key_hist_n--; }
+        snprintf(key_hist[key_hist_n++], sizeof key_hist[0], "%s", line);
+        return;
+    }
+    if (!strstr(line, key_wait)) return;
+    key_hist_n = 0;
+    uint64_t d = M.cpu.cycles > key_wait_at ? M.cpu.cycles - key_wait_at : 0;
+    for (int i = nextkey; i < nkeys; i++) keys[i].cycle += d;
+    key_wait = NULL;
+    machine_reschedule();
+}
+
+static char *unhex(const char *s, int n)
+{
+    char *t = malloc(n / 2 + 1);
+    for (int i = 0; i < n / 2; i++) { unsigned v; sscanf(s + 2 * i, "%2x", &v); t[i] = (char)v; }
+    t[n / 2] = 0;
+    return t;
 }
 
 static int cmpkey(const void *a, const void *b)
@@ -94,6 +144,18 @@ static void parse_keys(const char *s)
 {
     while (*s) {
         double ms; unsigned u, d; int n = 0;
+        char kind;
+        if (sscanf(s, "%lf:%c:%n", &ms, &kind, &n) == 2 && n && (kind == 'W' || kind == 'S')) {
+            int h = (int)strspn(s + n, "0123456789abcdefABCDEF");
+            keys = realloc(keys, (nkeys + 1) * sizeof *keys);
+            keys[nkeys] = (KeyAt){ .cycle = (uint64_t)(ms * CPU_HZ / 1000.0), .seq = nkeys,
+                                   .kind = kind == 'W' ? K_WAIT : K_SHOT, .text = unhex(s + n, h) };
+            nkeys++;
+            s += n + h;
+            if (*s == ',') s++;
+            continue;
+        }
+        n = 0;
         if (sscanf(s, "%lf:%x:%u%n", &ms, &u, &d, &n) != 3) { fprintf(stderr, "emu816: bad --keys at \"%s\"\n", s); exit(1); }
         keys = realloc(keys, (nkeys + 1) * sizeof *keys);
         keys[nkeys] = (KeyAt){ .cycle = (uint64_t)(ms * CPU_HZ / 1000.0), .seq = nkeys, .usage = u, .down = d != 0 };
@@ -111,7 +173,7 @@ static void parse_mouse(const char *s)
         double ms; int dx, dy, w, b, n = 0;
         if (sscanf(s, "%lf:%d:%d:%d:%i%n", &ms, &dx, &dy, &w, &b, &n) != 5) { fprintf(stderr, "emu816: bad --mouse at \"%s\"\n", s); exit(1); }
         keys = realloc(keys, (nkeys + 1) * sizeof *keys);
-        keys[nkeys] = (KeyAt){ .cycle = (uint64_t)(ms * CPU_HZ / 1000.0), .seq = nkeys, .mouse = 1, .btn = b, .dx = dx, .dy = dy, .wheel = w };
+        keys[nkeys] = (KeyAt){ .cycle = (uint64_t)(ms * CPU_HZ / 1000.0), .seq = nkeys, .mouse = 1, .btn = b, .dx = dx, .dy = dy, .wheel = w, .kind = K_MOUSE };
         nkeys++;
         s += n;
         if (*s == ',') s++;
@@ -136,7 +198,7 @@ void machine_reschedule(void)
     if (se < n) n = se;
     se = opl_next_event();
     if (se < n) n = se;
-    if (nextkey < nkeys && keys[nextkey].cycle < n) n = keys[nextkey].cycle;
+    if (!key_wait && nextkey < nkeys && keys[nextkey].cycle < n) n = keys[nextkey].cycle;
     if (kbd_release && kbd_last && kbd_last + kbd_release < n) n = kbd_last + kbd_release;
     M.next_event = n;
 }
@@ -243,10 +305,11 @@ static int shoton_len, shoton_req, shoton_n;
 
 void emu_console_byte(uint8_t v)
 {
-    if (!shoton_text) return;
+    if (!shoton_text && !nkeys) return;
     if (v == 10 || v == 13) {
         shoton_line[shoton_len] = 0;
-        if (shoton_len && strstr(shoton_line, shoton_text) && !shoton_req) shoton_req = 3;
+        if (shoton_text && shoton_len && strstr(shoton_line, shoton_text) && !shoton_req) shoton_req = 3;
+        if (shoton_len) keys_wait_line(shoton_line);
         shoton_len = 0;
     } else if (shoton_len < (int)sizeof shoton_line - 1)
         shoton_line[shoton_len++] = (char)v;
@@ -256,6 +319,13 @@ static void on_frame(void)
 {
     /* Marga only fetches and keeps lines when someone will look at them */
     double now = M.cpu.cycles / CPU_HZ;
+    if (key_shot_req) {
+        M.nvc.want = 1;
+        if (--key_shot_req == 0) {
+            nvc_render();
+            if (nvc_write_ppm(key_shot)) fprintf(stderr, "emu816: cannot write %s\n", key_shot);
+        }
+    }
     if (shoton_req) {
         M.nvc.want = 1;
         if (--shoton_req == 0) {
@@ -397,6 +467,8 @@ static void usage(void)
         "                       the blitter's older speed model (the timing before Horizon 0.19)\n"
         "  --console-us N       DBG_OUT busy for N us after each byte; bytes written while busy are dropped\n"
         "  --keys LIST          inject keys: \"t_ms:usage:down,...\" (usage in hex, e.g. 100:04:1,150:04:0)\n"
+        "                       (also t_ms:W:HEX: wait until the console shows a line holding that text,\n"
+        "                       the rest later by as long; t_ms:S:HEX: a screenshot to that file)\n"
         "  --mouse LIST         inject mouse: \"t_ms:dx:dy:wheel:buttons,...\" (e.g. 100:5:-3:0:1)\n"
         "  --rev N              SYS_REV to report: 6 (no sound, no blitter), 7 (sound), 8 (+ blitter),\n"
         "                       9 (+ blitter lists, raster events at the beam, NV_FRAME),\n"
@@ -629,6 +701,8 @@ int main(int argc, char **argv)
     fflush(stdout);
     audio_wav_close();
     if (prof_u) prof_write();
+    if (key_wait)                                       /* (run816.py looks for this line) */
+        fprintf(stderr, "emu816: the script still waits for \"%s\"\n", key_wait);
 
     for (int i = 0; i < nshots; i++) if (!shot_done[i]) {
         nvc_render();
