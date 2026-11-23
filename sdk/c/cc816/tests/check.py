@@ -171,7 +171,7 @@ def main():
         print('== c-testsuite')
         # (00040.c, 8 queens by brute force, is right but needs about 260 emulated
         # seconds: 1.5 million calls of its check function)
-        # (with far data its int * board costs more: 00040.c needs about 500 seconds)
+        # (with far data its int * board costs more: 00040.c needs more than 400 seconds)
         res = conform(sorted(glob.glob(os.path.join(cts, 'tests', 'single-exec', '*.c'))),
                       os.path.join(prog.BUILD, 'cts'),
                       slow=['00040.c=' + ('900' if code == 'large-far' else '400')])

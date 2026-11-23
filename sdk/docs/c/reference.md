@@ -1588,7 +1588,7 @@ with the name of a typedef (c-testsuite 00129.c, a fix of the vendored pycparser
 `#pragma push_macro` / `pop_macro` (00206.c), `__has_include`, `-U`, `-include` and
 `-fsigned-char`.
 
-The c-testsuite (single-exec, 220 programs): 213 pass (201 before `long long`, case
+The c-testsuite (single-exec, 220 programs): 213 pass, in each of the three configurations (201 before `long long`, case
 ranges and range designators). Each of the other 7 is listed in
 `cc816/tests/cts-known.txt` with its reason: 1 a variable-length array, 2 a 32-bit `int`,
 3 a 64-bit `double` (one of them also a 32-bit `int`), 1 one of the `__LP64__` /
