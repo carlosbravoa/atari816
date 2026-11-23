@@ -397,8 +397,8 @@ options of a test from a file, `tests/*.args`). Upstream is untouched.
 
 | | |
 | --- | --- |
-| XCOM.PRG | 865,512 bytes: an o65 of 21 KB, 12 code banks (763,057 bytes of code; 578,218 with near data: far pointers make it 32 % bigger), 1 bank of far data (51,168 bytes: the strings and constant tables) |
-| The main bank | 45,964 bytes besides movable code: code that must stay 8,068, constants 3,517, data 319, bss 34,060 (the biggest, `hcc --sizes`: hgame's record queues 4.6 KB, `arena` 2 KB, `g_units` 2 KB, `save_box` 1.3 KB); + `--heap 2048` + `--stack 8192` = 56,204 of 65,264; 9 KB of it then filled with movable code |
+| XCOM.PRG | 833,994 bytes: an o65 of 21 KB, 12 code banks (732,183 bytes of code; 578,218 with near data: far pointers make it 27 % bigger), 1 bank of far data (51,168 bytes: the strings and constant tables) |
+| The main bank | 46,577 bytes besides movable code: code that must stay 8,005, constants 3,517, data 319, bss 34,736 (the biggest, `hcc --sizes`: hgame's record queues 4.6 KB, `arena` 2 KB, `g_units` 2 KB, `save_box` 1.3 KB); + `--heap 2048` + `--stack 8192` = 56,817 of 65,264; 8 KB of it then filled with movable code |
 | Banks at run time | 13 for the program, 17 for the DOS arena, the framebuffer's |
 | Boot | `X.PRG @GEO.ARG` (`/V VGA NOINTRO LOG GEO.TXT KEYS GEO.KEY`): the start menu, a new game, the base placed, the geoscape within 20 s of emulated time; the whole of tests/geo.keys (the base, the UFOpaedia, the graphs) by about 80 s |
 | Against the host | GEO.TXT and BATTLE.TXT (tests/battle.keys: a quick battle on FA1V, sectoids, seed 1, to "script finished") are the host's line for line, except the VGA buffer's segment (the structures' sizes differ: 16-bit `int`, 4-byte pointers) and BATTLE.TXT's "KB in all" (the host prints 0: a 32-bit `int` fault of the host build; the Atari816's 434 is the DOS model's own figure); every screenshot is one of the host's pictures but for 55 pixels (the mouse arrow: the emulator's pointer at 0,0) |

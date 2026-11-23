@@ -493,11 +493,11 @@ pointer shapes, in cycles a step: a byte, an element, a call):
 | call, `d = pass(d) - 1`: a pointer argument and result | 95 | 188 (197) | 4 bytes pushed, A and X back, 32-bit arithmetic |
 | `memcpy`, `strlen` (4,000 bytes) | 12, 12 | 10, 10 | MVN either way; `strlen` reads two bytes a round |
 | program size: fbench, farbench | 27,881, 10,979 bytes | 32,169, 18,703 | the far library's heap, stdio and printf with far pointers |
-| XCOM-XT's code | 578,218 bytes (does not link: its data does not fit) | 763,057 bytes in 12 banks | +32 % |
+| XCOM-XT's code | 578,218 bytes (does not link: its data does not fit) | 732,183 bytes in 12 banks | +27 % |
 
 So: arithmetic, calls without pointers and code that reads globals by name cost nothing;
 loops through pointers cost 8-20 % more, a call with pointer arguments about twice as
-much, and code grows by about a third where pointers are everywhere. A byte read through
+much, and code grows by about a quarter where pointers are everywhere. A byte read through
 a far pointer is an 8-bit load (`sep`/`rep`: a 16-bit one could touch the next bank at a
 bank's last byte); a far pointer stepped in place is `inc`, `bne`, `inc` (`p++`), and
 an index through it is Y (`[p],y`) when it is unsigned, an add to the offset alone when

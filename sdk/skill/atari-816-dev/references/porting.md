@@ -215,7 +215,7 @@ Steps for the port:
 Costs measured (`sdk/c/tests/bench/farbench.c`, cycles a step, near data / far data):
 a byte copy loop through pointers 85 / 96, the masked sprite loop 95 / 105, an `int`
 array through a pointer parameter 171 / 205, a call with a pointer argument and result
-95 / 188; code grows about 30 % (XCOM-XT: 578 KB near, 763 KB far).
+95 / 188; code grows about 27 % (XCOM-XT: 578 KB near, 732 KB far).
 
 ## Timing and the sound clock
 
