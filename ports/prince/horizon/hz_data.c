@@ -7,8 +7,6 @@
 #include <string.h>
 #include <stdio.h>
 #include <hgame.h>
-#include <fcntl.h>
-#include <unistd.h>
 #include "common.h"
 #include "hz_plat.h"
 
@@ -28,53 +26,58 @@ unsigned char __far *hzd_dir;           /* POP.DAT, a bank of its own */
 unsigned char hzd_buf[512];
 static unsigned ndir;
 
-/* read max bytes (or to the end) of a file from offset into consecutive far memory from
- * addr -> the length read */
-static long load_far(const char *name, unsigned long addr, unsigned long max, long offset)
+#define HDR 22                          /* POP.DAT's header (version 2): the table after it */
+
+/* The loading: every file opened once and read whole, straight into far memory in pieces
+ * of up to 32,767 bytes (the most one read moves; a piece never crosses a bank). On the
+ * board's card each request costs a few ms whatever its size: the 512-byte reads through a
+ * buffer this replaced took 4,320 requests and 35 s in the emulator's model of the card,
+ * these 88 and 9.6 s (4 s at the board's 580 KB/s). hzd_loaded / hzd_total: the
+ * progress bar (hzv_loading). */
+unsigned long hzd_loaded, hzd_total;
+
+static int open_data(const char *name)
 {
-    unsigned char *buf = hzd_buf;
     char path[160];
-    int fd;
-    long total = 0;
     strcpy(path, hz_prog);
     strcat(path, name);
-    fd = open(path, O_RDONLY);
-    if (fd < 0)
-        return -1;
-    if (offset && lseek(fd, offset, SEEK_SET) != offset) {
-        close(fd);
-        return -1;
-    }
-    for (;;) {
-        unsigned want = max - (unsigned long)total > sizeof hzd_buf ? sizeof hzd_buf :
-                        (unsigned)(max - (unsigned long)total);
-        int n = want ? read(fd, buf, want) : 0;
-        unsigned long a = addr + (unsigned long)total;
-        unsigned room;
-        if (n <= 0)
-            break;
-        room = (unsigned)(0x10000UL - (a & 0xFFFF));
-        if ((unsigned)n <= room) {
-            hz_far_copy((void __far *)a, buf, (unsigned)n);
-        } else {                        /* across a bank's end */
-            hz_far_copy((void __far *)a, buf, room);
-            hz_far_copy((void __far *)(a + room), buf + room, (unsigned)n - room);
-        }
-        total += n;
-    }
-    close(fd);
-    return total;
+    return hz_open(path, HZ_O_READ);
 }
 
-static long file_size(const char *name)
+/* n bytes (or to the end) of the open file h into far memory from addr -> bytes read */
+long hzd_read_far(int h, unsigned long addr, unsigned long n)
 {
-    char path[160];
-    hz_fileinfo st;
-    strcpy(path, hz_prog);
-    strcat(path, name);
-    if (hz_stat_path(path, &st) < 0)
+    unsigned long total = 0;
+    hz_io io;
+    while (total < n) {
+        unsigned long a = addr + total, room = 0x10000UL - (a & 0xFFFF), left = n - total;
+        unsigned want = (unsigned)(left < room ? (left < 32767UL ? left : 32767UL)
+                                               : (room < 32767UL ? room : 32767UL));
+        int got;
+        io.handle = (unsigned char)h;
+        HZ_U24B(io.buf, (unsigned)(a >> 16), (unsigned)a);
+        io.len = want;
+        got = hz_read(&io);
+        if (got <= 0)
+            break;
+        total += (unsigned)got;
+        hzd_loaded += (unsigned)got;
+        hzv_loading(hzd_loaded, hzd_total);
+        if ((unsigned)got < want)
+            break;
+    }
+    return (long)total;
+}
+
+/* a whole file of n bytes into far memory from addr -> 0, or -1 */
+static int load_file(const char *name, unsigned long addr, unsigned long n)
+{
+    int h = open_data(name), ok;
+    if (h < 0)
         return -1;
-    return (long)st.size;
+    ok = hzd_read_far(h, addr, n) == (long)n;
+    hz_close((unsigned)h);
+    return ok ? 0 : -1;
 }
 
 static int fail(const char *what)
@@ -83,24 +86,42 @@ static int fail(const char *what)
     return -1;
 }
 
+unsigned long hzd_snd_size;             /* (hz_sound.c loads POP.SND) */
+
 int hzd_init(void)
 {
     long n, gsz;
     unsigned b, nb, k;
+    unsigned long msk_size;
+    int h;
     dir = hz_far_alloc();
     if (!dir)
         return fail("no memory for POP.DAT");
-    n = load_far("POP.DAT", (unsigned long)dir, 0xFFFFUL, 0);
-    if (n < 16 || dir[0] != 'P' || dir[3] != 'D')
+    h = open_data("POP.DAT");
+    if (h < 0)
         return fail("no POP.DAT");
+    hzd_total = 0xFFFFUL;               /* (the bar: POP.DAT is a small part) */
+    n = hzd_read_far(h, (unsigned long)dir, 0xFFFFUL);
+    hz_close((unsigned)h);
+    if (n < HDR || dir[0] != 'P' || dir[3] != 'D')
+        return fail("no POP.DAT");
+    if (*(unsigned __far *)(dir + 4) != 2)
+        return fail("POP.DAT of an older version");
     ndir = *(unsigned __far *)(dir + 6);
     hzd_atlas_w = *(unsigned __far *)(dir + 8);
     hzd_atlas_h = *(unsigned __far *)(dir + 10);
     hzd_part = *(unsigned __far *)(dir + 12);
-    /* the atlas: each part in banks of its own (consecutive within the part) */
+    msk_size = *(unsigned long __far *)(dir + 14);
+    hzd_snd_size = *(unsigned long __far *)(dir + 18);
+    hzd_total = (unsigned long)n + (unsigned long)hzd_atlas_w * hzd_atlas_h + msk_size + hzd_snd_size;
+    /* the atlas: each part in banks of its own (consecutive within the part), the parts one
+     * after the other in POP.GFX: read in one go */
     hzd_nparts = (hzd_atlas_h + hzd_part - 1) / hzd_part;
-    if (hzd_nparts > HZD_PARTS)
-        return fail("POP.GFX has too many parts");
+    if (hzd_nparts > HZD_PARTS || hzd_part != 256)
+        return fail("POP.GFX has too many parts, or parts not of 256 rows");
+    h = open_data("POP.GFX");
+    if (h < 0)
+        return fail("no POP.GFX");
     for (k = 0; k < hzd_nparts; k++) {
         unsigned rows = hzd_atlas_h - k * hzd_part < hzd_part ? hzd_atlas_h - k * hzd_part : hzd_part;
         gsz = (long)hzd_atlas_w * rows;
@@ -112,24 +133,35 @@ int hzd_init(void)
                 --m;
             printf("prince: %u banks free, at most %u together; the atlas wants %u\n",
                    hz_mem_info(), m, nb);
+            hz_close((unsigned)h);
             return fail("not enough memory for the atlas");
         }
         hzd_part_addr[k] = (unsigned long)b << 16;
-        if (load_far("POP.GFX", hzd_part_addr[k], (unsigned long)gsz,
-                     (long)hzd_atlas_w * hzd_part * k) != gsz)
+        if (hzd_read_far(h, hzd_part_addr[k], (unsigned long)gsz) != gsz) {
+            hz_close((unsigned)h);
             return fail("POP.GFX is missing or damaged");
+        }
     }
-    n = file_size("POP.MSK");
-    if (n <= 0)
-        return fail("no POP.MSK");
-    nb = (unsigned)((n + 0xFFFF) >> 16);
+    hz_close((unsigned)h);
+    nb = (unsigned)((msk_size + 0xFFFF) >> 16);
     b = hg_banks(nb);
     if (!b)
         return fail("not enough memory for the masks");
     hzd_masks = (unsigned long)b << 16;
-    if (load_far("POP.MSK", hzd_masks, (unsigned long)nb << 16, 0) != n)
-        return fail("POP.MSK is damaged");
+    if (load_file("POP.MSK", hzd_masks, msk_size) < 0)
+        return fail("POP.MSK is missing or damaged");
     return 0;
+}
+
+/* POP.SND (hz_sound.c): its size from POP.DAT, read like the others -> its address, or 0 */
+unsigned long hzd_load_snd(void)
+{
+    unsigned nb = (unsigned)((hzd_snd_size + 0xFFFF) >> 16), b;
+    if (!hzd_snd_size || (b = hg_banks(nb)) == 0)
+        return 0;
+    if (load_file("POP.SND", (unsigned long)b << 16, hzd_snd_size) < 0)
+        return 0;
+    return (unsigned long)b << 16;
 }
 
 /* the directory's record of (folder, kind, res) -> its offset in POP.DAT, or 0 */
@@ -138,7 +170,7 @@ static unsigned find(unsigned folder, unsigned kind, unsigned res)
     unsigned lo = 0, hi = ndir;
     while (lo < hi) {
         unsigned mid = (lo + hi) >> 1;
-        const unsigned char __far *e = dir + 14 + mid * 8;
+        const unsigned char __far *e = dir + HDR + mid * 8;
         unsigned ef = e[0], er = *(const unsigned __far *)(e + 2), ek = e[1];
         int c = ef != folder ? (ef < folder ? -1 : 1) :
                 er != res ? (er < res ? -1 : 1) : ek != kind ? (ek < kind ? -1 : 1) : 0;

@@ -10,8 +10,6 @@
 #include <string.h>
 #include <stdio.h>
 #include <hgame.h>
-#include <fcntl.h>
-#include <unistd.h>
 #include "common.h"
 #include "hz_plat.h"
 
@@ -37,41 +35,12 @@ static const unsigned char __far *entry(unsigned id)
 
 int hzs_init(void)
 {
-    char path[160];
-    hz_fileinfo st;
-    unsigned nb, b, i;
-    long n;
-    int fd;
+    unsigned i;
     has_lau = (unsigned char)hg_has_lau();
     has_opl = (unsigned char)hg_has_opl();
-    strcpy(path, hz_prog);
-    strcat(path, "POP.SND");
-    if (hz_stat_path(path, &st) < 0)
+    snd = hzd_load_snd();
+    if (!snd)
         return -1;
-    nb = (unsigned)((st.size + 0xFFFF) >> 16);
-    b = hg_banks(nb);
-    if (!b)
-        return -1;
-    snd = (unsigned long)b << 16;
-    fd = open(path, O_RDONLY);
-    if (fd < 0)
-        return -1;
-    for (n = 0; n < (long)st.size;) {
-        unsigned char *buf = hzd_buf;
-        int k = read(fd, buf, sizeof hzd_buf);
-        unsigned long a = snd + (unsigned long)n;
-        unsigned room = (unsigned)(0x10000UL - (a & 0xFFFF));
-        if (k <= 0)
-            break;
-        if ((unsigned)k <= room) {
-            hz_far_copy((void __far *)a, buf, (unsigned)k);
-        } else {
-            hz_far_copy((void __far *)a, buf, room);
-            hz_far_copy((void __far *)(a + room), buf + room, (unsigned)k - room);
-        }
-        n += k;
-    }
-    close(fd);
     if (has_lau) {
         for (i = 0; i < NSOUNDS; i++) {
             const unsigned char __far *e = entry(i);

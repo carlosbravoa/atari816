@@ -1,0 +1,12 @@
+Replay started in level 3, room 9.
+Remaining time: 59 min, 59 sec, 11 ticks. (rem_min=60, rem_tick=719)
+lvl: level 3 room 9 sum d3cc949f size 2305
+ref: tick 10 level 3 room 9 kid 9 135 181 15 0 alive -1 hp 3/3 guard 0 0 0 0 alive 0 hp 0/0 seed 3115572192 time 60 709
+ref: tick 20 level 3 room 9 kid 9 135 181 15 0 alive -1 hp 3/3 guard 0 0 0 0 alive 0 hp 0/0 seed 4200262242 time 60 699
+ref: tick 30 level 3 room 9 kid 9 135 181 15 0 alive -1 hp 3/3 guard 0 0 0 0 alive 0 hp 0/0 seed 2140559924 time 60 689
+ref: tick 40 level 3 room 9 kid 9 135 181 15 0 alive -1 hp 3/3 guard 0 0 0 0 alive 0 hp 0/0 seed 3601754070 time 60 679
+Replay ended in level 3, room 9.
+Kid is alive.
+Remaining time: 59 min, 56 sec, 7 ticks. (rem_min=60, rem_tick=679)
+Play duration:  0 min, 3 sec, 4 ticks. (curr_tick=40)
+Play duration matches replay length. (40 ticks)

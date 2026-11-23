@@ -17,6 +17,7 @@ extern char *hz_ref_dump;
 
 int main(int argc, char *argv[])
 {
+    unsigned char sndtest = 0;
     int n = hz_prog_dir(hz_prog, sizeof hz_prog), i;
     if (n > 1) {
         hz_prog[n - 1] = 0;             /* (chdir: without the last '/') */
@@ -40,16 +41,44 @@ int main(int argc, char *argv[])
         } else if (!strcasecmp(argv[i], "nosound")) {
             extern unsigned char hz_nosound;
             hz_nosound = 1;
+        } else if (!strcasecmp(argv[i], "levelsum")) {
+            extern unsigned char hz_ref_level;
+            hz_ref_level = 1;
+        } else if (!strcasecmp(argv[i], "sndtest")) {
+            sndtest = 1;
         } else if (!strncasecmp(argv[i], "every=", 6))
             hz_ref_every = atoi(argv[i] + 6);
     }
+    /* the screen at once: the loading takes seconds on the board's card */
+    if (hzv_screen() < 0) {
+        printf("prince: no full screen (%u banks free)\n", hz_mem_info());
+        return 1;
+    }
+    printf("prince: loading\n");
     if (hzd_init() < 0)
         return 1;
     if (hzs_init() < 0)
         printf("prince: no POP.SND: no sound\n");
+    if (sndtest) {
+        /* every sound once, one after the other ("prince: sound N" as it starts; the
+         * songs' first 4 s): their levels in a recording (tests/sndlevel.py) */
+        for (i = 0; i < 58; i++) {
+            unsigned f = hz_frame();
+            hzs_play(i);
+            if (!hzs_playing())
+                continue;
+            printf("prince: sound %d\n", i);
+            while (hzs_playing() && (unsigned)(hz_frame() - f) < 240)
+                hzt_wait_frames(1);
+            hzs_stop();
+            hzt_wait_frames(30);
+        }
+        printf("prince: sound end\n");
+        return 0;
+    }
     g_argc = argc;
     g_argv = argv;
-    printf("prince: start\n");
+    printf("prince: start (%lu bytes loaded)\n", hzd_loaded);
     pop_main();
     quit(0);
     return 0;

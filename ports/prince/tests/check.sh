@@ -20,7 +20,10 @@
 #   4b. a key at the title after 15, 40 and 60 s (the story, the princess's scene, their
 #      fades): level 1 must start in room 1 with the heap as after a key at once (a key in
 #      a fade or a cutscene leaked their memory; then the level was not loaded at all)
+#   4c. Enter on the first screen: level 1 at once, without the title
 #   5. a game saved on level 3 (Ctrl+G: PRINCE.SAV) and loaded from the title (Ctrl+L)
+#   6. every sound once (sndtest), recorded: the effects and the songs equally loud, no
+#      clipping (tests/sndlevel.py)
 #
 # --refs: write tests/frames.md5 and tests/play.md5 anew (look at the pictures first).
 # The game's data must be in data/card (make data).
@@ -32,11 +35,10 @@ ok() { echo "PASS  $1"; }
 bad() { echo "FAIL  $1"; fail=1; }
 FILES=
 for f in data/card/*; do FILES="$FILES --file $f:/APPS/PRINCE/$(basename "$f")"; done
+# the card as the board's (run816's default): the loading takes its seconds; the scripts
+# wait for the program's lines, never for fixed times after the start
 run() {
-# --fast-card: the card answers at once (emu816's old default). These scripts press keys at
-# fixed times after the start; on the board's card (run816's default since 2026-11-23: an OPEN
-# about 50 ms) the loads take longer and the keys come too early. To do: wait lines instead.
-  python3 ../../sdk/tools/run816.py PRINCE.PRG --horizon "$HZ" --fast-card --dest /APPS/PRINCE/PRINCE.PRG \
+  python3 ../../sdk/tools/run816.py PRINCE.PRG --horizon "$HZ" --dest /APPS/PRINCE/PRINCE.PRG \
     $FILES "$@"
 }
 shell() {
@@ -144,13 +146,20 @@ elif python3 tests/shots.py tests/play.md5 build/test/play/shot*.png; then :; el
 
 # ---------------------------------------------------------------- 4b. a key late at the title
 heap1=$(tr -d '\r' < "$con" | grep -a '^prince: level 1 in room' | head -1 | sed 's/.*, the heap //')
+printf '0 wait prince: start\n+800 {enter}\n+0 wait prince: level 1 in room\n' > build/test/enter.script
+run --mode desktop --script build/test/enter.script --seconds 30 --out build/test/enter \
+  > build/test/enter.log 2>&1 &
 for t in 15000 40000 60000; do
-  printf '0 wait prince: start\n+800 {space}\n+0 wait prince: title\n+%d {space}\n+0 wait prince: level 1 in room\n+1000 shot\n' \
+  printf '0 wait prince: start\n+800 t\n+0 wait prince: title\n+%d {space}\n+0 wait prince: level 1 in room\n+1000 shot\n' \
     $t > build/test/key$t.script
   run --mode desktop --script build/test/key$t.script --seconds $((t / 1000 + 30)) \
     --out build/test/key$t > build/test/key$t.log 2>&1 &
 done
 wait
+l=$(tr -d '\r' < build/test/enter/console.txt | grep -a '^prince: level 1 in room' | head -1)
+if [ "$l" = "prince: level 1 in room 1, the heap $heap1" ] && ! grep -aq '^prince: title' build/test/enter/console.txt; then
+  ok "Enter on the first screen: level 1 at once (no title), room 1, the heap as from the title"
+else bad "Enter on the first screen: '$l' (from the title: the heap $heap1)"; fi
 for t in 15000 40000 60000; do
   l=$(tr -d '\r' < build/test/key$t/console.txt | grep -a '^prince: level 1 in room\|^prince: out of memory' | head -1)
   case "$l" in
@@ -173,6 +182,15 @@ if [ -f "$s" ]; then
     ok "the saved game loaded from the title (Ctrl+L): level 3"
   else bad "Ctrl+L at the title did not start level 3"; fi
 fi
+
+# ---------------------------------------------------------------- 6. the sounds' levels
+# every sound once (sndtest), recorded as the board mixes Lau and the OPL2: the effects and
+# the songs as loud as each other (median rms within 3 dB), no clipping (tests/sndlevel.py)
+shell "sndtest" --console-times --stop-on "prince: sound end" --seconds 200 --wav build/test/snd.wav \
+  --out build/test/snd > build/test/snd.log 2>&1
+if l=$(python3 tests/sndlevel.py build/test/snd.wav build/test/snd/console.txt); then
+  ok "sound levels: ${l#sndlevel: }"
+else bad "sound levels: ${l#sndlevel: }"; fi
 
 if [ $fail = 0 ]; then echo "check: all passed"; else echo "check: FAILED"; fi
 exit $fail

@@ -1,7 +1,7 @@
 # tests/late.script - the game started when the machine has been on for 280 s: the title
 # through its last picture and the wipe to the story (about 18 s), then a key: level 1
 0 wait prince: start
-+280000 {space}
++280000 t
 +0 wait prince: title
 +27000 {space}
 +0 wait prince: level 1

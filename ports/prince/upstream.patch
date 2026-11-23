@@ -561,7 +561,7 @@ diff -ruN a/seg000.c b/seg000.c
  	} else if (graphics_mode == gmEga || graphics_mode == gmTga) {
  		// ...
  	}
-@@ -2407,6 +2447,25 @@
+@@ -2407,6 +2447,30 @@
  	need_quotes = 0;
  }
  
@@ -570,8 +570,10 @@ diff -ruN a/seg000.c b/seg000.c
 +const rect_type splash_text_1_rect = {24, 0, 50, 320};
 +const rect_type splash_text_2_rect = {54, 0, 200, 320};
 +
-+const char* splash_text_1 = "Prince of Persia for the Atari816";
-+const char* splash_text_2 =
++// (the texts in far memory, copied to the stack to be drawn: 440 bytes the main bank,
++// where constants, data and the heap share 64 KB, could not spare)
++HZ_FAR const char splash_text_1[] = "Prince of Persia for the Atari816";
++HZ_FAR const char splash_text_2[] =
 +		"from SDLPoP " SDLPOP_VERSION " (GPL-3)\n"
 +		"\n"
 +		"Arrows: run, jump, climb, crouch.\n"
@@ -580,14 +582,17 @@ diff -ruN a/seg000.c b/seg000.c
 +		"Ctrl+G: save (from level 3), Ctrl+L: load.\n"
 +		"F6: quicksave, F9: quickload.\n"
 +		"Ctrl+S: sound.  Ctrl+R: new game.  Ctrl+Q: quit.\n"
-+		"Space: time left.  Joystick: as the arrows.\n"
-+		"\n"
-+		"Press any key to continue...";
++		"Space: time left.  Joystick: as the arrows.";
++// (players asked how to start: the title waits for any key, but says nothing)
++const rect_type splash_text_3_rect = {154, 0, 200, 320};
++HZ_FAR const char splash_text_3[] =
++		"Space or Enter: start the game.\n"
++		"Ctrl+L: load the saved game.  Other keys: the title.";
 +#else
  const rect_type splash_text_1_rect = {0, 0, 50, 320};
  const rect_type splash_text_2_rect = {50, 0, 200, 320};
  
-@@ -2426,6 +2485,7 @@
+@@ -2426,13 +2490,26 @@
  		"Questions? Visit https://forum.princed.org\n"
  		"\n"
  		"Press any key to continue...";
@@ -595,7 +600,37 @@ diff -ruN a/seg000.c b/seg000.c
  
  void show_splash() {
  	if (!enable_info_screen || start_level >= 0) return;
-@@ -2468,6 +2528,12 @@
+ 	current_target_surface = onscreen_surface_;
+ 	draw_rect(&screen_rect, color_0_black);
++#if defined(_HORIZON)
++	{
++		char text[sizeof splash_text_2];
++		hz_far_copy(text, splash_text_1, sizeof splash_text_1);
++		show_text_with_color(&splash_text_1_rect, halign_center, valign_middle, text, color_15_brightwhite);
++		hz_far_copy(text, splash_text_2, sizeof splash_text_2);
++		show_text_with_color(&splash_text_2_rect, halign_center, valign_top, text, color_7_lightgray);
++		hz_far_copy(text, splash_text_3, sizeof splash_text_3);
++		show_text_with_color(&splash_text_3_rect, halign_center, valign_top, text, color_15_brightwhite);
++	}
++#else
+ 	show_text_with_color(&splash_text_1_rect, halign_center, valign_middle, splash_text_1, color_15_brightwhite);
+ 	show_text_with_color(&splash_text_2_rect, halign_center, valign_top, splash_text_2, color_7_lightgray);
++#endif
+ 
+ #ifdef USE_TEXT // Don't wait for a keypress if there is no text for the user to read.
+ 	int key = 0;
+@@ -2462,12 +2539,23 @@
+ 		extern int last_key_scancode; // defined in seg009.c
+ 		last_key_scancode = key; // can immediately do Ctrl+L, etc from the splash screen
+ 	}
++#if defined(_HORIZON) // Horizon: Space or Enter start the game at once (the title is for other keys)
++	else if (key == SDL_SCANCODE_SPACE || key == SDL_SCANCODE_RETURN || key == SDL_SCANCODE_KP_ENTER) {
++		start_level = custom->first_level;
++	}
++#endif
+ 	key_states[SDL_SCANCODE_LSHIFT] &= ~KEYSTATE_HELD; // don't immediately start the game if Shift was pressed!
+ 	key_states[SDL_SCANCODE_RSHIFT] &= ~KEYSTATE_HELD;
+ #endif
  }
  
  const char* get_writable_file_path(char* custom_path_buffer, size_t max_len, const char* file_name) {
@@ -633,7 +668,60 @@ diff -ruN a/seg003.c b/seg003.c
  		// busy waiting?
  		while (check_sound_playing() && !do_paused()) idle();
  		stop_sounds();
-@@ -386,6 +394,9 @@
+@@ -238,14 +246,31 @@
+ 
+ // seg003:037B
+ void redraw_screen(int drawing_different_room) {
++#if defined(_HORIZON) && defined(USE_DARK_TRANSITION)
++	// Horizon: the dark screen's 100 ms are waited for after the new room is drawn (into the
++	// offscreen buffer, unseen), before it is copied to the screen: the black lasts as long
++	// and the room comes 100 ms sooner (a room change took the wait plus 140-160 ms of drawing)
++	extern unsigned hzt_frame(void);
++	extern void hzt_wait_frames(unsigned n);
++	unsigned dark_from = 0, passed;
++	byte dark = 0;
++#define HZ_DARK_WAIT() if (dark) { /* (SDL_Delay(100): 6 frames) */ \
++		dark = 0; passed = hzt_frame() - dark_from; \
++		if (passed < 6) hzt_wait_frames(6 - passed); }
++#endif
+ 	//remove_flash();
+ 	if (drawing_different_room) {
+ 		draw_rect(&rect_top, color_0_black);
+ #ifdef USE_DARK_TRANSITION
+ 		// Briefly show a dark screen when changing rooms, like in the original game.
+ 		update_screen();
++#if defined(_HORIZON)
++		dark_from = hzt_frame();
++		dark = 1;
++#else
+ 		SDL_Delay(100);
+ #endif
++#endif
+ 	}
+ 
+ 	different_room = 0;
+@@ -296,6 +321,9 @@
+ 		if (upside_down) {
+ 			flip_screen(offscreen_surface);
+ 		}
++#if defined(_HORIZON) && defined(USE_DARK_TRANSITION)
++		HZ_DARK_WAIT();
++#endif
+ 		copy_screen_rect(&rect_top);
+ 		if (upside_down) {
+ 			flip_screen(offscreen_surface);
+@@ -304,6 +332,10 @@
+ 			clear_kbd_buf();
+ 		}
+ 	}
++#if defined(_HORIZON) && defined(USE_DARK_TRANSITION)
++	HZ_DARK_WAIT(); // (blind: nothing was copied)
++#undef HZ_DARK_WAIT
++#endif
+ 	exit_room_timer = 2;
+ 
+ }
+@@ -386,6 +418,9 @@
  		} else {
  			if (next_level == current_level || check_sound_playing()) {
  				draw_game_frame();
@@ -838,19 +926,26 @@ diff -ruN a/seg008.c b/seg008.c
  	entry_addr->y = obj_y;
  	entry_addr->clip.top = obj_clip_top;
  	entry_addr->clip.bottom = obj_clip_bottom;
-@@ -1848,7 +1863,11 @@
+@@ -1848,7 +1863,18 @@
  
  // seg008:2602
  short calc_screen_x_coord(short logical_x) {
 +#if defined(_HORIZON) // Horizon: logical_x*320 overflows a 16-bit int; 320/280 = 8/7 exactly
-+	return logical_x*8/7;
++	// (n / 7 without a division: a quotient from shifts, a little low, then corrected;
++	// truncated toward 0 as C's; 10 % of a room's drawing went to the divisions)
++	short n = logical_x*8;
++	word u = n < 0 ? (word)-n : (word)n;
++	word q = (u >> 3) + (u >> 6) + (u >> 9) + (u >> 12);
++	word r = u - ((q << 3) - q);
++	while (r >= 7) { ++q; r -= 7; }
++	return n < 0 ? -(short)q : (short)q;
 +#else
  	return logical_x*320/280;
 +#endif
  }
  
  // seg008:2627
-@@ -1862,6 +1881,9 @@
+@@ -1862,6 +1888,9 @@
  
  // seg008:2644
  void display_text_bottom(const char* text) {

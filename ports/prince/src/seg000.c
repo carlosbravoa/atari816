@@ -2452,8 +2452,10 @@ void show_quotes() {
 const rect_type splash_text_1_rect = {24, 0, 50, 320};
 const rect_type splash_text_2_rect = {54, 0, 200, 320};
 
-const char* splash_text_1 = "Prince of Persia for the Atari816";
-const char* splash_text_2 =
+// (the texts in far memory, copied to the stack to be drawn: 440 bytes the main bank,
+// where constants, data and the heap share 64 KB, could not spare)
+HZ_FAR const char splash_text_1[] = "Prince of Persia for the Atari816";
+HZ_FAR const char splash_text_2[] =
 		"from SDLPoP " SDLPOP_VERSION " (GPL-3)\n"
 		"\n"
 		"Arrows: run, jump, climb, crouch.\n"
@@ -2462,9 +2464,12 @@ const char* splash_text_2 =
 		"Ctrl+G: save (from level 3), Ctrl+L: load.\n"
 		"F6: quicksave, F9: quickload.\n"
 		"Ctrl+S: sound.  Ctrl+R: new game.  Ctrl+Q: quit.\n"
-		"Space: time left.  Joystick: as the arrows.\n"
-		"\n"
-		"Press any key to continue...";
+		"Space: time left.  Joystick: as the arrows.";
+// (players asked how to start: the title waits for any key, but says nothing)
+const rect_type splash_text_3_rect = {154, 0, 200, 320};
+HZ_FAR const char splash_text_3[] =
+		"Space or Enter: start the game.\n"
+		"Ctrl+L: load the saved game.  Other keys: the title.";
 #else
 const rect_type splash_text_1_rect = {0, 0, 50, 320};
 const rect_type splash_text_2_rect = {50, 0, 200, 320};
@@ -2491,8 +2496,20 @@ void show_splash() {
 	if (!enable_info_screen || start_level >= 0) return;
 	current_target_surface = onscreen_surface_;
 	draw_rect(&screen_rect, color_0_black);
+#if defined(_HORIZON)
+	{
+		char text[sizeof splash_text_2];
+		hz_far_copy(text, splash_text_1, sizeof splash_text_1);
+		show_text_with_color(&splash_text_1_rect, halign_center, valign_middle, text, color_15_brightwhite);
+		hz_far_copy(text, splash_text_2, sizeof splash_text_2);
+		show_text_with_color(&splash_text_2_rect, halign_center, valign_top, text, color_7_lightgray);
+		hz_far_copy(text, splash_text_3, sizeof splash_text_3);
+		show_text_with_color(&splash_text_3_rect, halign_center, valign_top, text, color_15_brightwhite);
+	}
+#else
 	show_text_with_color(&splash_text_1_rect, halign_center, valign_middle, splash_text_1, color_15_brightwhite);
 	show_text_with_color(&splash_text_2_rect, halign_center, valign_top, splash_text_2, color_7_lightgray);
+#endif
 
 #ifdef USE_TEXT // Don't wait for a keypress if there is no text for the user to read.
 	int key = 0;
@@ -2522,6 +2539,11 @@ void show_splash() {
 		extern int last_key_scancode; // defined in seg009.c
 		last_key_scancode = key; // can immediately do Ctrl+L, etc from the splash screen
 	}
+#if defined(_HORIZON) // Horizon: Space or Enter start the game at once (the title is for other keys)
+	else if (key == SDL_SCANCODE_SPACE || key == SDL_SCANCODE_RETURN || key == SDL_SCANCODE_KP_ENTER) {
+		start_level = custom->first_level;
+	}
+#endif
 	key_states[SDL_SCANCODE_LSHIFT] &= ~KEYSTATE_HELD; // don't immediately start the game if Shift was pressed!
 	key_states[SDL_SCANCODE_RSHIFT] &= ~KEYSTATE_HELD;
 #endif

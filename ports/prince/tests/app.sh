@@ -18,8 +18,8 @@ for f in APP.INF PRINCE.PRG POP.DAT POP.GFX POP.MSK POP.SND PRINCE.ICN; do
 done
 [ $okf = 1 ] && cmp -s $A/PRINCE.PRG PRINCE.PRG && ok "installed by the Installer into /APPS/PRINCE (APP.INF, PRINCE.PRG, POP.*, PRINCE.ICN)"
 c=build/apptest/console.txt
-if grep -aq '^prince: level 1' $c && grep -aq '^prince: title' $c; then
-  ok "Prince of Persia started from Programs > Games: the title, level 1"
+if grep -aq '^prince: level 1' $c && ! grep -aq '^prince: title' $c; then
+  ok "Prince of Persia started from Programs > Games: Space on the first screen, level 1"
 else bad "the game did not reach level 1 (build/apptest)"; fi
 if grep -aq '^install: replaced /APPS/PRINCE' $c && [ -f $A/QUICKSAVE.SAV ]; then
   ok "updated with Replace; the quicksave (/APPS/PRINCE/QUICKSAVE.SAV) kept"

@@ -1,9 +1,10 @@
-# tests/play.script - a game through the keyboard: the first screen, the title, level 1,
+# tests/play.script - a game through the keyboard: the first screen ("t": any key but Space
+# or Enter shows the title), the title, level 1,
 # running, a quicksave (F6), running on, a quickload (F9: back), a pause (Esc). Every step
 # waits for the program's own console lines (tests/check.sh checks them and the pictures,
 # taken only where nothing moves: the kid's runs are timed by the clock, not by the game)
 0 wait prince: start
-+800 {space}
++800 t
 +0 wait prince: title
 +2500 {space}
 +0 wait prince: level 1

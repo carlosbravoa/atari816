@@ -70,6 +70,24 @@ void ref_print_state(void)
            (unsigned long)random_seed, rem_min, rem_tick);
 }
 
+/* levelsum (host/refhook.c's POP_REF_LEVEL): at the first replay tick of each level, the
+ * level structure's checksum (FNV-1a of its 2,305 bytes), the room drawn */
+unsigned char hz_ref_level;
+static void level_sum(void)
+{
+    static int last_level = -1;
+    const unsigned char *p = (const unsigned char *)&level;
+    unsigned long sum = 2166136261UL;
+    unsigned i;
+    if (!hz_ref_level || current_level == last_level)
+        return;
+    last_level = current_level;
+    for (i = 0; i < sizeof(level); i++)
+        sum = (sum ^ p[i]) * 16777619UL;
+    printf("lvl: level %d room %d sum %08lx size %u\n", current_level, drawn_room, sum,
+           (unsigned)sizeof(level));
+}
+
 void ref_hook(void)
 {
     static long last = -1;
@@ -78,6 +96,7 @@ void ref_hook(void)
     if (!(replaying || recording) || tick == last)
         return;
     last = tick;
+    level_sum();
     shot = in_list(hz_ref_shots, (int)tick);
     if (hz_ref_every > 0 && tick % hz_ref_every == 0)
         ref_print_state();

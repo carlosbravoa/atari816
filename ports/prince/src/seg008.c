@@ -1864,7 +1864,14 @@ void show_level() {
 // seg008:2602
 short calc_screen_x_coord(short logical_x) {
 #if defined(_HORIZON) // Horizon: logical_x*320 overflows a 16-bit int; 320/280 = 8/7 exactly
-	return logical_x*8/7;
+	// (n / 7 without a division: a quotient from shifts, a little low, then corrected;
+	// truncated toward 0 as C's; 10 % of a room's drawing went to the divisions)
+	short n = logical_x*8;
+	word u = n < 0 ? (word)-n : (word)n;
+	word q = (u >> 3) + (u >> 6) + (u >> 9) + (u >> 12);
+	word r = u - ((q << 3) - q);
+	while (r >= 7) { ++q; r -= 7; }
+	return n < 0 ? -(short)q : (short)q;
 #else
 	return logical_x*320/280;
 #endif

@@ -24,7 +24,9 @@ extern unsigned char hzv_fb_sheet, hzv_part_sheet[];
 extern unsigned hzv_fbbank;         /* the framebuffer's first bank */
 extern unsigned hzv_frames;         /* (statistics) */
 
-int hzv_init(void);
+int hzv_screen(void);               /* the full screen and the loading screen (hz_main.c) */
+void hzv_loading(unsigned long done, unsigned long total);  /* its progress bar */
+int hzv_init(void);                 /* the rest, once the data is loaded (set_gr_mode) */
 void hzv_flush(void);               /* send the blitter's queue */
 void hzv_sync(void);                /* ... and wait until it is drawn */
 void hzv_show(void);                /* palette and view for the next vertical blank */
@@ -41,7 +43,10 @@ extern unsigned long hzd_part_addr[HZD_PARTS];
 extern unsigned hzd_atlas_w, hzd_atlas_h, hzd_part, hzd_nparts;
 extern unsigned long hzd_masks;
 extern unsigned char __far *hzd_dir; /* POP.DAT */
-extern unsigned char hzd_buf[512];  /* a buffer for file reads */
+extern unsigned char hzd_buf[512];  /* a buffer (the palette's bytes, the key states) */
+extern unsigned long hzd_loaded, hzd_total; /* the loading's bytes read, and of all */
+long hzd_read_far(int h, unsigned long addr, unsigned long n);
+unsigned long hzd_load_snd(void);   /* POP.SND into far memory -> its address, or 0 */
 
 /* ---------------------------------------------------------------- sound (hz_sound.c) */
 int hzs_init(void);

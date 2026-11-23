@@ -6,6 +6,7 @@
 #   make            PRINCE.PRG
 #   make run        the game in the emulator (build/run/)
 #   make test       the checks (tests/check.sh)
+#   make test-long  every level against upstream on the PC (tests/levels.sh; make host first)
 #   make app        PRINCE.HZA, the installable app; make test-app installs it in the
 #                   emulator and starts it
 #   make host       the reference: upstream SDLPoP built on this PC (host/; needs SDL2)
@@ -133,6 +134,12 @@ run: PRINCE.PRG data $(CARD)
 test: PRINCE.PRG data $(CARD)
 	sh tests/check.sh $(HORIZON)
 
+# every level against upstream on the PC (needs make host: the level replays are recorded by
+# it into build/levels, tests/mklevels.sh): each level's start, the walk through all of
+# them with the cheat keys (tests/levels.sh)
+test-long: PRINCE.PRG data $(CARD)
+	sh tests/levels.sh $(HORIZON)
+
 # make test's checks with the layout shifted: PAD=0 and LAYOUTS (each builds, runs check.sh)
 LAYOUTS ?= 0 1 37 250 500
 test-layouts: data $(CARD)
@@ -151,4 +158,4 @@ refs: PRINCE.PRG data $(CARD)
 clean:
 	rm -rf build PRINCE.PRG PRINCE.map PRINCE.lbl PRINCE.HZA
 
-.PHONY: all data host run test test-layouts check-host refs-host refs app test-app clean FORCE
+.PHONY: all data host run test test-long test-layouts check-host refs-host refs app test-app clean FORCE

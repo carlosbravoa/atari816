@@ -1,0 +1,12 @@
+Replay started in level 13, room 23.
+Remaining time: 59 min, 59 sec, 11 ticks. (rem_min=60, rem_tick=719)
+lvl: level 13 room 23 sum c1091cd8 size 2305
+ref: tick 10 level 13 room 23 kid 23 189 118 15 -1 alive -1 hp 3/3 guard 0 0 0 0 alive 0 hp 0/0 seed 1881138856 time 60 709
+ref: tick 20 level 13 room 23 kid 23 189 118 15 -1 alive -1 hp 3/3 guard 0 0 0 0 alive 0 hp 0/0 seed 2125947405 time 60 699
+ref: tick 30 level 13 room 23 kid 23 189 118 15 -1 alive -1 hp 3/3 guard 0 0 0 0 alive 0 hp 0/0 seed 1502690714 time 60 689
+ref: tick 40 level 13 room 23 kid 23 189 118 15 -1 alive -1 hp 3/3 guard 0 0 0 0 alive 0 hp 0/0 seed 1502690714 time 60 679
+Replay ended in level 13, room 23.
+Kid is alive.
+Remaining time: 59 min, 56 sec, 7 ticks. (rem_min=60, rem_tick=679)
+Play duration:  0 min, 3 sec, 4 ticks. (curr_tick=40)
+Play duration matches replay length. (40 ticks)

@@ -62,6 +62,29 @@ unsigned hzt_frame(void)
     return hz_frame();
 }
 
+/* SDL_AddTimer: one timer (upstream's only one is Shift+L's: it held the Shift key again
+ * after 250 ms; the 0 the stub returned before made Shift+L quit the game) */
+static SDL_TimerCallback timer_f;
+static void *timer_param;
+static unsigned timer_due;
+
+SDL_TimerID SDL_AddTimer(Uint32 ms, SDL_TimerCallback f, void *param)
+{
+    timer_f = f;
+    timer_param = param;
+    timer_due = hz_frame() + (unsigned)((ms * 60UL + 999) / 1000);
+    return 1;
+}
+
+static void run_timer(void)
+{
+    if (timer_f && (int)(hz_frame() - timer_due) >= 0) {
+        SDL_TimerCallback f = timer_f;
+        timer_f = NULL;
+        f(0, timer_param);
+    }
+}
+
 /* one vertical blank: the blitter's queue sent, the input, the view and palette, sound */
 static void pump(void)
 {
@@ -71,6 +94,7 @@ static void pump(void)
     hzv_show();
     hzs_poll();
     hz_events();
+    run_timer();
 }
 
 void hzt_wait_frames(unsigned n)
@@ -177,6 +201,8 @@ static void stats_frame(int timer_index)
             st_max = d;
         if (d > (unsigned long)wait_time[timer_index] * 16683UL)
             ++st_late;
+        if (d > 150000UL)               /* (a room change: its time, for profiles) */
+            printf("prince: stats slow frame %lu.%lu ms, room %d\n", d / 1000, d / 100 % 10, drawn_room);
         if (st_n >= hz_stats_every)
             hz_stats_print("frames");
     }
@@ -277,18 +303,28 @@ static int is_modifier(unsigned k)
 
 void hz_events(void)
 {
-    unsigned e, k, i, d, t;
-    /* presses, in order */
+    unsigned e, k, i, d, t, mods = 0;
+    /* presses, in order. hg_mods is the modifiers' state at the last event read, and the
+     * queue holds presses only: Ctrl+G typed quickly (Ctrl and G released together, as a
+     * keyboard adapter that sends both in one report does) came with Ctrl already up, and
+     * was a plain G. So a modifier pressed earlier in the same batch counts too. */
     while ((e = hg_key_next()) != 0) {
         unsigned c = e >> 8;
         k = e & 0xFF;
         key_states[k] |= KEYSTATE_HELD | KEYSTATE_HELD_NEW;
         last_any_key_scancode = (int)k;
+        if (k == SDL_SCANCODE_LCTRL || k == SDL_SCANCODE_RCTRL)
+            mods |= HG_MOD_CTRL;
+        else if (k == SDL_SCANCODE_LSHIFT || k == SDL_SCANCODE_RSHIFT)
+            mods |= HG_MOD_SHIFT;
+        else if (k == SDL_SCANCODE_LALT || k == SDL_SCANCODE_RALT)
+            mods |= HG_MOD_ALT;
         if (!is_modifier(k)) {
+            unsigned m = hg_mods | mods;
             last_key_scancode = (int)k;
-            if (hg_mods & HG_MOD_SHIFT) last_key_scancode |= WITH_SHIFT;
-            if (hg_mods & HG_MOD_CTRL) last_key_scancode |= WITH_CTRL;
-            if (hg_mods & HG_MOD_ALT) last_key_scancode |= WITH_ALT;
+            if (m & HG_MOD_SHIFT) last_key_scancode |= WITH_SHIFT;
+            if (m & HG_MOD_CTRL) last_key_scancode |= WITH_CTRL;
+            if (m & HG_MOD_ALT) last_key_scancode |= WITH_ALT;
             last_text_input = (char)(c >= 0x20 && c <= 0x7E ? c : 0);
         }
     }
@@ -303,8 +339,8 @@ void hz_events(void)
         if ((joy_now & (1u << i)) && !(key_states[k] & KEYSTATE_HELD))
             key_states[k] |= KEYSTATE_HELD | KEYSTATE_HELD_NEW;
     }
-    /* releases */
-    for (k = 1; k < SDL_NUM_SCANCODES; k++)
+    /* releases (the keyboard's codes end at $E7, right GUI) */
+    for (k = 1; k <= 0xE7; k++)
         if ((key_states[k] & KEYSTATE_HELD) && !hg_key(k) && !joy_holds(k))
             key_states[k] &= ~KEYSTATE_HELD;
 }
@@ -315,6 +351,7 @@ void process_events(void)
         quit(0);
     hzs_poll();
     hz_events();
+    run_timer();
 }
 
 int set_joy_mode(void)

@@ -1,0 +1,12 @@
+Replay started in level 14, room 4.
+Remaining time: 59 min, 59 sec, 11 ticks. (rem_min=60, rem_tick=719)
+lvl: level 14 room 4 sum e431c212 size 2305
+ref: tick 10 level 14 room 4 kid 4 121 118 15 -1 alive -1 hp 3/3 guard 0 0 0 0 alive 0 hp 0/0 seed 4120522691 time 60 719
+ref: tick 20 level 14 room 4 kid 4 121 118 15 -1 alive -1 hp 3/3 guard 0 0 0 0 alive 0 hp 0/0 seed 650832907 time 60 719
+ref: tick 30 level 14 room 4 kid 4 121 118 15 -1 alive -1 hp 3/3 guard 0 0 0 0 alive 0 hp 0/0 seed 583889235 time 60 719
+ref: tick 40 level 14 room 4 kid 4 121 118 15 -1 alive -1 hp 3/3 guard 0 0 0 0 alive 0 hp 0/0 seed 1831002011 time 60 719
+Replay ended in level 14, room 4.
+Kid is alive.
+Remaining time: 59 min, 59 sec, 11 ticks. (rem_min=60, rem_tick=719)
+Play duration:  0 min, 3 sec, 4 ticks. (curr_tick=40)
+Play duration matches replay length. (40 ticks)

@@ -7,6 +7,8 @@
  *   POP_REF_SHOTS=a,b   write the screen (320 x 200, onscreen_surface_) at these ticks as
  *                       POP_REF_DIR/frame-TICK.png
  *   POP_REF_OPL=FILE    every OPL register write of the music: "us reg value" lines
+ *   POP_REF_LEVEL=1     at the first replay tick of each level: "lvl: level N room R sum S"
+ *                       (S: FNV-1a of the whole level structure, 2,305 bytes)
  *
  * The port prints the same line (horizon/hz_ref.c): tests/state.sh compares them. */
 #include "common.h"
@@ -49,6 +51,21 @@ void ref_print_state(void)
     fflush(stdout);
 }
 
+static void ref_level_sum(void)
+{
+    static int last_level = -1;
+    const unsigned char *p = (const unsigned char *)&level;
+    unsigned long sum = 2166136261UL;
+    size_t i;
+    if (!getenv("POP_REF_LEVEL") || current_level == last_level)
+        return;
+    last_level = current_level;
+    for (i = 0; i < sizeof(level); i++)
+        sum = ((sum ^ p[i]) * 16777619UL) & 0xFFFFFFFFUL;
+    printf("lvl: level %d room %d sum %08lx size %u\n", current_level, drawn_room, sum,
+           (unsigned)sizeof(level));
+}
+
 void ref_hook(void)
 {
     static int last = -1;
@@ -57,6 +74,7 @@ void ref_hook(void)
     if (!(replaying || recording) || tick == last)
         return;
     last = tick;
+    ref_level_sum();
     if ((every && atoi(every) > 0 && tick % atoi(every) == 0) || in_list("POP_REF_TICKS", tick))
         ref_print_state();
     if (in_list("POP_REF_DUMP", tick)) {

@@ -68,7 +68,8 @@ Uint64 SDL_GetPerformanceCounter(void);
 Uint64 SDL_GetPerformanceFrequency(void);
 Uint32 SDL_GetTicks(void);
 const Uint8 *SDL_GetKeyboardState(int *n);
-#define SDL_AddTimer(d, f, p) 0
+/* one timer at a time (Shift+L's: hz_sys.c), run by the frame's input poll */
+SDL_TimerID SDL_AddTimer(Uint32 ms, SDL_TimerCallback f, void *param);
 #define SDL_RemoveTimer(t) 0
 #define SDL_SetWindowTitle(w, t) ((void)0)
 #define SDL_HapticRumblePlay(h, s, l) 0

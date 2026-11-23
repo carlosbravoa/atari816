@@ -49,7 +49,11 @@ CHTABS = [("PRINCE", 700, 2, True), ("PRINCE", 150, 3, False), ("KID", 400, 7, T
 OPTGRAF = (1200, 0x90)
 # sounds whose MIDI tempo SDLPoP adjusts (midi.c, midi_tempo_modifiers)
 TEMPO = {53: -3, 54: 3}
-OPL_ATT = 12            # the music 9 dB quieter: the board mixes the OPL2 loud (games.md)
+# the music's carriers 13.5 dB quieter (18 steps of 0.75 dB): the board mixes the OPL2 three
+# times louder than a Lau voice (games.md). At 12 steps (9 dB) the songs were still 4.5 dB
+# louder than the effects (median rms of each, tests/sndlevel.py: -23.1 against -27.6 dBFS);
+# now both are about -27.5 dBFS, the loudest song's peak -9 dBFS (no clipping)
+OPL_ATT = 18
 
 
 def read_dat(path):
@@ -175,21 +179,34 @@ def main():
         items.append((img, False))
         if img["flip"]:
             items.append((img, True))
+    # a skyline, tallest first: each image at the lowest place where it fits (then the
+    # leftmost), never across a part's edge. 735 rows where shelves took 840: 210 KB less
+    # to read at the start (the card's bytes are most of the loading time)
     items.sort(key=lambda t: (-t[0]["h"], -t[0]["w"]))
-    x = y = shelf = 0
+    sky = [0] * ATLAS_W
     for img, fl in items:
-        if x + img["w"] > ATLAS_W:
-            y += shelf
-            x = shelf = 0
-        if x == 0 and y // ATLAS_PART != (y + img["h"] - 1) // ATLAS_PART:
-            y = (y // ATLAS_PART + 1) * ATLAS_PART      # (the shelf starts a new part)
-        if img["h"] > ATLAS_PART:
+        w, h = img["w"], img["h"]
+        if h > ATLAS_PART:
             raise SystemExit("mkdata: an image taller than an atlas part")
+        cands = {0}
+        for c in range(1, ATLAS_W):
+            if sky[c] != sky[c - 1]:
+                cands.add(c)
+                cands.add(c - w)
+        best = None
+        for x in sorted(cands):
+            if x < 0 or x + w > ATLAS_W:
+                continue
+            y = max(sky[x:x + w])
+            if y // ATLAS_PART != (y + h - 1) // ATLAS_PART:
+                y = (y // ATLAS_PART + 1) * ATLAS_PART
+            if best is None or (y, x) < best:
+                best = (y, x)
+        y, x = best
+        sky[x:x + w] = [y + h] * w
         img["fx" if fl else "sx"] = x
         img["fy" if fl else "sy"] = y
-        x += img["w"]
-        shelf = max(shelf, img["h"])
-    atlas_h = y + shelf
+    atlas_h = max(sky)
     atlas = bytearray(ATLAS_W * atlas_h)
     masks = bytearray()
     for img in images:
@@ -300,11 +317,14 @@ def main():
     # ---------------------------------------------------------------- the directory
     dirents.sort(key=lambda d: (d[0], d[2], d[1]))
     n = len(dirents)
-    head = b"POPD" + struct.pack("<HHH", 1, n, ATLAS_W) + struct.pack("<HH", atlas_h, ATLAS_PART)
+    # version 2: the sizes of POP.MSK and POP.SND too (the loader reads every file whole, in
+    # pieces of 32 KB, and shows its progress: it knows the total before it starts)
+    head = b"POPD" + struct.pack("<HHH", 2, n, ATLAS_W) + struct.pack("<HH", atlas_h, ATLAS_PART) + \
+        struct.pack("<II", len(masks), len(out))
     table = bytearray()
     blob = bytearray()
     start = len(head) + 8 * n
-    assert len(head) == 14
+    assert len(head) == 22
     for folder, kind, res, payload in dirents:
         table += struct.pack("<BBHI", folder, kind, res, start + len(blob))
         if kind == KIND_BIN:

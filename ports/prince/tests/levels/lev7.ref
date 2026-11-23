@@ -1,0 +1,12 @@
+Replay started in level 7, room 1.
+Remaining time: 59 min, 59 sec, 11 ticks. (rem_min=60, rem_tick=719)
+lvl: level 7 room 1 sum cc2597b3 size 2305
+ref: tick 10 level 7 room 1 kid 1 92 175 106 -1 alive -1 hp 3/3 guard 0 0 0 0 alive 0 hp 0/0 seed 756189987 time 60 709
+ref: tick 20 level 7 room 3 kid 3 83 179 185 -1 alive 4 hp 0/3 guard 0 0 0 0 alive 0 hp 0/0 seed 2146787367 time 60 703
+ref: tick 30 level 7 room 3 kid 3 83 179 185 -1 alive 8 hp 0/3 guard 0 0 0 0 alive 0 hp 0/0 seed 441037675 time 60 703
+ref: tick 40 level 7 room 3 kid 3 83 179 185 -1 alive 8 hp 0/3 guard 0 0 0 0 alive 0 hp 0/0 seed 742082799 time 60 703
+Replay ended in level 7, room 3.
+Kid is dead.
+Remaining time: 59 min, 58 sec, 7 ticks. (rem_min=60, rem_tick=703)
+Play duration:  0 min, 3 sec, 4 ticks. (curr_tick=40)
+Play duration matches replay length. (40 ticks)

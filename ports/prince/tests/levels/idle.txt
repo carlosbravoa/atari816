@@ -1,0 +1,3 @@
+# tests/levels/idle.txt - the input of the level replays (tests/mklevels.sh): the kid
+# stands still for 40 ticks at the level's start (the room drawn, the guards, the timers)
+40 -

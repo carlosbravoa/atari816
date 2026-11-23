@@ -1,0 +1,6 @@
+# tests/levels/shadow.txt - the input of the shadow's replay (tests/mklevels.sh): level 6
+# with the kid moved by tests/patchp1r.py to room 18's left end, facing right; he turns and
+# runs left into room 1, where the shadow appears across the gap (upstream's check_shadow),
+# then stands. The shadow is drawn with the XOR blit.
+14 L
+40 -

@@ -246,13 +246,30 @@ void draw_level_first() {
 
 // seg003:037B
 void redraw_screen(int drawing_different_room) {
+#if defined(_HORIZON) && defined(USE_DARK_TRANSITION)
+	// Horizon: the dark screen's 100 ms are waited for after the new room is drawn (into the
+	// offscreen buffer, unseen), before it is copied to the screen: the black lasts as long
+	// and the room comes 100 ms sooner (a room change took the wait plus 140-160 ms of drawing)
+	extern unsigned hzt_frame(void);
+	extern void hzt_wait_frames(unsigned n);
+	unsigned dark_from = 0, passed;
+	byte dark = 0;
+#define HZ_DARK_WAIT() if (dark) { /* (SDL_Delay(100): 6 frames) */ \
+		dark = 0; passed = hzt_frame() - dark_from; \
+		if (passed < 6) hzt_wait_frames(6 - passed); }
+#endif
 	//remove_flash();
 	if (drawing_different_room) {
 		draw_rect(&rect_top, color_0_black);
 #ifdef USE_DARK_TRANSITION
 		// Briefly show a dark screen when changing rooms, like in the original game.
 		update_screen();
+#if defined(_HORIZON)
+		dark_from = hzt_frame();
+		dark = 1;
+#else
 		SDL_Delay(100);
+#endif
 #endif
 	}
 
@@ -304,6 +321,9 @@ void redraw_screen(int drawing_different_room) {
 		if (upside_down) {
 			flip_screen(offscreen_surface);
 		}
+#if defined(_HORIZON) && defined(USE_DARK_TRANSITION)
+		HZ_DARK_WAIT();
+#endif
 		copy_screen_rect(&rect_top);
 		if (upside_down) {
 			flip_screen(offscreen_surface);
@@ -312,6 +332,10 @@ void redraw_screen(int drawing_different_room) {
 			clear_kbd_buf();
 		}
 	}
+#if defined(_HORIZON) && defined(USE_DARK_TRANSITION)
+	HZ_DARK_WAIT(); // (blind: nothing was copied)
+#undef HZ_DARK_WAIT
+#endif
 	exit_room_timer = 2;
 
 }

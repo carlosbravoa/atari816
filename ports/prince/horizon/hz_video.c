@@ -41,8 +41,8 @@ static unsigned char src_pos(const SDL_Surface *s, unsigned *x, unsigned *y)
             *x = r[2];
             yy = r[3];
         }
-        *y = yy % hzd_part;
-        return hzv_part_sheet[yy / hzd_part];
+        *y = yy & 255;                  /* (parts of 256 rows: hzd_init checks) */
+        return hzv_part_sheet[yy >> 8];
     }
     *x = s->a;
     *y = s->b;
@@ -54,8 +54,10 @@ static unsigned char src_pos(const SDL_Surface *s, unsigned *x, unsigned *y)
 #define QN 32
 static hz_sheetrec q[QN];
 static unsigned qn;
+static hz_sheetrec *qp = q;             /* &q[qn], &dq[dqn]: (an index costs a multiply) */
 static hz_drawrec dq[8];
 static unsigned dqn;
+static hz_drawrec *dqp = dq;
 static unsigned char ali;               /* sent, maybe not drawn yet */
 unsigned long hzv_recs;                 /* (statistics) */
 
@@ -81,6 +83,7 @@ static void send_sheet(void)
             }
         }
         qn = 0;
+        qp = q;
         ali = 1;
     }
 }
@@ -90,6 +93,7 @@ static void send_draw(void)
     if (dqn) {
         hz_draw_list(hg_win, dqn, dq);
         dqn = 0;
+        dqp = dq;
         ali = 1;
     }
 }
@@ -116,7 +120,8 @@ static hz_sheetrec *srec(void)
     if (qn == QN)
         send_sheet();
     ++hzv_recs;
-    return &q[qn++];
+    ++qn;
+    return qp++;
 }
 
 static hz_drawrec *drec(void)
@@ -126,7 +131,8 @@ static hz_drawrec *drec(void)
     if (dqn == 8)
         send_draw();
     ++hzv_recs;
-    return &dq[dqn++];
+    ++dqn;
+    return dqp++;
 }
 
 /* ---------------------------------------------------------------- clipping */
@@ -207,33 +213,33 @@ static void fill_to(const SDL_Surface *t, int x, int y, int w, int h, unsigned c
 
 /* ---------------------------------------------------------------- set-up */
 
-int hzv_init(void)
-{
-    hz_fsenter fe;
-    hz_fsscroll z;
-    hz_sheetnew sn;
-    unsigned b, k;
-    int r;
+/* The full screen at once (before the data is loaded): hgame's framebuffer of 768 rows of
+ * 512 bytes, also a sheet; and the loading screen in hgame's own font (the game's is in
+ * the data being loaded), its bar moved by hzd_read_far. */
+static unsigned char screen_up;
+static unsigned bar_w;
+#define BAR_X 60
+#define BAR_Y (20 + 118)
+#define BAR_W 200
 
-    if (hg_screen(HG_320X180, "Prince of Persia") < 0)
+static void text_c(int y, const char *s, unsigned ink)
+{
+    hg_text((int)(320 - hg_text_width(s)) / 2, 20 + y, s, ink);
+}
+
+int hzv_screen(void)
+{
+    hz_sheetnew sn;
+    int r;
+    static const unsigned char rgb[] = {168, 168, 168, 252, 252, 252, 252, 252, 84};
+    if (screen_up)
+        return 0;
+    if (hg_screen_fb(HG_320X180, "Prince of Persia", HZ_STRIDE, HZ_ROWS) < 0)
         return -1;
     hg_palette_black();
-    b = hg_banks(HZ_FBANKS);
-    if (!b)
-        return -1;
-    hzv_fbbank = b;
-    memset(&z, 0, sizeof z);
-    hz_fs_scroll(&z);
-    fe.mode = 2;                        /* FS_320X8 */
-    fe.flags = 0;
-    fe.stride = HZ_STRIDE;
-    fe.rows = HZ_ROWS;
-    HZ_U24B(fe.base, b, 0);
-    fe.zero = 0;
-    if (hz_fs_enter(hg_win, &fe))
-        return -1;
+    hzv_fbbank = hg_fb_bank;
     /* the framebuffer as a sheet (copies inside it) */
-    HZ_U24B(sn.addr, b, 0);
+    HZ_U24B(sn.addr, hzv_fbbank, 0);
     sn.zero = 0;
     sn.stride = HZ_STRIDE;
     sn.w = HZ_STRIDE;
@@ -242,9 +248,49 @@ int hzv_init(void)
     if (r <= 0)
         return -1;
     hzv_fb_sheet = (unsigned char)r;
+    hzv_show();                         /* (rows 20-199, as the pictures) */
+    /* the loading screen: colours 7 and 15 as the game's (light grey, white), 14 yellow */
+    hg_palette(7, 1, rgb);
+    hg_palette(15, 1, rgb + 3);
+    hg_palette(14, 1, rgb + 6);
+    text_c(40, "PRINCE OF PERSIA", 15);
+    text_c(56, "for the Atari816", 7);
+    text_c(100, "Loading the game...", 7);
+    hg_rect(BAR_X - 2, BAR_Y - 2, BAR_W + 4, 12, 7);
+    hg_flush(1);
+    screen_up = 1;
+    return 0;
+}
+
+void hzv_loading(unsigned long done, unsigned long total)
+{
+    unsigned w;
+    if (!screen_up || !total)
+        return;
+    if (done > total)
+        done = total;
+    w = (unsigned)((done >> 8) * BAR_W / ((total >> 8) + 1));
+    if (w > bar_w) {
+        hg_fill(BAR_X + (int)bar_w, BAR_Y, w - bar_w, 8, 14);
+        hg_flush(0);
+        bar_w = w;
+    }
+}
+
+/* the rest, once the data is in memory (set_gr_mode) */
+int hzv_init(void)
+{
+    hz_sheetnew sn;
+    unsigned k;
+    int r;
+
+    if (hzv_screen() < 0)
+        return -1;
+    hg_flush(1);
     /* the atlas's parts (hz_data.c has loaded them) */
     for (k = 0; k < hzd_nparts; k++) {
         HZ_U24B(sn.addr, (unsigned)(hzd_part_addr[k] >> 16), 0);
+        sn.zero = 0;
         sn.stride = hzd_atlas_w;
         sn.w = hzd_atlas_w;
         sn.h = hzd_atlas_h - k * hzd_part < hzd_part ? hzd_atlas_h - k * hzd_part : hzd_part;
@@ -253,8 +299,8 @@ int hzv_init(void)
             return -1;
         hzv_part_sheet[k] = (unsigned char)r;
     }
-    /* all black */
-    for (k = 0; k < HZ_ROWS; k += 256) {
+    /* black below the screen (the loading screen stays until the first screen's) */
+    for (k = HZ_OFF_Y; k < HZ_ROWS; k += 256) {
         hz_sheetrec *f = srec();
         memset(f, 0, sizeof *f);
         f->w = HZ_STRIDE;
@@ -273,8 +319,19 @@ static unsigned dirty_lo = 0xFFFF, dirty_hi;
 static unsigned char flash_on;
 static unsigned char flash_rgb[3];
 
+static unsigned pal_gen;                /* +1 at every change of the game's palette */
+
+static void pal_dirty(unsigned first, unsigned n)
+{
+    if (first < dirty_lo)
+        dirty_lo = first;
+    if (first + n > dirty_hi)
+        dirty_hi = first + n;
+}
+
 void hzv_pal_dirty(unsigned first, unsigned n)
 {
+    ++pal_gen;
     if (first < dirty_lo)
         dirty_lo = first;
     if (first + n > dirty_hi)
@@ -507,8 +564,53 @@ image_type *hz_hflip(image_type *image)
     return r;
 }
 
-/* XOR (the shadow's second blit), by the CPU: the image's colours change the low half of
- * each pixel under it (its palette row stays: the same colours XOR to the row's black) */
+/* XOR (the shadow's second blit), by the CPU, as SDLPoP does it: in RGB. SDLPoP xors the
+ * image's colours (24 bits) into the screen's, so the result is a colour of no palette
+ * (the shadow's outline: blue, green, yellow over a red and white kid's). Here each pair
+ * (the screen's colour index, the image's colour) gets a palette entry of the colour
+ * rgb(screen) ^ rgb(image): an entry that already has it, else one of the 32 the game never
+ * uses (rows 4 and 15), else (all 32 taken in one palette) the nearest. The pairs are
+ * remembered until the palette changes (a fade, a level's colours): about 20 in a frame.
+ * (The port xored the low 4 bits of the indices before: the outline in the kid's colours,
+ * 114 pixels of a shadow standing differed from the PC's picture.) */
+static unsigned char __far xlut[4096];  /* (screen index << 4 | image colour) -> entry, 0 */
+static unsigned xlut_gen = 0xFFFF;
+static unsigned char xlut_row, pool_n;
+static const unsigned char pool_row[2] = {4, 15};
+
+static unsigned char xor_entry(unsigned d, unsigned p)
+{
+    const rgb_type *a = &palette[d], *b = &palette[p];
+    unsigned char r = (unsigned char)(a->r ^ b->r), g = (unsigned char)(a->g ^ b->g),
+                  bl = (unsigned char)(a->b ^ b->b);
+    unsigned i, best = 1;
+    unsigned long bd = 0xFFFFFFFFUL;
+    for (i = 1; i < 256; i++) {         /* (0: the flashes' entry) */
+        const rgb_type *c = &palette[i];
+        if (c->r == r && c->g == g && c->b == bl)
+            return (unsigned char)i;
+    }
+    if (pool_n < 32) {
+        i = pool_row[pool_n >> 4] * 16 + (pool_n & 15);
+        ++pool_n;
+        palette[i].r = r;
+        palette[i].g = g;
+        palette[i].b = bl;
+        pal_dirty(i, 1);
+        return (unsigned char)i;
+    }
+    for (i = 1; i < 256; i++) {
+        const rgb_type *c = &palette[i];
+        int dr = (int)c->r - r, dg = (int)c->g - g, db = (int)c->b - bl;
+        unsigned long e = (unsigned long)(dr * dr) + (unsigned long)(dg * dg) + (unsigned long)(db * db);
+        if (e < bd) {
+            bd = e;
+            best = i;
+        }
+    }
+    return (unsigned char)best;
+}
+
 void hzv_xor(const SDL_Surface *img, int xpos, int ypos)
 {
     const SDL_Surface *t = current_target_surface;
@@ -529,8 +631,21 @@ void hzv_xor(const SDL_Surface *img, int xpos, int ypos)
         unsigned char __far *d = (unsigned char __far *)da;
         for (i = 0; i < w; i++) {
             unsigned char p = s[i];
-            if (p)
-                d[i] = (unsigned char)((d[i] & 0xF0) | ((d[i] ^ p) & 0x0F));
+            if (p) {
+                unsigned k;
+                unsigned char e;
+                if (xlut_gen != pal_gen || (p >> 4) != xlut_row) {
+                    hz_far_set(xlut, 0, sizeof xlut);
+                    xlut_gen = pal_gen;
+                    xlut_row = (unsigned char)(p >> 4);
+                    pool_n = 0;
+                }
+                k = (unsigned)d[i] << 4 | (p & 15);
+                e = xlut[k];
+                if (!e)
+                    e = xlut[k] = xor_entry(d[i], p);
+                d[i] = e;
+            }
         }
     }
 }

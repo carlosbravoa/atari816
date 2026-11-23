@@ -69,8 +69,19 @@ word prandom(word max) {
 		random_seed = 0x12345678; // Horizon: no clock at start (seed= or a replay sets it)
 		seed_was_init = 1;
 	}
+#if defined(_HORIZON) // Horizon: the same product from a 16 x 16 -> 32 multiply and a 16-bit one
+	{                     // (214013 = 3 * 65536 + 0x43FD; a 32 x 32 multiply cost more)
+		word lo = (word)random_seed, hi = (word)(random_seed >> 16);
+		random_seed = (dword)lo * 0x43FDu + ((dword)(word)(lo * 3u + hi * 0x43FDu) << 16) + 2531011UL;
+	}
+#else
 	random_seed = random_seed * 214013 + 2531011;
+#endif
+#if defined(_HORIZON) // Horizon: the same value with a 16-bit modulo (a 32-bit one cost 2 ms a room drawn)
+	return (word)(random_seed >> 16) % (word)(max + 1);
+#else
 	return (random_seed >> 16) % (max + 1);
+#endif
 }
 
 // seg009:0467

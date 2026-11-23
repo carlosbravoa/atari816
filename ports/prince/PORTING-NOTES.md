@@ -5,7 +5,7 @@ in C, SDL2), about 19,700 lines of game code, large code model, 2 MB of data.
 
 Upstream: SDLPoP at commit f7be2e9 (7 November 2026, "1.24 RC"), GPL-3. Its game files are in
 `src/` (seg000-seg008, seqtbl, replay, options, data, the headers) with every change in
-`#if defined(_HORIZON)` (`upstream.patch`: 11 files, about 275 lines added, 38 removed). Not
+`#if defined(_HORIZON)` (`upstream.patch`: 11 files, about 327 lines added, 28 removed). Not
 built: `seg009.c` (the SDL layer: replaced by `horizon/`), `main.c`, `menu.c` (the pause
 menu), `lighting.c`, `screenshot.c`, `midi.c` and `opl3.c` (the music: converted at build
 time, played by the real OPL2), `stb_vorbis.c` (OGG music).
@@ -17,11 +17,12 @@ time, played by the real OPL2), `stb_vorbis.c` (OGG music).
 | Upstream C built | 13 files, about 19,700 lines with their headers |
 | New platform layer | `horizon/`: 7 C files (`hz_seg009.c` is the part of upstream's seg009.c that does not touch SDL, taken over unchanged: text, dialogs, rectangles, random numbers), 3 headers (an SDL2 shim, `sys/stat.h`) |
 | Tools and tests | `tools/` (getdata.sh, mkdata.py, midi2imf.c, mkicon.py), `host/` (the reference build), `tests/` (check.sh, mkref.sh, hostframes.sh, cmpframe.py, oplcheck.py, shots.py, scripts): about 4,600 lines with horizon/ |
-| Build | `hcc --code large`: PRINCE.PRG 188 KB (142 KB of code in 3 other banks; the main bank 48.1 KB without its movable code: bss 20.2 KB, constants 13.1 KB, data 5.8 KB, code that must stay 9.1 KB; heap 12.4 KB, software stack 4 KB; 9.4 KB of `__far` objects in a bank) |
-| Data | POP.GFX 1,680 KB (927 images and 500 mirrored copies in an atlas 2048 wide, in 4 parts of 256 rows), POP.MSK 132 KB (1-bit masks), POP.DAT 61 KB (directory, palettes, levels), POP.SND 250 KB (24 digital effects, 26 songs as OPL2 streams, 4 PC-speaker sounds) |
+| Build | `hcc --code large`: PRINCE.PRG 196 KB (146 KB of code in 3 other banks; the main bank 48.3 KB without its movable code: bss 20.1 KB, constants 13.4 KB, data 5.8 KB, code that must stay 9.1 KB; heap 12.4 KB, software stack 4 KB; 13.5 KB of `__far` objects in a bank) |
+| Data | POP.GFX 1,470 KB (927 images and 500 mirrored copies in an atlas 2048 wide and 735 rows, packed as a skyline, in parts of 256 rows), POP.MSK 132 KB (1-bit masks), POP.DAT 61 KB (directory, palettes, levels, the other files' sizes), POP.SND 250 KB (24 digital effects, 26 songs as OPL2 streams, 4 PC-speaker sounds): 1,958,240 bytes |
+| Loading | 4 files, one open each, 88 reads straight into far memory: 9.6 s in the emulator's card model of Horizon 0.30's tree (220 KB/s), 4.0 s at the board's 580 KB/s since its firmware's faster card clock; a loading screen with a bar from the first 0.1 s |
 | Memory at run time | about 48 banks (3 MB): framebuffer 6 (512 x 768), atlas 27, masks 3, sounds 4, directory 1, replay moves and savestate 1, far tables 1, code 3, the main bank |
 | Speed | 22-34 ms of work a game frame on average in level 1 and a fight (the game's frame is 83 ms: 12 a second; 10 a second in fights); see "Speed" |
-| Determinism | 4 replays recorded on the PC (2,478 ticks): every state and every picture taken equal to upstream's on the PC |
+| Determinism | 4 replays recorded on the PC (2,478 ticks): every state and every picture taken equal to upstream's on the PC; every level's start (14 replays, `make test-long`): the level's 2,305 bytes, states and picture as the PC's; the shadow's XOR pixel for pixel |
 
 ## How the port was checked against upstream
 
@@ -62,6 +63,12 @@ plays them at the game's speed.
 | 11 | **Level 1 started empty on the board** (the kid in room 0, dead at once) when the title had run 40 s or more before the key: a key in `fade_out_2`/`fade_in_2` (the story's fades) or in the princess's scene jumps to `start_game` (longjmp), which never frees the fade's 1.5 KB buffer nor the scene's peels (upstream leaks them too: `clear_screen_and_sounds` sets `peels_count = 0`). The 12 KB heap then had no 2,310 bytes in one piece; `load_from_opendats_alloc`'s `malloc` gave NULL and `load_level` silently left the level all zero (25 non-zero bytes of 2,305: exactly what the board showed). Depends on when the key comes, not on the build: in the emulator the tests' key came 2.5 s into the title | port + upstream leaks | the level copied straight from POP.DAT's far copy (no heap); `start_game` frees an abandoned fade (`hzv_fade_abandoned`); `clear_screen_and_sounds` frees its peels; `horizon/hz_heap.h`: every `malloc`/`calloc`/`realloc` of the port stops the game with "prince: out of memory" instead of returning NULL; `list_replay_files` asked 49,792 bytes (128 replays' records, NULL before, written through when a replays folder exists): grows by 4. Test 4b: a key after 15, 40, 60 s, level 1 in room 1 with the same heap | 2 h 30 |
 | 12 | `make test`'s scripted-game pictures failed or passed with the layout: how many game ticks a held key covers depends on the CPU's time (emu816 models the cache by address), so the kid's run and the torches' random flames moved. The kid "missing" after the quickload is upstream's: he stops in the wall's column (the PC's build draws the same) | test | the quickload checked by a checksum of the whole savestate (`prince: quicksave state`, `quickload state`); after the first picture only the status line's rows are compared; `make test-layouts` (PAD=n: `tools/mkpad.py`) | 1 h |
 
+| 13 | **35 s of black screen at the start on the board** (the user's first play: 25 s and more): the data (2.1 MB) was read through a 512-byte buffer, 4,320 reads, each a card request of a few ms plus its bytes; nothing was on the screen until it was all in. The emulator's card answered at once then, so it never showed | port | one open per file, reads of up to 32,767 bytes straight into far memory (a read must not cross a bank: three a bank), the sizes of POP.MSK and POP.SND in POP.DAT (no STAT); the full screen and a loading screen with a bar first (hgame's font: the game's is in the data); the atlas packed as a skyline (735 rows, was 840: 210 KB less). 35.1 s -> 9.6 s in the emulator's card model (220 KB/s), about 29 -> 4.0 s at the board's 580 KB/s; requests 4,250 reads -> 88 | 1 h |
+| 14 | **Shift+L quit the game** (allowed on levels 1-3 in the original): the SDL shim's `SDL_AddTimer` was a macro giving 0, and upstream quits when the timer cannot be made | port | a one-timer `SDL_AddTimer` run by the frame's input poll (upstream's only timer: Shift held again after 250 ms). Found by `make test-long`'s walk through the levels | 15 min |
+| 15 | Ctrl+G typed quickly did nothing (`make test`'s save, now with the board's card timing): hgame's key queue has presses only, and `hg_mods` is the modifiers at the last event read; Ctrl and G released together (as a keyboard adapter that sends both in one report does) came as a plain G | port, SDK wish 5 | a modifier pressed earlier in the same batch of events counts | 20 min |
+| 16 | The shadow's colours differed from the PC's (the user's note): the port xored the low 4 bits of the palette indices (the outline in the kid's red and white); SDLPoP xors 24-bit RGB (blue, green, yellow: colours of no palette). 114 pixels of the shadow standing differed | port | each (screen colour, image colour) pair gets an entry of colour rgb ^ rgb: an existing one, else one of rows 4 and 15 (never used by the game), else the nearest; remembered until the palette changes. 0 pixels differ (`make test-long`: a replay moved next to level 6's shadow, `tests/patchp1r.py`) | 1 h |
+| 17 | The music against the effects: measured (`sndtest`, run816 `--wav`, the board's mix) the songs were 4.5 dB louder than the effects (median rms -23.1 against -27.6 dBFS) even with their carriers 9 dB down; the effects cannot be louder (their samples are full scale at Lau's full volume) | data | carriers 13.5 dB down (`OPL_ATT` 18): -28.2 against -27.6 dBFS, the loudest peak -9 dBFS; `make test` checks it (`tests/sndlevel.py`) | 30 min |
+
 Also: `get_joystick_state` used `atan2` and doubles (1.7 KB of floating point in the main
 bank for an analog stick Horizon does not have): signs instead; the feather fall's tick
 count (18.75 s as a double) and the timers' scaling in integers.
@@ -83,7 +90,9 @@ count (18.75 s as a double) and the timers' scaling in integers.
   heap.
 - **The view.** 172 rows of the room following the kid, the status line below a split;
   pictures from row 20 (`hzv_show`, every vertical blank).
-- **Data (`hz_data.c`).** POP.DAT's directory read once; upstream's open_dat chain (the
+- **Data (`hz_data.c`).** The four files read whole at the start, each opened once, in
+  reads of up to 32,767 bytes straight into their banks, behind a loading screen (fault 13);
+  POP.DAT's directory read once; upstream's open_dat chain (the
   last DAT opened searched first) over folder numbers; load_sprites_from_file makes an
   image set's pointers and surfaces in one allocation.
 - **Sound (`hz_sound.c`).** As above; `check_sound_playing` counts a sound's known length in
@@ -102,14 +111,29 @@ sending the records, the kernel's share), the replays played at the game's speed
 | Scene | Average | Worst | Late |
 | --- | --- | --- | --- |
 | Level 1, ten rooms (l1run, 1,207 frames) | 21.7-34.2 ms | 300 ms | 1 in 100 (the room changes) |
+| ... since the room changes were cut (below) | 21.8-34.0 ms (26.0 in all) | 171 ms | 7 in 1,000 |
 | A sword fight, level 2 (frames of 100 ms) | 33.2 ms | 216 ms | 1 in 120 (the room change) |
 | the 30 ms slower machine (/BUSY:30) | no change of the game's states | | |
 
 The game's frame is 83 ms (12 a second; 100 ms in fights), so a frame uses a quarter to
 two fifths of it. The worst frames are room changes: SDLPoP's deliberate 100 ms of black
 ("dark transition", as the original) plus drawing the whole room (about 30 tiles in many
-records each, the table building in C: 120-200 ms). Not optimised further: the game does
-not need it.
+records each, the table building in C: 120-200 ms).
+
+Room changes, cut (2026-11-23; `stats=N` prints each frame over 150 ms; a profile of one,
+run816 `--prof` over its 0.3 s): the 100 ms of black are now waited for after the room is
+drawn into the offscreen buffer, before it is copied to the screen (the black lasts as
+long; the drawing no longer comes after it: -100 ms); `prandom`'s modulo in 16 bits and
+its multiply as one 16 x 16 -> 32 and one 16-bit (the same values; it is called a dozen
+times a wall tile); the atlas part of a row by a shift (`/ hzd_part` was a division a
+blit); `calc_screen_x_coord`'s `/ 7` by shifts and a correction (a division an image);
+the record queues by pointer (an index into 14-byte records was a multiply); the key
+release scan up to $E7, not 256. l1run's ten room changes: 218-298 ms -> 130-171 ms. What
+is left is upstream's table building (`get_tile_to_draw`, `draw_back_fore`,
+`add_backtable`: about 40 % of the drawing, compiled C with a multiply for every index
+into a table of structures: SDK wish 6) and the kernel's `sheet_draw` (15 %). During play
+the card is not touched: `--stats` counts the same requests for a run stopped at level 1's
+first frame and one through the ten rooms, the title and the demo.
 
 ## SDK changes made (with tests)
 
@@ -127,10 +151,17 @@ not need it.
 | 2 | hgame takes 7.1 KB of the main bank for its draw queues even when a game draws with its own records (both Xargon and this port) | `hg_draw.c`: `hg__dq`, `hg__sq` (used at fixed addresses by `hg_fast.s`), the arena |
 | 3 | `int`-typed `switch` on key codes with bit 15 set warns `-Woverflow` for every case (SDLPoP's `WITH_SHIFT` = 0x8000): correct code, 16 lines of noise | a `case` whose value fits `unsigned int` of the same width could be quiet |
 | 4 | `sheet_draw` refuses the whole call for one bad record: a game sees its whole frame vanish; it would help if the kernel drew the valid ones and said which was refused (or hgame checked records in a debug build) | fault 7 |
+| 5 | `hg_key_next`'s events have no modifier state (`hg_mods` is the state at the last event read): a game cannot tell Ctrl+G from G when Ctrl went up in the same frame (fault 15). The free bits of the event, or a `hg_key_next_mods` | `sdk/c/game/hg_core.c` `events()`: `kq[]` could keep `ev.b & 0xFF` |
+| 6 | cc816 calls `__mul16` for a multiply by a constant (an index into an array of 14-, 30- or 44-byte structures; `44 * row`) and `__udiv16` for a division by one (`x / 7`): about 10 % of a room's drawing in this port. Shifts and adds for small constants, a multiply-shift for division | room changes above |
+| 7 | One read moves at most 32,767 bytes and must not cross a bank: three reads a bank (32,767 + 32,767 + 2), each a card request. 32,768 (or anything to the bank's end) would make it two | fault 13 |
+| 8 | No hourglass or busy pointer for a full-screen program: a loading screen draws its own | fault 13 |
 
 ## Time
 
-About 6 h of the agent's time (wall clock), builds and emulator runs on a fast PC:
+The polish round (2026-11-23: faults 13-17, the room changes, `make test-long`, the
+first screen's keys, the tests on the board's card): about 4 h 30.
+
+The port itself: about 6 h of the agent's time (wall clock), builds and emulator runs on a fast PC:
 
 | | |
 | --- | --- |
