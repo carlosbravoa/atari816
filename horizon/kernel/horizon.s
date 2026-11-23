@@ -36,6 +36,7 @@
         .import k2_fswheel: far, k2_pal_apply: far, k2_wspal: far, k2_classic: far
         .import k2_line: far, k2_lwait: far, k2_ws_end: far        ; (0.18) the second code segment, k2.s
         .import __K3CODE_RUN__, __K3CODE_SIZE__, k3_sys: far      ; (0.19) the third, k3.s
+        .import __VSTATE_SIZE__         ; (0.30) the video-state block with k2fs.s's part
 
         .include "hw.inc"
         .include "kdefs.inc"

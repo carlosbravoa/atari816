@@ -28,69 +28,159 @@
 
 	.segment "CODE"
 
-; ---- 32-bit shifts by X (C: the count is 0-31); 16 or more moves a word first
+; ---- 32-bit shifts by X (C: the count is 0-31): 16 or more moves a word, then 8 or
+; more a byte (an unaligned word access), then the 0-7 bits left a bit at a time with one
+; word in A (about 14 cycles a bit; 1UL << 13 about 130 cycles in all)
 __shl32:
 	txa
 	and	#31
 	beq	@r
 	cmp	#16
-	bcc	@go
-	sbc	#16		; (C set)
+	bcs	@w
+	cmp	#8
+	bcc	@b
+	sbc	#8		; (C set) 0-7 bits left
 	tax
-	lda	__h0
+	lda	__h0+1		; bytes 1-2: the high word
 	sta	__h0+2
-	stz	__h0
+	lda	__h0
+	xba
+	and	#$FF00		; byte 0: the low word's high byte
+	sta	__h0
 	txa
 	beq	@r
-@go:	tax
+@b:	tax			; 1-7 bits
+	lda	__h0+2
 @l:	asl	__h0
-	rol	__h0+2
+	rol	a
 	dex
 	bne	@l
+	sta	__h0+2
 @r:	RET
+@w:	sbc	#16		; (C set) 0-15: the low word, shifted, becomes the high one
+	tax
+	lda	__h0
+	stz	__h0
+	cpx	#8
+	bcc	@w2
+	xba
+	and	#$FF00
+	tay
+	txa
+	sbc	#8		; (C set by cpx)
+	tax
+	tya
+@w2:	cpx	#0
+	beq	@w4
+@w3:	asl	a
+	dex
+	bne	@w3
+@w4:	sta	__h0+2
+	RET
 
 __shr32:
 	txa
 	and	#31
 	beq	@r
 	cmp	#16
-	bcc	@go
-	sbc	#16
+	bcs	@w
+	cmp	#8
+	bcc	@b
+	sbc	#8
 	tax
-	lda	__h0+2
+	lda	__h0+1		; bytes 1-2: the low word
 	sta	__h0
-	stz	__h0+2
+	lda	__h0+3		; byte 3: the high word
+	and	#$00FF
+	sta	__h0+2
 	txa
 	beq	@r
-@go:	tax
-@l:	lsr	__h0+2
+@b:	tax
+	lda	__h0+2
+@l:	lsr	a
 	ror	__h0
 	dex
 	bne	@l
+	sta	__h0+2
 @r:	RET
+@w:	sbc	#16
+	tax
+	lda	__h0+2
+	stz	__h0+2
+	cpx	#8
+	bcc	@w2
+	xba
+	and	#$00FF
+	tay
+	txa
+	sbc	#8
+	tax
+	tya
+@w2:	cpx	#0
+	beq	@w4
+@w3:	lsr	a
+	dex
+	bne	@w3
+@w4:	sta	__h0
+	RET
 
 __sar32:
 	txa
 	and	#31
 	beq	@r
 	cmp	#16
-	bcc	@go
-	sbc	#16
+	bcs	@w
+	cmp	#8
+	bcc	@b
+	sbc	#8
+	tax
+	lda	__h0+1
+	sta	__h0
+	lda	__h0+3		; byte 3, sign-extended: the high word
+	and	#$00FF
+	eor	#$0080
+	sec
+	sbc	#$0080
+	sta	__h0+2
+	txa
+	beq	@r
+@b:	tax
+	lda	__h0+2
+@l:	cmp	#$8000
+	ror	a
+	ror	__h0
+	dex
+	bne	@l
+	sta	__h0+2
+@r:	RET
+@w:	sbc	#16
 	tax
 	lda	__h0+2
-	sta	__h0
+	tay
 	asl	a		; the sign into C
 	lda	#0
 	adc	#$FFFF
 	eor	#$FFFF		; $FFFF when negative, else 0
 	sta	__h0+2
+	tya
+	cpx	#8
+	bcc	@w2
+	xba
+	and	#$00FF
+	eor	#$0080
+	sec
+	sbc	#$0080
+	tay
 	txa
-	beq	@r
-@go:	tax
-@l:	lda	__h0+2
-	cmp	#$8000
-	ror	__h0+2
-	ror	__h0
+	sec
+	sbc	#8
+	tax
+	tya
+@w2:	cpx	#0
+	beq	@w4
+@w3:	cmp	#$8000
+	ror	a
 	dex
-	bne	@l
-@r:	RET
+	bne	@w3
+@w4:	sta	__h0
+	RET

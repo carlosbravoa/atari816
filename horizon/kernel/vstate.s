@@ -4,8 +4,12 @@
 ; Every write of NV_CTRL, NV_BASE, NV_STRIDE, the palette and the pointer registers goes
 ; through here or stores its copy next to the write; vs_seq counts the changes (not the
 ; pointer moves), so a reader can tell a torn read.
+; (0.30) Version 2: the hardware revision (k_rev itself lives at offset 30) and, after the
+; palette at offset 800, the full-screen program's scroll set (k2fs.s keeps fs_act and fs_scr
+; there), so a screenshot needs no search of the kernel's code. Old readers see version 1's
+; fields where they were.
 
-VS_VERSION = 1
+VS_VERSION = 2
 
         .segment "VSTATE"
 vs_blk:
@@ -25,9 +29,9 @@ vs_img:     .res    3           ; PTR_IMG
 vs_pc:      .res    3           ; PTR_C1-C3
 vs_shape:   .res    1           ; 0 arrow, 1 drag, 2 crosshair, 3 column resize, 4 row resize (ws_pointer)
 vs_btn:     .res    2           ; the mouse buttons now
-vs_res:     .res    2
+k_rev:      .res    2           ; (0.30) SYS_REV (the kernel's variable; 0 before snd_init)
 vs_pal:     .res    768         ; the palette as written to Marga: R, G, B for 0-255
-vs_end:
+vs_end:                         ; (0.30) k2fs.s: fs_act (2) and fs_scr (14) follow (offset 800)
         .assert vs_pal - vs_blk = 32, error, "video state: header must be 32 bytes"
 
         .segment "CODE"
@@ -39,7 +43,7 @@ vs_init:
 :       stz     vs_blk,x
         inx
         inx
-        cpx     #vs_end - vs_blk
+        cpx     #__VSTATE_SIZE__        ; (0.30) with k2fs.s's part after the palette
         bcc     :-
         lda     #'H' | ('Z' << 8)
         sta     vs_magic

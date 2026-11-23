@@ -41,7 +41,7 @@ from .diag import Diag                             # noqa: E402
 from .front import Front                           # noqa: E402
 from . import opt as optmod                        # noqa: E402
 from .regalloc import allocate                     # noqa: E402
-from .gen import Gen, DP_NAMES                     # noqa: E402
+from .gen import Gen, DP_NAMES, SSCHECK            # noqa: E402
 from .peep import peephole, text                   # noqa: E402
 
 # the standard headers (cc816/include), then the SDK's (horizon.h, hgame.h, ...)
@@ -372,6 +372,8 @@ def _compile(path, incs, defs, level, dump_ir, split, o, diag):
     # code model)
     unit.funcnames = {sy.asm for sy in fr.scopes[0].values()
                       if getattr(sy, 'kind', None) == 'global' and sy.t.is_func}
+    frame_sizes(unit, o, diag)
+    _fail(diag)
     large = bool(o.get('large'))
     lines_all = []
     helpers = set()
@@ -390,7 +392,7 @@ def _compile(path, incs, defs, level, dump_ir, split, o, diag):
             print(f.dump(), file=sys.stderr)
         allocate(f)
         t0 = _tick('regalloc', t0)
-        g = Gen(f, unit, {'level': level, 'large': large})
+        g = Gen(f, unit, {'level': level, 'large': large, 'sscheck': o.get('sscheck', SSCHECK)})
         lines = g.gen()
         t0 = _tick('codegen', t0)
         lines = peephole(lines, level >= 1)
@@ -403,6 +405,37 @@ def _compile(path, incs, defs, level, dump_ir, split, o, diag):
                           large and not o.get('resident')), unit.warnings
     return emit(unit, [(f, l) for f, l, _ in lines_all], helpers, path,
                 large and not o.get('resident'), large), unit.warnings
+
+
+# the software stack's size when hcc does not say (tools/hzc816.py SSTACK, hcc --stack)
+SSTACK = 8192
+# a frame bigger than this is worth a warning (-Wframe-larger-than)
+FRAME_WARN = 1024
+
+
+def frame_sizes(unit, o, diag):
+    """a function's software-stack frame (its arrays, structures, locals whose address is
+    taken, the temporaries of structures returned by value) bigger than FRAME_WARN bytes:
+    a warning; bigger than the whole software stack (o['sstack'], hcc --stack): an error
+    (it would overflow into the heap at every call)"""
+    total = o.get('sstack') or SSTACK
+    for f in unit.funcs:
+        n = sum(s.size for s in f.slots)
+        if n <= FRAME_WARN:
+            continue
+        name = getattr(f, 'cname', f.name)
+        where = getattr(f, 'coord', None)
+        if n > total:
+            more = -(-(n + 1024) // 1024) * 1024
+            diag.error(where, f"the function '{name}' needs a software-stack frame of {n:,} "
+                              f"bytes, more than the whole software stack ({total:,} bytes): "
+                              f"make the big locals static or global" +
+                              (f", or give hcc --stack {more}" if more <= 0x8000 else ''))
+        else:
+            diag.warning(where, f"the function '{name}' needs a software-stack frame of "
+                                f"{n:,} bytes (the software stack is {total:,} bytes: hcc "
+                                f"--stack N; arrays and structures returned by value are "
+                                f"there)", 'frame-larger-than')
 
 
 def _strip_gnu(src):

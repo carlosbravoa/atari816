@@ -1,0 +1,4 @@
+# (0.30) RTEST on the text shell (NODESK): fill_runs and uptime_us (user/rtest.s). Its console
+# must match tests/rtest.txt (tests/rtest-r9.txt on REV $09, tests/rtest-r8.txt below).
+1500 {esc}
++1500 rtest\n

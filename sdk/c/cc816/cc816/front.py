@@ -1602,6 +1602,7 @@ class Front:
             self.unit.exports.add(asm)
         f = Func(asm, static)
         f.ctype = ft
+        f.coord = d.coord
         if name in self.attrs.get('naked', ()):
             return self.naked_function(f, fd, name)
         f.cname = name
@@ -3029,6 +3030,9 @@ class Front:
         if t.is_int and t.is_bool:
             if isinstance(op, Imm):
                 return self.to_dst(RV(Imm(1 if op.val else 0), t), dst)
+            if st.is_int and st.is_bool and op.size == 2:
+                # a _Bool value is 0 or 1 already (as gcc takes it)
+                return self.to_dst(RV(op, t), dst)
             d = dst if dst is not None else self.newv(2)
             lt, lf, le = self.mkblock(), self.mkblock(), self.mkblock()
             self.emit(Ins('br', a=op, b=Imm(0, op.size), cc='ne', t=lt, f=lf))

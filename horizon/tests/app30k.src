@@ -1,0 +1,10 @@
+# (0.30) the keyboard on a submenu item (DESK=1; tests/mousegen.py makes tests/app30k.keys
+# from this; the card of tests/app29m.src: tests/mkapps.py desk20). The Programs menu is
+# opened by a click, Up wraps the highlight to its last item, "More apps  >", and Right opens
+# its pop-up as Enter would (before 0.30 Right went to the next menu of the bar). Shots (s):
+#   1   8    the Programs menu, "More apps  >" highlighted
+#   2   10   Right: More apps' pop-up (the other six apps, then Snake and Tetra)
+6000 move 105 8
+6200 click
+7000 key {up}
+9000 key {right}

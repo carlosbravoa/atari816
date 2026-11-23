@@ -2,7 +2,7 @@
  * from horizon.inc, ABI.md and tools/syscalls.tab: do not edit (make -C sdk/c gen).
  * Included by horizon.h, which defines the parameter blocks (hz_io, hz_winopen, ...).
  *
- * 113 syscalls, 115 C functions.
+ * 115 syscalls, 117 C functions.
  * Each function: carry clear -> hz_errno = 0 and the result; carry set -> hz_errno =
  * the Horizon error code (HZ_E*) and -1 ($FFFF for unsigned results). */
 #ifndef HZSYS_H
@@ -109,6 +109,20 @@
 #define SD_H             0xA
 #define SD_X             0xC
 #define SD_Y             0xE
+#define FRB_PAGE         0
+#define FRB_SIZE         4
+#define FRB_RUNS         6
+#define FRR_OFS          0
+#define FRR_C            2
+#define FRR_W            3
+#define FR_MAX           0xA80
+#define FR_GROUPS        1
+#define FRG_ELEMS        0
+#define FRG_C            3
+#define FRG_N            4
+#define FRG_STRIDE       6
+#define FRG_FIELDS       7
+#define FR_GN            0x400
 #define POP_HERE         0x8000
 #define POP_KEY          1
 #define MS_STATE         0x10
@@ -321,7 +335,9 @@
 #define SYS_SHEETNEW     0xA1
 #define SYS_SHEETFREE    0xA2
 #define SYS_SHEETDRAW    0xA3
-#define HZ_NSYSCALLS     113
+#define SYS_FILLRUNS     0xA4
+#define SYS_UPTIMEUS     0xA5
+#define HZ_NSYSCALLS     115
 
 /* ---- the syscalls */
 /** exit (SYS_EXIT, $00): End the task with an exit code. Nothing is flushed: exit() (stdlib.h) flushes the C streams first.
@@ -429,7 +445,7 @@ int hz_task_single(void);
 /** task_path (SYS_TPATH, $35): The absolute path of the file the program was loaded from (zero-terminated) into buf -> its length. A 128-byte buffer always fits; EINVAL if buf is too small. Horizon 0.28 and later (before: ENOSYS). See hz_prog_dir.
  *  [buf: XY, size: A] */
 int hz_task_path(char *buf, unsigned size);
-/** sys_info (SYS_INFO, $36): Horizon's version: major * 256 + minor (0x001D = 0.29); hz_x = the hardware revision (SYS_REV: 0x0C the OPL2, 0x0B sprites, 0x0A Lau, 0x08 the blitter). Horizon 0.29 and later (before: ENOSYS, 0xFFFF). hcc --needs checks a program's needs with it at its start.
+/** sys_info (SYS_INFO, $36): Horizon's version: major * 256 + minor (0x001D = 0.29, 0x001E = 0.30); hz_x = the hardware revision (SYS_REV: 0x0C the OPL2, 0x0B sprites, 0x0A Lau, 0x08 the blitter). Horizon 0.29 and later (before: ENOSYS, 0xFFFF). hcc --needs checks a program's needs with it at its start.
  *  [no arguments; out: hz_x] */
 unsigned hz_sys_info(void);
 /** port_create (SYS_PCREATE, $40): A message port owned by the caller -> its number (0-15).
@@ -663,6 +679,12 @@ int hz_sheet_free(unsigned sheet);
 /** sheet_draw (SYS_SHEETDRAW, $A3): Run count (1-128) sheet records -> records drawn. Returns at once: see list_wait.
  *  [win: A.lo, count: A.hi, r: XY] */
 int hz_sheet_draw(unsigned win, unsigned count, const hz_sheetrec *r);
+/** fill_runs (SYS_FILLRUNS, $A4): (0.30) Fill count (0-2688) runs {offset, colour, width} (or, with FR_GROUPS, groups of runs in the program's own layout) into a page of own memory with the blitter -> count. Returns at once (see list_wait). EINVAL: hz_x = the index of a run (group) past the page. ENODEV before REV $09 or with the blitter off: fill them with the CPU (hgame's hg_fill_runs does).
+ *  [count: A, b: XY; out: hz_x] */
+int hz_fill_runs(unsigned count, const hz_fillruns *b);
+/** uptime_us (SYS_UPTIMEUS, $A5): (0.30) Microseconds since reset (32 bits; wraps after 71.6 minutes).
+ *  [no arguments] */
+long hz_uptime_us(void);
 /** spr_move (SYS_SPRMOVE, $94): (0.24) Move count sprites (1-16) in one call.
  *  [count: A, e: XY, A |= $8000] */
 int hz_spr_move_many(unsigned count, const hz_sprmove *e);

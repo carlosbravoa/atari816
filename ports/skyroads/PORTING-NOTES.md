@@ -140,6 +140,45 @@ the 16-bit stores.
 3. cc816 code for 32-bit and small-int arithmetic (the simulation): see the SDK wishes
    below; worth 4-6 ms a tick here.
 
+## Horizon 0.30: the spans through fill_runs
+
+Horizon 0.30 added the call "What it would take" 1 asked for: `fill_runs` ($A4, horizon/
+ABI.md "Fill runs"), many runs in one request, the page checked once, each run with one
+compare, Ali filling them while the kernel makes the rest; and its groups (FR_GROUPS): a
+program's own span arrays, each drawn in one colour, read where they are. The port now sends
+each road pass as one call: a job is a group, its shape's own `PreparedSpan` array
+{left, right, width} (stride 5, the offset at 0 or 2, the width at 4) in the job's colour
+(`hz_span_groups` in `hz_spans.s` writes 8 bytes a job, `hz_video.c` sends them with
+hgame's `hg_fill_groups_at`; `plat_alloc` keeps objects below offset $FF00 of a bank, where
+the kernel reads groups). `/NORUNS` (or a Horizon without the call) keeps the CPU's spans.
+`make check`: 1,708 of 1,708 frames identical.
+
+| | 0.29 (the CPU's spans) | 0.30 (fill_runs groups) |
+| --- | --- | --- |
+| `make paced`: frames drawn of 1,708 ticks | 685 (40.1 %) | 730 (42.7 %) |
+| `make bench`, drawing a frame, frames 1-1481: average / worst | 39.1 / 62.0 ms | 34.7 / 58.0 ms |
+| the busy stretch, frames 700-1099: average / worst | 44.5 / 57.0 ms | 37.2 / 42.0 ms |
+| simulation a tick | 11.4 ms | 11.5 ms |
+
+(`make bench` runs 900 emulated seconds: 0.29 reached frame 1481 of the demo, 0.30 frame 1617;
+the compiler as in git at the time, the same for both. A first version that copied every
+span into a 4-byte run, `hz_span_runs`, then one `hg_fill_runs`: 708 frames, 36.6 / 64.0 ms,
+busy 39.5 / 46.0 ms.)
+
+**Why it is not the 2x hoped for.** The kernel's floor is about 140 CPU cycles a run (it
+writes five bytes of Ali's 24-byte command record for each, with the SDRAM's stall on every
+byte; measured by `sdk/c/game/tests/gt_runbench.c`), about 150 for a group's element plus
+a few hundred a group (its record, its bank and layout compared with the group before). The
+road's spans average 23 pixels and come two or three to a job, and this port's own span
+filler was already tight (a jump into unrolled 16-bit stores: about 260 cycles a span of 23
+pixels): so a span still costs the CPU about as much bookkeeping as filling it did, and only
+the pixels went away. That is why the busy stretch (wider spans: 27 pixels on average, up to
+2,100 a frame) gains most, and the average a tenth. The drawing is still about 35 ms a frame
+against the 20 the target needs. What
+would close the gap is the hardware feature in ABI.md, "For a later hardware revision": Ali
+reading the runs (or the groups' elements) by itself from the program's memory, with the
+page as a bound it enforces, so the kernel does nothing per run.
+
 ## C++ to C: what came up
 
 This is the first C++ source ported to the Atari816. The patterns, and what was done:
@@ -192,9 +231,9 @@ parsed form) in a full port.
 | 2 | a variable shift of a `long` (`1UL << c`) is a call (`__shl32`) | cc816 speed | `unsigned long s(unsigned c){return 1UL << c;}` |
 | 3 | a function returning a big structure by value, or with a big local, overflows the software stack into the heap silently (seen only at exit with `--debug`, or as corrupt data) | cc816 diagnostics | `struct big { char a[3700]; } f(void){ struct big b = {0}; return b; }` called with `--stack 4096`: a warning ("this function needs about 7,400 bytes of software stack") or a check at entry in `--debug` builds would have saved an hour |
 | 4 | 32-bit comparisons and calls with `long` arguments are slow enough that the C glue of a frame (a few dozen calls) costs milliseconds | cc816 speed | (general: compare `level_is_inside_tile_128`'s 32-bit form with the 16-bit one, about 4,000 against 900 cycles a call) |
-| 5 | no way to fill many runs in one request (the road's spans); a fill record costs the kernel about 1,100 cycles | Horizon / Ali | "What it would take" 1 |
-| 6 | hgame has no non-blocking page flip for a taller framebuffer (`hg_screen_fb` + `hg_scroll` waits in `hg_frame`): the port calls `hz_fs_scroll` and tracks the pending flip itself, with three pages | hgame gap | `hzv_show` / `hzv_free_page` in `horizon/hz_video.c` |
-| 7 | programs have no fine clock (`hz_uptime` steps 10 ms): timing a frame needed each frame repeated 10 times | API / emulator wish | a microsecond or cycle counter syscall (or emu816-only) |
+| 5 | no way to fill many runs in one request (the road's spans); a fill record costs the kernel about 1,100 cycles | Horizon / Ali | "What it would take" 1. (0.30: `fill_runs`, about 140 cycles a run: "Horizon 0.30" above) |
+| 6 | hgame has no non-blocking page flip for a taller framebuffer (`hg_screen_fb` + `hg_scroll` waits in `hg_frame`): the port calls `hz_fs_scroll` and tracks the pending flip itself, with three pages | hgame gap | `hzv_show` / `hzv_free_page` in `horizon/hz_video.c`. (0.30: `hg_flip_pages`, `hg_flip`, `hg_flip_free`) |
+| 7 | programs have no fine clock (`hz_uptime` steps 10 ms): timing a frame needed each frame repeated 10 times | API / emulator wish | a microsecond or cycle counter syscall (or emu816-only). (0.30: `uptime_us`, `hz_uptime_us`, `hg_us`) |
 
 ## Time
 

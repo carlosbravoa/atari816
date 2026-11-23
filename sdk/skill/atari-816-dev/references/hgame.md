@@ -184,6 +184,19 @@ while (hg_frame()) { input; logic; draw; }
 Coordinates may be negative or off screen: the library clips. `HG_NONE` = no colour (no
 paper, no key).
 
+**Many small fills (Horizon 0.30).** Spans, scan lines, a road of hundreds of runs: never
+one `hg_fill` each (3,400 cycles a run with the kernel's part). Fill an array of `hg_run`
+{`ofs` = y * `hg_fb_stride` + x from the page's start, `color`, `w` 0-255} (`HG_RUN(&r[k],
+ofs, w, c)`) and send it with one `hg_fill_runs(y0, runs, n)` (full screen; the page starts at
+screen row y0): about 140 cycles a run whatever its width, Ali fills while the game goes on
+(read the framebuffer after `hg_flush(1)`). Spans the game keeps in its own layout (a
+shape's, prepared once): `hg_fill_groups` with `HG_RUNGROUP(&g, elems, n, colour, stride,
+ofs_at, w_at)`, read where they are (elements in one bank, below its offset $FF00). Before
+REV $09 hgame fills them with the CPU (the same pixels). Page flipping with three pages in a
+taller framebuffer (`hg_screen_fb`), never waiting for the blank: `hg_flip_pages(3, rows)`,
+`p = hg_flip_free()` to draw into, `hg_flip(p, dy)` to show it (REV $0B). `hg_us()`:
+microseconds (`hg_ms` has 10 ms steps).
+
 ## Images and image files
 
 `hg_image`: `n` frames of `w` x `h`, one under the other, in far memory; `key` the transparent

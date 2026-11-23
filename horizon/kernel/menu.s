@@ -11,7 +11,8 @@
 ; 0.13: an item may start with a state byte MS_STATE | bits ($10-$13: MS_CHECK a check
 ; mark in the left margin, MS_DIM greyed and not selectable; set with win_mstate) and may
 ; hold a TAB: the text after it (a shortcut, "Ctrl+S") is drawn right-aligned. Keyboard
-; menus (F10, Alt alone, Alt+letter; the keys while a menu is open): mn_key.
+; menus (F10, Alt alone, Alt+letter; the keys while a menu is open): mn_key. (0.30) An item
+; ending in TAB ">" opens a submenu (its program's pop-up): Right picks it, as Enter does.
 
 MB_MAX  = 12                            ; menus shown at most
 MS_STATE = $10                          ; an item's state byte: MS_STATE | MS_CHECK | MS_DIM
@@ -962,7 +963,28 @@ mn_krts:
 mn_key: cmp     #$29
         bne     :+
         jmp     mn_close
-:       ldx     mn_open                 ; (0.15: a pop-up menu has no neighbours)
+:       cmp     #$4F                    ; (0.30) Right on an item that ends in TAB ">" (a
+        bne     @nsub                   ; submenu: the Desktop's "More apps"): as Enter
+        ldx     mn_sel
+        bmi     @nsub
+        txa
+        jsr     it_at
+        ldy     #$FFFF
+@len:   iny
+        lda     [kg_ln],y
+        and     #$00FF
+        bne     @len
+        cpy     #2
+        bcc     @nsub0
+        dey
+        dey
+        lda     [kg_ln],y
+        cmp     #9 | ('>' << 8)
+        bne     @nsub0
+        ldx     mn_sel
+        jmp     mn_pick
+@nsub0: lda     #$4F
+@nsub:  ldx     mn_open                 ; (0.15: a pop-up menu has no neighbours)
         cpx     #MB_POP
         bne     :+
         cmp     #$4F

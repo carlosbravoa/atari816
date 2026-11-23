@@ -11,7 +11,7 @@
 #                   simulation and drawing timed, build/bench/console.txt
 #   make paced      the demo at the game's 36 ticks a second: frames drawn, build/paced/
 #   make clean
-# HORIZON=DIR: a Horizon tree with a built card (0.29).
+# HORIZON=DIR: a Horizon tree with a built card (0.30: the road by fill_runs; 0.29: by the CPU).
 
 SDK      ?= ../../sdk
 HORIZON  ?= $(SDK)/../horizon

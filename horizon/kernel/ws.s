@@ -1240,15 +1240,22 @@ bl_wait:
         rts
 
 ; before the CPU reads memory the blitter wrote: the 65C816's cache does not see the
-; blitter's writes (CACHE_FLUSH sweeps it, about 18 us)
+; blitter's writes (CACHE_FLUSH sweeps it, about 18 us). (0.30) Also without the window
+; system on REV $09+ (fill_runs draws there too: list_wait, vsync)
 bl_flush:
         lda     bl_on
-        beq     :+
+        beq     @off
         jsr     bl_wait
-        a8
+@fl:    a8
         sta     f:CACHE_FLUSH
         a16
-:       rts
+@out:   rts
+@off:   lda     ws_on
+        bne     @out
+        lda     k_rev
+        cmp     #$09
+        bcs     @fl
+        rts
 
 ; bl_on / bl_mode from SYS_REV and ws_config
 bl_config:

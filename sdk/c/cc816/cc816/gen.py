@@ -13,6 +13,9 @@ import re
 from .ir import V, Imm, Sym, Frame
 from .regalloc import SCR, CS
 
+# the software stack's check at a function's entry (gen): on for every frame of at least
+# this many bytes (cc816's sscheck option; 0 turns it off: hcc --no-stack-check)
+SSCHECK = 1
 DP_NAMES = ('__rg', '__sp', '__rv', '__h0', '__h1', '__h2', '__h3', '__cbank')
 INV = {'beq': 'bne', 'bne': 'beq', 'bcc': 'bcs', 'bcs': 'bcc', 'bmi': 'bpl', 'bpl': 'bmi',
        'bvc': 'bvs', 'bvs': 'bvc'}
@@ -67,6 +70,45 @@ def asm_size(text):
         else:
             n += 4
     return n
+
+
+_MAGIC = {}
+
+
+def magic16(k, hi):
+    """(pre, M, s, add) such that, for every x in 0..hi, x / k (unsigned, k not a power of
+    two) is t >> s with t = ((x >> pre) * M) >> 16 (add: (t + (((x >> pre) - t) >> 1)) >>
+    (s - 1), a 17-bit multiplier's form); M < 65536. Every x is tried (cached): a candidate
+    is taken only when it is exact for all of them. None when there is none."""
+    key = (k, hi)
+    if key in _MAGIC:
+        return _MAGIC[key]
+    r = None
+    tz = (k & -k).bit_length() - 1
+    for add in (False, True):
+        for pre in ((0, tz) if tz else (0,)):
+            kk = k >> pre
+            for s in range(1 if add else 0, 17):
+                M = -(-(1 << (16 + s)) // kk) - ((1 << 16) if add else 0)
+                if not 0 < M < 0x10000:
+                    continue
+                ok = True
+                for x in range(hi + 1):
+                    y = x >> pre
+                    t = (y * M) >> 16
+                    q = (t + ((y - t) >> 1)) >> (s - 1) if add else t >> s
+                    if q != x // k:
+                        ok = False
+                        break
+                if ok:
+                    r = (pre, M, s, add)
+                    break
+            if r:
+                break
+        if r:
+            break
+    _MAGIC[key] = r
+    return r
 
 
 class Gen:
@@ -231,6 +273,24 @@ class Gen:
             self.I('lda', '__sp')
             self.I('sec')
             self.I('sbc', '#' + hexw(self.S))
+            chk = self.opts.get('sscheck', SSCHECK)
+            if chk and self.S >= chk:
+                # the software stack's check: below its lowest address (__hz_sslo, the
+                # guard zone's start: the heap is under it) is an overflow, which
+                # ___hz_sovf (rt/crt0.s) reports with the function's name; JSR/JSL there
+                # with the frame's size and the name after it, never returns (10 cycles
+                # when the frame fits)
+                ovf, ok = self.newlab(), self.newlab()
+                self.I('bcc', ovf)
+                self.I('cmp', '___hz_sslo')
+                self.I('bcs', ok)
+                self.helpers.add('___hz_sslo')
+                name = getattr(f, 'cname', f.name.lstrip('_'))
+                self.L(ovf)
+                self.helper('___hz_sovf')
+                self.out.append(('D', f'.word {hexw(self.S)}', 2))
+                self.out.append(('D', f'.byte "{name}", 0', len(name) + 1))
+                self.L(ok)
             self.I('sta', '__sp')
         for p, loc in f.param_copies:
             for part in range(p.size // 2):
@@ -487,70 +547,7 @@ class Gen:
     def shift32(self, i, kind):
         d, a, b = i.d, i.a, i.b
         if isinstance(b, Imm):
-            k = b.val & 0xFFFF
-            if k >= 32:
-                if kind == 'sshr':
-                    self.lda(a, 1)
-                    self.I('asl', 'a')
-                    self.I('lda', '#0')
-                    self.I('adc', '#$FFFF')
-                    self.I('eor', '#$FFFF')
-                    self.sta(d, 0)
-                    self.sta(d, 1)
-                else:
-                    self.stz(d, 0)
-                    self.stz(d, 1)
-                return
-            if k >= 16:
-                if kind == 'shl':
-                    self.lda(a, 0)
-                    self.shift_a('shl', k - 16)
-                    self.sta(d, 1)
-                    self.stz(d, 0)
-                elif kind == 'ushr':
-                    self.lda(a, 1)
-                    self.shift_a('ushr', k - 16)
-                    self.sta(d, 0)
-                    self.stz(d, 1)
-                else:
-                    self.lda(a, 1)
-                    self.shift_a('sshr', k - 16)
-                    self.sta(d, 0)
-                    self.I('asl', 'a')
-                    self.I('lda', '#0')
-                    self.I('adc', '#$FFFF')
-                    self.I('eor', '#$FFFF')
-                    self.sta(d, 1)
-                return
-            # k < 16: through __h0 in the direct page
-            self.lda(a, 0)
-            self.I('sta', '__h0')
-            self.lda(a, 1)
-            if k == 0:
-                self.I('sta', '__h0+2')
-            else:
-                for n in range(k):
-                    if kind == 'shl':
-                        if n == 0:
-                            self.I('sta', '__h0+2')
-                        self.I('asl', '__h0')
-                        self.I('rol', '__h0+2')
-                    else:
-                        if n == 0:
-                            pass
-                        if kind == 'ushr':
-                            self.I('lsr', 'a')
-                        else:
-                            self.I('cmp', '#$8000')
-                            self.I('ror', 'a')
-                        self.I('ror', '__h0')
-                if kind != 'shl':
-                    self.I('sta', '__h0+2')
-            self.I('lda', '__h0')
-            self.sta(d, 0)
-            self.I('lda', '__h0+2')
-            self.sta(d, 1)
-            return
+            return self.shift32c(kind, b.val & 0xFFFF, a, d)
         self.lda(a, 0)
         self.I('sta', '__h0')
         self.lda(a, 1)
@@ -561,6 +558,180 @@ class Gen:
         self.sta(d, 0)
         self.I('lda', '__h0+2')
         self.sta(d, 1)
+
+    def bsrc(self, o, b):
+        """the operand text for the (unaligned) word at byte b of a 32-bit V in the direct
+        page or on the hardware stack, else None"""
+        if not isinstance(o, V) or o.size != 4 or o is self.res or o.loc is None:
+            return None
+        kind, off = o.loc
+        if kind == 'dp':
+            return f'__rg+{off + b}'
+        if kind == 'sr':
+            return f'{1 + self.push + off + b},s'
+        if kind == 'home':
+            return f'{1 + self.push + self.F + self.C + self.RA + off + b},s'
+        return None
+
+    def shift32c(self, kind, k, a, d, h0=False):
+        """a 32-bit shift of a by the constant k into the V d (d may be a: every word of a
+        is read before d is written). h0: the value is in __h0 instead of a. 16 or more: a
+        word move; then 8 or more: a byte (an unaligned word load); then k % 8 bit steps,
+        one word in A and the other in __h0"""
+        if h0:
+            def ld(p):
+                self.I('lda', '__h0+2' if p else '__h0')
+
+            def bt(n):
+                return f'__h0+{n}'
+        else:
+            def ld(p):
+                self.lda(a, p)
+
+            def bt(n):
+                return self.bsrc(a, n)
+        # (the bit tricks keep the carry between two loads: not a Frame's address)
+        plain = h0 or isinstance(a, (V, Imm))
+        if k >= 32:
+            if kind == 'sshr':
+                ld(1)
+                self.sign_word()
+                self.sta(d, 0)
+                self.sta(d, 1)
+            else:
+                self.stz(d, 0)
+                self.stz(d, 1)
+            return
+        if k >= 16:
+            if kind == 'shl':
+                ld(0)
+                self.shift_a('shl', k - 16)
+                self.sta(d, 1)
+                self.stz(d, 0)
+            elif kind == 'ushr':
+                ld(1)
+                self.shift_a('ushr', k - 16)
+                self.sta(d, 0)
+                self.stz(d, 1)
+            else:
+                ld(1)
+                self.shift_a('sshr', k - 16)
+                self.sta(d, 0)
+                self.sign_word()
+                self.sta(d, 1)
+            return
+        if k == 7 and kind == 'shl' and plain:
+            # (x >> 1) << 8, x's bit 0 into bit 7 (x * 128: 48 cycles, not 85)
+            lo = self.newlab()
+            ld(1)
+            self.I('lsr', 'a')
+            self.I('sta', '__h0+2')
+            ld(0)
+            self.I('ror', 'a')
+            self.I('sta', '__h0')
+            self.I('xba')
+            self.I('and', '#$FF00')
+            self.I('bcc', lo)
+            self.I('ora', '#$0080')
+            self.L(lo)
+            self.I('tay')
+            self.I('lda', '__h0+1')
+            self.sta(d, 1)
+            self.I('tya')
+            self.sta(d, 0)
+            return
+        if k == 15 and kind == 'shl' and plain:
+            # (x >> 1) << 16, x's bit 0 into bit 15
+            ld(1)
+            self.I('lsr', 'a')
+            ld(0)
+            self.I('ror', 'a')
+            self.sta(d, 1)
+            self.I('lda', '#0')
+            self.I('ror', 'a')
+            self.sta(d, 0)
+            return
+        if k == 7 and plain:
+            # (x << 1) >> 8: bytes 1-2 of x << 1 the low word; byte 3 and the bit shifted
+            # out (x's sign) the high one
+            hi = self.newlab()
+            ld(0)
+            self.I('asl', 'a')
+            self.I('sta', '__h0')
+            ld(1)
+            self.I('rol', 'a')
+            self.I('sta', '__h0+2')
+            self.I('xba')
+            self.I('and', '#$00FF')
+            self.I('bcc', hi)
+            self.I('ora', '#$0100' if kind == 'ushr' else '#$FF00')
+            self.L(hi)
+            self.I('tay')
+            self.I('lda', '__h0+1')
+            self.sta(d, 0)
+            self.I('tya')
+            self.sta(d, 1)
+            return
+        if k == 15 and plain:
+            # (x << 1) >> 16
+            ld(0)
+            self.I('asl', 'a')
+            ld(1)
+            self.I('rol', 'a')
+            self.sta(d, 0)
+            self.I('lda', '#0')
+            if kind == 'ushr':
+                self.I('rol', 'a')
+            else:
+                self.I('adc', '#$FFFF')
+                self.I('eor', '#$FFFF')
+            self.sta(d, 1)
+            return
+        b1 = bt(1) if k >= 8 else None
+        if kind == 'shl':
+            if b1 is not None:
+                # bytes 1-2 become the high word, byte 0 the high byte of the low one
+                self.I('lda', b1)
+                self.I('tay')
+                ld(0)
+                self.I('xba')
+                self.I('and', '#$FF00')
+                self.I('sta', '__h0')
+                self.I('tya')
+                k -= 8
+            else:
+                ld(0)
+                self.I('sta', '__h0')
+                ld(1)
+            for _ in range(k):
+                self.I('asl', '__h0')
+                self.I('rol', 'a')
+        else:
+            if b1 is not None:
+                # bytes 1-2 become the low word, byte 3 (extended) the high one
+                self.I('lda', b1)
+                self.I('sta', '__h0')
+                self.I('lda', bt(3))
+                self.I('and', '#$00FF')
+                if kind == 'sshr':
+                    self.I('eor', '#$0080')
+                    self.I('sec')
+                    self.I('sbc', '#$0080')
+                k -= 8
+            else:
+                ld(0)
+                self.I('sta', '__h0')
+                ld(1)
+            for _ in range(k):
+                if kind == 'ushr':
+                    self.I('lsr', 'a')
+                else:
+                    self.I('cmp', '#$8000')
+                    self.I('ror', 'a')
+                self.I('ror', '__h0')
+        self.sta(d, 1)
+        self.I('lda', '__h0')
+        self.sta(d, 0)
 
     def sign_word(self):
         """A = $FFFF when bit 15 of A is set, else 0"""
@@ -727,10 +898,18 @@ class Gen:
         self.sta(d)
         return True
 
+    # Division by constants. C truncates toward zero; a remainder has the sign of the
+    # dividend. Signed x / 2^n is (x + (x < 0 ? 2^n - 1 : 0)) >> n, arithmetically;
+    # x % 2^n is x & (2^n - 1) for x >= 0, else -((-x) & (2^n - 1)) (x = INT_MIN too: -x
+    # is INT_MIN again, whose low bits are 0). A 16-bit divide by another constant is a
+    # multiply by its reciprocal (magic16: checked for every dividend when chosen).
     def sdiv_pow2(self, i):
-        """a signed x / 2^n: (x + (x < 0 ? 2^n - 1 : 0)) >> n, arithmetically (C rounds
-        toward zero): no call (the Xargon port: every position / 16)"""
+        """a signed 16-bit x / 2^n or x / -2^n (n 1-14): no call (the Xargon port: every
+        position / 16)"""
         k = i.b.val & 0xFFFF
+        neg = bool(k & 0x8000)
+        if neg:
+            k = 0x10000 - k
         if k < 2 or k & (k - 1) or k >= 0x8000:
             return False
         n = k.bit_length() - 1
@@ -741,7 +920,231 @@ class Gen:
         self.I('adc', f'#{k - 2}')      # (+ k - 1 with the carry)
         self.L(pos)
         self.shift_a('sshr', n)
+        if neg:
+            self.I('eor', '#$FFFF')
+            self.I('inc', 'a')
         self.sta(i.d)
+        return True
+
+    def smod_pow2(self, i):
+        """a signed 16-bit x % 2^n or x % -2^n (n 1-15)"""
+        k = i.b.val & 0xFFFF
+        if k & 0x8000 and k != 0x8000:
+            k = 0x10000 - k
+        if k < 2 or k & (k - 1):
+            return False
+        neg, done = self.newlab(), self.newlab()
+        self.lda(i.a)
+        self.I('bmi', neg)
+        self.I('and', '#' + hexw(k - 1))
+        self.I('bra', done)
+        self.L(neg)
+        self.I('eor', '#$FFFF')
+        self.I('inc', 'a')
+        self.I('and', '#' + hexw(k - 1))
+        self.I('eor', '#$FFFF')
+        self.I('inc', 'a')
+        self.L(done)
+        self.sta(i.d)
+        return True
+
+    def sdiv32_pow2(self, i):
+        """a signed 32-bit x / 2^n or x / -2^n (n 1-30): the bias added in __h0, the
+        arithmetic shift from there (the SkyRoads port: long / 512, / 16)"""
+        k = i.b.val & 0xFFFFFFFF
+        neg = bool(k & 0x80000000)
+        if neg:
+            k = 0x100000000 - k
+        if k < 2 or k & (k - 1) or k >= 0x80000000 or not isinstance(i.a, V):
+            return False
+        n = k.bit_length() - 1
+        a, d = i.a, i.d
+        pos, join = self.newlab(), self.newlab()
+        self.lda(a, 1)
+        self.I('bpl', pos)
+        self.I('clc')
+        self.lda(a, 0)
+        self.I('adc', '#' + hexw(k - 1))
+        self.I('sta', '__h0')
+        self.lda(a, 1)
+        self.I('adc', '#' + hexw((k - 1) >> 16))
+        self.I('bra', join)
+        self.L(pos)
+        self.lda(a, 0)
+        self.I('sta', '__h0')
+        self.lda(a, 1)
+        self.L(join)
+        self.I('sta', '__h0+2')
+        self.shift32c('sshr', n, None, d, h0=True)
+        if neg:
+            self.I('sec')
+            for p in (0, 1):
+                self.I('lda', '#0')
+                self.I('sbc', self.vaddr(d, p))
+                self.sta(d, p)
+        return True
+
+    def smod32_pow2(self, i):
+        """a signed 32-bit x % 2^n or x % -2^n (n 1-31)"""
+        k = i.b.val & 0xFFFFFFFF
+        if k & 0x80000000 and k != 0x80000000:
+            k = 0x100000000 - k
+        if k < 2 or k & (k - 1) or not isinstance(i.a, V):
+            return False
+        m = k - 1
+        a, d = i.a, i.d
+        pos, done = self.newlab(), self.newlab()
+        self.lda(a, 1)
+        self.I('bpl', pos)
+        # -((-x) & m)
+        self.I('sec')
+        self.I('lda', '#0')
+        self.I('sbc', self.opsrc(a, 0))
+        self.I('and', '#' + hexw(m))
+        self.I('sta', '__h0')
+        self.I('lda', '#0')
+        self.I('sbc', self.opsrc(a, 1))
+        self.I('and', '#' + hexw(m >> 16))
+        self.I('sta', '__h0+2')
+        self.I('sec')
+        self.I('lda', '#0')
+        self.I('sbc', '__h0')
+        self.sta(d, 0)
+        self.I('lda', '#0')
+        self.I('sbc', '__h0+2')
+        self.sta(d, 1)
+        self.I('bra', done)
+        self.L(pos)
+        self.lda(a, 0)
+        self.I('and', '#' + hexw(m))
+        self.sta(d, 0)
+        self.lda(a, 1)
+        self.I('and', '#' + hexw(m >> 16))
+        self.sta(d, 1)
+        self.L(done)
+        return True
+
+    def mulc_a(self, k, s):
+        """A = A * k (16 bits), A's value also in the operand s: shifts and adds or
+        subtracts (the binary or the non-adjacent form, the fewer non-zero digits)"""
+        digits = [int(c) for c in bin(k)[2:]]
+        nf = self.naf(k)
+        if sum(1 for z in nf if z) < sum(digits):
+            digits = nf
+        for z in digits[1:]:
+            self.I('asl', 'a')
+            if z == 1:
+                self.I('clc')
+                self.I('adc', s)
+            elif z == -1:
+                self.I('sec')
+                self.I('sbc', s)
+
+    def div16_const(self, i, signed, mod):
+        """a 16-bit x / k or x % k, k a constant other than a power of two: the quotient
+        is (|x| * M) >> (16 + s) (M and s from magic16, exact for every dividend), the
+        multiply inline (M is known); a remainder x - q * k"""
+        if isinstance(i.a, Imm):
+            return False
+        k = i.b.val & 0xFFFF
+        a, d = i.a, i.d
+        negk = False
+        if signed and k & 0x8000:
+            if k == 0x8000:
+                return False
+            k, negk = 0x10000 - k, True
+        if k < 3 or not k & (k - 1):
+            return False
+        if not signed and k >= 0x8000:
+            # the quotient is 0 or 1
+            self.lda(a)
+            self.I('cmp', '#' + hexw(k))
+            if mod:
+                done = self.newlab()
+                self.I('bcc', done)
+                self.I('sbc', '#' + hexw(k))
+                self.L(done)
+            else:
+                self.I('lda', '#0')
+                self.I('rol', 'a')
+            self.sta(d)
+            return True
+        mg = magic16(k, 0x8000 if signed else 0xFFFF)
+        if mg is None:
+            return False
+        pre, M, sh, add = mg
+        self.lda(a)
+        if signed:
+            pos = self.newlab()
+            self.I('bpl', pos)
+            self.I('eor', '#$FFFF')
+            self.I('inc', 'a')
+            self.L(pos)
+        for _ in range(pre):
+            self.I('lsr', 'a')
+        self.I('sta', '__h0')
+        # t = (x * M) >> 16 inline, M's bits from the lowest: a one adds x, then every bit
+        # halves the 17-bit sum (carry and A); each halving's dropped bit only floors,
+        # so t is exact (about 8 cycles a one-bit, 2 a zero)
+        first = True
+        for bit in range(16):
+            if not (M >> bit) & 1:
+                if not first:
+                    self.I('lsr', 'a')
+                continue
+            if not first:
+                self.I('clc')
+                self.I('adc', '__h0')
+                self.I('ror', 'a')
+            else:
+                self.I('lsr', 'a')      # (t = x, halved: no carry)
+                first = False
+        if add:
+            # (t + ((x - t) >> 1)) >> (s - 1): the 17-bit multiplier's form
+            self.I('sta', '__h1')
+            self.I('lda', '__h0')
+            self.I('sec')
+            self.I('sbc', '__h1')
+            self.I('lsr', 'a')
+            self.I('clc')
+            self.I('adc', '__h1')
+            sh -= 1
+        self.shift_a('ushr', sh)
+        # A = |x| / k
+        if mod:
+            self.I('sta', '__h1')
+            self.mulc_a(k, '__h1')
+            self.I('sta', '__h1')
+            self.lda(a)
+            if signed:
+                # x < 0: x + q * k, else x - q * k (the remainder takes x's sign)
+                neg, done = self.newlab(), self.newlab()
+                self.I('bmi', neg)
+                self.I('sec')
+                self.I('sbc', '__h1')
+                self.I('bra', done)
+                self.L(neg)
+                self.I('clc')
+                self.I('adc', '__h1')
+                self.L(done)
+            else:
+                self.I('sec')
+                self.I('sbc', '__h1')
+            self.sta(d)
+            return True
+        if signed:
+            keep, done = self.newlab(), self.newlab()
+            self.I('tay')
+            self.lda(a)
+            self.I('bmi' if negk else 'bpl', keep)
+            self.I('tya')
+            self.I('eor', '#$FFFF')
+            self.I('inc', 'a')
+            self.I('bra', done)
+            self.L(keep)
+            self.I('tya')
+            self.L(done)
+        self.sta(d)
         return True
 
     def divmod16(self, i, h):
@@ -752,6 +1155,8 @@ class Gen:
 
     def g_udiv(self, i):
         if i.d.size == 2:
+            if isinstance(i.b, Imm) and self.div16_const(i, False, False):
+                return
             return self.divmod16(i, '__udiv16')
         if i.d.size == 8:
             return self.call64('__udiv64', i)
@@ -759,15 +1164,19 @@ class Gen:
 
     def g_sdiv(self, i):
         if i.d.size == 2:
-            if isinstance(i.b, Imm) and self.sdiv_pow2(i):
+            if isinstance(i.b, Imm) and (self.sdiv_pow2(i) or self.div16_const(i, True, False)):
                 return
             return self.divmod16(i, '__sdiv16')
         if i.d.size == 8:
             return self.call64('__sdiv64', i)
+        if isinstance(i.b, Imm) and self.sdiv32_pow2(i):
+            return
         self.call32('__sdiv32', i)
 
     def g_umod(self, i):
         if i.d.size == 2:
+            if isinstance(i.b, Imm) and self.div16_const(i, False, True):
+                return
             return self.divmod16(i, '__umod16')
         if i.d.size == 8:
             return self.call64('__umod64', i)
@@ -775,9 +1184,13 @@ class Gen:
 
     def g_smod(self, i):
         if i.d.size == 2:
+            if isinstance(i.b, Imm) and (self.smod_pow2(i) or self.div16_const(i, True, True)):
+                return
             return self.divmod16(i, '__smod16')
         if i.d.size == 8:
             return self.call64('__smod64', i)
+        if isinstance(i.b, Imm) and self.smod32_pow2(i):
+            return
         self.call32('__smod32', i)
 
     # --- floating point (rt/fp_*.s): the operands in __h0 (and __h1), the result
@@ -1384,6 +1797,95 @@ class Gen:
         self.L(ok)
         self.branch('bmi' if cc == 'slt' else 'bpl', t, f)
 
+    def g_set(self, i):
+        """d = a cc b as 0 / 1 (opt.setcc), without branches where it can: the carry of a
+        compare (unsigned), the sign of the difference (signed), a nonzero test (eq, ne)
+        rotated into A"""
+        cc, a, b = i.x['cc'], i.a, i.b
+        size = max(a.size, b.size)
+        n = size // 2
+        if isinstance(a, (Imm, Sym, Frame)) and not isinstance(b, (Imm, Sym, Frame)):
+            a, b = b, a
+            cc = {'ult': 'ugt', 'ugt': 'ult', 'ule': 'uge', 'uge': 'ule', 'slt': 'sgt',
+                  'sgt': 'slt', 'sle': 'sge', 'sge': 'sle'}.get(cc, cc)
+        if isinstance(b, Imm):
+            # x <= k -> x < k + 1, x > k -> x >= k + 1 (k not the largest value)
+            m = (1 << (8 * size)) - 1
+            k = b.val
+            if cc in ('ule', 'ugt') and k < m:
+                cc, b = ('ult' if cc == 'ule' else 'uge'), Imm(k + 1, b.size)
+            elif cc in ('sle', 'sgt') and k != m >> 1:
+                cc, b = ('slt' if cc == 'sle' else 'sge'), Imm((k + 1) & m, b.size)
+        if cc in ('ugt', 'ule', 'sgt', 'sle'):
+            a, b = b, a
+            cc = {'ugt': 'ult', 'ule': 'uge', 'sgt': 'slt', 'sle': 'sge'}[cc]
+        flip = False
+        if cc in ('eq', 'ne'):
+            # A = 0 exactly when a == b; then C = (A != 0)
+            if isinstance(b, Imm) and b.val == 0:
+                self.lda(a, 0)
+                for p in range(1, n):
+                    self.I('ora', self.opsrc(a, p))
+            else:
+                if n > 1:
+                    self.lda(a, 1)
+                    self.I('eor', self.opsrc(b, 1))
+                    self.I('sta', '__h0')
+                self.lda(a, 0)
+                self.I('eor', self.opsrc(b, 0))
+                if n > 1:
+                    self.I('ora', '__h0')
+            self.I('cmp', '#$0001')
+            self.I('lda', '#0')
+            self.I('rol', 'a')
+            flip = cc == 'eq'
+        elif cc in ('ult', 'uge'):
+            # the carry of a - b: set when a >= b
+            self.lda(a, 0)
+            self.I('cmp', self.opsrc(b, 0))
+            for p in range(1, n):
+                self.lda(a, p)
+                self.I('sbc', self.opsrc(b, p))
+            self.I('lda', '#0')
+            self.I('rol', 'a')
+            flip = cc == 'ult'
+        else:
+            # slt / sge: the sign of a - b (corrected for an overflow) into the carry
+            if isinstance(b, Imm) and b.val == 0:
+                self.lda(a, n - 1)
+            elif n == 1 and isinstance(b, Imm):
+                # biased: a ^ $8000 >= k ^ $8000 unsigned (the carry)
+                self.lda(a)
+                self.I('eor', '#$8000')
+                self.I('cmp', '#' + hexw(b.val ^ 0x8000))
+                self.I('lda', '#0')
+                self.I('rol', 'a')
+                if cc == 'slt':
+                    self.I('eor', '#$0001')
+                self.sta(i.d)
+                return
+            else:
+                self.lda(a, 0)
+                if n == 1:
+                    self.I('sec')
+                    self.I('sbc', self.opsrc(b, 0))
+                else:
+                    self.I('cmp', self.opsrc(b, 0))
+                    for p in range(1, n):
+                        self.lda(a, p)
+                        self.I('sbc', self.opsrc(b, p))
+                ok = self.newlab()
+                self.I('bvc', ok)
+                self.I('eor', '#$8000')
+                self.L(ok)
+            self.I('asl', 'a')
+            self.I('lda', '#0')
+            self.I('rol', 'a')
+            flip = cc == 'sge'
+        if flip:
+            self.I('eor', '#$0001')
+        self.sta(i.d)
+
     def br32(self, i):
         cc = i.x['cc']
         a, b = i.a, i.b
@@ -1404,6 +1906,11 @@ class Gen:
         if cc in ('ugt', 'ule', 'sgt', 'sle'):
             a, b = b, a
             cc = {'ugt': 'ult', 'ule': 'uge', 'sgt': 'slt', 'sle': 'sge'}[cc]
+        if cc in ('slt', 'sge') and isinstance(b, Imm) and b.val == 0 and not isinstance(a, Imm):
+            # x < 0, x >= 0: the high word's sign
+            self.lda(a, 1)
+            self.branch('bmi' if cc == 'slt' else 'bpl', t, f)
+            return
         self.lda(a, 0)
         self.I('cmp', self.opsrc(b, 0))
         self.lda(a, 1)

@@ -1,7 +1,8 @@
 /* Ali, the blitter — register spec "Ali (blitter)". Executed in full when START is written, so BUSY is
  * never seen set. Addresses are physical (no bank 0 window, no protection).
  *
- * Timing, from the RTL simulation (clk_core cycles per pixel; a CPU cycle is 2 clk_core):
+ * Timing (--ideal-timing: the model before Horizon 0.19), from the RTL simulation (clk_core
+ * cycles per pixel; a CPU cycle is 2 clk_core):
  * FILL 2.0, EXPAND / EXPAND_KEY 2.2, COPY / COPY_KEY 2.9 with the classic machine frozen
  * (16-byte bursts) or 3.5 running, plus about 0.8 with the video on. The pixels are
  * written at START; BUSY then reads 1 for 8 + 2 per line + that many cycles, and the
@@ -38,7 +39,21 @@ void blitter_reset(void) { memset(&M.bl, 0, sizeof M.bl); }
 static uint32_t r24(int i) { return M.bl.r[i] | M.bl.r[i + 1] << 8 | (uint32_t)M.bl.r[i + 2] << 16; }
 static uint32_t r16(int i) { return M.bl.r[i] | M.bl.r[i + 1] << 8; }
 
-static uint64_t blit_cost(uint32_t w, uint32_t h, uint8_t op)
+/* (Horizon 0.30) a FILL writes aligned 32-bit words with a byte mask (a816_blit.sv: no reads,
+ * one word a request), so its time follows the words a line touches, not its pixels: a short
+ * run that starts or ends inside a word pays for the whole word. The words of h lines of w
+ * pixels from dst, lines dstr apart. */
+static uint64_t fill_words(uint32_t dst, uint32_t dstr, uint32_t w, uint32_t h)
+{
+    uint64_t n = 0;
+    if ((dstr & 3) == 0 || h == 1)
+        return (uint64_t)(((dst & 3) + w + 3) >> 2) * h;
+    for (uint32_t y = 0; y < h; y++, dst += dstr)
+        n += ((dst & 3) + w + 3) >> 2;
+    return n;
+}
+
+static uint64_t blit_cost(uint32_t w, uint32_t h, uint8_t op, uint32_t dst, uint32_t dstr)
 {
     uint64_t px = (uint64_t)w * h;
     if (M.fr.ideal) {                                   /* the model before Horizon 0.19 */
@@ -58,6 +73,8 @@ static uint64_t blit_cost(uint32_t w, uint32_t h, uint8_t op)
     int k = op == 0 ? 0 : (op == 1 || op == 2) ? 1 : 2, v = 0;
     if (M.nvc.ctrl & 1) { v = 1 + ((M.nvc.ctrl >> 1) & 3); if (v > 3) v = 3; }
     uint32_t clk100 = clk[!(M.sys.sv_ctrl & 0x04)][v][k];
+    if (k == 0)                                         /* (0.30) a fill: by its words */
+        px = 4 * fill_words(dst, dstr, w, h);
     return 8 + (k == 1 ? 0 : 2 * (uint64_t)h) + px * clk100 / 200;
 }
 
@@ -81,7 +98,13 @@ void blitter_stale_read(uint32_t a)
         fprintf(stderr, "emu816: blitter: CPU read of %06X written by the blitter, no CACHE_FLUSH since\n", a);
 }
 
-#define REC_CYC 30                                      /* reading and loading a record */
+/* reading and loading a record: a816_blit.sv's list sequencer reads it as three 8-byte bursts
+ * one after the other through the blitter's port (the lowest priority), each followed by 8
+ * clk_core of loading its bytes into the registers (L_RD, L_WT, L_LD), then L_CHK, L_GO and
+ * the blit's line set-up (S_LS0, S_LS2): about 60 clk_core with an idle port = 30 CPU cycles,
+ * then blit_cost's 8 + 2 a line. (0.30: checked against the RTL for fill_runs, whose lists
+ * are thousands of one-line fills; a 23-pixel run costs about 30 + 10 + 7 words.) */
+#define REC_CYC 30
 
 static int busy(void) { return M.bl.list || M.cpu.cycles < M.bl.busy_until; }
 
@@ -119,7 +142,7 @@ static void blit(uint64_t at)
     }
     b->n_pixels += (uint64_t)w * h;
 out:;
-    uint64_t c = (w && h && op <= 4) ? blit_cost(w, h, op) : 8;
+    uint64_t c = (w && h && op <= 4) ? blit_cost(w, h, op, dst, dstr) : 8;
     b->busy_cycles += c;
     b->busy_until = at + c;
 }

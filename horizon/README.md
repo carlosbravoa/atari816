@@ -436,6 +436,23 @@ the blitter: the software drawing paths; both must pass):
    console lines, `install: asks: ...`); 20 apps and the odd folders
    (`tests/app29m.src`: a junk APP.INF, a missing program, no APP.INF, a program right in
    /APPS, a hidden folder; "More apps >" and its pop-up; the needs window of NEEDV).
+   (0.30) `tests/app30k.src`: the same card, the Programs menu opened by a click, Up to
+   "More apps  >" and Right: its pop-up opens as Enter would.
+35. **0.30 fill_runs** (RTEST, `user/rtest.s`, `tests/rtest.keys`, compared with
+   `tests/rtest.txt`; `tests/rtest-r9.txt` on REV $09, `tests/rtest-r8.txt` below): uptime_us
+   against a sleep; refused calls (too many runs, flags, a page in the kernel's bank, in a
+   free bank, running out of the caller's bank, runs in the kernel's bank or past the window,
+   a run past the page: EINVAL with its index), the page's edges (its last byte, a page of
+   65,536 bytes); the pixels of 14 runs (zero widths, overlapping runs in order, width 255)
+   and 12 single-run calls against the CPU's own fill of the same runs; 2,688 random runs,
+   and nine such lists each made while the one before is drawn (the runs' memory rewritten
+   at once); a full-screen framebuffer; the music timer (1 ms) served during a 2,688-run
+   list of 255-pixel runs (8 messages wait when it returns); another program's page
+   refused (a child); a child killed while it sends long lists, then a list of ours; groups
+   (FR_GROUPS: 5-byte elements by their left and right offsets, an empty group, 4-byte runs
+   as a group) against the CPU's, and refused groups (in the window, the kernel's bank,
+   past $FF00, 1025 elements, stride 0) and a call cut at 2,688 runs (A = the groups taken).
+   Before REV $09: ENODEV and nothing else.
 
 The Desktop sessions (`DESK=1` in `tests/shots.sh`) get `tests/desk.programs` as their
 Programs menu (the order of 0.12), so programs added to `sdfiles/PROGRAMS` do not change
@@ -1122,6 +1139,45 @@ bus time (see emu/README.md, "Memory timing"). Expect the same factor on the CPU
   source stride), SYS_WGEOM, SYS_TNAME, WE_DROP's modifiers, the date routines (ui_clk*,
   `user/uidate.s`), shortcuts (ui_lnkread, ui_mklink), program and file icons (ui_prog,
   ui_ficon). See ABI.md and ui.inc.
+
+## Version 0.30 (many small fills)
+
+- **fill_runs ($A4)**: many horizontal runs, each of one colour, filled by Ali in one call
+  (ABI.md, "Fill runs"). A run is 4 bytes {offset, colour, width}; the page (a full-screen
+  framebuffer or any memory of the caller's own, up to 64 KB) is checked once, each run with
+  one compare; the kernel writes five bytes of Ali's 24-byte record for it in a bank of its
+  own (taken at the first call; the fixed bytes written then) and hands Ali the records 64 at a
+  time while it makes the rest, serving interrupts in between; the call returns while Ali
+  fills, like `draw_list`. With FR_GROUPS the runs are the program's own arrays in any layout
+  (a stride and the places of the offset and the width), each group in one colour: spans
+  prepared once are drawn each frame without copying. About 140 CPU cycles a run on the
+  board (emulated), whatever its width: an `SH_FILL` record cost 1,100, a 23-pixel run
+  filled by tight assembly about 260. In `k3.s` (the third code segment): 1,036 bytes there,
+  8 in bank $01 (two table entries, a far wrapper for the bank). ENODEV before REV $09 or
+  with the blitter turned off (hgame fills by the CPU then); the window system need not run
+  (`bl_flush`, `list_wait`'s and `vsync`'s, now makes Ali's writes visible to the CPU without
+  it too, on REV $09+). Why it exists and what it gives a real
+  program: `ports/skyroads/PORTING-NOTES.md`, "Horizon 0.30".
+- **uptime_us ($A5)**: the system block's microsecond counter, which tasks cannot read
+  themselves: a fine clock for timing code (`uptime` steps 10 ms).
+- **The video-state block, version 2** ($01:F000, ABI.md "Video state"): the hardware
+  revision (offset 30) and the full-screen scroll set after the palette (offset 800). The
+  kernel keeps its own variables there (`k_rev`, `fs_act`, `fs_scr` moved into the block:
+  18 bytes of bank $01 freed, no code), so `core/tools/a816_screen.py` reads a scrolled
+  full-screen program's picture without searching the kernel's code (kept as the fallback
+  for older kernels).
+- **Menus**: Right on an item that ends in TAB ">" (a submenu: the Desktop's "More apps")
+  opens it as Enter does (before, Right went to the next menu of the bar).
+- **emu816**: a fill's time follows the 32-bit words it writes (Ali writes aligned words
+  with a byte mask), not its pixels: a short run that starts or ends inside a word pays for
+  the whole word (`emu/tests/asm/blitruns.s` pins Ali's time for lists of one-line fills).
+- **hgame**: `hg_fill_runs`, `hg_fill_groups` (the CPU path in `hg_runs.s` where the call
+  is missing), `hg_flip_pages` / `hg_flip` / `hg_flip_free` (page flipping in a framebuffer
+  of several pages, never waiting for the blank), `hg_us`.
+- The kernel's space: bank $01 548 -> 496 bytes left (the menu change 48, `bl_flush` without
+  the window system 14, the two syscalls and the bank wrapper 8, the video-state move -18),
+  k3.s 2,386 -> 1,350 bytes left, k2.s unchanged (580).
+- `sys_info` answers $001E. Programs of 0.29 run unchanged; `hcc --needs horizon=0.30`.
 
 ## Version 0.29 (apps)
 

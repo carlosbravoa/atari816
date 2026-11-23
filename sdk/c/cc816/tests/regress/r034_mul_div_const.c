@@ -3,7 +3,8 @@
  * signed x / 16 = (x + 15 if negative) >> 16 arithmetically) instead of calling __mul16
  * and __sdiv16: the Xargon port spent 13 % of its time there (its objects are 31-byte
  * structures, its positions are divided by 16). Checked against the plain helpers' results
- * (a variable divisor or factor) for many values, negative ones and the edges. */
+ * (a variable divisor or factor) for many values, negative ones and the edges.
+ * LEVELS: 0 1 2 */
 static volatile int vk;
 
 static int ok_mul(int x)

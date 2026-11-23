@@ -18,6 +18,8 @@ READS_NZ = {'beq', 'bne', 'bmi', 'bpl', 'php'}
 SETS_C = {'adc', 'sbc', 'cmp', 'cpx', 'cpy', 'asl', 'lsr', 'rol', 'ror', 'clc', 'sec', 'plp',
           'rep', 'sep', 'xce'}
 READS_C = {'bcc', 'bcs', 'adc', 'sbc', 'rol', 'ror', 'php'}
+SETS_V = {'adc', 'sbc', 'bit', 'clv', 'plp', 'rep', 'sep'}
+READS_V = {'bvc', 'bvs', 'php'}
 WRITES_A = {'lda', 'and', 'ora', 'eor', 'adc', 'sbc', 'txa', 'tya', 'tsc', 'tdc', 'pla', 'xba'}
 RMW = {'inc', 'dec', 'asl', 'lsr', 'rol', 'ror', 'tsb', 'trb'}
 END = {'rts', 'rtl', 'jmp', 'jml', 'brl', 'bra', 'rti'}
@@ -34,6 +36,30 @@ def plain(o):
     if o.endswith(',x') or o.endswith(',y'):
         return False
     return True
+
+
+_OVL_SR = re.compile(r'(\d+),s')
+_OVL_DP = re.compile(r'([A-Za-z_]\w*)(?:\+(\d+))?')
+
+
+def overlaps(o):
+    """the plain operands whose word shares one byte with o's word (an unaligned access:
+    gen.py reads the word at byte 1 or 3 of a 32-bit register): a store to o changes
+    them too"""
+    m = _OVL_SR.fullmatch(o or '')
+    if m:
+        n = int(m.group(1))
+        return {f'{n - 1},s', f'{n + 1},s'}
+    m = _OVL_DP.fullmatch(o or '')
+    if m:
+        name, n = m.group(1), int(m.group(2) or 0)
+        r = {f'{name}+{n + 1}'}
+        if n == 1:
+            r |= {name, f'{name}+0'}
+        elif n > 1:
+            r.add(f'{name}+{n - 1}')
+        return r
+    return set()
 
 
 def peephole(lines, opt=True):
@@ -65,8 +91,8 @@ def ins_at(lines, i):
 
 def flags_needed(lines, i, which):
     """are flags (N/Z: 'nz', carry: 'c') set by instruction i read later?"""
-    reads = READS_NZ if which == 'nz' else READS_C
-    sets = SETS_NZ if which == 'nz' else SETS_C
+    reads = {'nz': READS_NZ, 'c': READS_C, 'v': READS_V}[which]
+    sets = {'nz': SETS_NZ, 'c': SETS_C, 'v': SETS_V}[which]
     for l in lines[i + 1:]:
         if l[0] in ('L', 'ASM'):
             return False
@@ -239,6 +265,11 @@ def _walk(lines, lab_in, rec, xstates=None):
             l = ('I', m, '#$0000')
             o = '#$0000'
             changed = True
+        if (m in ('sta', 'stx', 'sty', 'stz') or m in RMW) and plain(o):
+            ov = overlaps(o)
+            Z -= ov
+            for S in (A, X, Y):
+                S -= ov
         if m == 'stz' and not m8 and plain(o):
             Z.add(o)
         elif m in ('sta', 'stx', 'sty', 'stz') or m in RMW:
@@ -403,6 +434,12 @@ def xpromote(lines):
         if not ok or len(cands) != 1:
             continue
         v = next(iter(cands))
+        ov = overlaps(v)
+        for k in body:
+            l = lines[k]
+            if l[0] == 'I' and any(x in ov for x in re.split(r'[\[\](),]', l[2] or '')):
+                ok = False
+                break
         for k in body:
             l = lines[k]
             if l[0] != 'I':
@@ -502,6 +539,8 @@ def _rg_all(o):
     for mm in re.finditer(r'__rg\+(\d+)', o or ''):
         k = int(mm.group(1))
         r.append(k - (k & 1))
+        if k & 1:
+            r.append(k + 1)         # (an unaligned word: two registers' bytes)
         if o.startswith('[') or o.startswith('#'):
             # [__rg+k],y reads a 24-bit pointer; #__rg+k is the address of a 32-bit float
             # given to a helper in X, Y or A (gen.py's ...i and ...x entries): both words
@@ -515,7 +554,7 @@ def _uses_defs(m, o):
         return (), ()
     if m in ('sta', 'stz', 'stx', 'sty'):
         k = _rg(o)
-        if k is not None:
+        if k is not None and not k & 1:
             return (), (k,)
     return tuple(_rg_all(o)), ()
 
@@ -712,7 +751,8 @@ def simple(lines):
         # clc ; adc #$0001 -> inc a (carry out unused)
         if l[0] == 'I' and l[1] in ('clc', 'sec') and i + 1 < n and lines[i + 1][0] == 'I' and \
                 lines[i + 1][1] == ('adc' if l[1] == 'clc' else 'sbc') and \
-                lines[i + 1][2] in ('#$0001', '#$0002') and not flags_needed(lines, i + 1, 'c'):
+                lines[i + 1][2] in ('#$0001', '#$0002') and not flags_needed(lines, i + 1, 'c') \
+                and not flags_needed(lines, i + 1, 'v'):
             m = 'inc' if l[1] == 'clc' else 'dec'
             out.append(('I', m, 'a'))
             if lines[i + 1][2] == '#$0002':

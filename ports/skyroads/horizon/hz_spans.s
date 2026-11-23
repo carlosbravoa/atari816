@@ -120,6 +120,77 @@ _hz_span_jobs:
         plb
         RET
 
+;(0.30) unsigned hz_span_groups(const SpanJob __far *jobs, unsigned n, void __far *out)
+; The jobs as groups for Horizon's fill_runs (FR_GROUPS: the blitter fills them, hz_video.c):
+; a job is its shape's PreparedSpan array as it is, {u24 the spans, u8 colour (the job's
+; index), u16 count, u8 stride 5, u8 fields: the offset at 0 (left) or 2 (right), the width
+; at 4}; jobs of no spans are left out. -> the groups written (8 bytes each, at out: one bank)
+        .export _hz_span_groups
+_hz_span_groups:
+        lda     ARGS+4,s
+        sta     njobs
+        stz     cnt
+        lda     ARGS,s
+        sta     jobs
+        lda     ARGS+2,s
+        sta     jobs+2
+        lda     ARGS+6,s        ; out: X, its bank DBR
+        tax
+        lda     ARGS+8,s
+        phb
+        sep     #$20
+        .a8
+        pha
+        plb
+        rep     #$20
+        .a16
+        lda     njobs
+        beq     @done
+@job:   ldy     #0
+        lda     [jobs],y        ; the shape
+        sta     shp
+        ldy     #2
+        lda     [jobs],y
+        sta     shp+2
+        ldy     #4
+        lda     [shp],y         ; its spans' count
+        beq     @next
+        sta     a:4,x
+        ldy     #0
+        lda     [shp],y         ; the spans
+        sta     a:0,x
+        ldy     #2
+        lda     [shp],y
+        and     #$00FF
+        sta     col
+        ldy     #4
+        lda     [jobs],y        ; index | right << 8
+        xba
+        and     #$FF00
+        ora     col
+        sta     a:2,x           ; bank, colour
+        lda     [jobs],y
+        and     #$FF00          ; right: the offset at 2
+        beq     :+
+        lda     #$4205 - $4005
+:       clc
+        adc     #$4005          ; stride 5, fields $40 / $42
+        sta     a:6,x
+        txa
+        clc
+        adc     #8
+        tax
+        inc     cnt
+@next:  lda     jobs
+        clc
+        adc     #6
+        sta     jobs
+        dec     njobs
+        bne     @job
+@done:  plb
+        lda     cnt
+        RET
+
 ; col = A's low byte in both bytes
 setcol: and     #$00FF
         sta     col

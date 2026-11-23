@@ -1,0 +1,43 @@
+rtest 1: uptime_us
+  a sleep of 40 ms (10 ms ticks) later: 29,000 to 50,000 us more: ok
+rtest 2: fill_runs refused
+  one run: 1
+  2689 runs: error 01
+  flags 2: error 01
+  a page in the kernel's bank: error 04
+  a page in a free bank: error 04
+  a page running out of the bank: error 04
+  runs in the kernel's bank: error 04
+  runs past the window: error 04
+  run 5 past the page: error 01, X = 5
+  run 2 ending at the page's last byte: 8
+  run 7 at offset 1000, width 0: 8
+  run 7 at offset 1001, width 0: error 01, X = 7
+  a page of 65,536 bytes, run at 65,535 width 1: 8
+  the same, width 2: error 01, X = 3
+  no runs: 0
+rtest 3: pixels
+  14 runs: 14
+  the same as the CPU's: ok
+  12 runs of width 1 at the page's first bytes, one at a time: ok
+  the same as the CPU's: ok
+rtest 4: 2,688 runs
+  a list: 2688
+  the same as the CPU's: ok
+  nine lists, each made while the one before is drawn: ok
+  the same as the CPU's: ok
+rtest 5: the full-screen framebuffer: ok
+rtest 6: the music timer during a long list: ENODEV (no Lau before REV $0A)
+rtest 7: a child's list into the parent's bank: error 04
+rtest 8: a child killed while its lists run, then a list of ours: ok
+  the same as the CPU's: ok
+rtest 9: groups (FR_GROUPS)
+  five groups (left and right sides of 5-byte elements, none, 4-byte runs): 5
+  the same as the CPU's: ok
+  a group in the window: error 04
+  a group in the kernel's bank: error 04
+  group 1 with elements past $FF00: error 01, X = 1
+  group 0 with 1025 elements: error 01, X = 0
+  group 0 with stride 0: error 01, X = 0
+  three groups of 1000 (more than 2,688 runs): the call takes 2
+rtest: done

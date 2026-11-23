@@ -28,12 +28,15 @@ void hzv_underlay(PlaySceneCache *cache);   /* (and its dashboard band cache) */
 void hzv_register_fragment(const ImageFrame SR_FAR *fragment, unsigned palette_base);
 extern unsigned long hzv_blits;
 extern bool hzv_nofast;
+extern bool hzv_noruns;                 /* /NORUNS: the spans by the CPU (hz_span_jobs) */
 
 /* ---- hz_spans.s */
 void hz_spans(const PreparedSpan SR_FAR *spans, unsigned count, unsigned right, unsigned index,
               unsigned bank, unsigned base);
 
 void hz_span_jobs(const SpanJob SR_FAR *jobs, unsigned n, unsigned bank, unsigned base);
+/* (Horizon 0.30) the jobs as fill_runs groups (FR_GROUPS) at out -> how many */
+unsigned hz_span_groups(const SpanJob SR_FAR *jobs, unsigned n, void SR_FAR *out);
 unsigned long hz_sum(const void SR_FAR *p, unsigned nwords);
 
 /* ---- hz_probe.s */

@@ -513,7 +513,11 @@ Ali:
   COPY and COPY_KEY / EXPAND, with the classic machine frozen 2.06 / 2.90 / 2.27 (Marga off),
   3.41 / 4.50 / 3.77 (640x360x8), 2.56 / 3.55 / 2.82 (320x180x8), and with it running
   7.0 / 10.7 / 7.8 in 640x360x8 (the other cases interpolated; a CPU cycle is 2 clk_core),
-  plus 8 CPU cycles a blit and, for FILL and EXPAND, 2 a line. A CPU access to RAM while Ali
+  plus 8 CPU cycles a blit and, for FILL and EXPAND, 2 a line. (Horizon 0.30) A FILL is
+  charged by the 32-bit words it writes (four pixels' time each), as `a816_blit.sv` writes
+  aligned words with a byte mask: a run that starts or ends inside a word pays for the
+  whole word, which matters for lists of short one-line fills (`fill_runs`; a 23-pixel run
+  is 6 or 7 words). `tests/asm/blitruns.s` pins the time of such lists. A CPU access to RAM while Ali
   is busy delays Ali by the access's time (and the CPU's access waits a little longer; see
   "Memory timing"). IRQ_EN raises BLITTER when BUSY drops. `--ideal-timing` keeps the older
   rates (FILL 2.0, EXPAND 2.2, COPY 2.9 / 3.5 + 0.8 with the video on, 8 + 2 a line).
@@ -532,7 +536,10 @@ Ali:
 Command lists (REV $09):
 
 - LIST reads the record at BL_LIST 30 CPU cycles after the previous blit has finished
-  (BL_LIST + 24, BL_COUNT - 1, bytes 0-18 into $DA00-$DA12), then starts it at once or,
+  (BL_LIST + 24, BL_COUNT - 1, bytes 0-18 into $DA00-$DA12; the RTL reads it as three
+  8-byte bursts one after the other through Ali's port, each followed by 8 clk_core of
+  loading the bytes: about 60 clk_core with an idle port, checked for Horizon 0.30), then
+  starts it at once or,
   with WAIT_VBL, at the next VBLANK event. Its pixels are written when it starts; it is
   BUSY for the same modelled time as a single blit. One interrupt at the end of the list.
 - ABORT stops the list and drops BUSY at once; unlike the hardware, the blit that was

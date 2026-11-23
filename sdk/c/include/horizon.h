@@ -252,6 +252,31 @@ typedef struct {                /* sheet_draw record: 16 bytes */
 } hz_sheetrec;
 HZ_STATIC_ASSERT(sizeof(hz_sheetrec) == 16, sheetrec);
 
+typedef struct {                /* (0.30) fill_runs' block: 10 bytes */
+    hz_u24 page;                /* offset 0 of the page (own memory) */
+    unsigned char flags;        /* 0, or FR_GROUPS: runs points at hz_rungroup records */
+    unsigned short size;        /* its bytes (0: 65,536): every run ends inside it */
+    hz_u24 runs;                /* the first run */
+    unsigned char zero;
+} hz_fillruns;
+HZ_STATIC_ASSERT(sizeof(hz_fillruns) == 10, fillruns);
+
+typedef struct {                /* (0.30) a fill_runs run: 4 bytes */
+    unsigned short ofs;         /* its first byte: page + ofs */
+    unsigned char c;            /* the colour */
+    unsigned char w;            /* the width, 0-255 */
+} hz_run;
+HZ_STATIC_ASSERT(sizeof(hz_run) == 4, run);
+
+typedef struct {                /* (0.30) a fill_runs group (FR_GROUPS): 8 bytes */
+    hz_u24 elems;               /* its elements: below offset $FF00 of their bank */
+    unsigned char c;            /* the colour of all its runs */
+    unsigned short n;           /* elements, 0-1024 */
+    unsigned char stride;       /* bytes from one element to the next, 1-255 */
+    unsigned char fields;       /* bits 0-3: an element's u16 offset's place, 4-7: its width's */
+} hz_rungroup;
+HZ_STATIC_ASSERT(sizeof(hz_rungroup) == 8, rungroup);
+
 typedef struct {                /* the music timer's message (sample_timer) */
     unsigned char ff;           /* $FF */
     unsigned char gen;          /* the generation */

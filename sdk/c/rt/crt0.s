@@ -41,7 +41,7 @@
 	.export	__start, __fpt, __abs0
 	.export	___hz_argbuf, ___hz_arglen, ___hz_argoff, ___hz_stktop, ___hz_sslo
 	.export	_exit, __Exit, _atexit, _abort
-	.export	_hz_stack_free, _hz_sstack_free
+	.export	_hz_stack_free, _hz_sstack_free, ___hz_sovf
 	.export	___hz_heapstart, ___hz_heapend, ___hz_paintflag
 	.export	___hz_heapuse, ___hz_heappeak
 	.import	_main, ___hz_mkargs, ___hz_argv, ___hz_exitchk
@@ -60,6 +60,7 @@ __cc816_small = 1
 __abs0	= 0			; *(T *)constant: an absolute address in the code bank
 SSTOP	= $FFF0			; the software stack's top (it grows down from here)
 HSLO	= $0100			; the hardware stack's lowest address (window)
+SYS_PUTS = $06			; X, Y = a zero-terminated string
 GUARD	= $C35A			; the guard zones' pattern (lib/exitchk.c knows it)
 PAINTW	= $A5A5			; hcc --debug's paint
 ZONE	= 256			; the guard zones' size
@@ -256,6 +257,105 @@ _hz_stack_free:
 	sbc	#HSLO
 	RET
 
+; ___hz_sovf: a function's frame does not fit in the software stack (cc816 checks at the
+; entry of every function with a frame: __sp - frame below __hz_sslo, where the heap is).
+; Reached by JSR / JSL from the function, with the frame's size (.word) and the function's
+; name (.byte ..., 0) after the call. Prints
+;   software stack overflow: NAME needs a frame of N bytes; F of the software stack's T
+;   bytes are free (...)
+; and exits with code 3 (the atexit functions and the destructors run as for exit(): __sp
+; was not moved, nothing was overwritten yet).
+___hz_sovf:
+	lda	1,s		; the return address: the call's last byte
+	sta	__h2
+.if LARGE
+	lda	3,s		; (its bank)
+	and	#$00FF
+.else
+	lda	__cbank
+.endif
+	sta	__h2+2
+	ldx	#ovm1
+	jsr	ovputs
+	lda	__h2		; the name: X = its address, Y = its bank
+	clc
+	adc	#3
+	tax
+	ldy	__h2+2
+	cop	#SYS_PUTS
+	ldx	#ovm2
+	jsr	ovputs
+	ldy	#1
+	lda	[__h2],y	; the frame's size
+	jsr	ovnum
+	ldx	#ovm3
+	jsr	ovputs
+	lda	__sp		; the free bytes
+	sec
+	sbc	___hz_sslo
+	bcs	@f
+	lda	#0
+@f:	jsr	ovnum
+	ldx	#ovm4
+	jsr	ovputs
+	lda	#SSTOP
+	sec
+	sbc	___hz_sslo
+	jsr	ovnum
+	ldx	#ovm5
+	jsr	ovputs
+	lda	#3
+	ldx	inexit		; (in an atexit function or a destructor: no more of them)
+	bne	@end
+	jmp	exitA
+@end:	cop	#0		; SYS_EXIT
+	bra	@end
+
+; a string of this bank (X) on the console
+ovputs:	ldy	__cbank
+	cop	#SYS_PUTS
+	rts
+
+; A in decimal on the console
+ovnum:	sta	__h3
+	ldx	#0		; the digits written
+	ldy	#0		; the power of ten
+@p:	stz	__h3+2
+@s:	lda	__h3
+	cmp	ovpow,y
+	bcc	@e
+	sbc	ovpow,y
+	sta	__h3
+	inc	__h3+2
+	bra	@s
+@e:	lda	__h3+2
+	bne	@o
+	cpx	#0
+	beq	@n		; (no leading zeros)
+@o:	ora	#'0'
+	sep	#$20
+	.a8
+	sta	ovbuf,x
+	rep	#$20
+	.a16
+	inx
+@n:	iny
+	iny
+	cpy	#8
+	bcc	@p
+	lda	__h3
+	ora	#'0'
+	sep	#$20
+	.a8
+	sta	ovbuf,x
+	lda	#0
+	sta	ovbuf+1,x
+	rep	#$20
+	.a16
+	ldx	#ovbuf
+	bra	ovputs
+ovpow:	.word	10000, 1000, 100, 10
+
 ; unsigned hz_sstack_free(void): bytes of the software stack below __sp now
 _hz_sstack_free:
 	lda	__sp
@@ -278,7 +378,14 @@ ___hz_heapstart:
 ___hz_paintflag:		; nonzero with hcc --debug (lib/exitchk.c's report)
 	.word	__HZ_PAINT__
 
+ovm1:	.byte	$0A, "software stack overflow: ", 0
+ovm2:	.byte	" needs a frame of ", 0
+ovm3:	.byte	" bytes; ", 0
+ovm4:	.byte	" of the software stack's ", 0
+ovm5:	.byte	" bytes are free (hcc --stack N; docs/c/reference.md)", $0A, 0
+
 	.segment "BSS"
+ovbuf:	.res	6
 ___hz_argbuf:	.res	256	; the argument string (lib/args.c splits it into argv)
 ___hz_arglen:	.res	2
 ___hz_argoff:	.res	2

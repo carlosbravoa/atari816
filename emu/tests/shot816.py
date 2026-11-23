@@ -8,6 +8,8 @@ video-state block, its full-screen scroll set, the framebuffer) and makes its pi
 each of its pixels must be the colour of emu816's (1280 x 720: 2 x 2 or 4 x 4 pixels a
 screen pixel), the mouse pointer included. Prints PASS or FAIL and exits 1 on a
 difference.
+shot816.py --fs RAM: (Horizon 0.30) the video-state block's scroll set (version 2) must be
+the kernel's own variables, as the code search finds them (a full-screen program's RAM).
 Example (Xargon's game, scrolled and split; make -C ports/xargon first):
     emu816 ... --shot x.ppm --dump-ram x.ram HORIZON.SYS; shot816.py x.ram x.ppm
 """
@@ -53,8 +55,24 @@ def read_ppm(path):
     return w, h, d[i + 1:i + 1 + w * h * 3]
 
 
+def fs_compare(ram):
+    """(Horizon 0.30) the video-state block's full-screen scroll set (version 2) against the
+    kernel's own variables found by the code search (version 1's way)"""
+    link = RamLink(ram)
+    vs = a816_screen.video_state(link)
+    old = a816_screen.scroll_state(link)
+    new = vs and vs["fs"]
+    if not new or not old or any(new[k] != old[k] for k in old):
+        print(f"FAIL  shot816 --fs: the block (version {vs and vs['version']}) {new}, the code {old}")
+        return 1
+    print(f"PASS  shot816 --fs: the block's scroll set (version {vs['version']}) is the kernel's: {new}")
+    return 0
+
+
 def main():
     a = sys.argv[1:]
+    if len(a) >= 2 and a[0] == "--fs":
+        return fs_compare(open(a[1], "rb").read())
     if len(a) < 2 or a[0] in ("-h", "--help"):
         sys.exit(__doc__)
     ram = open(a[0], "rb").read()

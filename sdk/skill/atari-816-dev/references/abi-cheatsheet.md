@@ -1,4 +1,4 @@
-# Horizon ABI cheat sheet for assembly (Horizon 0.29)
+# Horizon ABI cheat sheet for assembly (Horizon 0.30)
 
 Read this when writing 65816 assembly for Horizon (a whole program, or a .s file next to
 C: then also references/c-language.md, "Assembly called from C"). Full text:
@@ -80,7 +80,7 @@ it yourself (`dec5` / `digit` in `sdk/templates/game/main.s`: A -> ASCII digits)
 | $33 | SYS_TINFO | A slot, X,Y 16 bytes | |
 | $34 | SYS_SINGLE | | C set: already running (exit) |
 | $35 | SYS_TPATH | X,Y buf, A size (128 fits) | A length; the program file's absolute path (0.28) |
-| $36 | SYS_INFO | - | A version (major<<8\|minor, $001D = 0.29), X REV (0.29; ENOSYS before). Apps and HZ_NEEDS: sdk/docs/apps.md |
+| $36 | SYS_INFO | - | A version (major<<8\|minor, $001D = 0.29, $001E = 0.30), X REV (0.29; ENOSYS before). Apps and HZ_NEEDS: sdk/docs/apps.md |
 | $40-$43 | SYS_PCREATE / SYS_SEND / SYS_RECV / SYS_PCLOSE | ports, 16-byte messages | |
 | $50 | SYS_ICLAIM | | |
 | $51 | SYS_IREAD | (blocks) | A usage, X mods\|down<<8 |
@@ -147,6 +147,8 @@ it yourself (`dec5` / `digit` in `sdk/templates/game/main.s`: A -> ASCII digits)
 | $A1 | SYS_SHEETNEW | X,Y {u24 address, u8 0, u16 stride, u16 width 1-4096, u16 height 1-1024} (0.19; own memory, else EFAULT) | A sheet 1-32 (EAGAIN: 32 sheets / 4096 rows in all) |
 | $A2 | SYS_SHEETFREE | A sheet / $FFFF all of yours (stops your running list) | |
 | $A3 | SYS_SHEETDRAW | A win \| count<<8 (1-128), X,Y 16-byte records SD_* {u8 sheet, u8 op SH_FILL/COPY/KEY (+SH_VBL $80), u8 colour/key, 0, sx, sy, w, h, x, y} | A drawn; returns at once; ~300 cycles a record |
+| $A4 | SYS_FILLRUNS | (0.30) A count 0-2688, X,Y 10-byte block FRB_* {u24 page (own memory), u8 flags (FR_GROUPS), u16 size (0 = 64K), u24 runs, u8 0}; run FRR_* {u16 offset, u8 colour, u8 width}; group FRG_* {u24 elements, u8 colour, u16 n (0-1024), u8 stride, u8 fields} | A count (groups: those taken); returns at once (list_wait); ~140 cycles a run; EINVAL X = the bad run/group; ENODEV before REV $09: fill by the CPU |
+| $A5 | SYS_UPTIMEUS | (0.30) - | A low, X high: microseconds since reset |
 
 ## Games round (0.18): `sdk/docs/reference/games.md`
 

@@ -31,12 +31,14 @@ Full screen (REV $0B+): a program in Horizon's full-screen mode chooses the rows
 with the scroll registers (kernel fs_scroll: the row of line 0, the pixels skipped, a second
 set from a split line, a vertical wrap, rows as rings): Xargon shows one of its two pages
 and its status bar that way, from rows far below NV_BASE. The video-state block does not
-hold them (version 1), so they are read from the kernel's own copy (fs_scr, with fs_act
-and k_rev), found by the code that uses them in the kernel's second segment ($00:E100:
+hold them in version 1 (Horizon 0.29 and older), so they are read from the kernel's own copy
+(fs_scr, with fs_act and k_rev), found by the code that uses them in the kernel's second segment ($00:E100:
 fs_regs' "ldx #8 / lda fs_scr,x / sta f:NV_SCROLLX,x", fs_noscroll's "stz fs_act / ... /
 lda k_rev / cmp #$0B"). The picture is then made row by row as Marga walks the rows
 (emu/nvc.c, bit-exact with the RTL). Where the code is not found the rows from NV_BASE
-are shown, as before (scroll=False: always). Sprites are not drawn.
+are shown, as before (scroll=False: always). Sprites are not drawn. Version 2 of the block
+(Horizon 0.30) holds them itself: the revision at offset 30 and, after the palette (offset
+800), fs_act and the 14-byte scroll set; the code search is then not needed.
 
 Without Horizon (or with overrides) mode / base / stride / palette can be given by hand;
 the fallback palette is Marga's reset palette (core/src/nvc_palette.hex).
@@ -205,7 +207,12 @@ def video_state(link, tries=3):
         if again[6:8] == hdr[6:8]:
             break
     w = lambda o: hdr[o] | hdr[o + 1] << 8
-    return dict(version=hdr[4], seq=w(6), ctrl=hdr[8],
+    fs = None
+    if hdr[4] >= 2:                          # (Horizon 0.30) the scroll set after the palette
+        s = link.peek816(VS_ADDR + hdr[5] + 768, 16)
+        fs = dict(act=_w(s, 0), x=_w(s, 2), y=_w(s, 4), x2=_w(s, 6), y2=_w(s, 8),
+                  vheight=_w(s, 10), split=_w(s, 12), ctrl=s[14], rev=hdr[30])
+    return dict(version=hdr[4], seq=w(6), ctrl=hdr[8], fs=fs,
                 base=hdr[9] | hdr[10] << 8 | hdr[11] << 16, stride=w(12),
                 classic=bool(hdr[14] & 1), desktop=bool(hdr[14] & 2), dctrl=hdr[15],
                 ptr_x=w(16), ptr_y=w(18), ptr_hot=hdr[20],
@@ -343,15 +350,19 @@ def capture(link, mode=None, base=None, stride=None, palette=None, pointer=True,
     scroll=False ignores a full-screen program's scroll registers (the rows from base)."""
     info = {}
     sc = None
-    if horizon and scroll and base is None and stride is None:
-        try:
-            sc = scroll_state(link)
-        except Exception:                    # (a link error: the rows from base)
-            sc = None
     st = None
     vs = None
     if horizon:
         vs = video_state(link)
+    if horizon and scroll and base is None and stride is None:
+        if vs and vs["fs"]:                  # (video-state block v2: no code search)
+            sc = vs["fs"]
+        else:
+            try:
+                sc = scroll_state(link)
+            except Exception:                # (a link error: the rows from base)
+                sc = None
+    if horizon:
         if vs is None:
             try:
                 st = horizon_state(link, find_layout(link))

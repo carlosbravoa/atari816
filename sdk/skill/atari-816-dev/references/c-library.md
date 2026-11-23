@@ -31,7 +31,7 @@ All names checked against the headers; the marked ones run in the emulator.
 | how much memory | `hz_mem_info()` free banks, `hz_x` total (tested: 82 of 92); `hz_heap_free()`, `hz_heap_largest()` |
 | run another program | `t = hz_spawn_path("/APPS/X.PRG", "args", 1); code = hz_wait(t);` (tested) |
 | one instance only | `hz_task_single()` (-1 with `hz_errno == HZ_ERUNNING`: exit) |
-| Horizon's version | `hz_sys_info()` (0x001D for 0.29; `hz_x` = hardware REV, 0x0C) (tested) |
+| Horizon's version | `hz_sys_info()` (0x001D for 0.29, 0x001E for 0.30; `hz_x` = hardware REV, 0x0C) (tested) |
 | console size | `hz_con_size()` columns, `hz_x` rows (tested: 78 x 29) |
 | my task id | `hz_getpid()` (tested) |
 | a beep / chime | `hz_beep(pitch, ticks, volume)`; `hz_sound_chime(CH_INFO, 0xFFFF)` |

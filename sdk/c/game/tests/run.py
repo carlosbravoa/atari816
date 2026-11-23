@@ -105,6 +105,12 @@ TESTS = [
      ["gt_view: 0 failed"], ["audctl"]),
     ("util", ["gt_util.c"], ["--seconds", "4", "--file", "{run}/TEST.HGI:/TEST.HGI"],
      ["gt_util: 0 failed"], []),
+    # (0.30) runs by the blitter in one call, page flipping without waiting, hg_us; and the
+    # measurement of a run's cost by each way of filling it (its lines in console.txt)
+    ("runs", ["gt_runs.c"], ["--shot", "3", "--seconds", "4"],
+     ["gt_runs: 0 failed"], []),
+    ("runbench", ["gt_runbench.c"], ["--seconds", "20"],
+     ["gt_runbench: 0 failed"], []),
 ]
 
 

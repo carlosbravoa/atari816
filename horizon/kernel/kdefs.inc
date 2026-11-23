@@ -61,8 +61,8 @@ CB_STAY     = $C01D         ; (0.18) classic_boot: A = this, cold boot without s
 CART_B0     = $70           ; (0.18) a cartridge's image: banks $70 .. $70 + CART_NB - 1
 CART_NB     = 12            ;   (at most 768 KB while Horizon runs; $7C-$7F are the console's)
 K2_NSYS     = $A0           ; (0.18) syscalls $91 .. K2_NSYS - 1 are in k2.s
-K3_SYS0     = $A1           ; (0.19) syscalls K3_SYS0 .. K3_NSYS - 1 are in k3.s (sheets)
-K3_NSYS     = $A4
+K3_SYS0     = $A1           ; (0.19) syscalls K3_SYS0 .. K3_NSYS - 1 are in k3.s (sheets; 0.30:
+K3_NSYS     = $A6           ; fill_runs, uptime_us)
 ; (0.19) the console framebuffer's last bank ($7F) past its 60 cell rows ($7F:8400) and below
 ; the pointer images ($7F:F000) is kernel memory for the lists and the third code segment:
 SL_LIST     = $7F8400       ; Ali's records of draw_list / sheet_draw: 128 x 24 ($8400-$8FFF)

@@ -182,6 +182,8 @@ def simplify(ins):
         return Ins('mov', ins.d, Imm(v, ins.d.size))
     if op in ('zx', 'tr') and isinstance(ins.a, Sym) and op == 'tr':
         return Ins('mov', ins.d, ins.a)
+    if op == 'set' and isinstance(ins.a, Imm) and isinstance(ins.b, Imm):
+        return Ins('mov', ins.d, Imm(1 if cmp(ins.x['cc'], ins.a.val, ins.b.val, ins.a.size) else 0))
     if op == 'br':
         a, b = ins.a, ins.b
         if const(a) and not const(b):
@@ -660,7 +662,7 @@ def entry_const(b, v, depth=0):
 
 # ---------------------------------------------------------------------- loop-invariant code
 PURE = {'mov', 'add', 'sub', 'and', 'or', 'xor', 'com', 'neg', 'shl', 'ushr', 'sshr', 'mul', 'zx',
-        'sx', 'tr', 'x8u', 'x8s', 'mkfar'}
+        'sx', 'tr', 'x8u', 'x8s', 'mkfar', 'set'}
 
 
 def preheader(f, head, body):
@@ -740,6 +742,45 @@ def licm(f):
     return changed
 
 
+# ---------------------------------------------------------------------- compares as values
+def setcc(f):
+    """a compare whose two outcomes only set a register to 1 and 0 and meet again (C's
+    a < b as a value, a conversion to _Bool): d = a cc b without branches (gen: the flags
+    into A; 32-bit == and != keep their branches). The two blocks go when nothing else
+    jumps to them"""
+    preds(f)
+    changed = False
+
+    def setter(b):
+        if len(b.ins) != 2 or b.ins[0].op != 'mov' or b.ins[1].op != 'jmp':
+            return None
+        m = b.ins[0]
+        if not isinstance(m.d, V) or m.d.size != 2 or not isinstance(m.a, Imm) or \
+                m.a.val not in (0, 1):
+            return None
+        return m.d, m.a.val, b.ins[1].x['t']
+    for b in f.blocks:
+        t = b.term
+        if t is None or t.op != 'br' or t.a.size not in (2, 4) or t.b.size != t.a.size:
+            continue
+        if t.a.size == 4 and t.x['cc'] in ('eq', 'ne'):
+            continue        # (32 bits: the branches' early out on the low word is quicker)
+        st, sf = setter(t.x['t']), setter(t.x['f'])
+        if st is None or sf is None or st[0] is not sf[0] or st[2] is not sf[2] or \
+                {st[1], sf[1]} != {0, 1} or st[2] in (t.x['t'], t.x['f'], b):
+            continue
+        cc = t.x['cc'] if st[1] == 1 else NEGCC[t.x['cc']]
+        b.ins[-1:] = [Ins('set', st[0], t.a, t.b, cc=cc), Ins('jmp', t=st[2])]
+        changed = True
+    if changed:
+        cleanup_cfg(f)
+    return changed
+
+
+NEGCC = {'eq': 'ne', 'ne': 'eq', 'ult': 'uge', 'uge': 'ult', 'ule': 'ugt', 'ugt': 'ule',
+         'slt': 'sge', 'sge': 'slt', 'sle': 'sgt', 'sgt': 'sle'}
+
+
 # ---------------------------------------------------------------------- driver
 def optimise(f, level=2):
     cleanup_cfg(f)
@@ -762,4 +803,11 @@ def optimise(f, level=2):
                 cleanup_cfg(f)
                 if not (c1 or c2):
                     break
+    if setcc(f):
+        for _ in range(2):
+            c1 = local_prop(f)
+            c2 = dce(f)
+            cleanup_cfg(f)
+            if not (c1 or c2):
+                break
     set_depths(f)

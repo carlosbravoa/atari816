@@ -29,11 +29,16 @@
 
 FS_PTR      = 1                 ; fs_enter flags: the mouse pointer is shown (not in 320x180)
 
+; (0.30) these two in the video-state block (vstate.s, version 2: offset 800), for screenshots
+        .segment "VSTATE"
+fs_act:     .res    2           ; its screen is on Marga now
+fs_scr:     .res    14          ; scroll set: x, y, x2, y2, vheight, split line, ctrl
+        .assert fs_act = $01F000 + 800, lderror, "video state: fs_act must be at offset 800"
+
         .segment "BSS"
 fs_on:      .res    2           ; a program is in full-screen mode (fs_w, fs_task)
 fs_w:       .res    2           ; its window*2
 fs_task:    .res    2           ; its slot*2
-fs_act:     .res    2           ; its screen is on Marga now
 fs_mode:    .res    2           ; 0 640x360x8, 1 640x360x4, 2 320x180x8
 fs_flags:   .res    2
 fs_base:    .res    4           ; physical address of row 0
@@ -41,7 +46,6 @@ fs_stride:  .res    2
 fs_rows:    .res    2
 fs_b0:      .res    2           ; the banks the framebuffer lies in
 fs_b1:      .res    2
-fs_scr:     .res    14          ; scroll set: x, y, x2, y2, vheight, split line, ctrl
 fs_new:     .res    14          ; (fs_scroll's block, checked before it is taken)
 fs_dirty:   .res    2           ; the registers change at the next vertical blank
 fs_lx:      .res    2           ; the pointer's last position (motion events)

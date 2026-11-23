@@ -158,6 +158,9 @@ def allocate(f):
     # a variable an asm statement names (%[name]) lives in a callee-saved register, so
     # that the text can use the scratch ones freely: those first
     asmv = {find(v) for v in allv if v.pinned == 'asm'}
+    farbase = {find(i.x['base']) for b in f.blocks for i in b.ins
+               if i.op in ('ld', 'st') and isinstance(i.x.get('base'), V) and
+               i.x['base'].size == 4}
     order = sorted(reps, key=lambda v: (v not in asmv, -(weight.get(v, 0)), v.id))
     for v in order:
         w = weight.get(v, 0)
@@ -174,7 +177,10 @@ def allocate(f):
                 used_cs.add(k)
             continue
         if v.param is not None:
-            if acr and w < 16 or not acr and w < 3:
+            # (a value read and written a few times outside loops is as quick in its
+            # argument slot, n,s, as in the direct page: the copy would cost more; not a
+            # far pointer, whose [dp],y needs the direct page)
+            if acr and w < 16 or not acr and (w < 3 or w < 8 and v not in farbase):
                 loc[v] = ('home', v.param)
                 continue
         if not acr:

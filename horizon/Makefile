@@ -39,6 +39,8 @@ SYSPROGS += saver
 TESTPROGS := selftest bench mouse mtest wdemo hello count spin tick regs crash ping pong keys ftest leak hog ktest stest gtest
 # (0.27) OTEST: the OPL2 call (tests/otest.keys)
 TESTPROGS += otest
+# (0.30) RTEST: fill_runs and uptime_us (tests/rtest.keys)
+TESTPROGS += rtest
 # programs linked with the controls library (build/ui.lib from user/ui*.s, API in user/ui.inc)
 UIPROGS := edit wfiles desk paint settings basic sheet about
 UIPROGS += calc solitair quabrick download bbs printer
@@ -163,6 +165,8 @@ STESTERR = $(if $(NOLAU),/dev/null,tests/stest.err)
 OLD8    = $(or $(findstring --rev 8,$(EMUFLAGS)),$(findstring --rev 7,$(EMUFLAGS)))
 NOSPR   = $(or $(NOLAU),$(findstring --rev 10,$(EMUFLAGS)))
 GTESTTXT = $(if $(OLD8),gtest-r8.txt,$(if $(NOSPR),gtest-r10.txt,gtest.txt))
+# (0.30) RTEST: REV $0A+ (the music timer), $09 (no Lau), below (ENODEV: nothing else)
+RTESTTXT = $(if $(OLD8),rtest-r8.txt,$(if $(findstring --rev 9,$(EMUFLAGS)),rtest-r9.txt,rtest.txt))
 # (About says how it draws: without the blitter, its own md5; so do the next two)
 # (0.18) and boards without Lau (REV $08, $09): About says "Sound: POKEY 2": $(1)-rev9.md5 where
 # the session shows About (only that line differs from the default); (0.27) REV $0A and $0B
@@ -558,6 +562,13 @@ test: all $(EMU)
 	else echo "FAIL  GTEST ($(B)/gtest.out)"; exit 1; fi
 	@if diff -u tests/pictures/gtest.md5 $(B)/gtest.md5; then echo "PASS  0.18 draw lists, (0.19) sheets: the same pictures by Ali's list, its single blits and the CPU"; \
 	else echo "FAIL  GTEST pictures (look at $(B)/gtest1.ppm, gtest2.ppm)"; exit 1; fi
+	@rm -rf build/run-sd; cp -r $(SD) build/run-sd; rm -rf build/run-sd/Music; touch build/run-sd/SYSTEM/NODESK
+	@$(EMU) $(EMUFLAGS) $(CARDDATE) --headless --sd build/run-sd --max-seconds 25 \
+	    --keys "$$(python3 tests/keyscript.py tests/rtest.keys)" \
+	    $(SD)/SYSTEM/HORIZON.SYS > $(B)/rtest.out 2> $(B)/rtest.err || true
+	@python3 -c "L = open('$(B)/rtest.out', encoding='latin-1').read().split('\n'); i = [k for k, l in enumerate(L) if l.startswith('rtest 1')][0]; j = ([k for k, l in enumerate(L) if k > i and l.startswith('rtest: done')] + [len(L) - 1])[0]; open('$(B)/rtest.txt', 'w').write('\n'.join(L[i:j + 1]) + '\n')"
+	@if python3 tests/compare.py tests/$(RTESTTXT) $(B)/rtest.txt; then echo "PASS  0.30 fill_runs: refused pages and runs, the edges, the pixels of short and 2,688-run lists against the CPU's, full screen, the music timer served during a long list, another program's page, a kill during lists, ENODEV before REV \$$09; uptime_us"; \
+	else echo "FAIL  RTEST ($(B)/rtest.out)"; exit 1; fi
 	@if [ -z "$(NOSPR)$(OLD8)" ]; then \
 	  sh tests/shots.sh "$(EMU) $(EMUFLAGS) $(CARDDATE)" $(SD) gtests 12 5.5 7.5 9.5; \
 	  if diff -u tests/pictures/gtests.md5 $(B)/gtests.md5; then echo "PASS  0.18 sprites over a window: shown while it has the focus and nothing covers it, wholly inside its content"; \
@@ -570,7 +581,7 @@ test: all $(EMU)
 	  else echo "FAIL  full screen and kill (look at $(B)/gtestk*.ppm)"; exit 1; fi; \
 	else echo "SKIP  0.18 sprite and full-screen pictures (REV \$$0B only)"; fi
 	@$(MAKE) --no-print-directory test-games
-	@if grep -l 'emu816: blitter:' $(B)/selftest-*.err $(B)/shell-*.err $(B)/screen.err $(B)/browse.err $(B)/wdemo.err $(B)/wcopy.err $(B)/wdraw.err $(B)/desk.err $(B)/edit.err $(B)/editw.err $(B)/editp.err $(B)/paint.err $(B)/settings.err $(B)/files.err $(B)/basic-t.err $(B)/basic.err $(B)/sheet-t.err $(B)/sheet.err $(B)/sheetp.err $(B)/classic.err $(B)/system.err $(B)/wins.err $(B)/desk14.err $(B)/kmenu.err $(B)/leak.err $(B)/ktest.err $(B)/desk15.err $(B)/desk18.err $(B)/stest.err $(B)/gtest.err $(B)/gtests.err $(B)/gtestf.err $(B)/gtestk.err; \
+	@if grep -l 'emu816: blitter:' $(B)/selftest-*.err $(B)/shell-*.err $(B)/screen.err $(B)/browse.err $(B)/wdemo.err $(B)/wcopy.err $(B)/wdraw.err $(B)/desk.err $(B)/edit.err $(B)/editw.err $(B)/editp.err $(B)/paint.err $(B)/settings.err $(B)/files.err $(B)/basic-t.err $(B)/basic.err $(B)/sheet-t.err $(B)/sheet.err $(B)/sheetp.err $(B)/classic.err $(B)/system.err $(B)/wins.err $(B)/desk14.err $(B)/kmenu.err $(B)/leak.err $(B)/ktest.err $(B)/desk15.err $(B)/desk18.err $(B)/stest.err $(B)/gtest.err $(B)/rtest.err $(B)/gtests.err $(B)/gtestf.err $(B)/gtestk.err; \
 	then echo "FAIL  blitter rules (START or a register write while BUSY, or a read without CACHE_FLUSH)"; exit 1; \
 	else echo "PASS  blitter rules: no violations"; fi
 	@echo "TEST PASSED"
@@ -1096,11 +1107,16 @@ test-29: all $(EMU) $(APP29PRGS)
 	@python3 tests/apppic.py app29m
 	@if diff -u tests/pictures/app29m.md5 $(B)/app29m.pic; then echo "PASS  0.29 the Desktop: 20 apps and the odd folders (More apps), the needs window"; \
 	else echo "FAIL  0.29 the Desktop's 20 apps pictures (look at $(B)/app29m*.ppm, then make pictures-29)"; exit 1; fi
+	@PREP='python3 ../../tests/mkapps.py desk20 ../../$(B) .' DESK=1 sh tests/shots.sh "$(EMU) $(EMUFLAGS) $(CARDDATE)" $(SD) app30k 12 8 10
+	@python3 tests/apppic.py app30k
+	@if diff -u tests/pictures/app30k.md5 $(B)/app30k.pic; then echo "PASS  0.30 the keyboard on a submenu item: Right opens More apps' pop-up as Enter does"; \
+	else echo "FAIL  0.30 Right on a submenu item (look at $(B)/app30k*.ppm, then make pictures-29)"; exit 1; fi
 
 pictures-29:
 	cp $(B)/app29d.pic tests/pictures/app29d.md5
 	cp $(B)/app29m.pic tests/pictures/app29m.md5
-	python3 -c "from PIL import Image; import glob; [Image.open(f).save('tests/pictures/' + f.split('/')[-1][:-4] + '.png') for f in sorted(glob.glob('$(B)/app29[dm][0-9]*.ppm'))]"
+	cp $(B)/app30k.pic tests/pictures/app30k.md5
+	python3 -c "from PIL import Image; import glob; [Image.open(f).save('tests/pictures/' + f.split('/')[-1][:-4] + '.png') for f in sorted(glob.glob('$(B)/app29[dm][0-9]*.ppm') + glob.glob('$(B)/app30k[0-9]*.ppm'))]"
 
 .PHONY: test-29 pictures-29
 

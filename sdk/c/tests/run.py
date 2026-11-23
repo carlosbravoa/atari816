@@ -27,8 +27,10 @@ Tests (in tests/):
   ll       long long and setjmp (tests/ll/llbench.c): the time of one operation and its
            checks; noll: a program without long long links none of its code (no 64-bit
            helpers, no %lld in printf), one with long long and printf links them
-  stack    the stack guard (the software stack: an overflow is reported); stackdbg:
-           --debug's report
+  stack    the stack guard (the software stack: an overflow is reported by the entry check
+           with the function's name); stackbig: a big structure returned by value in a
+           6 KB software stack (hcc --stack 6144): the compile's frame warnings, the check
+           stops it before the heap; stackdbg: --debug's report
   bench    the benchmark, its six check values (-O2 and -O1)
   fbench   a floating-point benchmark (tests/bench/fbench.c: a Mandelbrot row, sin and
            cos, sqrt, exp log pow, conversions): its times and the program's size
@@ -306,12 +308,28 @@ def run_model(model, horizon, only):
         rc, out = hcc(prg, [T("stack", "stack.c")], model)
         if not rc:
             rc, con, _ = emu(prg, os.path.join(b, "run-stack"), horizon, seconds=3)
-            overflow = "stack overflow:" in con
-            # 200 levels of ~70 bytes: more than the 8 KB software stack (the array is there)
-            ok = overflow
+            # 200 levels of ~70 bytes: more than the 8 KB software stack (the array is
+            # there): the entry check of depth's frame stops it (rt/crt0.s ___hz_sovf)
+            overflow = "software stack overflow: depth needs a frame of" in con
+            ok = overflow and "result" not in con
             report("stack", model, ok, "overflow reported" if overflow else "no overflow, guard intact")
         else:
             report("stack", model, False, "build: " + out.strip().splitlines()[-1])
+        # a structure returned by value in a 6 KB stack: stopped at big_atlas's entry; the
+        # warnings of its two frames (over 1 KB) at the compile
+        prg = os.path.join(b, "STACKBIG.PRG")
+        rc, out = hcc(prg, [T("stack", "stackbig.c")], model, ["--stack", "6144"])
+        if not rc:
+            rc, con, _ = emu(prg, os.path.join(b, "run-stackbig"), horizon, seconds=3)
+            m = re.search(r"software stack overflow: big_atlas needs a frame of (\d+) bytes; "
+                          r"(\d+) of the software stack's 6144 bytes are free", con)
+            warned = "'big_atlas' needs a software-stack frame of 2,500 bytes" in out and \
+                "'main' needs a software-stack frame of" in out
+            ok = bool(m) and "survived" not in con and "calling big_atlas" in con and warned
+            report("stackbig", model, ok, (m.group(0) if m else "no overflow reported") +
+                   ("" if warned else "; the frame warnings missing"))
+        else:
+            report("stackbig", model, False, "build: " + out.strip().splitlines()[-1])
         prg = os.path.join(b, "STACKD.PRG")
         rc, out = hcc(prg, [T("stack", "stack.c")], model, ["--debug"])
         if not rc:
@@ -923,7 +941,7 @@ def run_apps(horizon, only, models):
         con = open(p, encoding="latin-1").read() if os.path.exists(p) else ""
         exp = ["C App is installed", "Assembly App is installed",
                "install: installed /APPS/CWIN", "install: installed /APPS/ASMAPP",
-               "cwin: in /APPS/CWIN/, current folder /, Horizon 0.29", "cwin: done",
+               "cwin: in /APPS/CWIN/, current folder /, Horizon 0.30", "cwin: done",
                "asmapp: running"]
         miss = [e for e in exp if e not in con]
         report("apps", m, not miss and os.path.isdir(os.path.join(d, "run-install", "card",
@@ -935,12 +953,12 @@ def run_apps(horizon, only, models):
             "--out", os.path.join(d, "run-desk")])
         p = os.path.join(d, "run-desk", "console.txt")
         con = open(p, encoding="latin-1").read() if os.path.exists(p) else ""
-        report("apps", m, "cwin: done" in con and "Horizon 0.29" in con,
+        report("apps", m, "cwin: done" in con and "Horizon 0.30" in con,
                "CWIN on the Desktop (its window, then its end)")
         # the needs refused (console; the Desktop: the message window too)
         for prg, rev, want, mode in (
-                ("CNEEDV.PRG", None, "CNEEDV needs Horizon 0.99 or later (this is 0.29).", "shell"),
-                ("CNEEDV.PRG", None, "CNEEDV needs Horizon 0.99 or later (this is 0.29).", "desktop"),
+                ("CNEEDV.PRG", None, "CNEEDV needs Horizon 0.99 or later (this is 0.30).", "shell"),
+                ("CNEEDV.PRG", None, "CNEEDV needs Horizon 0.99 or later (this is 0.30).", "desktop"),
                 ("CNEEDO.PRG", "11", "CNEEDO needs the OPL2 sound chip (hardware revision $0C).", "shell"),
                 ("CNEEDO.PRG", None, "cwin: in", "shell")):
             out_dir = os.path.join(d, f"run-{prg[:-4].lower()}-{mode}-{rev or 'def'}")

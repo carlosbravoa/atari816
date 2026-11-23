@@ -841,7 +841,7 @@ hz_close(h);
   before `main`: where something is missing the program prints one line ("GAME needs the
   OPL2 sound chip (hardware revision $0C).", also in a small window when the window system
   runs) and exits with code 1. It works on older Horizons too. Without `--needs` nothing is
-  added. `hz_sys_info()` returns Horizon's version (major x 256 + minor, 0x001D for 0.29)
+  added. `hz_sys_info()` returns Horizon's version (major x 256 + minor, 0x001D for 0.29, 0x001E for 0.30)
   and sets `hz_x` to the hardware revision (-1 / 0xFFFF and `HZ_ENOSYS` before 0.29). An
   app (a program in its own folder, installed from an `.HZA` archive):
   [../apps.md](../apps.md).
@@ -897,8 +897,36 @@ local array larger than that can jump over them), and only at exit (`hz_stack_ch
 checks any time; `hz_stack_free()` gives the bytes below the hardware stack pointer now,
 `hz_sstack_free()` those of the software stack). With `hcc --debug` the startup
 paints the stacks and the exit reports the most used: `stack: 109 of 32251 bytes used`
-and `software stack: 660 of 7936 bytes used`. The compiler does not check the stack in
-every function.
+and `software stack: 660 of 7936 bytes used`.
+
+**The software stack is checked at every function's entry.** A function with a frame
+there (an array, a structure, a local whose address is taken, the copy of a structure
+returned by value) compares `__sp` minus its frame with the stack's lowest address before
+it takes the frame (9 cycles, 9 bytes of code and the name: under 1 % of the
+benchmarks). When the frame does not fit, the program stops before anything is
+overwritten (the heap lies just under the stack), prints
+
+```
+software stack overflow: build_atlas needs a frame of 3700 bytes; 396 of the software stack's 4096 bytes are free (hcc --stack N; docs/c/reference.md)
+```
+
+and exits with code 3 (the `atexit` functions and the destructors run, as for `exit`).
+Before, such a frame went into the heap without a word and the program's data changed
+under it (the SkyRoads port: a 3.7 KB structure returned by value in a 4 KB stack). The
+hardware stack is not checked this way (its guard zone, at exit, as above).
+
+The compiler warns at a frame over 1 KB and refuses one bigger than the whole software
+stack (hcc gives cc816 the `--stack` size; a library compiled alone is checked against
+the default 8,192):
+
+```
+atlas.c:14:16: warning: the function 'load_atlas' needs a software-stack frame of 7,400 bytes (the software stack is 8,192 bytes: hcc --stack N; arrays and structures returned by value are there) [-Wframe-larger-than]
+atlas.c:30:5: error: the function 'huge' needs a software-stack frame of 9,000 bytes, more than the whole software stack (8,192 bytes): make the big locals static or global, or give hcc --stack 10240
+```
+
+A structure returned by value takes its size twice: the callee's local and the caller's
+copy (`struct big b = make();` is two of them in the caller). Big structures are better
+filled in place through a pointer.
 
 ## Program files
 
@@ -1049,6 +1077,7 @@ message turns it off: `-Wno-format`.
 | `extern-initializer` | `extern int x = 1;` (it defines x) |
 | `multichar` | a character constant of three or more characters |
 | `attributes` | a GNU attribute cc816 does not honour (`aligned(16)`, `constructor`, `section`, ...): ignored |
+| `frame-larger-than` | a function's software-stack frame over 1 KB (its arrays, structures, the copies of structures returned by value), with the stack's size ("The heap and the stacks"); a frame bigger than the whole software stack is an error |
 | `unused-variable` (-Wall) | a local or static variable that is never used |
 | `unused-label` (-Wall) | a label no `goto` uses |
 | `parentheses` (-Wall) | `if (a = b)`: an assignment as a condition |
@@ -1082,16 +1111,19 @@ hcc's own: `--code small|large` (the code model, "The two code models"; `HZ_CODE
 environment), with `--code large` also `--heap N` (the main bank's room kept for malloc)
 and, for tests, `--main-room N`,
 `--bank-room N` and `--spread N` (how much code the main bank and each other bank may
-take; the functions in turn in N banks).
+take; the functions in turn in N banks); `--no-stack-check` (the program's functions
+without the software stack's entry check, "The heap and the stacks": about 1-3 % less
+code, 10 cycles a call of a function with a frame; the library keeps its checks).
 
 ### How it is tested
 
-Its regression set (`make -C sdk/c/cc816 check`) has five parts. `tests/diag/` (101
+Its regression set (`make -C sdk/c/cc816 check`) has five parts. `tests/diag/` (106
 files, no emulator; `make -C sdk/c/cc816 diag` runs it alone): each file says the errors
 and warnings it must give, and nothing else may be said; a Python traceback fails the
 test. Then 400 test programs, each with one random change (a token taken out, doubled
 or replaced), must all give messages or compile, never an internal compiler error. `tests/regress/`: one small program
-for each fault found, run in the emulator. `tests/lang/` (29 programs): one for each part
+for each fault found, run in the emulator (those whose code differs between the levels,
+marked `LEVELS: 0 1 2`, at -O0 and -O1 too). `tests/lang/` (29 programs): one for each part
 of C listed above, `long long`, `setjmp`, inline assembly and the GNU extensions among
 them. Random programs checked against gcc's results
 (`cc816/tests/fuzz/genfuzz.py`: arithmetic of every width, casts, compares, shifts,
@@ -1101,7 +1133,9 @@ designated initialisers and compound literals, unions read through other members
 anonymous unions, `goto` state machines and Duff's device, enumerations, `_Bool`, the
 comma operator, statement expressions, `long long` mixed with every other width (its
 operators, conversions both ways and to float, globals, structures, arguments, results,
-function pointers, variadic arguments, switches, sprintf `%lld %llu %llx %llo`); and floating-point programs, `--features
+function pointers, variadic arguments, switches, sprintf `%lld %llu %llx %llo`;
+division, remainder and shifts by constants and compares with constants, every width, the
+operands at the edges); and floating-point programs, `--features
 basic,float`: float and double arithmetic, compares, conversions both ways, `++`, compound
 assignments, float arrays, structures, globals, pointers, parameters, results, variadic
 doubles, sprintf `%f %e %g`, checked bit for bit against gcc's SSE single precision). And
@@ -1189,6 +1223,16 @@ the c-testsuite when `CTS=` points at a checkout.
 25. **An undeclared name in an array's size** (`int t[numkinds];` without the header that
     defines numkinds) was reported as "cc816 does not support variable-length arrays"; it
     is "'numkinds' undeclared" now (`tests/diag/array_size_undeclared.c`).
+26. **A frame bigger than what was left of the software stack** went into the heap without
+    a word (the SkyRoads port: a 3.7 KB structure returned by value with `--stack 4096`;
+    the data changed under the program). Every function with a frame now checks at its
+    entry and stops the program with its name ("The heap and the stacks"); the compile
+    warns at a frame over 1 KB and refuses one bigger than the stack
+    (`tests/stack/stackbig.c`, `tests/diag/w_frame*.c`).
+27. **The peephole pass made `sec ; sbc #1` a `dec a` before a `bvc`** (the overflow flag
+    of a signed compare, which `dec` does not set). No code of the generator produced that
+    sequence until the compares as values below; found by their test
+    (`r039_compare_values.c`).
 
 Faster code from the same port (its profile: 13 % of the time in `__mul16` and
 `__sdiv16`, and its board, a `__far` array of arrays, read through 32-bit address
@@ -1206,6 +1250,41 @@ arithmetic at every access):
   index through a far pointer does the same (Y carries into the bank as the 32-bit add
   did); a signed one through a far pointer keeps the 32-bit step (it may be negative)
   (`r034_mul_div_const.c`, `r035_far_index.c`).
+
+Faster code from the SkyRoads port (its simulation: `long / 512`, `/ 16`, `int / 5`,
+`/ 10`, `1UL << c`, 32-bit compares; times with the call around the operation):
+
+- a **16-bit divide or remainder by any constant** is inline: the quotient is
+  `(|x| * M) >> (16 + s)`, the multiply by the known M done a bit at a time from the low
+  end (a one-bit adds x, every bit halves the 17-bit sum: exact), the sign put back, a
+  remainder `x - q * k`. cc816 picks M and s for each divisor and keeps them only if they
+  give the exact quotient for every dividend (all 65,536, or 0 to 32,768 for a signed
+  one; else the call stays). `int / 10` 9 us, was 51 (`__sdiv16`); `% 10` 13; unsigned
+  by 32,768 or more is a compare. `x % 16` of an `int` is a mask (it was a call), `x / -16`
+  the shift negated;
+- a **signed `long` divide or remainder by a power of two** (`/ 512`, `% 16`, and by
+  minus one) is inline: the bias for a negative dividend, then the arithmetic shift; the
+  remainder `-((-x) & (2^n - 1))` (`LONG_MIN` too). `long / 512` 16 us with the call,
+  was 102 (`__sdiv32`). Unsigned ones were shifts and masks already;
+- **32-bit shifts by a constant** move a word for 16 or more and a byte for 8 or more (an
+  unaligned word load from the register), then 0-7 bit steps with a word in A; by 7 and
+  15 (`x * 128`, `>> 7`) a one-bit shift the other way and a byte move (48 cycles, was
+  about 90). **By a variable** (`1UL << c`), `__shl32`, `__shr32`, `__sar32` do the same
+  steps (`1UL << 13` 26 us, was 47);
+- **a compare as a value** (`return a < b;`, `int c = x >= k;`, a conversion to `_Bool`)
+  is the compare's carry or sign rotated into A, no branches (`opt.setcc`; 32-bit `==`
+  keeps its branches, quicker when the low words differ); a `_Bool` copied to a `_Bool`
+  is not tested again; `x < 0` and `x >= 0` of a `long` test the high word's sign alone;
+- a parameter used a few times outside loops stays in its argument slot (`n,s`, as quick
+  as the direct page) instead of being copied in by the prologue.
+
+(`r036_div16_const.c`, `r037_div32_pow2.c`, `r038_shift32.c`, `r039_compare_values.c`,
+each at -O0, -O1 and -O2 too, and the random programs' `constop` shape: divisions,
+remainders and shifts by constants of every width, compares with constants, operands at
+the edges.) Not done: a `long` divided by another constant (it would need a 32 x 32 ->
+64-bit multiply: about as slow as `__udiv32`), inlining of `static inline` functions (each
+is a call: `cell_is_empty` in SkyRoads' probes), and the copy of a structure returned
+by value (it is built in the callee's frame and copied to the caller's).
 
 Bugs 4-6 were found by the random programs once they learnt structures, bit-fields and
 far pointers; 10-16 by the programs of `tests/lang/` and the c-testsuite; 17 by the
@@ -1248,10 +1327,14 @@ speed (emu816 models them: its timings are the board's within about 5 %). The be
 
 | | sieve | sum16 | mul32 | fib22 | strs | structs |
 | --- | --- | --- | --- | --- | --- | --- |
-| -O2 (the default) | 809 | 296 | 1277 | 388 | 994 | 670 |
-| -O1 | 809 | 476 | 1280 | 393 | 999 | 659 |
-| `--code large`, -O2 | 808 | 300 | 1290 | 430 | 1000 | 678 |
-| `--code large`, -O1 | 808 | 490 | 1287 | 417 | 996 | 674 |
+| -O2 (the default) | 808 | 298 | 1279 | 395 | 860 | 667 |
+| -O1 | 808 | 478 | 1276 | 400 | 847 | 670 |
+| `--code large`, -O2 | 810 | 298 | 1279 | 420 | 849 | 676 |
+| `--code large`, -O1 | 810 | 478 | 1285 | 416 | 856 | 680 |
+
+(strs was 994: its `% 26` is a multiply by the reciprocal now. The others move by up to
+about 1.5 % between builds of the same code: the 4 KB cache sees the code at other
+addresses.)
 
 (The check values are the benchmark's six: 1899, 27824, 1071602483, 17711, 3160,
 4275534039.)
@@ -1265,8 +1348,8 @@ milliseconds, and the program's size on the card:
 
 | | mandel | sincos | sqrt | expow | conv | program |
 | --- | --- | --- | --- | --- | --- | --- |
-| -O2 | 2,140 | 1,650 | 365 | 1,950 | 1,070 | 25,929 bytes |
-| `--code large` | 2,140 | 1,640 | 368 | 1,939 | 1,070 | 27,799 bytes |
+| -O2 | 2,166 | 1,660 | 360 | 1,970 | 1,068 | 23,132 bytes |
+| `--code large` | 2,150 | 1,650 | 370 | 1,950 | 1,066 | 27,881 bytes |
 
 mandel is one 64-point row of the Mandelbrot set (+ - * and compares), sincos `sin` and
 `cos` of 200 values, sqrt 500 square roots, expow `exp`, `log` and `pow` of 100 values,

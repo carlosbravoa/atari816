@@ -108,6 +108,19 @@ if [ $REVN -ge 9 ]; then
     if printf '%s\n' "$out" | grep -qx "BLITLIST PASS" && printf '%s\n' "$out" | grep -qx "FRAMES 3C US 000F4050"; then
         ok "BLITLIST.BIN (lists, abort, WAIT_VBL, raster events: 60 frames 999,504 us)"; else bad "BLITLIST.BIN" "$out"; fi
 else skip "BLITLIST.BIN (REV 09)"; fi
+# (Horizon 0.30) Ali's time for lists of one-line fills (what fill_runs gives it): a record is
+# REC_CYC (30 cycles: three 8-byte bursts and their loading, a816_blit.sv) + 8 + 2 a line + the
+# 32-bit words written (5.12 cycles each, classic machine running, Marga off): 1000 x 23 pixels
+# (6 words) = 4,889 us, starting 1 byte into a word (still 6) the same, 1000 x 2 pixels across
+# a word boundary (2 words) = 3,492 us; and the pixels right
+if [ $REVN -ge 9 ]; then
+    out=$($EMU --max-seconds 5 $T/asm/blitruns.bin 2>/dev/null)
+    us() { printf '%d' "0x$(printf '%s\n' "$out" | grep "^$1" | awk '{print $NF}')"; }
+    a=$(us "23 PX ALIGNED"); b=$(us "23 PX AT"); c=$(us "2 PX ACROSS")
+    if [ "$a" -ge 4870 ] && [ "$a" -le 4910 ] && [ "$b" -ge 4870 ] && [ "$b" -le 4910 ] && \
+       [ "$c" -ge 3475 ] && [ "$c" -le 3510 ] && printf '%s\n' "$out" | grep -qx "PIXELS OK"; then
+        ok "blitruns (lists of one-line fills: $a, $b, $c us; by words written; pixels)"; else bad "blitruns" "$out"; fi
+else skip "blitruns (REV 09)"; fi
 if [ $REVN -ge 10 ]; then
     out=$($EMU --max-seconds 20 $SAMPLER 2>/dev/null)
     printf '%s\n' "$out" | grep -qx "SAMPLER PASS" && ok "SAMPLER.BIN (sample player: rate, end interrupt, loop, mix, AU_LATE 0)" || bad "SAMPLER.BIN" "$out"
@@ -229,6 +242,15 @@ if [ -f $HSD/SYSTEM/HORIZON.SYS ] && command -v python3 >/dev/null; then
         *) bad "shot816 (the PC tool's screenshot)" "$out
 $out2" ;;
     esac
+    # (Horizon 0.30) GTEST f's full screen (scrolled, split): the video-state block's scroll
+    # set (version 2) is the kernel's own, so the tool needs no code search
+    if [ -f ../horizon/tests/gtestf.keys ] && [ $REVN -ge 11 ]; then
+        $EMU --sd "$TMP/hsd" --max-seconds 5.5 --keys "$(python3 ../horizon/tests/keyscript.py ../horizon/tests/gtestf.keys)" \
+             --dump-ram "$TMP/f.ram" "$TMP/hsd/SYSTEM/HORIZON.SYS" >/dev/null 2>&1
+        out=$(python3 $T/shot816.py --fs "$TMP/f.ram")
+        case "$out" in PASS*) ok "shot816 --fs: GTEST f's scroll set in the video-state block (v2) is the kernel's" ;;
+            *) bad "shot816 --fs" "$out" ;; esac
+    fi
 else skip "shot816 (no Horizon card in $HSD)"; fi
 
 # ── the PC volume (PC link step 1, --pc-folder): /PC: paths, the "PC:" entry at the end of the

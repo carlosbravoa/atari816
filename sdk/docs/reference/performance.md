@@ -101,6 +101,41 @@ move many sprites with one `spr_move` (A = $8000 | count, a table), and only tho
 by a pixel. The screen saver moves 16 sprites so for about 1.5 ms of CPU a frame in all. Scrolling with `fs_scroll` is one call a frame whatever the
 distance.
 
+## Many small fills (Horizon 0.30)
+
+A road made of spans, a polygon's scan lines: hundreds or thousands of short horizontal
+runs a frame. Measured by `sdk/c/game/tests/gt_runbench.c` (emu816, board timing, 320 x 180,
+2,000 runs at scattered places; CPU cycles a run until the program has the CPU again; the
+blitter's part runs meanwhile):
+
+| Way | 8 pixels | 23 pixels | 100 pixels |
+| --- | --- | --- | --- |
+| a C loop through a `__far` pointer | | 1,700 | |
+| hgame's CPU path (assembly: 16-bit stores) | 420 | 610 | 1,550 |
+| SkyRoads' unrolled assembly (a jump into 127 16-bit stores; ports/skyroads) | | about 260 | |
+| `hg_fill` records (`sheet_draw` fills, 128 a call) | | 3,400 | |
+| one call a run (`hg_fill` + `hg_flush`) | | 10,000 | |
+| `fill_runs` (`hg_fill_runs`: one call for all of them) | 138 | 140 | 175 (done: 210) |
+| `fill_runs` groups of 20 (`hg_fill_groups`: the runs read where they are) | | 170 | |
+| `fill_runs` groups of 2 | | 300 | |
+
+`fill_runs` (ABI.md, "Fill runs") checks the page once and each run with one compare and
+writes five bytes of Ali's record for it: about 140 cycles a run, a third of it the SDRAM's
+write stall, whatever the run's width; a call itself about 0.35 ms (RTEST m: one run 440 us with the clock call around it). Ali fills a 23-pixel run
+in about 70 cycles, so it keeps up with the kernel (the pixels are there about 300 us after
+the call returns); 100-pixel runs take Ali longer than the kernel (done 4.6 ms after the
+call). The first call of all takes the kernel's list bank (about 25 ms, once).
+
+So the blitter now takes runs at about half the cost of a tight assembly fill of 23 pixels,
+and the pixels for nothing; but the CPU still pays for every run. What it changes for a real
+program: SkyRoads (ports/skyroads, PORTING-NOTES.md, "Horizon 0.30") draws its road's
+700-900 spans a frame through groups and gets 7 % more frames at the game's speed (730 of
+1,708 against 685), its drawing 11 % faster on average and 16 % in its busy stretch (37.2
+against 44.5 ms a frame; the worst frame there 42 against 57): its spans are short and its
+own assembly was already tight. A hardware
+run-list mode that read the runs by itself would take the kernel's part away (ABI.md, "For a
+later hardware revision").
+
 ## What fits in a frame
 
 At 50 Hz (20 ms), emulator, with the blitter (win_draw); halve the counts for the board:

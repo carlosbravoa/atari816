@@ -39,7 +39,8 @@
         .include "kdefs.inc"
 
         .import f_set_ok: far, f_set_err: far, f_win_arg: far, f_uaccess: far
-        .import t_a, t_x, t_y, ws_on
+        .import f_bank_run: far, f_irq_poll: far
+        .import t_a, t_x, t_y, ws_on, k_rev, bl_force, ls_task
         .import f2_idle: far, f2_stop: far, f2_setup: far, f2_clip: far, f2_emit: far
         .import f2_finish: far, f2_range: far, f2_mul: far
         .import ls_n, ls_o, ls_cnt, ls_vbl, ls_bmp, ls_base, ls_str, ls_ox, ls_oy
@@ -116,6 +117,7 @@ sh_b1:      .res    SH_N * 2
         .export k3_sys: far
 k3_sys: jmp     (.loword(k3_tab) - K3_SYS0 * 2,x)
 k3_tab: .word   .loword(k3_new), .loword(k3_free), .loword(k3_draw)    ; $A1
+        .word   .loword(k3_runs), .loword(k3_usec)                      ; $A4 (0.30)
         .assert (* - k3_tab) / 2 + K3_SYS0 = K3_NSYS, error, "k3_tab: one entry per syscall"
 
 k3_ok0: lda     #0
@@ -928,3 +930,611 @@ dr_build:
         bne     @r
 @ok:    clc
         rts
+
+; ---- (0.30) $A4 fill_runs(A = count 0-2688, X, Y = {u24 page, u8 0, u16 size, u24 runs,
+; u8 0}) -> A = count ----
+; Many horizontal runs of one colour each, filled by Ali: run k is 4 bytes {u16 offset, u8
+; colour, u8 width} and fills width (0-255) bytes from page + offset with colour; every run
+; must lie inside the page (offset + width <= size, size 0 = 65,536 bytes), and the page must
+; be the caller's own memory (a full-screen framebuffer, banks it allocated: Ali writes past
+; FREDDIE II). The page is checked once; a run costs one compare. Each run becomes one of
+; Ali's 24-byte records in the kernel's list bank (one bank taken at the first call and kept):
+; the bytes that do not change (HEIGHT 1, OP FILL, FLAGS, RFLAGS) were written once when the
+; bank was taken, so a run writes DST (5-7: a word and a byte), WIDTH's low byte (10) and FG
+; (14): five bytes (the SDRAM stalls every byte the CPU writes, about 4.5 cycles; DST_STRIDE
+; and BG do not matter for a one-line fill). Ali starts on the first 64 runs and is fed again after
+; every 64 when it is idle, so it fills while the kernel makes the rest; interrupts are
+; served every 64 runs (the call itself is not preempted: about 120 cycles a run). The call
+; returns when the last runs are started (A = count; it waits for the part Ali still runs
+; first, short unless the runs are long), like draw_list: list_wait, vsync or the next list
+; call wait for it, ABORT at the task's end. At most 2688 runs a call (the list bank's records:
+; a call never waits for its own records to be free).
+; A run past the page: EINVAL, X = its index (the runs before it may be drawn, none after
+; it). ENODEV before REV $09 or with the blitter turned off (ws_config bit 0): the caller fills
+; by itself. (It works without the window system too: bl_flush, list_wait's, flushes then.)
+ENODEV      = 9                 ; (as k2.s)
+BL_CTRL     = $00DA13
+BL_LIST     = $00DA14
+BL_COUNT    = $00DA17
+FR_CH       = 64                ; runs a chunk
+FR_SLOTS    = 42 * FR_CH        ; Ali's records in the list bank (2688 x 24 = 64,512 bytes): the
+                                ; most runs a call
+
+fr_kr   = $90                   ; -> the runs (24 bits)
+fr_kr2  = $94                   ; -> the runs + 2 (colour, width)
+fr_base = $98                   ; the page's physical address, bits 0-15
+fr_bank = $9A                   ;   bits 16-23
+fr_lim  = $9C                   ; offsets below this are inside with any width (size - 255, or 0)
+fr_szm1 = $9E                   ; size - 1
+fr_cy   = $A0                   ; the chunk's end (offset in the runs)
+fr_ye   = $A2                   ; the runs' end (count * 4)
+fr_s    = $A4                   ; the first record (offset in the list bank) not started yet
+fr_np   = $A6                   ; records made and not started
+fr_t    = $A8
+fr_lbk  = $AA                   ; the list bank
+fr_y0   = $AC                   ; the chunk's first run
+fr_go   = $AE                   ; a list was started in this call
+fr_fl   = $B0                   ; the block's flags (FR_GROUPS)
+fr_gy   = $B2                   ; groups: the next group (offset in the groups)
+fr_po   = $B4                   ;   -> its elements' offsets (24 bits: bank:field)
+fr_pw   = $B8                   ;   -> their widths
+fr_str  = $BC                   ;   the elements' stride
+fr_col  = $BE                   ;   the group's colour
+fr_n    = $C0                   ;   elements left
+fr_okb  = $C4                   ;   a bank of elements found readable in this call ($FFFF: none)
+fr_sum  = $C6                   ;   runs made in this call
+fr_since = $C8                  ;   runs made since interrupts were last served
+fr_sf   = fr_kr2                ;   the layout seen last (stride | fields << 8; fr_kr2 is free)
+FR_GROUPS = 1                   ; the block's flags: runs points at groups
+FR_GN   = 1024                  ; the most elements a group
+
+        .segment "K0BSS"
+fr_lb:      .res    2           ; the list bank (0: not taken yet)
+
+        .segment "K3CODE"
+k3_runs:
+        lda     k_rev
+        cmp     #$09
+        bcc     @nodev
+        lda     bl_force                ; (the blitter turned off with ws_config: the CPU's job)
+        lsr     a
+        bcc     :+
+@nodev: lda     #ENODEV
+        jmp     k3_err
+:       ldx     cur
+        lda     t_a,x
+        bne     :+
+        jmp     k3_ok0                  ; (0 runs: nothing to do)
+:       cmp     #FR_SLOTS + 1
+        bcc     :+
+@inv:   jmp     k3_inval
+:       jsr     fr_idle                 ; (may block: before anything is kept)
+        ldx     cur                     ; the block
+        lda     t_x,x
+        sta     kt0
+        lda     t_y,x
+        sta     kt1
+        lda     #10
+        sta     kt2
+        stz     kt3
+        jsl     f_uaccess
+        bcc     :+
+@flt:   jmp     k3_fault
+:       ldy     #8
+:       lda     [kphys],y
+        sta     sr,y
+        dey
+        dey
+        bpl     :-
+        lda     sr+3                    ; flags: FR_GROUPS or none
+        and     #$00FF
+        sta     fr_fl
+        cmp     #FR_GROUPS + 1
+        bcs     @inv
+        lda     sr+4                    ; size - 1 (size 0: 65,536)
+        dec     a
+        sta     fr_szm1
+        sec
+        sbc     #254
+        bcs     :+
+        lda     #0
+:       sta     fr_lim
+        lda     sr                      ; the page: the caller's own memory
+        sta     kt0
+        lda     sr+2
+        and     #$00FF
+        sta     kt1
+        stz     kt3
+        lda     sr+4
+        sta     kt2
+        bne     :+
+        inc     kt3
+:       jsl     f2_range
+        bcs     @flt
+        lda     kphys
+        sta     fr_base
+        lda     kphys+2
+        and     #$00FF
+        sta     fr_bank
+        ldx     cur                     ; the runs: readable by the caller (4 bytes each; groups 8)
+        lda     t_a,x
+        asl     a
+        asl     a
+        sta     fr_ye
+        ldx     fr_fl
+        beq     :+
+        asl     a
+:       sta     kt2
+        lda     sr+6
+        sta     kt0
+        lda     sr+8
+        and     #$00FF
+        sta     kt1
+        stz     kt3
+        jsl     f_uaccess
+        bcs     @flt
+        lda     kphys
+        sta     fr_kr
+        clc
+        adc     #2
+        sta     fr_kr2
+        lda     kphys+2
+        and     #$00FF
+        sta     fr_kr+2
+        adc     #0
+        sta     fr_kr2+2
+        lda     f:fr_lb                 ; the list bank
+        bne     :+
+        jsr     fr_make
+        bcc     :+
+        lda     #ENOMEM
+        jmp     k3_err
+:       sta     fr_lbk
+        stz     fr_s
+        stz     fr_np
+        stz     fr_go
+        phb
+        a8
+        lda     fr_lbk
+        pha
+        plb
+        a16
+        ldx     #0
+        ldy     #0
+        lda     fr_fl
+        beq     @chunk
+        jmp     fr_groups
+@chunk: sty     fr_y0                   ; the next 64 runs (or the rest)
+        tya
+        clc
+        adc     #FR_CH * 4
+        bcs     @last
+        cmp     fr_ye
+        bcc     :+
+@last:  lda     fr_ye
+:       sta     fr_cy
+        jsr     fr_fill
+        bcs     fr_badr
+        tya
+        sec
+        sbc     fr_y0
+        lsr     a
+        lsr     a
+        clc
+        adc     fr_np
+        sta     fr_np
+        jsr     fr_poll
+        a8                              ; Ali idle: it takes what is made
+        lda     f:BL_CTRL
+        lsr     a
+        a16
+        bcs     :+
+        jsr     fr_start
+:       cpy     fr_ye
+        bne     @chunk
+fr_end: lda     fr_np                   ; the rest
+        beq     :+
+        jsr     fr_spin
+        jsr     fr_start
+:       plb
+        jsr     fr_own
+        ldx     cur
+        lda     t_a,x
+        jsl     f_set_ok
+        rtl
+fr_badr:
+        tya                             ; Y = the run outside the page
+        lsr     a
+        lsr     a
+fr_bad: plb                             ; A = the run's (group's) index
+        pha
+        jsr     fr_own
+        pla
+        ldx     cur
+        sta     t_x,x
+        jmp     k3_inval
+fr_flt: plb
+        jsr     fr_own
+        jmp     k3_fault
+
+; (FR_GROUPS) the block's runs are groups of 8 bytes {u24 elements, u8 colour, u16 count
+; (0-1024), u8 stride (1-255), u8 fields: bits 0-3 where an element's u16 offset is, bits 4-7
+; where its u8 width is}: each element of a group is one run of the group's colour, so a
+; program's own arrays of spans (a shape's, in any layout) need no copying. The elements must
+; be readable by the caller and lie below offset $FF00 of their bank. A group that would make
+; the call's runs more than 2688 ends it: A = the groups taken (the caller sends the rest).
+; A group past these rules, or a run outside the page: EINVAL, X = the group.
+; DBR = the list bank, X = the next record, fr_kr -> the groups.
+fr_groups:
+        asl     fr_ye                   ; (8 bytes a group)
+        stz     fr_gy
+        lda     #$FFFF                  ; (no bank checked yet)
+        sta     fr_okb
+        stz     fr_sum
+        stz     fr_since
+        lda     #$FFFF                  ; (no layout seen yet)
+        sta     fr_sf
+@g:     ldy     fr_gy                   ; the groups' end?
+        cpy     fr_ye
+        bcc     :+
+        lda     fr_since                ; (the rest as for runs)
+        clc
+        adc     fr_np
+        sta     fr_np
+        jmp     fr_end
+:       lda     [fr_kr],y               ; the elements
+        sta     fr_t
+        iny
+        iny
+        lda     [fr_kr],y               ; bank | colour << 8
+        sta     fr_y0
+        and     #$00FF
+        cmp     fr_okb                  ; (the bank of the group before: checked)
+        beq     :+
+        jsr     fr_ebank
+        jcs     fr_flt
+:       lda     fr_y0
+        xba
+        and     #$00FF
+        sta     fr_col
+        iny
+        iny
+        lda     [fr_kr],y               ; count
+        beq     @next
+        cmp     #FR_GN + 1
+        jcs     fr_ginv
+        sta     fr_n
+        sta     fr_y0                   ; (kept: fr_n counts down)
+        clc
+        adc     fr_sum
+        cmp     #FR_SLOTS + 1
+        bcs     @full
+        sta     fr_sum
+        iny
+        iny
+        lda     [fr_kr],y               ; stride | fields << 8: as the group before?
+        cmp     fr_sf
+        beq     :+
+        jsr     fr_layout
+        jcs     fr_ginv
+:       ldy     fr_t
+        jsr     fr_elems
+        jcs     fr_ginv
+        lda     fr_y0
+        clc
+        adc     fr_since
+        sta     fr_since
+        cmp     #FR_CH
+        bcc     @next
+        clc
+        adc     fr_np
+        sta     fr_np
+        stz     fr_since
+        jsr     fr_poll
+        a8                              ; Ali idle: it takes what is made
+        lda     f:BL_CTRL
+        lsr     a
+        a16
+        bcs     @next
+        jsr     fr_start
+@next:  lda     fr_gy
+        clc
+        adc     #8
+        sta     fr_gy
+        jmp     @g
+@full:  lda     fr_gy                   ; more than 2688 runs: the groups so far (A = how
+        lsr     a                       ; many: the caller sends the rest again)
+        lsr     a
+        lsr     a
+        ldx     cur
+        sta     f:t_a,x
+        stz     fr_ye
+        jmp     @g
+fr_ginv:
+        lda     fr_gy                   ; X = the group
+        lsr     a
+        lsr     a
+        lsr     a
+        jmp     fr_bad
+
+; a group's elements in bank A (fr_t: the first): not the window, readable by the caller ->
+; fr_po, fr_pw's bank, fr_okb. C set: EFAULT
+fr_ebank:
+        cmp     #0
+        beq     @no
+        sta     fr_po+2
+        sta     fr_pw+2
+        phx
+        phy
+        sta     kt1
+        lda     fr_t
+        sta     kt0
+        lda     #1
+        sta     kt2
+        stz     kt3
+        phb
+        pea     KBANK * $0101
+        plb
+        plb
+        jsl     f_uaccess
+        plb
+        ply
+        plx
+        bcs     @out
+        lda     fr_po+2
+        sta     fr_okb
+        clc
+@out:   rts
+@no:    sec
+        rts
+
+; a group's layout A = stride | fields << 8 -> fr_str, fr_po, fr_pw (and fr_sf). C set: stride 0
+fr_layout:
+        sta     fr_sf
+        and     #$00FF
+        beq     @no
+        sta     fr_str
+        lda     fr_sf
+        xba
+        and     #$000F
+        sta     fr_po
+        lda     fr_sf
+        xba
+        lsr     a
+        lsr     a
+        lsr     a
+        lsr     a
+        and     #$000F
+        sta     fr_pw
+        clc
+        rts
+@no:    lda     #$FFFF
+        sta     fr_sf
+        sec
+        rts
+
+; a group's fr_n elements from Y (DBR = the list bank, X = the next record) -> X; C set: an
+; element past $FF00 or a run outside the page
+fr_elems:
+@e:     cpy     #$FF00
+        bcs     @bad
+        lda     [fr_po],y               ; the offset
+        cmp     fr_lim
+        bcs     @slow
+@ok:    adc     fr_base                 ; DST (C clear)
+        sta     a:5,x
+        lda     [fr_pw],y               ; the width (and the byte after it)
+        a8
+        sta     a:10,x                  ; WIDTH's low byte
+        lda     fr_col
+        sta     a:14,x                  ; FG
+        lda     fr_bank
+        adc     #0
+        sta     a:7,x                   ; DST's bank
+        a16
+        txa
+        adc     #24                     ; (C clear)
+        tax
+        tya
+        clc
+        adc     fr_str
+        tay
+        dec     fr_n
+        bne     @e
+        clc
+        rts
+@bad:   sec
+        rts
+@slow:  sta     fr_cy                   ; near the page's end: offset + width <= size?
+        lda     [fr_pw],y
+        and     #$00FF
+        clc
+        adc     fr_cy
+        bcs     @c
+        beq     @in
+        dec     a
+        cmp     fr_szm1
+        bcc     @in
+        beq     @in
+        bra     @bad
+@c:     bne     @bad                    ; past 65,536
+        lda     fr_szm1
+        inc     a
+        bne     @bad
+@in:    lda     fr_cy
+        clc
+        bra     @ok
+
+; the list Ali runs is the caller's (list_wait, vsync, ABORT at its end), if one was started
+fr_own: lda     fr_go
+        beq     :+
+        lda     cur
+        inc     a
+        sta     ls_task
+:       rts
+
+; runs Y .. fr_cy - 1 into Ali's records from X (DBR = the list bank). C set: run Y is not
+; inside the page
+fr_fill:
+@r:     lda     [fr_kr],y               ; the offset
+        cmp     fr_lim
+        bcs     @slow
+@ok:    adc     fr_base                 ; DST (C clear)
+        sta     a:5,x
+        lda     [fr_kr2],y              ; colour | width << 8 (the carry stays DST's)
+        a8                              ; (byte stores: SDRAM stalls a CPU write per byte)
+        sta     a:14,x                  ; FG
+        xba
+        sta     a:10,x                  ; WIDTH's low byte (byte 11 stays 0)
+        lda     fr_bank
+        adc     #0
+        sta     a:7,x                   ; DST's bank
+        a16
+        txa
+        adc     #24                     ; (C clear)
+        tax
+        iny
+        iny
+        iny
+        iny
+        cpy     fr_cy
+        bne     @r
+        clc
+        rts
+@slow:  sta     fr_t                    ; near the page's end: offset + width <= size?
+        lda     [fr_kr2],y
+        xba
+        and     #$00FF
+        clc
+        adc     fr_t
+        bcs     @c
+        beq     @in
+        dec     a
+        cmp     fr_szm1
+        bcc     @in
+        beq     @in
+@bad:   sec
+        rts
+@c:     bne     @bad                    ; past 65,536
+        lda     fr_szm1
+        inc     a
+        bne     @bad                    ; (only a page of 65,536 bytes reaches it)
+@in:    lda     fr_t
+        clc
+        bra     @ok
+
+; Ali runs the records made since fr_s (none: nothing); fr_s = X
+fr_start:
+        lda     fr_np
+        beq     @out
+        lda     fr_s
+        sta     f:BL_LIST
+        a8
+        lda     fr_lbk
+        sta     f:BL_LIST+2
+        a16
+        lda     fr_np
+        sta     f:BL_COUNT
+        a8
+        lda     #4 | 2                  ; LIST, IRQ_EN
+        sta     f:BL_CTRL
+        a16
+        stx     fr_s
+        stz     fr_np
+        lda     #1
+        sta     fr_go
+@out:   rts
+
+; the interrupts that are due served (keeps X, Y, DBR)
+fr_poll:
+        phb
+        pea     KBANK * $0101
+        plb
+        plb
+        jsl     f_irq_poll
+        plb
+        rts
+
+; until Ali is idle, interrupts served meanwhile (keeps X, Y)
+fr_spin:
+        a8
+        lda     f:BL_CTRL
+        lsr     a
+        a16
+        bcc     @out
+        jsr     fr_poll
+        bra     fr_spin
+@out:   rts
+
+; before a call: Ali idle. The caller's own list with few records left is waited for here
+; (no block and wake-up for its last runs); anything else blocks as for draw_list
+fr_idle:
+        a8
+        lda     f:BL_CTRL
+        a16
+        and     #$0005
+        cmp     #$0005                  ; BUSY and LIST
+        bne     @blk
+        lda     ls_task
+        dec     a
+        cmp     cur
+        bne     @blk
+        lda     f:BL_COUNT
+        cmp     #128
+        bcs     @blk
+        jsr     fr_spin
+        stz     ls_task
+        rts
+@blk:   jsl     f2_idle
+        rts
+
+; the list bank taken (one bank for the kernel) and its records' fixed bytes written: WIDTH's
+; high byte 0, HEIGHT 1, KEY and OP 0 (FILL), FLAGS and RFLAGS 0, 20-23 0 -> A = the bank, C
+; set: no bank
+fr_make:
+        lda     #1
+        jsl     f_bank_run
+        bcs     @out
+        sta     f:fr_lb
+        sta     fr_lbk
+        phb
+        a8
+        pha
+        plb
+        a16
+        ldx     #0
+@s:     lda     #0
+        sta     a:10,x
+        sta     a:16,x
+        sta     a:18,x
+        sta     a:20,x
+        sta     a:22,x
+        inc     a
+        sta     a:12,x
+        txa
+        and     #$07FF                  ; (interrupts every 256 records)
+        bne     :+
+        jsr     fr_poll
+:       txa
+        clc
+        adc     #24
+        tax
+        cpx     #FR_SLOTS * 24
+        bcc     @s
+        plb
+        lda     fr_lbk
+        clc
+@out:   rts
+
+; ---- (0.30) $A5 uptime_us -> A = microseconds since reset, bits 0-15, X = bits 16-31 ----
+; The system block's free-running UPTIME counter ($00:DE18, reading its first byte
+; latches all four), which tasks cannot read themselves (I/O page). Wraps after 71 minutes.
+k3_usec:
+        ldx     cur
+        lda     f:UPTIME
+        pha
+        lda     f:UPTIME+2
+        sta     t_x,x
+        pla
+        jsl     f_set_ok
+        rtl

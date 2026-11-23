@@ -73,8 +73,15 @@ int main(void)
     CALLED(hz_task_path(buf, sizeof(buf)) == 13 && !strcmp(buf, "/APPS/SYS.PRG"), "task_path");
     CALLED(hz_task_path(buf, 13) == -1 && hz_errno == HZ_EINVAL, "task_path: buffer too small");
     check(hz_prog_dir(buf, sizeof(buf)) == 6 && !strcmp(buf, "/APPS/"), "prog_dir");
-    /* (Horizon 0.29) the version and the hardware revision */
-    CALLED(hz_sys_info() == 0x001D && hz_x >= 7 && hz_x < 0x20, "sys_info");
+    /* (Horizon 0.29) the version and the hardware revision (0.30: $001E) */
+    CALLED(hz_sys_info() == 0x001E && hz_x >= 7 && hz_x < 0x20, "sys_info");
+    /* (Horizon 0.30) the microsecond clock; fill_runs with no runs (nothing drawn) */
+    l = hz_uptime_us();
+    CALLED(hz_errno == 0 && l != 0, "uptime_us");
+    {
+        static hz_fillruns fr;
+        CALLED(hz_fill_runs(0, &fr) == 0, "fill_runs (no runs)");
+    }
     l = hz_time_get();
     CALLED(hz_errno == 0 && hz_y <= CLK_SET, "time_get");
     u = hz_mem_info();

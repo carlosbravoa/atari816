@@ -1,4 +1,4 @@
-# Horizon ABI (version 0.29)
+# Horizon ABI (version 0.30)
 
 This file describes the interface between Horizon and user programs. `user/horizon.inc`
 holds the same definitions for ca65.
@@ -63,7 +63,7 @@ PBR:PC-1.
 | $33 | task_info | A = slot 0-15, X, Y = 16-byte record | - | Record: u8 id (0 = free slot), u8 state (1 ready, 2 running, 3 blocked, 4 zombie), u8 priority, u8 banks owned, u8 parent id (0 = none), 8 characters name (space padded), u8 flags (0.13: TI_WINDOWS 1 it has windows, TI_MODAL 2 a WF_MODAL window is open, TI_IDLE 4 it waits in win_event with nothing queued, TI_SINGLE 8 single instance), u8 its number of windows, 1 spare byte (0) |
 | $34 | task_single | - | - | (0.13) One instance of the caller's program (the same absolute path) only. If another live task runs it already, that task's windows are raised (the top one gets the focus) and the call returns C set, A = ERUNNING, X = its id: the caller should exit. Otherwise the caller is marked, and a later spawn of the same path raises its windows instead and returns ERUNNING. The Desktop, About and Settings call it first thing |
 | $35 | task_path | X, Y = buffer, A = its size | A = length | (0.28) The absolute path of the file the caller's program was loaded from, zero-terminated, as the loader opened it: "/GAMES/MINE/GAME.PRG" (the path given to spawn, made absolute with the parent's current directory; upper or lower case as it was given). At most 127 characters: a 128-byte buffer always fits. EINVAL if the buffer is too small (as getcwd), EFAULT a bad buffer. A program finds its own data files next to it this way. Before 0.28 the call does not exist (ENOSYS) |
-| $36 | sys_info | - | A = version, X = the hardware revision | (0.29) Horizon's version as major << 8 \| minor ($001D for 0.29) and SYS_REV (what About shows; $0C: the OPL2, $0B: sprites, $0A: Lau, $08: the blitter). No side effects (unlike ws_config). A program checks what it needs with it: HZ_NEEDS (user/needs.inc) and hcc --needs, see sdk/docs/apps.md. Before 0.29 the call does not exist (ENOSYS): task_path answering (EINVAL for a buffer of size 0) tells 0.28 |
+| $36 | sys_info | - | A = version, X = the hardware revision | (0.29) Horizon's version as major << 8 \| minor ($001D for 0.29, $001E for 0.30) and SYS_REV (what About shows; $0C: the OPL2, $0B: sprites, $0A: Lau, $08: the blitter). No side effects (unlike ws_config). A program checks what it needs with it: HZ_NEEDS (user/needs.inc) and hcc --needs, see sdk/docs/apps.md. Before 0.29 the call does not exist (ENOSYS): task_path answering (EINVAL for a buffer of size 0) tells 0.28 |
 | $40 | port_create | - | A = port (0-15) | The caller owns the port. EAGAIN if all 16 are in use |
 | $41 | send | A = port, X, Y = 16-byte message | - | Any task may send. EAGAIN if the port's queue (8 messages) is full, EINVAL if the port is not open |
 | $42 | recv | A = port, X, Y = 16-byte buffer | - | Owner only (else EINVAL). Blocks while the queue is empty. Interruptible by kill. (0.26) A = port \| RV_POLL ($8000): EAGAIN at once when the queue is empty (a window program reads its port at each event without waiting) |
@@ -134,13 +134,15 @@ PBR:PC-1.
 | $9A | pal_set | A = first \| count << 8 (count 0 = 256), X, Y = count x 3 bytes red, green, blue | - | (0.18) Several entries in one call, each by the rules of ws_palette; EAGAIN (nothing set) if one of them is another program's; EINVAL past 255 |
 | $9B | pal_alloc | A = count 1-240, X = the first entry wanted ($FFFF: any) | A = the first entry | (0.18) count entries in a row that nobody holds become the caller's, with their system colours (nothing changes until it sets them). With $FFFF the kernel chooses: first in 76-113 and 136-175 (no desktop icon or UI colour uses them), then from 16 up. A = 0: every entry of the caller goes back. EAGAIN: no such run |
 | $9C | draw_list | A = window \| count << 8 (1-128), X, Y = count records of 20 bytes | A = records drawn | (0.18) Many blits in one call, run by Ali as one command list (REV $09; started one by one on REV $08, drawn by the CPU before), returning at once. See "Draw lists". EINVAL a bad window, count or op, more than 460,800 pixels; EFAULT the records or a source not wholly in the caller's memory; then nothing is drawn |
-| $9D | list_wait | A = 0 wait, 1 ask | A = 1 while the caller's list runs | (0.18) Waiting (or an answer of 0) also makes the CPU see what Ali wrote (CACHE_FLUSH) |
+| $9D | list_wait | A = 0 wait, 1 ask | A = 1 while the caller's list runs | (0.18) Waiting (or an answer of 0) also makes the CPU see what Ali wrote (CACHE_FLUSH; (0.30) also while the window system does not run, for fill_runs) |
 | $9E | frame | - | A = the frame counter | (0.18) NV_FRAME: + 1 at every vertical blank since the start, wraps at 65536 (REV $09); before REV $09 the vertical blanks waited for (vsync) |
 | $9F | win_vbl | A = own window, X = 1 on, 0 off | - | (0.18) WE_VBL (16) at every vertical blank while the window's event queue is empty, for event-loop programs that draw once a frame. ENODEV before REV $09 |
 | $A0 | win_front | A = own window | - | (BASIC 2.0) The window comes back if minimized, is raised to the top of its class and gets the keyboard focus (with a WF_MODAL dialog of its program over it, as the Windows menu does). For a program that must show a window again by itself: the sprites of a window show only while it has the focus, and a full-screen window shows its screen only then (BASIC's SCREEN, CONT and the end of INPUT use it). EINVAL: not the caller's window |
 | $A1 | sheet_new | X, Y = {u24 address, u8 0, u16 stride, u16 width, u16 height} | A = the sheet (1-32) | (0.19) Registers a sheet: width x height 8 bpp pixels from the address, rows stride bytes apart, all of it the caller's own memory (its window, its code bank, banks it allocated, across consecutive banks it owns; not the kernel's, another program's or a shared bank: EFAULT). Checked once here; sheet_draw's records then name the sheet and a rectangle in it. EINVAL: width 0 or above 4096, height 0 or above 1024, a stride below the width; EAGAIN: 32 sheets exist (all programs together), or the rows of all sheets would pass 4096. See "Sheets" |
 | $A2 | sheet_free | A = sheet, $FFFF: every sheet of the caller's | - | (0.19) The caller's running list (draw_list's or sheet_draw's) is stopped first (Ali's ABORT). EINVAL: not the caller's sheet. A sheet also goes when the program frees a bank it lies in (bank_free) and when the program ends |
 | $A3 | sheet_draw | A = window \| count << 8 (1-128), X, Y = count records of 16 bytes | A = records drawn | (0.19) Copies and keyed copies from the caller's sheets, and fills, as one of Ali's command lists: the targets, the clipping, the revisions and the waiting of draw_list, at a fraction of its cost (the kernel only compares a record's numbers with the sheet's size). See "Sheets". EINVAL: a bad window, count or op, a sheet not the caller's, sx + w or sy + h past the sheet, more than 460,800 pixels; EFAULT: the records not wholly in the caller's memory; then nothing is drawn |
+| $A4 | fill_runs | A = count (0-2688), X, Y = 10-byte block {u24 page, u8 0, u16 size, u24 runs, u8 0} | A = count | (0.30) Many horizontal runs, each of one colour, filled by Ali in one call: run k is 4 bytes {u16 offset, u8 colour, u8 width 0-255} and fills width bytes from page + offset. The page (size bytes, 0 = 65,536) must be the caller's own memory (its full-screen framebuffer, banks it allocated, its window: Ali writes past FREDDIE II), and every run must end inside it (offset + width <= size). The page is checked once, each run with one compare; returns when the last runs are started, while Ali still fills (list_wait, vsync or the next list call wait for it; the runs' memory may be reused at once: the kernel has copied them). See "Fill runs". EINVAL count above 2688, flags not 0, a run past the page (X = its index: the runs before it may be drawn, none after it); EFAULT the page not wholly the caller's own memory, the block or the runs not readable; ENOMEM no bank for the kernel's list (taken at the first call); ENODEV before REV $09 or with the blitter turned off (ws_config bit 0): fill by the CPU then (hgame does). The window system need not run |
+| $A5 | uptime_us | - | A = microseconds since reset, bits 0-15, X = bits 16-31 | (0.30) The system block's free-running microsecond counter (UPTIME, $00:DE18), which tasks cannot read themselves (the I/O page is the kernel's). Wraps after 71.6 minutes. For timing: one call costs about 40 us (the syscall's own entry and return), uptime ($04) steps 10 ms |
 
 Any other number returns ENOSYS.
 
@@ -637,6 +639,137 @@ tiles:  .faraddr art            ; sheet_new's block: 16 x 16 tiles, one under th
         .word   0, 3 * 16, 16, 16, 40, 20
 ```
 
+### Fill runs (0.30)
+
+`fill_runs` exists for programs that draw many small pieces a frame: a road made of spans, a
+polygon renderer's scan lines, a voxel column's runs turned on their side. SkyRoads' road is
+700-2,100 runs a frame (about 23 pixels each); as `draw_list` or `sheet_draw` fills each run
+costs the kernel 1,100-1,300 CPU cycles, more than filling the run with the CPU, so the
+blitter could not help. `fill_runs` checks the page once and each run with one compare, and
+Ali fills them while the kernel makes the rest.
+
+**The call.** A = the number of runs (0-2688; 0 does nothing), X, Y = the block:
+
+| Offset | Field |
+| --- | --- |
+| 0 | u24 page: the address of offset 0 (any alignment) |
+| 3 | u8 flags: 0, or FR_GROUPS (1): the runs pointer points at groups (below); others EINVAL |
+| 4 | u16 size: the page's bytes, 1-65,535, or 0 for 65,536 |
+| 6 | u24 runs (or groups): the first one |
+| 9 | u8 0 |
+
+A run (`horizon.inc`: FRR_*):
+
+| Offset | Field |
+| --- | --- |
+| 0 | u16 offset: the run's first byte, from the page's start |
+| 2 | u8 colour |
+| 3 | u8 width: 0-255 bytes (0: nothing) |
+
+Run k fills `page + offset .. page + offset + width - 1` with its colour. A run is a line of
+bytes in memory, not a rectangle: for a framebuffer of stride S the offset of pixel (x, y)
+of the page is y * S + x, and a run that passes the end of a row goes on at the start of
+the next (the page has no rows of its own). Runs are drawn in order: a later run over an
+earlier one wins. Wider runs: several runs, or `sheet_draw`'s fills.
+
+**Groups** (FR_GROUPS; A = the number of groups). A group is a program's own array of runs
+drawn in one colour, in its own layout, so spans prepared once (a shape's) need no copying
+into run records each frame (`horizon.inc`: FRG_*):
+
+| Offset | Field |
+| --- | --- |
+| 0 | u24 its elements: the first one |
+| 3 | u8 the colour of all its runs |
+| 4 | u16 the elements, 0-1024 |
+| 6 | u8 stride: the bytes from one element to the next, 1-255 |
+| 7 | u8 fields: bits 0-3 the place of an element's u16 offset, bits 4-7 the place of its u8 width |
+
+Element k of a group is the run {u16 at elements + k * stride + (fields & 15), u8 at
+elements + k * stride + (fields >> 4)}. The elements must be readable by the caller (not in
+its window: EFAULT; the bank is checked once while the groups keep to it) and every element
+must lie below offset $FF00 of that bank (EINVAL). A group whose runs would make the call's
+more than 2688 ends the call there: A = the groups taken, the program sends the rest in
+another call. EINVAL with X = the group's index for a group past these rules or a run of it
+outside the page. (A run array of the 4-byte layout is the group {runs, colour, n, 4, $30};
+SkyRoads' 5-byte spans {u16 left, u16 right, u8 width} are {spans, colour, n, 5, $40} for
+the left side and $42 for the right.)
+
+**Rules.**
+- The page must lie wholly in the caller's own memory (the rule of every address Ali, Marga
+  or Lau use: its window, its code bank or banks it allocated, across consecutive banks it
+  owns; never the kernel's, a shared bank or another program's): EFAULT. A window's content
+  is not the program's memory: in a window, use `draw_list` / `sheet_draw` (or the CPU on an
+  image of its own). A program in full-screen mode passes its framebuffer (or a part of it:
+  one page of a framebuffer taller than the screen).
+- Every run must end inside the page (offset + width <= size). The first run that does not
+  stops the call: EINVAL, X = its index (a group's: the group's); the runs before it may be
+  drawn (Ali may have started on them), none after it.
+- The runs (groups) must be readable by the caller (EFAULT); they are read by the kernel, so
+  they may be changed as soon as the call returns. A group's elements are read while the call
+  runs too: change them after the call returns, as well.
+- A call takes at most 2688 runs (EINVAL above; groups: see above): more need more calls;
+  each one waits for the list before it (as every list call does).
+- REV $09 and later, the blitter not turned off (ws_config bit 0; the window system need not
+  run); else ENODEV and nothing is drawn: the program
+  fills the runs with the CPU (hgame's `hg_fill_runs` and `hg_fill_groups` do so by
+  themselves). `hcc --needs rev=9` (HZ_NEEDS revision $09) makes a program that has no CPU
+  path of its own refuse to start on an older board.
+
+**How it runs.** Like `draw_list`, the call returns while Ali still fills (A = count): leave
+the page alone until `list_wait`, `vsync` or the next list call, which wait for it; `list_wait`
+also makes the CPU see what Ali wrote. The program's running list is stopped (Ali's ABORT)
+when it ends (exit, kill, crash) or frees a bank. Inside the kernel:
+- At its first call the kernel takes one bank for its lists (kept until Horizon restarts:
+  ENOMEM when none is free) and writes the bytes of its 2688 Ali records that never change:
+  HEIGHT 1, OP FILL, FLAGS and RFLAGS 0 (about 25 ms, once).
+- Each run then costs two loads, one compare and five bytes written into its record (DST's
+  three, WIDTH's low byte, FG): about 138 CPU cycles (9.6 us) on the board, a third of it the
+  SDRAM's write stall (about 4.5 cycles a byte the CPU writes). Runs that start in the page's
+  last 255 bytes take a slower exact test. A group's element costs about 150 cycles, and the
+  group itself about 300 (its record read, its bank and layout compared with the group
+  before): groups pay when they are long (a shape of many spans), not for two runs each.
+- After every 64 runs the kernel serves the interrupts that are due (music timers, the
+  frame) and, when Ali is idle, gives it the records made so far; so Ali fills while the
+  kernel makes the rest. At the end it waits for the part Ali is running (short while the
+  runs are short: Ali fills a 23-pixel run in about 70 cycles, faster than the kernel makes
+  one) and starts the rest. The call is not preempted meanwhile (other tasks run after it):
+  2688 runs keep the CPU about 26 ms.
+- Ali's own cost for a record: about 40 cycles (reading its 24 bytes as three bursts, the
+  set-up) plus the 32-bit words it writes, about 4.6 cycles each in 320 x 180 (a run that
+  starts or ends inside a word writes the whole word with a mask); emu816 models this from
+  the RTL (`emu/blitter.c`, `emu/tests/asm/blitruns.s`).
+
+**What it costs**, against the other ways (emu816, board timing, 320 x 180, 2,000 runs at
+scattered places: `sdk/c/game/tests/gt_runbench.c`; CPU cycles a run until the program has
+the CPU again; see `sdk/docs/reference/performance.md`):
+
+| 23-pixel runs | cycles a run |
+| --- | --- |
+| a C loop through a `__far` pointer | 1,700 |
+| hgame's CPU path (assembly, 16-bit stores) | 610 |
+| SkyRoads' unrolled assembly (a jump into 127 16-bit stores; PORTING-NOTES) | about 260 |
+| one `sheet_draw` fill record each, 128 a call (`hg_fill`) | 3,400 |
+| one call a run (`hg_fill` + `hg_flush`) | 10,000 |
+| `fill_runs` (`hg_fill_runs`) | 140 (8- and 100-pixel runs: 138 and 175) |
+| `fill_runs` with groups of 20 (`hg_fill_groups`) | 170 |
+| `fill_runs` with groups of 2 | 300 |
+
+So the kernel's floor is about 140 cycles a run on this hardware: the program still pays for
+every run, about half of what a tight assembly fill of a 23-pixel run costs, and nothing for
+the pixels (a 100-pixel run costs the CPU 1,550 cycles in assembly, `fill_runs` 175).
+
+**For a later hardware revision** (not built): what is left per run is writing five bytes
+of Ali's 24-byte record. A *run list* mode in Ali would take the runs where the program
+keeps them: a command RUNS (BL_CTRL bit 6) with BL_DST = the page, BL_SRC_STRIDE = its
+size - 1 (a bound Ali enforces: a run past it ends the list with ABORTED and BL_COUNT
+telling which), BL_LIST = the first run (any address; or a group's elements with a stride
+and the two field places in BL_FLAGS), BL_COUNT their number and BL_FG the colour (groups);
+Ali reads 8-byte bursts (two 4-byte runs each) and fills each run at once, with no 24-byte
+record and no per-record set-up. The kernel would check the page and the runs' range once a
+call (the run list must be the caller's memory, as a sheet's rows are) and do
+nothing per run; a run would cost the program only what it takes to write it (about 25
+cycles for 4 bytes), or nothing for prepared groups, and Ali about 10 cycles plus its words.
+
 ## Window system
 
 The desktop. While it runs, the screen is the window system's (mode 0, 640x360, 8 bpp)
@@ -723,7 +856,7 @@ cannot be read back). The kernel keeps it current at every change. Little-endian
 | Offset | Size | Contents |
 | --- | --- | --- |
 | 0 | 4 | Magic `HZVS` |
-| 4 | 1 | Version (1) |
+| 4 | 1 | Version (2; 1 before 0.30) |
 | 5 | 1 | Header length (32): the palette starts there |
 | 6 | 2 | Change counter: + 1 at every change except pointer moves (read it again after the rest: a different value means a torn read) |
 | 8 | 1 | NV_CTRL as written (bit 0 ENABLE, 1-2 mode, 3 POINTER_EN; 0 while the classic machine is shown) |
@@ -738,8 +871,16 @@ cannot be read back). The kernel keeps it current at every change. Little-endian
 | 24 | 3 | PTR_C1, PTR_C2, PTR_C3 |
 | 27 | 1 | The shape set with ws_pointer (0 arrow, 1 drag, 2 crosshair, 3 column resize, 4 row resize) |
 | 28 | 2 | The mouse buttons now |
-| 30 | 2 | 0 |
+| 30 | 2 | (version 2) SYS_REV, the hardware revision (0 in version 1) |
 | 32 | 768 | The palette as written to Marga: red, green, blue of entries 0-255 (the text console sets entries 0-5 over the system palette, which the kernel loads at boot) |
+| 800 | 2 | (version 2) Not 0 while a full-screen program's screen is on Marga (its scroll set below is then what Marga uses, REV $0B+) |
+| 802 | 14 | (version 2) That program's scroll set as fs_scroll took it: u16 x, y, x2, y2, vheight, split line, u8 ctrl (FSC_*), u8 0 |
+
+(0.30) Version 2 adds the revision and the full-screen scroll set (the kernel keeps its own
+variables there, so the copy costs nothing), so a screenshot of a scrolled full-screen
+program needs no search of the kernel's code; the header is still 32 bytes and the palette
+still at 32, so a reader of version 1 works unchanged. `core/tools/a816_screen.py` uses the
+block's scroll set from version 2 on and the code search before it.
 
 ## Keyboard
 

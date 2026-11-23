@@ -19,6 +19,7 @@ Instructions (Ins.op):
   st  base idx off sz a        *(base + idx + off) = a
   call d tgt args              args: list of operands (pushed right to left)
   br  cc a b Lt Lf             compare and branch (cc: eq ne ult ule ugt uge slt sle sgt sge)
+  set d cc a b                 d(2) = 1 if a cc b else 0 (a, b 2 or 4 bytes; opt.setcc)
   jmp L
   ret a
   sw  a cases default          jump table / compare chain: cases = [(value, label)];

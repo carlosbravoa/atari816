@@ -147,11 +147,11 @@ o65 and ignores the rest, in a file of any size (before 0.28: files below 64 KB 
 program opens its own file with this path and reads the data from there.
 
 ### $36 sys_info (SYS_INFO)
-(Horizon 0.29.) Out: A = Horizon's version, major x 256 + minor ($001D for 0.29); X = the
+(Horizon 0.29.) Out: A = Horizon's version, major x 256 + minor ($001D for 0.29, $001E for 0.30); X = the
 hardware revision (SYS_REV: $0C the OPL2, $0B sprites and scrolling, $0A Lau, $08 the
 blitter, $07 POKEY's sound). No side effects. Before 0.29 the call does not exist (ENOSYS).
 ```asm
-        sys     SYS_INFO        ; A = $001D (0.29), X = $0C (REV $0C)
+        sys     SYS_INFO        ; A = $001E (0.30), X = $0C (REV $0C)
         bcs     @old            ; ENOSYS: Horizon before 0.29
         cpx     #$0A
         bcc     @nolau          ; REV below $0A: no Lau
@@ -175,6 +175,19 @@ counter. The board has no real-time clock.
         sys     SYS_UPTIME
         sec
         sbc     z:t0            ; A = elapsed ms (under 65 s)
+```
+
+### $A5 uptime_us (SYS_UPTIMEUS)
+(Horizon 0.30.) Out: A = microseconds since reset, bits 0-15; X = bits 16-31: the hardware
+microsecond counter itself (a program cannot read the I/O page), for timing code. `uptime`
+moves in 10 ms steps. Wraps after 71.6 minutes; a call costs about 40 us.
+```asm
+        sys     SYS_UPTIMEUS
+        sta     z:t0            ; start (low word: wraps every 65.5 ms)
+        ; ... work ...
+        sys     SYS_UPTIMEUS
+        sec
+        sbc     z:t0            ; A = elapsed microseconds (under 65 ms)
 ```
 
 For a steady rate in a window program use `SYS_WTIMER` (WE_TICK events) instead of

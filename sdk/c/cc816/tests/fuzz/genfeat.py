@@ -30,6 +30,9 @@ same type, no structure layout in the checksums.
     misc      enumerations with negative and large values, _Bool (++, --, compound
               assignments), the comma operator, ?: of mixed widths, statement expressions,
               compound literal arrays indexed
+    constop   / and % by constants (powers of two of both signs, others: the reciprocal
+              multiplies), shifts by every constant and by variables, compares with
+              constants (as values and in branches), every width, operands at the edges
     llong     long long (int64_t, uint64_t) mixed with every other width: + - * / % << >>
               & | ^ ~ unary -, compares, ?:, casts both ways, compound assignments, ++/--,
               shifts by variables, globals with initialisers, arrays, a structure member,
@@ -47,7 +50,7 @@ same type, no structure layout in the checksums.
 from genfuzz import TYPES, OPS, CMPS, Gen
 
 FEATURES = ['basic', 'struct', 'bitfield', 'fptr', 'vararg', 'far', 'switch', 'spill', 'ptr',
-            'globals', 'init', 'union', 'goto', 'misc', 'llong']
+            'globals', 'init', 'union', 'goto', 'misc', 'llong', 'constop']
 EXTRA_FEATURES = ['float']          # chosen by name only (all keeps its old programs)
 AVOID_KNOWN = False     # True: leave out the shapes of the compiler bugs in regress/ (while they are open)
 LOWOPS = ['add', 'sub', 'mul', 'and', 'or', 'xor']      # low bits independent of the width
@@ -1308,6 +1311,83 @@ class FGen(Gen):
         return self.tail(L, vars_)
 
     # ------------------------------------------------------------------ misc
+    def feat_constop(self, idx):
+        """division and remainder by constants (powers of two of both signs, the
+        reciprocal multiplies' divisors, the edges), shifts by every constant and by
+        variables, compares with constants as values and in branches, of every width;
+        the operands at the edges (MIN, MAX, -1, 0, powers of two +- 1)"""
+        r = self.r
+        P = f'F{idx}_'
+        L = self.head(idx)
+        vars_ = []
+        ins = []
+        for k in range(r.randint(4, 7)):
+            t = r.choice(list(TYPES))
+            b = nbits(t)
+            lo, hi = trange(t)
+            v = r.choice([lo, hi, -1, 0, 1, lo + 1, hi - 1, (1 << r.randrange(b - 1)),
+                          -(1 << r.randrange(b - 1)), (1 << r.randrange(b - 1)) - 1,
+                          self.rval(t), self.rval(t)])
+            vars_.append((f'v{k}', t))
+            ins.append((t, v))
+        # (the values from volatile globals: the compiler cannot fold the operations)
+        for k, (t, v) in enumerate(ins):
+            self.G.append(f'static volatile {tn(t)} {P}in{k} = {lit(t, v)};')
+            L.append(f'    {tn(t)} v{k} = {P}in{k};')
+        L.append('    H = 0;')
+
+        def divisor(t):
+            b = nbits(t)
+            c = r.random()
+            if c < 0.35:
+                k = 1 << r.randrange(1, b - 1)
+                if issigned(t) and r.random() < 0.4:
+                    k = -k
+            elif c < 0.8:
+                k = r.choice([3, 5, 6, 7, 9, 10, 11, 12, 13, 25, 46, 60, 100, 127, 641, 1000,
+                              5888, 10000, 32767, 40000, 65535, 3, 10, 5888])
+                if issigned(t) and r.random() < 0.25:
+                    k = -k
+            else:
+                k = self.rval(t)
+            k = wrap(t, k)
+            if k == 0 or (issigned(t) and k == -1):
+                k = 7
+            return lit(t, k)
+        for _ in range(r.randint(8, 16)):
+            n, t = r.choice(vars_)
+            x, tx = r.choice(vars_)
+            c = r.random()
+            ct = tn(tx)
+            if c < 0.3:
+                op = r.choice(['/', '%'])
+                e = f'({ct})(({ct}){x} {op} ({ct}){divisor(tx)})'
+            elif c < 0.5:
+                k = r.randrange(nbits(tx))
+                op = r.choice(['<<', '>>'])
+                e = f'({ct})(({ct}){x} {op} {k})'
+            elif c < 0.6:
+                m = nbits(tx) - 1
+                n2, _ = r.choice(vars_)
+                op = r.choice(['<<', '>>'])
+                e = f'({ct})(({ct}){x} {op} ((uint8_t){n2} & {m}))'
+            elif c < 0.8:
+                op = r.choice(list(CMPS.values()))
+                lo, hi = trange(tx)
+                kv = r.choice([0, 1, -1, lo, hi, lo + 1, hi - 1, self.rval(tx)])
+                k = lit(tx, kv)
+                e = f'(int16_t)(({ct}){x} {op} ({ct}){k})' if r.random() < 0.7 else \
+                    f'(int16_t)(({ct}){k} {op} ({ct}){x})'
+            else:
+                op = r.choice(list(CMPS.values()))
+                x2, t2 = r.choice(vars_)
+                y = r.choice([x2, lit(tx, self.rval(tx))])
+                L.append(f'    if (({ct}){x} {op} ({ct}){y}) mix(1); else mix(2);')
+                continue
+            L.append(f'    {n} = ({tn(t)}){e};')
+            L.append(f'    mix((uint32_t){n});')
+        return self.tail(L, vars_)
+
     def feat_misc(self, idx):
         r = self.r
         P = f'F{idx}_'

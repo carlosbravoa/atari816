@@ -12,7 +12,7 @@ function that can move placed in another bank, in turn in three banks (--main-ro
             file says the messages it must give; no emulator)
   regress   tests/regress/*.c: one small program per compiler bug found (each returns 0
             when the bug is not there), plus programs for the parts the random programs
-            do not reach
+            do not reach; those that say LEVELS: 0 1 2 also at -O0 and -O1
   lang      tests/lang/*.c: a program for each part of C the front end has (K&R
             definitions, designators, compound literals, bit-fields, switches, goto,
             wide strings, the preprocessor, ...), each returns 0
@@ -43,8 +43,9 @@ import prog  # noqa: E402
 CONFORM = os.path.join(HERE, 'conform', 'conform.py')
 
 
-def conform(files, out, spt=1.0, slow=()):
-    r = subprocess.run([sys.executable, CONFORM, '--out', out, '--seconds-per-test', str(spt)]
+def conform(files, out, spt=1.0, slow=(), level=2):
+    r = subprocess.run([sys.executable, CONFORM, '--out', out, '--seconds-per-test', str(spt),
+                        f'-O{level}']
                        + [x for s in slow for x in ('--slow', s)] + files,
                        capture_output=True, text=True)
     print(r.stdout.strip())
@@ -118,6 +119,14 @@ def main():
         print(f'== {part}')
         files = sorted(glob.glob(os.path.join(HERE, part, '*.c')))
         res = conform(files, os.path.join(prog.BUILD, part))
+        bad += sum(1 for r in res.values() if r['status'] != 'pass')
+    # the programs that say "LEVELS: 0 1 2" (code whose shape differs between the levels:
+    # division by constants, shifts, compares) at -O0 and -O1 too
+    lv = [f for f in sorted(glob.glob(os.path.join(HERE, 'regress', '*.c')))
+          if 'LEVELS: 0 1 2' in open(f, encoding='latin-1').read()]
+    for level in (0, 1):
+        print(f'== regress -O{level} (LEVELS)')
+        res = conform(lv, os.path.join(prog.BUILD, f'regress-O{level}'), level=level)
         bad += sum(1 for r in res.values() if r['status'] != 'pass')
     for seed in seeds:
         n = count or 200 * seed

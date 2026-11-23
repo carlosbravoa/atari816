@@ -1,0 +1,5 @@
+rtest 1: uptime_us
+  a sleep of 40 ms (10 ms ticks) later: 29,000 to 50,000 us more: ok
+rtest 2: fill_runs refused
+  one run: ENODEV (before REV $09, or no blitter): the caller fills by itself
+rtest: done

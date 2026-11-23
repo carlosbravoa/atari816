@@ -156,6 +156,69 @@ void hg_origin(int x, int y);
 /* draw the records so far now (and wait: hg_flush(1)) */
 void hg_flush(int wait);
 
+/* ================================================================ runs (Horizon 0.30) */
+
+/* Many horizontal runs, each of one colour, filled by the blitter in one system call
+ * (fill_runs; REV $09: on older boards, or with the blitter off, the CPU fills them here,
+ * the same pixels). For a road made of spans, a polygon's scan lines, a voxel renderer: a
+ * run costs the kernel about 8 us, where one hg_fill costs about 80 us and the CPU 15-60 us
+ * (sdk/docs/reference/performance.md). Full screen only (a window's content is not the
+ * program's memory). A run is 4 bytes: fill an array of them, then send it. */
+typedef struct hg_run {
+    unsigned ofs;               /* its first pixel: y * hg_fb_stride + x from the page's start */
+    unsigned char color;
+    unsigned char w;            /* 0-255 pixels (bytes: two pixels each in HG_640X360X4); a
+                                   run past the end of a row goes on in the next one */
+} hg_run;
+#define HG_RUN(r, o, width, col) \
+    ((r)->ofs = (o), (r)->color = (unsigned char)(col), (r)->w = (unsigned char)(width))
+/* n runs (any number: sent 2,688 a call) into the page from the screen's row y (hg_origin and
+ * HG_DOUBLE's hidden page are added, as for every drawing call) to the framebuffer's end or
+ * 65,536 bytes, whichever is less. In order with the frame's other drawing (the records
+ * queued before are sent first); returns while the blitter fills: the runs may be changed
+ * at once, the framebuffer read or drawn by the CPU after hg_flush(1) (hg_peek and hg_pixel
+ * wait by themselves). 0, or -1: a run past the page (its index printed; the runs before it
+ * may be drawn), no full screen */
+int hg_fill_runs(int y, const hg_run __far *runs, unsigned n);
+/* the same into any memory of the program's own: the page's 24-bit address and its size in
+ * bytes (0: 65,536) */
+int hg_fill_runs_at(unsigned long page, unsigned size, const hg_run __far *runs, unsigned n);
+/* Groups: a program's own arrays of spans, each drawn in one colour, in any layout (no
+ * copying into hg_run records: a shape's spans prepared once and drawn every frame). A group
+ * is n elements of `stride` bytes from elems, each holding a run's u16 offset at byte ofs_at
+ * and its u8 width at byte w_at (0-15). The elements lie in one bank, below its offset
+ * $FF00; at most 1024 a group. hg_fill_groups sends any number of groups (2,688 runs a call). */
+typedef struct hg_rungroup {
+    unsigned elems_ofs;         /* the first element: its offset and bank (HG_RUNGROUP) */
+    unsigned char elems_bank;
+    unsigned char color;
+    unsigned n;                 /* elements, 0-1024 */
+    unsigned char stride;       /* 1-255 */
+    unsigned char fields;       /* ofs_at | w_at << 4 */
+} hg_rungroup;
+#define HG_RUNGROUP(g, elems, count, col, strd, ofs_at, w_at) \
+    ((g)->elems_ofs = (unsigned)(unsigned long)(elems), \
+     (g)->elems_bank = (unsigned char)((unsigned long)(elems) >> 16), \
+     (g)->color = (unsigned char)(col), (g)->n = (count), (g)->stride = (unsigned char)(strd), \
+     (g)->fields = (unsigned char)((ofs_at) | (w_at) << 4))
+int hg_fill_groups(int y, const hg_rungroup __far *g, unsigned n);
+int hg_fill_groups_at(unsigned long page, unsigned size, const hg_rungroup __far *g, unsigned n);
+
+/* Page flipping without waiting for the blank, in a framebuffer taller than the screen
+ * (hg_screen_fb; not with HG_DOUBLE; REV $0B): n pages (2-4), page k at framebuffer row
+ * rows[k]. hg_flip(k, dy): page k is shown from its row + dy from the next vertical blank on
+ * (the drawing sent so far is waited for first); it returns at once. hg_flip_free(): a page
+ * neither on the screen nor waiting to be (a page that waited and was replaced before a blank
+ * is free again): with three pages, drawing never waits for the blank. -1 / 0xFFFF: refused */
+int hg_flip_pages(unsigned n, const unsigned *rows);
+int hg_flip(unsigned page, int dy);
+unsigned hg_flip_free(void);
+extern unsigned hg_flip_shown;  /* the page on the screen (after a blank passed) */
+
+/* microseconds since the machine started (Horizon 0.30: uptime_us; wraps after 71 minutes;
+ * 0 before 0.30). A call costs about 40 us. hg_ms has 10 ms steps */
+unsigned long hg_us(void);
+
 /* ================================================================ images */
 
 /* An image: n frames of w x h pixels (8 bpp: a byte each), frames one under the other in

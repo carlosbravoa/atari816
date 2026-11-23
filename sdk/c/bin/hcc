@@ -55,6 +55,11 @@ Options:
                     the profiler, prof816.py, reads it) and print the sizes
   --debug           paint the stacks; at exit the program prints how much of both
                     stacks it used, and the most of the heap in use at once
+  --no-stack-check  no software-stack check at the entry of the program's functions
+                    (by default every function with a frame there checks that it fits,
+                    10 cycles, and stops the program with its name when it does not:
+                    docs/c/reference.md, "The heap and the stacks"); the library keeps
+                    its checks
   -l FILE           link an extra object or library (.o, .lib)
   -lm               accepted and ignored (math.h's functions are in the C library)
   -v                show the commands
@@ -169,6 +174,8 @@ def main(argv):
             o["want_map"] = True
         elif a == "--debug":
             o["debug"] = True
+        elif a == "--no-stack-check":
+            o["ccopts"]["sscheck"] = 0
         elif a == "-l":
             o["libs"].append(val("-l"))
         elif a == "--game":
@@ -318,6 +325,8 @@ def build(o):
         stack = hzc816.SSTACK
     if not 512 <= stack <= 0x8000 or stack & 1:
         die("--stack: the software stack is an even number of bytes, 512 to 32768")
+    # cc816: the software stack's size (a frame bigger than it is an error)
+    o["ccopts"]["sstack"] = stack
     opt = o["opt"] or "2"
     incs = o["incs"]
     code = o["code"]

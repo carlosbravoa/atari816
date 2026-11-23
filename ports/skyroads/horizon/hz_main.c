@@ -6,7 +6,8 @@
  * 6003 frames), then the last tick's scene is drawn into a free page and shown.
  *
  * /BENCH: the phase-1 experiment: the attract demo, each frame's simulation and drawing
- * repeated 10 times and timed (hz_uptime, 10 ms steps: 1 ms resolution), a line a frame. */
+ * repeated 10 times and timed (hz_uptime, 10 ms steps: 1 ms resolution), a line a frame.
+ * /NORUNS: the road's spans by the CPU even where Horizon has fill_runs (0.30). */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -246,6 +247,8 @@ int main(int argc, char **argv)
     for (i = 1; i < argc; ++i)
         if (strcmp(argv[i], "/NOFAST") == 0)
             hzv_nofast = true;
+        else if (strcmp(argv[i], "/NORUNS") == 0)
+            hzv_noruns = true;
         else if (strncmp(argv[i], "/DUMP:", 6) == 0)
             dump_frame = (unsigned)atoi(argv[i] + 6);
     if (hz_prog_dir(root, sizeof root) < 0)

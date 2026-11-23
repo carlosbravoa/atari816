@@ -1,4 +1,4 @@
-# Syscalls: frame sync, palette entries, sprites, full screen, draw lists, sheets
+# Syscalls: frame sync, palette entries, sprites, full screen, draw lists, sheets, fill runs
 
 Horizon 0.18, "the games round": the calls a game needs to use Marga (the video chip) and
 Ali (the blitter) the way they were built for. A complete program that uses all of them:
@@ -681,3 +681,51 @@ recs:   .byte   0, SH_FILL | SH_VBL, 0, 0       ; a fill, in the vertical blank
         .byte   0, 0, 231, 0                    ; (sheet, op set above) key colour 231
         .word   0, 2 * 16, 16, 16, 24, 8        ; tile 2 at (24, 8)
 ```
+
+## Fill runs (Horizon 0.30)
+
+Many horizontal runs, each of one colour, filled by Ali in one call: a road's spans, a
+polygon's scan lines. The page is checked once and each run with one compare: about 140 CPU
+cycles a run whatever its width (an `SH_FILL` record costs 1,100; filling 23 pixels with
+the CPU 260-600). Full screen or any memory of your own; not a window's content. Details
+and the measurements: horizon/ABI.md, "Fill runs"; performance.md, "Many small fills".
+
+### $A4 fill_runs (SYS_FILLRUNS)
+In: A = the count (0-2688), X, Y = a 10-byte block {u24 the page (offset 0), u8 flags (0, or
+`FR_GROUPS`), u16 its size (0 = 65,536), u24 the runs, u8 0} (`FRB_*`). Out: A = the count;
+the call returns while Ali fills (`list_wait`, `vsync` or the next list call wait for it; the
+runs may be changed at once). Run (`FRR_*`, 4 bytes): u16 offset (y * stride + x from the
+page's start; a run past a row's end goes on in the next), u8 colour, u8 width 0-255. Every
+run must end inside the page: EINVAL with X = the first that does not (the runs before it
+may be drawn). EFAULT: the page not wholly your memory, the block or the runs not readable.
+ENOMEM: no bank for the kernel's list (taken at the first call). ENODEV: before REV $09 or
+with the blitter off: fill them with the CPU.
+
+With `FR_GROUPS` A counts groups (`FRG_*`, 8 bytes): {u24 elements, u8 colour, u16 count
+0-1024, u8 stride 1-255, u8 fields: bits 0-3 the place of an element's u16 offset, 4-7 of
+its u8 width}: your own arrays of spans, in any layout, read where they are (below offset
+$FF00 of their bank, not in the window), each group in one colour. A group that would pass
+2688 runs in all ends the call: A = the groups taken, send the rest again.
+
+```asm
+        lda     #3              ; three runs into the full-screen framebuffer (320 bytes a row)
+        ptr     frb
+        sys     SYS_FILLRUNS    ; -> A = 3; Ali works on
+        rts
+frb:    .faraddr $040000        ; the page: the framebuffer's first bank, row 0 (set at run time)
+        .byte   0
+        .word   320 * 180       ; its size
+        .faraddr runs
+        .byte   0
+runs:   .word   10 * 320 + 20   ; row 10, x 20: 100 pixels of colour 7
+        .byte   7, 100
+        .word   11 * 320 + 20
+        .byte   7, 100
+        .word   12 * 320 + 300  ; row 12, x 300: 40 pixels, on into row 13
+        .byte   9, 40
+```
+
+### $A5 uptime_us (SYS_UPTIMEUS)
+Out: A = microseconds since reset, bits 0-15, X = bits 16-31 (the system block's UPTIME,
+which a program cannot read itself). Wraps after 71.6 minutes. For timing code: `uptime`
+($04) has 10 ms steps.

@@ -150,9 +150,18 @@ Rules:
   3840 bytes used`, `heap: 1028 of 50395 bytes used at most ...`.
 - At any time: `hz_heap_free()`, `hz_heap_largest()`, `hz_heap_peak()`,
   `hz_stack_free()`, `hz_sstack_free()`, `hz_stack_check()` (-1 if a guard was written).
-- An overflow is reported only at exit and only if the 256-byte guard was written:
-  `stack overflow: the guard zone at window address N ... was written`. Fix: more
-  `--stack`, or move arrays out of locals.
+- **Software stack overflow** is caught at the entry of the function whose frame does not
+  fit, before the heap (just under the stack) is touched: `software stack overflow:
+  build_atlas needs a frame of 3700 bytes; 396 of the software stack's 4096 bytes are
+  free (...)`, exit code 3. Every function with a frame is checked (9 cycles a call).
+  Fix: more `--stack`, or make the big locals `static`, or fill big structures through a
+  pointer instead of returning them by value (a returned structure is on the stack twice:
+  the callee's local and the caller's copy).
+- The compile warns at a frame over 1 KB (`[-Wframe-larger-than]`: `the function 'f'
+  needs a software-stack frame of 7,400 bytes (the software stack is 8,192 bytes ...)`) and
+  refuses one bigger than the whole stack (`--stack N` as given to hcc). Read these.
+- The hardware stack's overflow is reported only at exit and only if its 256-byte guard
+  was written: `stack overflow: the guard zone at window address N ... was written`.
 - `--stack 100`: `hcc: --stack: the software stack is an even number of bytes, 512 to 32768`.
 
 ## Limits
@@ -302,6 +311,7 @@ warn.c:10:9: warning: unused variable 'unused' [-Wunused-variable]
 | `implicit-function-declaration` | missing header; the result is taken as a 16-bit int (a `long` or pointer result breaks) |
 | `int-conversion`, `incompatible-pointer-types` | pointer/int mixups; `long *` vs `int *` are different sizes here |
 | `return-type`, `shift-count-overflow`, `div-by-zero`, `excess-initializers` | real bugs |
+| `frame-larger-than` | a big array or structure (or a structure returned by value) on the software stack: near its size, or over it (`--stack N`), it overflows; make it `static` or fill it through a pointer |
 | `tautological-compare` (-Wall) | `u >= 0`, `x <= 32767` with an int: dead tests |
 | `unused-variable`, `unused-label` (-Wall), `discarded-qualifiers`, `multichar`, `attributes`, `cpp`, `extern-initializer` | cleanup |
 
@@ -325,6 +335,7 @@ Build a port once with `-Wall` and read every warning.
 | `--needs LIST` | start-up check: `horizon=0.29,rev=11,lau,opl2,sprites,blitter,joystick,mem=1024K` (references/packaging.md) |
 | `--map` | write NAME.map and NAME.lbl (for `sdk/tools/prof816.py`) and print the sizes |
 | `--debug` | report both stacks' and the heap's use at exit |
+| `--no-stack-check` | drop the software stack's entry check from the program's functions (1-3 % less code; an overflow then corrupts the heap silently) |
 | `-l FILE` | link an extra `.o` or `.lib` |
 | `-lm` | accepted, ignored (math is in the C library) |
 | `-v`, `--keep DIR`, `--version`, `-h` | show commands; keep intermediate links; version; help |

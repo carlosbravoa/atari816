@@ -53,7 +53,7 @@ SYS_SINGLE    = $34   ; one instance of this program only: C set, A = ERUNNING, 
                       ;   already (its windows were raised: exit); else later spawns of it raise this one
 SYS_TPATH     = $35   ; (0.28) X, Y = buffer, A = its size -> A = length: the absolute path of the
                       ;   caller's program file (EINVAL if the buffer is too small; 128 bytes always do)
-SYS_INFO      = $36   ; (0.29) -> A = Horizon's version (major << 8 | minor: $001D = 0.29), X = the
+SYS_INFO      = $36   ; (0.29) -> A = Horizon's version (major << 8 | minor: $001D = 0.29, $001E = 0.30), X = the
                       ;   hardware revision (SYS_REV). ENOSYS before 0.29. HZ_NEEDS (needs.inc) uses it
 TI_WINDOWS = 1        ; task_info byte 13: it has windows
 TI_MODAL   = 2        ;   a WF_MODAL window (a dialog, an alert) is open
@@ -200,6 +200,8 @@ SYS_WFRONT    = $A0   ; (BASIC 2.0) A = own window: back if minimized, raised, t
 SYS_SHEETNEW  = $A1   ; (0.19) X, Y = {u24 address, u8 0, u16 stride, u16 width, u16 height} (SHN_*): art in own memory -> A = the sheet (1-32)
 SYS_SHEETFREE = $A2   ; (0.19) A = sheet ($FFFF: all of the caller's)
 SYS_SHEETDRAW = $A3   ; (0.19) A = window | count << 8 (1-128), X, Y = count 16-byte records (SD_*) -> A = records drawn
+SYS_FILLRUNS  = $A4   ; (0.30) A = count 0-2688, X, Y = {u24 page, u8 flags, u16 size, u24 runs, u8 0} (FRB_*): runs {u16 offset, u8 colour, u8 width} (FRR_*; FR_GROUPS: groups, FRG_*) filled by Ali -> A = count (REV $09)
+SYS_UPTIMEUS  = $A5   ; (0.30) -> A = microseconds since reset, bits 0-15, X = bits 16-31
 SPR_EN    = $01       ; sprite ctrl (Marga's record CTRL): shown
 SPR_HFLIP = $02
 SPR_VFLIP = $04
@@ -255,6 +257,20 @@ SD_W      = 8         ;   u16 w, h
 SD_H      = 10
 SD_X      = 12        ;   i16 x, y: the destination (the window's content, or its full-screen framebuffer)
 SD_Y      = 14
+FRB_PAGE  = 0         ; (0.30) fill_runs block offsets (10 bytes): u24 the page (offset 0), u8 flags (FR_GROUPS)
+FRB_SIZE  = 4         ;   u16 its bytes (0: 65,536): every run must end inside it
+FRB_RUNS  = 6         ;   u24 the runs, u8 0
+FRR_OFS   = 0         ; (0.30) fill_runs run offsets (4 bytes): u16 the offset in the page
+FRR_C     = 2         ;   u8 the colour
+FRR_W     = 3         ;   u8 the width 0-255
+FR_MAX    = 2688      ; (0.30) fill_runs: the most runs a call
+FR_GROUPS = 1         ; (0.30) fill_runs' flags (block byte 3): the runs pointer points at groups
+FRG_ELEMS = 0         ; (0.30) a group (8 bytes): u24 its elements (below $FF00 of their bank)
+FRG_C     = 3         ;   u8 the colour of all its runs
+FRG_N     = 4         ;   u16 the elements (runs), 0-1024
+FRG_STRIDE = 6        ;   u8 the bytes from one element to the next (1-255)
+FRG_FIELDS = 7        ;   u8 bits 0-3: the place of an element's u16 offset, 4-7: of its u8 width
+FR_GN     = 1024      ; (0.30) the most elements a group
 POP_HERE = $8000      ; win_popup x: at the pointer
 POP_KEY  = 1          ; win_popup flags
 ; menus (win_menu): an item may start with a state byte MS_STATE | bits (MS_CHECK: a check mark,

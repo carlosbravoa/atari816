@@ -118,7 +118,7 @@ Messages (run on the emulator):
 
 ```
 NOPL needs the OPL2 sound chip (hardware revision $0C).          # --needs opl2, --rev 11
-CNEEDV needs Horizon 0.99 or later (this is 0.29).               # sdk/c/tests/run.py
+CNEEDV needs Horizon 0.99 or later (this is 0.30).               # sdk/c/tests/run.py
 ASMAPP needs Lau, the sample player (hardware revision $0A or later).
 MEM needs 60000 KB of free memory (5248 KB free).                # --needs mem=60000K
 ```

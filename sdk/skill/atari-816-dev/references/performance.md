@@ -72,9 +72,13 @@ with the empty loop's 3.5 us taken out; the loop compiled with -O2):
 | --- | --- | --- |
 | `i << 3`, `i * 10` (constant) | 1.6 | multiply by a constant is inline shifts and adds |
 | `i * v` (16-bit, variable) | 14.6 | call `__mul16` (~330 cycles) |
-| `i / v` (16-bit, variable or a non-power-of-2 constant) | 73 | call `__udiv16` (~1,000 cycles); `/ 16` is a shift |
+| `i / v` (16-bit, variable) | 73 | call `__udiv16` (~1,000 cycles) |
+| `i / 10`, `i % 10` (16-bit, any constant) | 9, 13 | inline: a multiply by the reciprocal, exact for every value (cc816 checks each divisor); signed too; was a call (51 us) |
+| `i / 16`, `i % 16` (power of two) | 1-2 | shifts and masks, signed too (the bias for negative values) |
 | `long * long` | 66 | call `__mul32` |
-| `long / long` | 62 | call `__udiv32` |
+| `long / long`, `long / 10` | 62 | call `__udiv32` (a non-power-of-2 constant too) |
+| `long / 512`, `long % 16` (power of two) | 6-10 | inline shifts and masks, signed too; was a call (100 us) |
+| `1UL << n`, `x >> n` (`long`, variable n) | 15-26 | `__shl32` etc.: a word, then a byte, then bits (`1UL << 13`: 26 us, was 47); a constant count is inline (word and byte moves: `x * 128` about 3 us) |
 | `float` multiply + add | 335 | soft float (`__fmuli`, `__faddrx`, `__fpack`) |
 | a byte read in a loop, near array | 2.7 | `s += a[i]` |
 | the same through a `__far` pointer | 4.7 | about 1.8 x near |
@@ -87,8 +91,10 @@ sieve 809, sum16 296, mul32 1,277, fib22 388, strs 994, structs 670.
 Rules that follow:
 - `unsigned int` (16 bits) for counters, indexes, coordinates. Signed division and right
   shifts of `int` need extra code.
-- No division in the inner loop: divide by a power of two (a shift) or keep a running
-  counter. Multiply by constants freely.
+- No division by a variable in the inner loop. A 16-bit division or remainder by a
+  constant is inline and cheap (`/ 10`: 9 us); by a power of two it is shifts and masks,
+  for `long` too. A `long` divided by another constant is still a call (100 us): keep a
+  running counter, or divide a 16-bit value. Multiply by constants freely.
 - No `long`, `long long` or `float` per pixel or per object per frame. Use 8.8 fixed point
   in an `int` (`HG_FIX8`) or 16.16 in a `long` only where needed (references/hgame.md).
 - Hot data near (globals, statics, malloc: the main bank). `__far` data is for bulk
@@ -143,6 +149,13 @@ SDK/docs/reference/performance.md (Horizon's own `gtest m`, 100 keyed 16 x 16 bl
 record); about 0.27 ms a call. A sheet record cut at an edge, a fill, or one into a covered
 window takes the full path (about 1,100 cycles).
 
+Many short horizontal runs (Horizon 0.30, `sdk/c/game/tests/gt_runbench.c`, 2,000 runs of
+23 pixels, CPU cycles a run): a C loop 1,700; hgame's assembly CPU path 610; a tight unrolled
+assembly fill about 260; `hg_fill` records 3,400; **`hg_fill_runs` 140** (8 pixels 138, 100
+pixels 175: the pixels cost the CPU nothing); `hg_fill_groups` (the game's own span arrays)
+about 150 a run plus 300 a group (groups of 20: 170 a run; of 2: 300). The CPU still pays for every run: batching wins against C
+and against wide runs; against a tight assembly fill of very short runs it gains about half.
+
 What is fast, in order:
 1. **Hardware sprites**: no CPU and no blits; one `spr_set`/`spr_move` for all of them a
    frame (each syscall about 0.1 ms on the board). hgame sends them in one call.
@@ -190,8 +203,12 @@ From SDK/docs/reference/performance.md:
 1. `hg_stats` / `hg_missed`: is it the CPU (high ms a frame) or waiting?
 2. Profile the slow stretch (`--prof-from`/`--prof-to`), top 15 rows.
 3. Big `syscall $9C`/`$A3` rows (draw_list, sheet_draw): too many records: draw less, draw
-   only what changed, use sprites or scrolling.
-4. `__mul16`, `__udiv16`, `__mul32`, `__udiv32`, `__f*` rows: arithmetic in the hot loop
-   (see the rules above).
-5. `___hz_vformat`: printf / `hg_textf` every frame.
-6. CPU drawing rows (`hg_pixel`, line routines): use fills, images or sprites.
+   only what changed, use sprites or scrolling; many small fills: one `hg_fill_runs`
+   (`syscall $A4`, about 140 cycles a run).
+4. `__mul16`, `__udiv16`, `__mul32`, `__udiv32`, `__sdiv32`, `__shl32`, `__f*` rows:
+   arithmetic in the hot loop (see the rules above).
+5. `___hz_sovf` in a crash or a console line `software stack overflow: F needs a frame of
+   N bytes`: F's locals (or a structure returned by value) do not fit the software stack:
+   `--stack N`, `static`, or fill the structure through a pointer.
+6. `___hz_vformat`: printf / `hg_textf` every frame.
+7. CPU drawing rows (`hg_pixel`, line routines): use fills, images or sprites.

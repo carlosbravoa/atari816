@@ -271,6 +271,13 @@ Every function is described in `hgame.h`. In short:
 | `hg_origin(x, y)` | added to every drawing call's coordinates (`hg_origin(0, hg_panel_y)`: the panel) |
 | `hg_flush(wait)` | send the records now (and wait for them) |
 
+| Runs and page flipping (Horizon 0.30) | |
+| --- | --- |
+| `hg_fill_runs(y, runs, n)`, `hg_fill_runs_at(page, size, runs, n)` | many horizontal runs, each of one colour (`hg_run` {offset, colour, width 0-255}, `HG_RUN(r, ofs, w, c)`), filled by the blitter in one system call (`fill_runs`): about 140 CPU cycles a run whatever its width, against 600 and more for the CPU and 3,400 for an `hg_fill` record. The page: the framebuffer from screen row y (to its end or 64 KB), or any memory of the game's own; offsets are y * `hg_fb_stride` + x from its start. Full screen only. Before REV $09 or with the blitter off hgame fills them with the CPU (the same pixels) |
+| `hg_fill_groups(y, g, n)`, `hg_fill_groups_at(...)`, `HG_RUNGROUP(g, elems, n, colour, stride, ofs_at, w_at)` | groups: the game's own arrays of spans in any layout (n elements of stride bytes, each with a u16 offset at byte ofs_at and a u8 width at byte w_at), each group in one colour, read where they are (a shape's spans prepared once, drawn each frame); about 300 cycles a group and 150 an element: worth it for long groups |
+| `hg_flip_pages(n, rows)`, `hg_flip(page, dy)`, `hg_flip_free()`, `hg_flip_shown` | page flipping without waiting for the blank, in a framebuffer taller than the screen (`hg_screen_fb`, REV $0B): n pages (2-4) at framebuffer rows rows[k]; `hg_flip` waits for the drawing sent, shows the page from the next blank on and returns at once; with three pages the game never waits for the blank (ports/skyroads) |
+| `hg_us()` | microseconds since the machine started (`uptime_us`; `hg_ms` has 10 ms steps) |
+
 | Images | |
 | --- | --- |
 | `hg_image_from(pixels, w, h, n, key)`, `hg_image_load(path)`, `hg_image_new(w, h, n)`, `hg_image_free` | from a C array (copied into far memory), from an `.HGI` file, blank |
@@ -391,6 +398,8 @@ then the kernel's when the frame is sent; Ali's drawing runs alongside the CPU):
 | `hz_spr_move` of one sprite | | 98 us (16 of them: 1.6 ms; hgame sends them in one call) |
 | `hg_image_draw` (the CPU), a 16 x 16 tile; `hg_map_image` of 20 x 12 tiles | 650 us; 112 ms | |
 | Ali (the blitter): clearing 320 x 180; copying a 320 x 192 image | | 5.6 ms; 7.8 ms (while the CPU goes on) |
+| (0.30) `hg_fill_runs`: a run of any width up to 255 (2,000 a call) | | 9.7 us (140 cycles); a call about 0.35 ms |
+| (0.30) the same 23-pixel runs filled by the CPU: hgame's assembly, a C loop | 42 us, 119 us | |
 
 **What a frame can afford** (16.7 ms at 60 frames a second, leaving the game's own logic
 some room):
@@ -437,6 +446,10 @@ the CPU busier (29.8 % against 23.4 % over the test); its program is 28,935 byte
 **Advice.**
 
 - Use sprites for what moves and a scrolling map for the world: neither costs blits.
+- (0.30) Many small fills (spans, scan lines, a road): `hg_fill_runs` or `hg_fill_groups`,
+  one call for all of them, not `hg_fill` (a run costs the kernel 140 cycles, an `hg_fill`
+  record 3,400 with the library's part). The CPU still pays for every run: for runs of a few
+  pixels a tight assembly loop costs about as much, for wide ones far more.
 - Make every image with hgame (a sheet each, while the kernel has sheets: 32 in all, shared
   by all programs, 4,096 rows together); a blit from a sheet costs the kernel a third of a
   `draw_list` record.
@@ -555,10 +568,13 @@ make -C sdk/c/game test
 
 runs `sdk/c/game/tests/run.py` in both code models (`small`, `large`), then the scripted
 tests of Glimmer, Catch, the tutorial and Gem Run in C. run.py
-builds nine test programs (`tests/gt_*.c`: drawing, the screen modes and the pause,
+builds eleven test programs (`tests/gt_*.c`: drawing, the screen modes and the pause,
 a framebuffer taller than the screen with a split view, the key queue and the 16-bit voices,
 a window with bobs and its menu, hardware sprites, scrolling maps, input, sound and music,
-the helpers and `.HGI` files with bad arguments) and runs each in the emulator with a script;
+the helpers and `.HGI` files with bad arguments, (0.30) runs and groups by the blitter
+against the CPU's, page flipping with three pages and `hg_us`, and `gt_runbench`, the
+measurement of a run by every way of filling it, its table in console.txt) and runs each in
+the emulator with a script;
 it checks the program's own PASS / FAIL lines (each reads the framebuffer back), the
 screenshots against `tests/ref/` (the same pictures for both code models: every shot is
 taken while nothing moves, or of what the program draws for a given frame), the POKEY and Lau writes

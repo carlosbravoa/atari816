@@ -46,7 +46,9 @@ void SR_FAR *plat_alloc(uint32_t n)
         n = 1;
     if (n > 65536UL)
         sr_fail("plat_alloc(%lu): one object is at most 64 KB", (unsigned long)n);
-    if (!cur_bank || cur_off + n > 65536UL) {
+    /* (Horizon 0.30) objects stay below offset $FF00 of a bank when they fit (fill_runs
+     * reads the spans of a group there: hz_video.c) */
+    if (!cur_bank || cur_off + n > (n <= 65280UL ? 65280UL : 65536UL)) {
         void SR_FAR *b = hz_far_alloc();
         if (!b)
             sr_fail("out of memory (%u banks taken)", hzp_banks_used);

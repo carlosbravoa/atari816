@@ -31,7 +31,6 @@ static hg_image *frag_img[4];           /* registered fragments (the dashboard) 
 static const ImageFrame SR_FAR *frag_src[4];
 static unsigned frag_base[4];
 static unsigned nfrag;
-static bool blits_out;                  /* records sent that may not be drawn yet */
 
 static int page_of(const FrameBuffer320x200 *f)
 {
@@ -49,9 +48,26 @@ static void hz_fb_spans(FrameBuffer320x200 *f, const PreparedSpan SR_FAR *spans,
     hz_spans(spans, count, right ? 1 : 0, index, (unsigned)(a >> 16), (unsigned)a);
 }
 
+/* (Horizon 0.30) the spans by the blitter, one call for a pass (fill_runs with FR_GROUPS):
+ * a job is a group, its shape's own PreparedSpan array in its colour, so the CPU writes 8
+ * bytes a job and the kernel reads the spans where they are; Ali fills them while the
+ * renderer goes on. The CPU path where the call is missing (before 0.30, REV $08 and older)
+ * or with /NORUNS */
+static hg_rungroup SR_FAR *grp;
+static bool use_runs;
+bool hzv_noruns;
+static bool blits_out;                  /* records sent that may not be drawn yet */
+
 static void hz_fb_span_jobs(FrameBuffer320x200 *f, const SpanJob *jobs, unsigned n)
 {
     const uint32_t a = (uint32_t)f->pixels;
+    if (use_runs) {
+        const unsigned g = hz_span_groups(jobs, n, grp);
+        if (g)
+            hg_fill_groups_at(a, 64000u, grp, g);
+        blits_out = true;
+        return;
+    }
     hz_span_jobs(jobs, n, (unsigned)(a >> 16), (unsigned)a);
 }
 
@@ -220,6 +236,14 @@ int hzv_init(void)
         hzv_page[p].width = 320;
         hzv_page[p].height = 200;
         hzv_page[p].pixels = (uint8_t SR_FAR *)a;
+    }
+    if (!hzv_noruns) {                  /* fill_runs answers (0 runs: nothing drawn)? */
+        hz_fillruns probe;
+        memset(&probe, 0, sizeof probe);
+        if (hz_fill_runs(0, &probe) >= 0) {
+            grp = (hg_rungroup SR_FAR *)plat_alloc(512u * sizeof(hg_rungroup));  /* PASS_JOBS */
+            use_runs = grp != 0;
+        }
     }
     fb_ops.spans = hz_fb_spans;
     fb_ops.span_jobs = hz_fb_span_jobs;

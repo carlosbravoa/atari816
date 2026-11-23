@@ -93,7 +93,7 @@ ms_dw:      .res    2
 ms_nb:      .res    2
 
 ; ---- sound, hardware ----
-k_rev:      .res    2           ; SYS_REV
+; (0.30) k_rev (SYS_REV) is in the video-state block (vstate.s)
 snd_left:   .res    2           ; ticks left of the beep playing
 
 ; ---- window system ----

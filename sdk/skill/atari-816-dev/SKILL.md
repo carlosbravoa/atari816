@@ -1,9 +1,9 @@
 ---
 name: atari-816-dev
-description: Write, port, build, test and package software for the Atari816 (a 65C816 computer on an FPGA) and its operating system Horizon 0.29, in C (the SDK's hcc and its compiler cc816) or 65816 assembly (ca65/ld65), checked in the emu816 emulator with scripted input, screenshots, sound logs and the profiler, and packed as installable apps (.HZA). Use when asked to write or fix an Atari816 / Horizon program, window app or game, to port a C program or game (for example a DOS game) to the Atari816, to test a .PRG in the emulator, or to package it as an app.
+description: Write, port, build, test and package software for the Atari816 (a 65C816 computer on an FPGA) and its operating system Horizon 0.30, in C (the SDK's hcc and its compiler cc816) or 65816 assembly (ca65/ld65), checked in the emu816 emulator with scripted input, screenshots, sound logs and the profiler, and packed as installable apps (.HZA). Use when asked to write or fix an Atari816 / Horizon program, window app or game, to port a C program or game (for example a DOS game) to the Atari816, to test a .PRG in the emulator, or to package it as an app.
 ---
 
-# Atari816 development (Horizon 0.29)
+# Atari816 development (Horizon 0.30)
 
 ## The machine
 

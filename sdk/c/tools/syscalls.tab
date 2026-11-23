@@ -56,7 +56,7 @@ kill          | ok       | unsigned task:A | | End a task (it exits with $FF80).
 task_info     | ok       | unsigned slot:A, hz_taskinfo *rec:XY | | The task in slot 0-15 into rec (id 0 = a free slot).
 task_single   | ok       | | x | One instance of this program only: when one runs already, -1 with hz_errno ERUNNING and hz_x = its id (the program should exit).
 task_path     | int      | char *buf:XY, unsigned size:A | | The absolute path of the file the program was loaded from (zero-terminated) into buf -> its length. A 128-byte buffer always fits; EINVAL if buf is too small. Horizon 0.28 and later (before: ENOSYS). See hz_prog_dir.
-sys_info      | unsigned | | x | Horizon's version: major * 256 + minor (0x001D = 0.29); hz_x = the hardware revision (SYS_REV: 0x0C the OPL2, 0x0B sprites, 0x0A Lau, 0x08 the blitter). Horizon 0.29 and later (before: ENOSYS, 0xFFFF). hcc --needs checks a program's needs with it at its start.
+sys_info      | unsigned | | x | Horizon's version: major * 256 + minor (0x001D = 0.29, 0x001E = 0.30); hz_x = the hardware revision (SYS_REV: 0x0C the OPL2, 0x0B sprites, 0x0A Lau, 0x08 the blitter). Horizon 0.29 and later (before: ENOSYS, 0xFFFF). hcc --needs checks a program's needs with it at its start.
 port_create   | int      | | | A message port owned by the caller -> its number (0-15).
 send          | ok       | unsigned port:A, const hz_msg *msg:XY | | Send a 16-byte message (EAGAIN: the queue is full).
 recv          | ok       | unsigned port:A, hz_msg *msg:XY | | Receive a 16-byte message; blocks unless port | RV_POLL (then EAGAIN when empty).
@@ -134,6 +134,8 @@ win_front     | ok       | unsigned win:A | | Raise an own window (restored if m
 sheet_new     | int      | const hz_sheetnew *s:XY | | Register a sheet of art in own memory -> its number (1-32).
 sheet_free    | ok       | unsigned sheet:A | | Free a sheet ($FFFF: all of the caller's).
 sheet_draw    | int      | unsigned win:A.lo, unsigned count:A.hi, const hz_sheetrec *r:XY | | Run count (1-128) sheet records -> records drawn. Returns at once: see list_wait.
+fill_runs     | int      | unsigned count:A, const hz_fillruns *b:XY | x | (0.30) Fill count (0-2688) runs {offset, colour, width} (or, with FR_GROUPS, groups of runs in the program's own layout) into a page of own memory with the blitter -> count. Returns at once (see list_wait). EINVAL: hz_x = the index of a run (group) past the page. ENODEV before REV $09 or with the blitter off: fill them with the CPU (hgame's hg_fill_runs does).
+uptime_us     | long     | | | (0.30) Microseconds since reset (32 bits; wraps after 71.6 minutes).
 
 # extra entry points: other register uses of a call above (abi_name:c_name)
 spr_move:spr_move_many   | ok  | unsigned count:A, const hz_sprmove *e:XY, +A:0x8000 | | (0.24) Move count sprites (1-16) in one call.

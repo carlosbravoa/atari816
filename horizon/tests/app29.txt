@@ -122,7 +122,7 @@ exit 0001
   PAXAPP                                               <DIR>  2026-01-01 00:00
 > cd /T
 > NEEDV.PRG
-NEEDV needs Horizon 0.99 or later (this is 0.29).
+NEEDV needs Horizon 0.99 or later (this is 0.30).
 exit 0001
 > NEEDM.PRG
 ~ NEEDM needs 60000 KB of free memory (* KB free).
