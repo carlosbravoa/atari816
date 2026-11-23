@@ -1,0 +1,2 @@
+# 1. BENCH (upstream renderer timings, real clock): ends by itself (about 2 min after the start)
+/M /MN PERFBEN /E /C BENCH.TXT /C BENCHLOG.TXT NOINTRO BENCH MISSION FA1V.PAK RACE RSV.PAK LOG BENCHLOG.TXT

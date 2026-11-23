@@ -27,7 +27,7 @@ tests/cputest: tests/cputest.c cpu65816.c cpu65816.h
 
 ASMTESTS = tests/asm/mbdemo.bin tests/asm/nvcdemo.bin tests/asm/cpuirq.bin tests/asm/nvcmode1.bin tests/asm/nvcmode2.bin \
            tests/asm/copabort.bin tests/asm/eirq.bin tests/asm/kbtest.bin tests/asm/nmihold.bin tests/asm/mousetest.bin tests/asm/pctest.bin \
-           tests/asm/slowtest.bin tests/asm/nettest1.bin tests/asm/nettest2.bin tests/asm/nettest3.bin \
+           tests/asm/slowtest.bin tests/asm/cardtest.bin tests/asm/nettest1.bin tests/asm/nettest2.bin tests/asm/nettest3.bin \
            tests/asm/opltimer.bin tests/asm/opltone.bin tests/asm/blitruns.bin
 
 # the test programs are rebuilt when ca65 is available (the .bin files are kept)
@@ -38,6 +38,8 @@ tests/asm/nvcmode1.bin: tests/asm/nvcmodes.s tests/asm/common.inc tests/asm/a816
 	cd tests/asm && ca65 -o m1.o nvcmodes.s && ld65 -C a816.cfg -o nvcmode1.bin m1.o && rm -f m1.o
 tests/asm/nvcmode2.bin: tests/asm/nvcmodes.s tests/asm/common.inc tests/asm/a816.cfg
 	cd tests/asm && ca65 -D MODE2 -o m2.o nvcmodes.s && ld65 -C a816.cfg -o nvcmode2.bin m2.o && rm -f m2.o
+tests/asm/cardtest.bin: tests/asm/slowtest.s tests/asm/common.inc tests/asm/a816.cfg
+	cd tests/asm && ca65 -D CARD -o ct.o slowtest.s && ld65 -C a816.cfg -o cardtest.bin ct.o && rm -f ct.o
 tests/asm/nettest%.bin: tests/asm/nettest.s tests/asm/common.inc tests/asm/a816.cfg
 	cd tests/asm && ca65 -D RUN=$* -o nt$*.o nettest.s && ld65 -C a816.cfg -o nettest$*.bin nt$*.o && rm -f nt$*.o
 

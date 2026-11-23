@@ -44,6 +44,48 @@ static int screen_on, pan = -1, mx = 160, my = 100, mb;
 static int presses[2], press_x[2], press_y[2];
 static unsigned vpolls;
 
+/* /M (horizon/hz_perf.c) */
+extern char g_perf_name[16];
+extern unsigned g_perf_quit;
+extern const char *g_perf_copy[4];
+extern int g_perf_ncopy;
+extern char g_perf_args[200];
+void perf_start(void);
+void perf_tick(unsigned long now);
+void perf_key(unsigned long now);
+void perf_ptr_moved(unsigned long t);
+
+/* /W: the pointer goes round a circle by itself (a measuring run with a KEYS script
+   and no hand on the mouse: the engine's pointer work as if the mouse moved), a step
+   every 20 ms, once round in 1.28 s, centre 160,90, radius 60 x 50 */
+static unsigned char wiggle;
+static const signed char sin64[64] = {
+    0, 6, 12, 19, 24, 30, 36, 41, 45, 49, 53, 56, 59, 61, 63, 64,
+    64, 64, 63, 61, 59, 56, 53, 49, 45, 41, 36, 30, 24, 19, 12, 6,
+    0, -6, -12, -19, -24, -30, -36, -41, -45, -49, -53, -56, -59, -61, -63, -64,
+    -64, -64, -63, -61, -59, -56, -53, -49, -45, -41, -36, -30, -24, -19, -12, -6
+};
+/* a KEYS script's CLICK or MOVE put the pointer (plat_mouse_set): the real mouse (or
+   /W) takes it back only when it moves (the hardware's place when it was set), or /W
+   after 1.5 s */
+static unsigned char set_hold;
+static int set_hx, set_hy;
+static unsigned long set_t;
+static int sx_now, sy_now;              /* the pointer's screen place (320 x 180) */
+
+/* the pointer's place on the screen, 320 x 180: the mouse's, or /W's */
+static void screen_pointer(void)
+{
+    if (wiggle) {
+        unsigned i = (unsigned)(last_us / 20000UL) & 63u;
+        sx_now = 160 + sin64[(i + 16) & 63] * 60 / 64;
+        sy_now = 90 + sin64[i] * 50 / 64;
+    } else {
+        sx_now = hg_mouse_x;
+        sy_now = hg_mouse_y;
+    }
+}
+
 /* hgame sends a scroll at hg_end (the frame's end) or at hg_poll; this program has
    no frames (it keeps its own time and polls): the view is sent at once,
    hg_view_send() */
@@ -116,6 +158,42 @@ void plat_wait_counts(unsigned long n)
     clock_counts += n;
 }
 
+static void ready(void);
+
+/* the CPU asleep until the next vertical blank (/M: the idle time) */
+static void idle_vsync(void)
+{
+    PERF_T0(pt0);
+    hz_vsync();
+    PERF_ADD(PF_IDLE, pt0);
+}
+
+/* the engine computing for long (plat/voxrun.c: each voxel line of an alien turn, 45 s of
+   them in a battle's turn): every 32nd call the clock is read and plat_poll runs as at an
+   xd_poll (at most every 8 ms): the pointer follows the mouse, keys are queued. Not with
+   the virtual clock (its readings move it: the tests' runs stay the host's) */
+void plat_busy_poll(void)
+{
+    static unsigned n;
+
+    if (g_plat_virtual || (++n & 31))
+        return;
+    plat_counts();
+    plat_poll();
+}
+
+/* a KEYS script's WAIT (patches/src-0006-perf.patch) between two looks at the mouse:
+   on the real clock the CPU sleeps to the next frame, as while a player's input is
+   awaited (a scripted measuring run idles as play does); the virtual clock: nothing */
+void plat_script_wait(void)
+{
+    if (g_plat_virtual)
+        return;
+    if (load_t0)
+        ready();
+    idle_vsync();
+}
+
 /* The engine waits for time (timer_pace, delay): the CPU sleeps through
    whole frames while more than one is left. */
 void plat_sleep_counts(unsigned long n)
@@ -123,7 +201,7 @@ void plat_sleep_counts(unsigned long n)
     unsigned long t0 = plat_counts();
 
     while (n > 20000UL && plat_counts() - t0 < n - 20000UL) {
-        hz_vsync();
+        idle_vsync();
         xd_poll();
     }
     while (plat_counts() - t0 < n)
@@ -177,14 +255,177 @@ static int view_on, vtop;               /* the battle view shown split, its top 
 #define VIEW_SPLIT 124                  /* screen lines of the view; the panel's 56 below */
 
 /* The screen as the model has it: the DAC when it was written, and which of
-   the 200 rows the 180 lines show. Normally they follow the pointer: at
-   screen line s it is at row s + s * 20 / 179, and the lines show rows from
-   s * 20 / 179 (every row reachable, the view moving a row for 9 of the
-   pointer). On the battle view the panel (rows 144-199) is shown whole at
-   lines 124-179 (Marga's split) and lines 0-123 show 124 of the view's 144
-   rows, following the pointer while it is over them. The virtual clock's
-   runs follow the engine's pointer (the same pictures as the host's). */
+   the 200 rows the 180 lines show (PORTING-NOTES.md "The screen").
+
+   The picture stands still: the pointer never moves it. It starts where the
+   screen's kind wants it (plat_screen_kind: the DOS palette the engine sets,
+   one per kind of screen: the geoscape's and its windows centred, rows 10-189;
+   the base screens bottom-aligned, rows 20-199, their buttons are in the
+   bottom rows; the graphs and the UFOpaedia's articles top-aligned, their
+   buttons in the top rows; the battle's inventory rows 4-183, its OK at the
+   top), and the mouse's wheel (5 rows a step: two steps from the middle to an
+   end) or F5 / F6 move it up or down, a few rows a poll. On the battle view
+   the panel (rows 144-199) is shown whole at lines 124-179 (Marga's split)
+   and lines 0-123 show 124 of the view's 144 rows: rows 10-133 at first, the
+   wheel moves them the same way.
+
+   /PANPTR: the earlier way, the rows shown follow the pointer (at screen line
+   s the pointer is at row s + s * 20 / 179, the lines show rows from
+   s * 20 / 179). The virtual clock's runs (/V) follow the engine's pointer
+   that way too (the same pictures as the host's). */
 static int loading;
+static unsigned char pan_pointer;       /* /PANPTR */
+static int pan_rows = 10, bat_rows = 10;/* where the wheel put a screen, the battle view */
+static int scr_kind;                    /* the screen's kind (its DOS palette, 1-5) */
+#define PAN_STEP 5                      /* rows a wheel step, F5 / F6 */
+#define PAN_RATE 4                      /* rows a poll at most (smooth, quick) */
+
+static int clamp20(int v)
+{
+    return v < 0 ? 0 : v > 20 ? 20 : v;
+}
+
+/* from cur toward want, PAN_RATE rows at most */
+static int step_to(int cur, int want)
+{
+    if (cur < 0)
+        return want;
+    if (want > cur + PAN_RATE)
+        return cur + PAN_RATE;
+    if (want < cur - PAN_RATE)
+        return cur - PAN_RATE;
+    return want;
+}
+
+/* the DOS palette the engine set (plat/vga.c set_pal: 1 geoscape, 2 bases, 3 graphs,
+   4 UFOpaedia, 5 battlescape): a new kind of screen starts at its own rows */
+void plat_screen_kind(int k)
+{
+    static const signed char rows[6] = { 10, 10, 20, 0, 0, 4 };
+
+    if (k != scr_kind && k >= 0 && k <= 5) {
+        scr_kind = k;
+        pan_rows = rows[k];
+    }
+}
+
+/* ---------------------------------------------------------------- the pointer
+   A hardware sprite (Marga's, 16 x 16 at 8 bpp) shows the engine's pointer instead of the
+   engine drawing it into the picture (vga_ms_draw / vga_ms_erase: 2 ms of CPU each, about
+   100 a second while the mouse moves): plat/vga.c asks here first. The sprite follows the
+   mouse at every poll (one spr_move when it moved), takes the arrow's or the hourglass's
+   picture at a draw, and is hidden when the engine erased the pointer and has not drawn
+   it again for 300 ms (a screen without one: the intro). /V runs draw as before (the
+   test pictures hold the arrow, as the host's). /CPUPTR: the engine draws it. */
+static int spr = -1, spr_kind = -1, spr_x = -999, spr_y = -999;
+static unsigned char spr_on, spr_erased, cpu_ptr;
+static unsigned long spr_erase_t, eng_look_t;     /* the engine's last look at the mouse */
+static unsigned char __far spr_buf[2 * 256 + 16];
+void vga_ptr_image(unsigned char far *d, int arrow);
+
+static unsigned char __far *spr_img(int k)
+{
+    unsigned char __far *p = spr_buf;
+
+    p += (16 - (HZ_OFF(p) & 15)) & 15;
+    return p + 256 * k;
+}
+
+/* the engine's place (320 x 200) on the screen (320 x 180) */
+static void screen_of(int x, int y, int *sx, int *sy)
+{
+    *sx = x;
+    if (view_on)
+        *sy = y < 144 ? y - vtop : y - 20;
+    else
+        *sy = y - (pan >= 0 && pan < 1000 ? pan : 0);
+}
+
+static void spr_place(int x, int y)
+{
+    if (spr >= 0 && spr_on && (x != spr_x || y != spr_y)) {
+        hz_spr_move((unsigned)spr, x, y);
+        spr_x = x;
+        spr_y = y;
+    }
+}
+
+int plat_pointer_draw(int x, int y, int arrow)
+{
+    int k = arrow ? 0 : 1, sx, sy;
+
+    if (g_plat_virtual || cpu_ptr || !screen_on)
+        return 0;
+    if (spr < 0) {
+        spr = hz_spr_alloc(1, hg_win);
+        if (spr < 0) {
+            cpu_ptr = 1;                /* (none free: the engine draws it) */
+            return 0;
+        }
+    }
+    screen_of(x, y, &sx, &sy);
+    if (k != spr_kind || !arrow || !spr_on) {
+        hz_sprite e;
+        unsigned char __far *im = spr_img(k);
+        vga_ptr_image(im, arrow);
+        e.sprite = (unsigned char)spr;
+        e.ctrl = SPR_EN;
+        e.x = (short)sx;
+        e.y = (short)sy;
+        HZ_U24(e.image, im);
+        e.pal = 0;
+        if (hz_spr_set(1, &e) < 0) {
+            cpu_ptr = 1;
+            return 0;
+        }
+        spr_kind = k;
+        spr_on = 1;
+        spr_x = sx;
+        spr_y = sy;
+    } else
+        spr_place(sx, sy);
+    spr_erased = 0;
+    return 1;
+}
+
+int plat_pointer_erase(void)
+{
+    if (spr < 0 || g_plat_virtual || cpu_ptr)
+        return 0;
+    if (!spr_erased) {
+        spr_erased = 1;
+        spr_erase_t = last_us;
+    }
+    return 1;
+}
+
+/* at each poll: the sprite where the mouse is; hidden once the engine has had no pointer
+   for 300 ms while it still looks at the mouse (a screen without one); while it computes
+   without looking (an alien turn: plat_busy_poll) the pointer stays, and moves */
+static void spr_poll(void)
+{
+    if (spr < 0 || !spr_on)
+        return;
+    if (spr_erased && last_us - spr_erase_t > 300000UL && last_us - eng_look_t < 100000UL) {
+        hz_spr_show((unsigned)spr, 0);
+        spr_on = 0;
+        spr_kind = -1;
+        return;
+    }
+    {
+        int sx, sy;
+        screen_of(mx, my, &sx, &sy);
+        spr_place(sx, sy);
+    }
+}
+
+static void pan_move(int d)
+{
+    if (view_on)
+        bat_rows = clamp20(bat_rows + d);
+    else
+        pan_rows = clamp20(pan_rows + d);
+}
 
 static void show(void)
 {
@@ -196,12 +437,19 @@ static void show(void)
         if (g_plat_virtual) {
             if (my < 144)
                 t = my * 20 / 143;
-        } else if (hg_mouse_y < VIEW_SPLIT)
-            t = hg_mouse_y * 20 / (VIEW_SPLIT - 1);
+        } else if (!pan_pointer)
+            t = step_to(pan >= 1000 ? vtop : -1, bat_rows);
+        else if (sy_now < VIEW_SPLIT)
+            t = sy_now * 20 / (VIEW_SPLIT - 1);
         k = 1000 + t;
-    } else
-        k = g_plat_virtual ? my * 20 / 199 : (int)((unsigned)hg_mouse_y * 20u / 179u);
+    } else if (g_plat_virtual)
+        k = my * 20 / 199;
+    else if (pan_pointer)
+        k = (int)((unsigned)sy_now * 20u / 179u);
+    else
+        k = step_to(pan >= 0 && pan < 1000 ? pan : -1, pan_rows);
     if (k != pan) {
+        PERF_T0(pt0);
         if (view_on) {
             vtop = t;
             hg_scroll(0, vtop);
@@ -214,13 +462,16 @@ static void show(void)
         }
         pan = k;
         hg_view_send();
+        PERF_ADD(PF_VIEW, pt0);
     }
     if (xd_dac_dirty) {
         static unsigned char __far rgb[768];  /* (__far: out of the main bank, which is full) */
+        PERF_T0(pt0);
         xd_dac_dirty = 0;
         for (i = 0; i < 768; i++)
             rgb[i] = (unsigned char)(xd_dac[i] << 2 | xd_dac[i] >> 4);
         hg_palette(0, 256, rgb);
+        PERF_ADD(PF_PAL, pt0);
     }
 }
 
@@ -232,19 +483,26 @@ void plat_view(int on)
     }
 }
 
+/* /M's timeline: 'B' the battle view or 'S' a screen, << 8, and the rows panned */
+unsigned perf_screen(void)
+{
+    return view_on ? 'B' << 8 | (unsigned)vtop : 'S' << 8 | (unsigned)(pan < 0 ? 0 : pan);
+}
+
 /* screen line s (the real pointer) -> the model's row */
 static int row_of(int s)
 {
     if (view_on)
         return s < VIEW_SPLIT ? s + vtop : s + 20;
-    return s + (int)((unsigned)s * 20u / 179u);
+    if (pan_pointer)
+        return s + (int)((unsigned)s * 20u / 179u);
+    return s + (pan >= 0 && pan < 1000 ? pan : 0);
 }
+
+static void poll_work(void);
 
 void plat_poll(void)
 {
-    unsigned k, b;
-    int i;
-
     if (g_plat_virtual) {
         /* a test run: the script is the input; the system's events now and
            then (the clock is the model's, not read here) */
@@ -258,10 +516,30 @@ void plat_poll(void)
     if (last_us - poll_us < 8000UL)
         return;
     poll_us = last_us;
+    if (g_perf) {
+        unsigned long t0;
+        perf_tick(last_us);
+        t0 = perf_now();
+        poll_work();
+        perf_add(PF_POLL, t0);
+    } else
+        poll_work();
+}
+
+/* the events, the pointer, the pan, the palette: at most every 8 ms */
+static void poll_work(void)
+{
+    unsigned k, b;
+    int i;
+
     if (!hg_poll())
         exit(0);
+    if (!pan_pointer && (i = hg_mouse_wheel()) != 0)
+        pan_move(-i * PAN_STEP);        /* (up, away from you: the upper rows) */
     while ((k = hg_key_next()) != 0)
-        if (keyn < 16) {
+        if ((k & 0xFF) == 0x3E || (k & 0xFF) == 0x3F)
+            pan_move((k & 0xFF) == 0x3E ? -PAN_STEP : PAN_STEP);   /* F5 up, F6 down */
+        else if (keyn < 16) {
             unsigned ch = k >> 8;
             if (ch == '\n')
                 ch = 13;
@@ -273,10 +551,25 @@ void plat_poll(void)
            640 x 360), a button held or not; the presses are counted here, from the
            buttons held at each poll (not hg_mouse_clicked: the engine's INT 33h
            counts presses per button, with the place of the last one) */
+        int ox = sx_now, oy = sy_now;
         b = hg_mouse_b;
-        mx = hg_mouse_x;
+        screen_pointer();
+        if (set_hold) {
+            /* the pointer where a script put it until the mouse moves */
+            if (wiggle ? last_us - set_t < 1500000UL : sx_now == set_hx && sy_now == set_hy) {
+                sx_now = ox;
+                sy_now = oy;
+                show();
+                goto buttons;
+            }
+            set_hold = 0;
+        }
+        if (g_perf && (sx_now != ox || sy_now != oy))
+            perf_ptr_moved(last_us);
+        mx = sx_now;
         show();                         /* (the rows shown move first) */
-        my = row_of(hg_mouse_y);
+        my = row_of(sy_now);
+    buttons:
         for (i = 0; i < 2; i++)
             if ((b & (1u << i)) && !(mb & (1 << i))) {
                 presses[i]++;
@@ -284,7 +577,28 @@ void plat_poll(void)
                 press_y[i] = my;
             }
         mb = (int)(b & 3);
+        spr_poll();
     }
+}
+
+/* the first wait for input (a key, or a KEYS script's WAIT): the start menu (how long
+   the start took); the loading screen ends, the engine's screen and palette are shown */
+static unsigned char exit_ready;        /* /E: end at the first wait for input */
+
+static void ready(void)
+{
+    if (exit_ready) {
+        printf("xcom: /E: the first wait for input, the end\n");
+        exit(0);
+    }
+    loading = 0;
+    pan = -1;
+    xd_dac_dirty = 1;
+    show();
+    printf("xcom: ready for input %lu ms after the start, %lu KB read (machine on %lu ms)\n",
+           (plat_us() - load_t0) / 1000UL, xd_bytes_read / 1024UL,
+           (unsigned long)hz_uptime());
+    load_t0 = 0;
 }
 
 unsigned plat_key(void)
@@ -293,24 +607,16 @@ unsigned plat_key(void)
 
     if (g_plat_virtual)
         return 0;
-    if (load_t0) {
-        /* the first wait for input: the start menu (how long the start took); the
-           loading screen ends, the engine's screen and palette are shown */
-        loading = 0;
-        pan = -1;
-        xd_dac_dirty = 1;
-        show();
-        printf("xcom: ready for input %lu ms after the start, %lu KB read (machine on %lu ms)\n",
-               (plat_us() - load_t0) / 1000UL, xd_bytes_read / 1024UL,
-               (unsigned long)hz_uptime());
-        load_t0 = 0;
-    }
+    if (load_t0)
+        ready();
     plat_poll();
+    if (g_perf)
+        perf_key(last_us);
     if (!keyn) {
         /* nothing: an engine that asks again within 2 ms is only waiting
            for input; it sleeps to the next frame */
         if (last_us - key_us < 2000UL) {
-            hz_vsync();
+            idle_vsync();
             poll_us = 0;                /* the events of that frame at the next poll */
         }
         key_us = last_us;
@@ -323,6 +629,7 @@ unsigned plat_key(void)
 
 void plat_mouse(int *x, int *y, int *buttons)
 {
+    eng_look_t = last_us;
     *x = mx;
     *y = my;
     *buttons = mb;
@@ -342,6 +649,13 @@ void plat_mouse_set(int x, int y)
 {
     mx = x;
     my = y;
+    if (!g_plat_virtual) {
+        set_hold = 1;
+        set_t = last_us;
+        screen_pointer();
+        set_hx = sx_now;
+        set_hy = sy_now;
+    }
 }
 
 static int exit_shot;
@@ -530,6 +844,8 @@ void plat_setmode(int m)
         }
         if (!loading)
             hg_palette_black();
+        if (g_perf)
+            printf("xcom: the framebuffer in banks %02X-%02X\n", hg_fb_bank, hg_fb_bank + 1);
         xd_banks[10] = (unsigned char)hg_fb_bank;   /* A000 is the framebuffer */
         xd_banks[13] = (unsigned char)(hg_fb_bank + 1); /* D004 its row 205 (plat.h) */
         hz_bb_screen(1);
@@ -598,6 +914,11 @@ static unsigned my_banks(void)
     return 0;
 }
 
+unsigned perf_banks(void)
+{
+    return my_banks();
+}
+
 void plat_end(void)
 {
     hz_bb_stats();
@@ -626,6 +947,10 @@ static int args_from_file(int argc, char **argv, char ***out)
             len = fread(more_text, 1, sizeof more_text - 1, f);
             fclose(f);
             more_text[len] = 0;
+            for (p = more_text; *p; p++)        /* # to the line's end: a comment */
+                if (*p == '#')
+                    while (*p && *p != '\n')
+                        *p++ = ' ';
             for (p = strtok(more_text, " \t\r\n"); p && n < 39; p = strtok(NULL, " \t\r\n"))
                 more_argv[n++] = p;
         } else
@@ -638,9 +963,32 @@ static int args_from_file(int argc, char **argv, char ***out)
 
 int main(int argc, char **argv)
 {
-    int i = 1;
+    int i = 1, iobench = 0;
+    static char arg_file[160], *arg2[3];
 
+    /* started without options (from the Desktop): XCOM.ARG in the program's folder, if
+       there, gives them (README.TXT) */
+    if (argc <= 1 && hz_prog_dir(arg_file + 1, 128) >= 0) {
+        hz_fileinfo st;
+        arg_file[0] = '@';
+        strcat(arg_file, "XCOM.ARG");
+        if (hz_stat_path(arg_file + 1, &st) >= 0) {
+            arg2[0] = argc ? argv[0] : "XCOM";
+            arg2[1] = arg_file;
+            arg2[2] = NULL;
+            argc = 2;
+            argv = arg2;
+        }
+    }
     argc = args_from_file(argc, argv, &argv);
+    {
+        int k;
+        g_perf_args[0] = 0;
+        for (k = 1; k < argc && strlen(g_perf_args) + strlen(argv[k]) + 2 < sizeof g_perf_args; k++) {
+            strcat(g_perf_args, argv[k]);
+            strcat(g_perf_args, " ");
+        }
+    }
 
     for (;;) {
         if (i < argc && !strcmp(argv[i], "/V")) {
@@ -655,6 +1003,36 @@ int main(int argc, char **argv)
             i += 2;
         } else if (i + 1 < argc && !strcmp(argv[i], "/U")) {
             us_offset = strtoul(argv[i + 1], NULL, 10);
+            i += 2;
+        } else if (i < argc && !stricmp(argv[i], "/M")) {
+            g_perf = 1;
+            i++;
+        } else if (i + 1 < argc && !stricmp(argv[i], "/MN")) {
+            g_perf = 1;
+            strncpy(g_perf_name, argv[i + 1], 8);
+            g_perf_name[8] = 0;
+            i += 2;
+        } else if (i < argc && !stricmp(argv[i], "/IOB")) {
+            iobench = 1;
+            i++;
+        } else if (i < argc && !stricmp(argv[i], "/E")) {
+            exit_ready = 1;
+            i++;
+        } else if (i < argc && !stricmp(argv[i], "/CPUPTR")) {
+            cpu_ptr = 1;
+            i++;
+        } else if (i < argc && !stricmp(argv[i], "/PANPTR")) {
+            pan_pointer = 1;
+            i++;
+        } else if (i < argc && !stricmp(argv[i], "/W")) {
+            wiggle = 1;
+            i++;
+        } else if (i + 1 < argc && !stricmp(argv[i], "/Q")) {
+            g_perf_quit = (unsigned)atoi(argv[i + 1]);
+            i += 2;
+        } else if (i + 1 < argc && !stricmp(argv[i], "/C")) {
+            if (g_perf_ncopy < 4)
+                g_perf_copy[g_perf_ncopy++] = argv[i + 1];
             i += 2;
         } else
             break;
@@ -684,12 +1062,21 @@ int main(int argc, char **argv)
         }
     }
     g_plat_dir[0] = 0;                  /* names relative to the program's folder */
+    if (iobench) {
+        void perf_iobench(void);
+        printf("xcom: /IOB: the card's request costs...\n");
+        perf_iobench();
+        printf("xcom: /IOB: done, IOBENCH.TXT\n");
+        return 0;
+    }
     if (plat_arena()) {
         static const char *l[4] = { "X-COM: not enough memory", "",
                                     "It needs 17 free banks (1.1 MB) for", "the DOS machine's memory." };
         message_screen(l, 4);
         return 1;
     }
+    if (g_plat_virtual)
+        g_perf = 0;
     loading_screen();
     argv[i - 1] = "XCOMXT";
     {
@@ -708,6 +1095,8 @@ int main(int argc, char **argv)
     }
     xd_init(argc - i + 1, argv + i - 1);
     hz_snd_start();                     /* MUSD.PRG, before the engine opens files */
+    if (g_perf)
+        perf_start();                   /* (after the music task: its exit report first) */
     printf("xcom: start (%u banks)\n", my_banks());
     return xcom_main(argc - i + 1, argv + i - 1);
 }

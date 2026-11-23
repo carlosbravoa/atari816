@@ -147,6 +147,11 @@ unsigned xd_off(const void *p)
     unsigned long a = lin_of(p);
 
     if (a == 0xFFFFFFFFUL) {
+#if defined(__CC816__)
+        /* a global of the program's main bank: panel.c's FP_OFF(u) of a unit in g_units,
+           only to test it for NULL (as xd_seg says): expected, not reported */
+        if (((unsigned long)p >> 16) != ((unsigned long)(void __far *)&xd_mem >> 16))
+#endif
         not_arena("FP_OFF");
         return p ? (unsigned)((unsigned long)p & 0xFFFF) | 1 : 0;
     }
@@ -1075,6 +1080,17 @@ static void file_closed(const void *f, int fd)
         }
 }
 
+/* the open file's short name (for /M's table), "?" if not known */
+static const char *name_of(const void *f, int fd)
+{
+    int i;
+
+    for (i = 0; i < XD_MAX_FILES; i++)
+        if (open_tab[i].name[0] && (f ? open_tab[i].f == f : open_tab[i].fd == fd))
+            return open_tab[i].name;
+    return "?";
+}
+
 static void files_report(void)
 {
     char line[160];
@@ -1084,6 +1100,297 @@ static void files_report(void)
     plat_note(line);
 }
 
+/* ---------------------------------------------------------------- the packs in memory
+   (Atari816) The board's card answers each request slowly whatever its size (an OPEN or
+   a STAT about 24 ms, a READ 4.5 ms + its bytes: emu/README.md "The card's speed"), and
+   the engine opens and reads its packs again at every screen (UIV.PAK's pictures, PALV.PAK
+   at each palette, NAMES.PAK, WORLDV.PAK in small pieces): seconds of card calls on the
+   board. So the packs (read-only opens of *.PAK, PACKS.VER) are read through a cache: a
+   name table (each path looked up on the card once: there or not, its size), and the
+   files' contents in blocks of 16 KB in far banks taken while memory is plentiful (at most
+   XC_BANKS, never leaving fewer than XC_RESERVE free; xc_release gives one back to the
+   battle's atlas), the least recently used block reused. An open, a seek, a read of what
+   is in memory: no card call at all. A miss opens the file (kept open until the engine
+   closes it, as before) and reads its whole block. The engine sees the same bytes, the same
+   open files (counted as before: the 4 of Horizon), the same errors; the host reads the
+   files as they are (the reference). /M counts the card's own calls ("card"). */
+#if defined(__CC816__)
+#define XC_BLOCK    16384u
+#define XC_BANKS    24
+#define XC_RESERVE  12                  /* banks left free for the battle's atlas, sound, ... */
+#define XC_NAMES    64
+#define XC_FILES    6
+#define XC_FD0      200                 /* the engine's fd of cached file i: XC_FD0 + i */
+
+static struct { char path[32]; long size; } __far xc_names[XC_NAMES];      /* size -1: none */
+static int xc_nnames;
+static unsigned char __far *xc_bank[XC_BANKS];
+static int xc_nbanks;
+static struct { int name; unsigned blk; unsigned long used; } __far xc_slot[XC_BANKS * 4];
+static unsigned long xc_clock;
+typedef struct {
+    int name, h, ungot, last;           /* h: the card's handle once a block was missed */
+    long pos;
+    unsigned char open, err;
+} XcFile;
+static XcFile __far xc_files[XC_FILES];
+static char __far xc_tag[XC_FILES];     /* (FILE *)&xc_tag[i] is cached file i's FILE */
+
+static void xc_card(int slot, unsigned long t0, unsigned long bytes)
+{
+    PERF_IO(slot, NULL, bytes, t0);
+}
+
+static int xc_wants(const char *name)
+{
+    size_t n = strlen(name);
+
+    return n > 4 && (!strcasecmp(name + n - 4, ".PAK") || !strcasecmp(name + n - 4, ".VER"));
+}
+
+/* the name's entry (looked up on the card the first time) */
+static int xc_name(const char *path)
+{
+    hz_fileinfo st;
+    int i;
+    PERF_T0(pt0);
+
+    for (i = 0; i < xc_nnames; i++)
+        if (!strcmp(xc_names[i].path, path))
+            return i;
+    if (strlen(path) >= sizeof xc_names[0].path || xc_nnames == XC_NAMES)
+        return -1;
+    i = xc_nnames++;
+    strcpy(xc_names[i].path, path);
+    xc_names[i].size = hz_stat_path(path, &st) < 0 || (st.attr & HZ_ATTR_DIR) ? -1L : (long)st.size;
+    xc_card(PF_CARD, pt0, 0);
+    return i;
+}
+
+/* opens a pack: the cached file's index, -1 when not there (-2: not a pack, or no room
+   in the tables: the caller opens it as before) */
+static int xc_open(const char *name)
+{
+    int n = -1, i;
+
+    if (!xc_wants(name))
+        return -2;
+    if (rd_dir) {
+        n = xc_name(dos_path(name, 1));
+        if (n >= 0 && xc_names[n].size < 0)
+            n = -1;
+    }
+    if (n < 0) {
+        n = xc_name(dos_path(name, 0));
+        if (n < 0)
+            return -2;
+        if (xc_names[n].size < 0)
+            return -1;
+    }
+    for (i = 0; i < XC_FILES; i++)
+        if (!xc_files[i].open) {
+            xc_files[i].open = 1;
+            xc_files[i].name = n;
+            xc_files[i].h = -1;
+            xc_files[i].pos = 0;
+            xc_files[i].ungot = -1;
+            xc_files[i].err = 0;
+            xc_files[i].last = -1;
+            return i;
+        }
+    return -2;
+}
+
+static int xc_of_file(const FILE *f)
+{
+    const char __far *p = (const char __far *)f;
+
+    return p >= xc_tag && p < xc_tag + XC_FILES ? (int)(p - xc_tag) : -1;
+}
+
+static int xc_of_fd(int fd)
+{
+    return fd >= XC_FD0 && fd < XC_FD0 + XC_FILES && xc_files[fd - XC_FD0].open ? fd - XC_FD0 : -1;
+}
+
+static unsigned char __far *xc_mem(int s)
+{
+    return xc_bank[s >> 2] + (unsigned)(s & 3) * XC_BLOCK;
+}
+
+int xc_nbanks_now(void)
+{
+    return xc_nbanks;
+}
+
+/* a free bank to the battle's atlas (horizon/hz_bb.c, when its own allocation failed):
+   1 when one was given back */
+int xc_release(void)
+{
+    int s;
+
+    if (!xc_nbanks)
+        return 0;
+    xc_nbanks--;
+    for (s = xc_nbanks * 4; s < xc_nbanks * 4 + 4; s++)
+        xc_slot[s].used = 0;
+    hz_far_free(xc_bank[xc_nbanks]);
+    xc_bank[xc_nbanks] = NULL;
+    for (s = 0; s < XC_FILES; s++)
+        xc_files[s].last = -1;
+    return 1;
+}
+
+/* block b of file i in memory: its slot, -1 on a card error */
+static int xc_block(int i, unsigned b)
+{
+    XcFile __far *x = &xc_files[i];
+    int s, best = -1;
+    unsigned long when = 0xFFFFFFFFUL, off;
+    unsigned len;
+    hz_io io;
+
+    if (x->last >= 0 && xc_slot[x->last].used && xc_slot[x->last].name == x->name
+        && xc_slot[x->last].blk == b) {
+        xc_slot[x->last].used = ++xc_clock;
+        return x->last;
+    }
+    for (s = 0; s < xc_nbanks * 4; s++) {
+        if (xc_slot[s].used && xc_slot[s].name == x->name && xc_slot[s].blk == b) {
+            xc_slot[s].used = ++xc_clock;
+            return x->last = s;
+        }
+        if (xc_slot[s].used < when) {
+            when = xc_slot[s].used;
+            best = s;
+        }
+    }
+    if ((best < 0 || when) && xc_nbanks < XC_BANKS && hz_mem_info() > XC_RESERVE) {
+        unsigned char __far *m = (unsigned char __far *)hz_far_alloc();
+        if (m) {
+            xc_bank[xc_nbanks] = m;
+            best = xc_nbanks * 4;
+            for (s = best; s < best + 4; s++)
+                xc_slot[s].used = 0;
+            xc_nbanks++;
+        }
+    }
+    if (best < 0)
+        return -2;                      /* (no memory at all: the caller reads the card) */
+    xc_slot[best].used = 0;
+    if (x->h < 0) {
+        PERF_T0(pt0);
+        x->h = hz_open(xc_names[x->name].path, HZ_O_READ);
+        xc_card(PF_CARD, pt0, 0);
+        if (x->h < 0)
+            return -1;
+    }
+    off = (unsigned long)b * XC_BLOCK;
+    len = xc_names[x->name].size - off > XC_BLOCK ? XC_BLOCK : (unsigned)(xc_names[x->name].size - off);
+    {
+        PERF_T0(pt0);
+        if (hz_seek((unsigned)x->h, off) == -1 && hz_errno)
+            return -1;
+        io.handle = (unsigned char)x->h;
+        HZ_U24(io.buf, xc_mem(best));
+        io.len = len;
+        if (hz_read(&io) != (int)len)
+            return -1;
+        xc_card(PF_CARD, pt0, len);
+    }
+    xc_slot[best].name = x->name;
+    xc_slot[best].blk = b;
+    xc_slot[best].used = ++xc_clock;
+    return x->last = best;
+}
+
+/* n bytes from the file's place into p: the count read (short at the end; an error: the
+   count so far, err set) */
+static unsigned long xc_read(int i, void *p, unsigned long n)
+{
+    XcFile __far *x = &xc_files[i];
+    unsigned char *q = (unsigned char *)p;
+    unsigned long done = 0, size = xc_names[x->name].size;
+
+    if (n && x->ungot >= 0) {
+        *q++ = (unsigned char)x->ungot;
+        x->ungot = -1;
+        x->pos++;
+        done++;
+        n--;
+    }
+    while (n && x->pos < (long)size) {
+        unsigned b = (unsigned)((unsigned long)x->pos / XC_BLOCK), o = (unsigned)((unsigned long)x->pos % XC_BLOCK);
+        unsigned long k = XC_BLOCK - o;
+        int s = xc_block(i, b);
+        if (s == -2) {
+            /* no memory for the cache: straight from the card, as before */
+            unsigned want = n > 0x7FFFu ? 0x7FFFu : (unsigned)n;
+            hz_io io;
+            int got;
+            if (x->h < 0 && (x->h = hz_open(xc_names[x->name].path, HZ_O_READ)) < 0)
+                s = -1;
+            else if (hz_seek((unsigned)x->h, (unsigned long)x->pos) == -1 && hz_errno)
+                s = -1;
+            else {
+                io.handle = (unsigned char)x->h;
+                HZ_U24(io.buf, q);
+                io.len = want;
+                got = hz_read(&io);
+                if (got <= 0) {
+                    if (got < 0)
+                        x->err = 1;
+                    break;
+                }
+                q += (unsigned)got;
+                x->pos += got;
+                done += (unsigned)got;
+                n -= (unsigned)got;
+                continue;
+            }
+        }
+        if (s < 0) {
+            x->err = 1;
+            break;
+        }
+        if (k > n)
+            k = n;
+        if (k > size - (unsigned long)x->pos)
+            k = size - (unsigned long)x->pos;
+        memcpy(q, xc_mem(s) + o, (size_t)k);
+        q += (unsigned)k;
+        x->pos += (long)k;
+        done += k;
+        n -= k;
+    }
+    return done;
+}
+
+static long xc_seek(int i, long off, int how)
+{
+    XcFile __far *x = &xc_files[i];
+    long p = how == SEEK_SET ? off : how == SEEK_CUR ? x->pos + off : xc_names[x->name].size + off;
+
+    if (p < 0)
+        return -1;
+    x->pos = p;
+    x->ungot = -1;
+    return p;
+}
+
+static void xc_close(int i)
+{
+    XcFile __far *x = &xc_files[i];
+
+    if (x->h >= 0) {
+        PERF_T0(pt0);
+        hz_close((unsigned)x->h);
+        xc_card(PF_CARD, pt0, 0);
+    }
+    x->open = 0;
+}
+#endif
+
 static FILE *save_f;                    /* a save being written (xd_fclose) */
 static char save_path[160];
 
@@ -1091,15 +1398,32 @@ static char save_path[160];
 FILE *xd_fopen(const char *name, const char *mode)
 {
     FILE *f = NULL;
+    PERF_T0(pt0);
 
     if (!file_room(name))
         return NULL;
+#if defined(__CC816__)
+    if (mode[0] == 'r' && !strchr(mode, '+')) {
+        int i = xc_open(name);
+        if (i == -1) {
+            PERF_IO(PF_OPEN, name, 0, pt0);
+            return NULL;
+        }
+        if (i >= 0) {
+            f = (FILE *)(xc_tag + i);
+            file_opened(f, -1, name);
+            PERF_IO(PF_OPEN, name, 0, pt0);
+            return f;
+        }
+    }
+#endif
     if (mode[0] == 'r' && !strchr(mode, '+') && rd_dir)
         f = fopen(dos_path(name, 1), mode);
     if (!f)
         f = fopen(dos_path(name, 0), mode);
     if (f)
         file_opened(f, -1, name);
+    PERF_IO(PF_OPEN, name, 0, pt0);
     if (f && mode[0] == 'w') {
         size_t n = strlen(name);
         if (n > 4 && !strcasecmp(name + n - 4, ".SAV")) {
@@ -1118,7 +1442,16 @@ FILE *xd_fopen(const char *name, const char *mode)
 int xd_fclose(FILE *f)
 {
     int bad = 0, r;
+    PERF_T0(pt0);
 
+#if defined(__CC816__)
+    if (xc_of_file(f) >= 0) {
+        file_closed(f, -1);
+        xc_close(xc_of_file(f));
+        PERF_ADD(PF_CLOSE, pt0);
+        return 0;
+    }
+#endif
     if (f == save_f) {
         bad = ferror(f) != 0 || fflush(f) != 0;
         save_f = NULL;
@@ -1133,15 +1466,108 @@ int xd_fclose(FILE *f)
         r = -1;
     }
     save_path[0] = 0;
+    PERF_ADD(PF_CLOSE, pt0);
     return r;
 }
 
 #undef close
 int xd_close(int fd)
 {
+    int r;
+    PERF_T0(pt0);
+
     file_closed(NULL, fd);
-    return close(fd);
+#if defined(__CC816__)
+    if (xc_of_fd(fd) >= 0) {
+        xc_close(xc_of_fd(fd));
+        PERF_ADD(PF_CLOSE, pt0);
+        return 0;
+    }
+#endif
+    r = close(fd);
+    PERF_ADD(PF_CLOSE, pt0);
+    return r;
 }
+
+#if defined(__CC816__)
+#undef lseek
+#undef fseek
+long xd_lseek(int fd, long off, int how)
+{
+    long r;
+    PERF_T0(pt0);
+
+    if (xc_of_fd(fd) >= 0)
+        r = xc_seek(xc_of_fd(fd), off, how);
+    else
+        r = lseek(fd, off, how);
+    PERF_ADD(PF_SEEK, pt0);
+    return r;
+}
+
+int xd_fseek(FILE *f, long off, int how)
+{
+    int r;
+    PERF_T0(pt0);
+
+    if (xc_of_file(f) >= 0)
+        r = xc_seek(xc_of_file(f), off, how) < 0 ? -1 : 0;
+    else
+        r = fseek(f, off, how);
+    PERF_ADD(PF_SEEK, pt0);
+    return r;
+}
+
+#undef ftell
+#undef fgetc
+#undef getc
+#undef ungetc
+#undef ferror
+#undef feof
+long xd_ftell(FILE *f)
+{
+    int i = xc_of_file(f);
+
+    return i >= 0 ? xc_files[i].pos : ftell(f);
+}
+
+int xd_fgetc(FILE *f)
+{
+    int i = xc_of_file(f);
+    unsigned char c;
+
+    if (i < 0)
+        return fgetc(f);
+    return xc_read(i, &c, 1) == 1 ? c : EOF;
+}
+
+int xd_ungetc(int c, FILE *f)
+{
+    int i = xc_of_file(f);
+
+    if (i < 0)
+        return ungetc(c, f);
+    if (c == EOF || xc_files[i].ungot >= 0 || !xc_files[i].pos)
+        return EOF;
+    xc_files[i].ungot = c & 0xFF;
+    xc_files[i].pos--;
+    return c & 0xFF;
+}
+
+int xd_ferror(FILE *f)
+{
+    int i = xc_of_file(f);
+
+    return i >= 0 ? xc_files[i].err : ferror(f);
+}
+
+int xd_feof(FILE *f)
+{
+    int i = xc_of_file(f);
+
+    return i >= 0 ? xc_files[i].pos >= xc_names[xc_files[i].name].size : feof(f);
+}
+#endif
 
 /* reads into the engine's memory: the platform hears of them (plat_mem_changed) */
 #undef fread
@@ -1150,8 +1576,17 @@ unsigned long xd_bytes_read;
 
 size_t xd_fread(void *p, size_t size, size_t n, FILE *f)
 {
-    size_t k = fread(p, size, n, f);
+    PERF_T0(pt0);
+    size_t k;
+#if defined(__CC816__)
+    int i = xc_of_file(f);
+    if (i >= 0)
+        k = size ? (size_t)(xc_read(i, p, (unsigned long)size * n) / size) : 0;
+    else
+#endif
+    k = fread(p, size, n, f);
 
+    PERF_IO(PF_READ, name_of(f, -1), (unsigned long)size * k, pt0);
     plat_mem_changed(p, (unsigned long)size * n);
     xd_bytes_read += (unsigned long)size * k;
     plat_progress();
@@ -1165,7 +1600,16 @@ static unsigned long read_all(int fd, void *p, unsigned n)
 {
     unsigned long total = 0;
     unsigned char *q = (unsigned char *)p;
+    PERF_T0(pt0);
 
+#if defined(__CC816__)
+    if (xc_of_fd(fd) >= 0) {
+        total = xc_read(xc_of_fd(fd), p, n);
+        if (!total && xc_files[xc_of_fd(fd)].err)
+            return 0xFFFFFFFFUL;
+        n = 0;
+    }
+#endif
     while (n) {
         unsigned want = n > 0x7FFFu ? 0x7FFFu : n;
         int k = (int)read(fd, q, want);
@@ -1178,6 +1622,7 @@ static unsigned long read_all(int fd, void *p, unsigned n)
         n -= (unsigned)k;
     }
     xd_bytes_read += total;
+    PERF_IO(PF_READ, name_of(NULL, fd), total, pt0);
     plat_progress();
     return total;
 }
@@ -1213,9 +1658,23 @@ int xd_read(int fd, void *p, unsigned n)
 int xd_open(const char *name, int flags, ...)
 {
     int fd = -1;
+    PERF_T0(pt0);
 
     if (!file_room(name))
         return -1;
+#if defined(__CC816__)
+    if ((flags & 3) == O_RDONLY) {
+        int i = xc_open(name);
+        if (i >= 0) {
+            fd = XC_FD0 + i;
+            file_opened(NULL, fd, name);
+        }
+        if (i != -2) {
+            PERF_IO(PF_OPEN, name, 0, pt0);
+            return fd;
+        }
+    }
+#endif
     if ((flags & 3) == O_RDONLY && rd_dir)
         fd = open(dos_path(name, 1), flags & ~O_BINARY);
     if (fd < 0)
@@ -1226,6 +1685,7 @@ int xd_open(const char *name, int flags, ...)
 #endif
     if (fd >= 0)
         file_opened(NULL, fd, name);
+    PERF_IO(PF_OPEN, name, 0, pt0);
     return fd;
 }
 

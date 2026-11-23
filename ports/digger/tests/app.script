@@ -8,16 +8,21 @@
 #     high score file is written in the app's folder; Esc: back to the Desktop;
 #  4. DIGGER.HZA opened again: the Installer offers Replace (shot 5): the update, which
 #     must keep DIGGER.SCO (tests/app.sh checks the card).
+# (on the board's card, run816's default: the install takes a few seconds, the Desktop then
+# reads the new Programs list, and the Programs and Games menus check their programs on the
+# card as they open: about 2 s each)
 1000 digger\n
-+3000 shot
++0 wait install: asks
++800 shot
 +500 \n
-+5000 shot
++0 wait install: installed
++800 shot
 +500 \n
-+1500 {f10}
++6000 {f10}
 +400 {right}
-+600 {end}
++3000 {end}
 +400 \n
-+600 shot
++3000 shot
 +400 {down}
 +300 \n
 +0 wait digger: title
@@ -35,6 +40,8 @@
 +0 wait digger: title
 +1500 key esc 100
 +3000 digger\n
-+3000 shot
++0 wait install: asks
++800 shot
 +500 \n
-+5000 \n
++0 wait install: replaced
++800 \n

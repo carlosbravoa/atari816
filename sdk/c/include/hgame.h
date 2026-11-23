@@ -386,6 +386,7 @@ unsigned hg_p1_pressed(void);
 extern int hg_mouse_x, hg_mouse_y;
 extern unsigned hg_mouse_b;     /* buttons held: 1 left, 2 right, 4 middle */
 unsigned hg_mouse_clicked(void);   /* buttons pressed since the last frame */
+int hg_mouse_wheel(void);          /* wheel steps since the last call (+ up / away), then 0 */
 /* the menu item picked since the last frame: menu << 8 | item, or -1 */
 int hg_menu(void);
 

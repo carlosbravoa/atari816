@@ -64,6 +64,9 @@ emu816 [--sd DIR] [--load FILE@ADDR]... [--max-seconds N] [--trace]
 | `--pc-drop-at SECONDS` | The PC link drops at this emulated time: open PC handles answer $88, new `/PC:` calls $87, the `PC:` entry leaves the root. Streams too (see "The internet"): open streams answer $88, requests put aside answer $88, each connection gets an $E4 event, new URL opens answer $87 |
 | `--pc-back-at SECONDS` | The link comes back at this time (after `--pc-drop-at`): a new session; handles from before the drop stay dead ($88) |
 | `--card-kbps R:W` | Slow card (see "Slow transfers"): READ and LOAD at R KB/s, WRITE at W KB/s, and 1 ms for every request on the card. 0 = instant. Default: off (every request instant). The board: about `170:100` |
+| `--card-board` | The board's card, request by request (see "The card's speed"): an OPEN or a STAT 24 ms, a READ 4.5 ms + 220 KB/s, ... Default: off (every request instant); `run816.py` turns it on from the program's start (`--card-board-at`) unless given `--fast-card` |
+| `--card-board-at S` | `--card-board` from S emulated seconds on (the boot stays instant: tests with fixed boot times) |
+| `--card-costs O:S:C:CW:SK:X:R:W:RK:WK` | `--card-board` with other costs: ms for OPEN, STAT, CLOSE of a file read, CLOSE of a file written, SEEK, the other requests, READ and WRITE (fixed part); KB/s of READ (and LOAD) and WRITE |
 | `--card-free BYTES` | (Horizon 0.29's tests) The card has room for BYTES more, written in this run: once they are used up, a WRITE on the card writes what still fits and answers that count (FatFs on a full volume: FR_OK, fewer bytes), and MKDIR answers FR_DENIED. Default: no limit |
 | `--pc-kbps R:W` | Slow PC volume: the same, with 6 ms for every request on the PC. The board: about `100:55` |
 | `--net` | The Net service of the PC link (step 2): `tcp://host:port` paths are real TCP connections from the host (see "The internet (PC link step 2)"). Without it they answer $8A |
@@ -308,6 +311,29 @@ answered in the poll that takes it, as before):
   and is not done (a WRITE writes nothing; its mode 2 file was deleted at the drop).
 - The board's measured speeds: card read about 170 KB/s, write about 100 KB/s; PC read about
   100 KB/s, write about 55 KB/s: `--card-kbps 170:100 --pc-kbps 100:55`.
+
+**The card's speed** (`--card-board`, 2026-11-23). The board's card answers slowly per
+request, whatever its size: measured on the board with ports/xcom's self-timing (`/M`, the
+same runs in the emulator beside them: `ports/xcom/tests/perfcmp.py`), an OPEN through the C
+library (a STAT, then the OPEN) about 50-65 ms, a CLOSE of a file read under 1 ms, of a file
+written about 20 ms (with its WRITE), a SEEK about 1.3 ms, a READ a few ms plus its bytes.
+The instant card made a program's file calls look 5-15 times cheaper than they are (a
+screen that opens and reads a few files: 0.3 s in the emulator, 2-3 s on the board). The
+model, per request (the I/O processor's time; the kernel's own time comes on top as before):
+
+| Request | ms |
+| --- | --- |
+| OPEN, STAT, and the others (READDIR, MKDIR, DELETE, RENAME) | 24 |
+| CLOSE of a file read / written | 0 / 16 |
+| SEEK | 1.1 |
+| READ (and LOAD) | 4.5 + bytes at 220 KB/s |
+| WRITE | 3 + bytes at 100 KB/s |
+
+Fitted to ports/xcom's three board runs (the geoscape, a battle, BENCH: the emulator's
+file time within 10-30 % of the board's for each kind of call); the program `/IOB` of
+ports/xcom times each kind alone on the board, to refine it (a STAT in a big folder may
+cost more than in a small one: not modelled). `tests/asm/cardtest.bin` checks the times.
+`--card-kbps` (below) stays the simpler model it was.
 
 **Keyboard events** follow the firmware's "Keyboard events" block (with the changes of the
 firmware of Horizon 0.21: events during a request, every key change in order):
@@ -718,6 +744,7 @@ every 512 CPU cycles here.
 | A816.BIN, slow console | The self test again with `--console-us 90`: same output |
 | tests/asm/mousetest | MOUSE events from a `--mouse` script: clamping with the remainder carried, a key event taking priority, motion discarded while KB_ROUTE = 1, a quick click (motion, press and release in one poll: three events) and a key tap in one poll (two events) |
 | tests/asm/kbtest | `core/sw/a816/kbtest.s`, unchanged, run with a `--keys` script: modifiers, the 4-key limit, F12 (KEY event + NMI), a key held before KB_ROUTE = 0, releases in the order they happened |
+| tests/asm/cardtest | `--card-board`: OPEN, SEEK, READ 32 KB, CLOSE, STAT, OPEN to create, WRITE 16, CLOSE of the written file, each answered after the board's time (slowtest.s built with `-D CARD`); with `--card-board-at 30` the same requests are instant |
 | tests/asm/slowtest | `--card-kbps 64:32 --pc-kbps 100:8 --pc-drop-at 3`: each answer after its time (a 32 KB card read 0.5 s, PC requests 6 ms), KEY and MOUSE events (a quick click, a tap) printed while a request is in progress, a mode 2 PC file not there before CLOSE, a 32 KB PC write cut by the drop: $88, no file left, the older file as it was |
 | tests/asm/nettest1-3 | The internet (PC link step 2), from `nettest.s` built three ways. 1: Fetch (`--net-root`, `--pc-kbps 16:16`): STAT then OPEN of the same URL (the OPEN at once), READ to the end, WRITE 7, SEEK $82, a closed handle $80, 404 in ARG1 with $8F, ftp $8D, no host $8C, mode 2 7, a folder's listing (case, query, dot files), MKDIR / RENAME 7, READDIR / LOAD $82, no Net $8A, an unknown scheme $8B, `/PC:` $87, an 8 KB READ put aside (0.5 s) while a card STAT is answered, the 5th stream 18. 2: Net (`--net`, `tests/netserver.py`: an echo server on 127.0.0.1 at a free port): OPEN, WRITE, $E4, READ, STAT / SEEK $82, a refused port $8D, `tls://` $91, no Fetch $8A, no port $8B, the server closing: $90. 3: `--pc-drop-at 1.5` with a connection and a slow Fetch READ open: $E4 at the drop, $88 for the READ put aside and on the handles, CLOSE 0, $87 after. Outputs `tests/expected/nettestN.txt`; 2 and 3 are skipped without python3 |
 | BLITTEST.BIN | `core/sw/a816/blittest.s`: every blitter op against a 65C816 reference (REV $08 and up) |

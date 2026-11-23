@@ -11,11 +11,14 @@
 +500 \n
 +0 wait install: installed /APPS/PRINCE
 +800 \n
-+1500 {f10}
+# (on the board's card, run816's default: the install takes a few seconds, the Desktop then
+# reads the new Programs list, and the Programs and Games menus check their programs on the
+# card as they open: about 2 s each)
++6000 {f10}
 +400 {right}
-+600 {end}
++3000 {end}
 +400 \n
-+600 shot
++3000 shot
 +400 \n
 +0 wait prince: start
 +1500 shot

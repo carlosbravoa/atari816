@@ -307,6 +307,7 @@ Every function is described in `hgame.h`. In short:
 | `hg_key_next()` | the keys pressed, in order (SDL_KEYDOWN's events): the HID usage in bits 0-7, the character in bits 8-15 |
 | `hg_joy(port)`, `hg_p1()`, `hg_p1_pressed()` | the joysticks; player 1: arrows + W A S D + joystick 1, fire Space / Enter / trigger |
 | `hg_mouse_x`, `hg_mouse_y`, `hg_mouse_b`, `hg_mouse_clicked()` | the mouse in screen pixels (halved in 320 x 180), updated by `hg_frame` / `hg_poll` whenever it moves, a button held or not (full screen and window). Absolute only: there is no relative motion (the pointer stops at the screen's edges and a program cannot move it), so a mouse-look game gets no deltas past an edge |
+| `hg_mouse_wheel()` | the wheel's steps since the last call (positive: up / away from you), then 0; full screen and window, collected by `hg_frame` / `hg_poll` |
 
 | Sound | |
 | --- | --- |

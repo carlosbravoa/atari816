@@ -67,10 +67,27 @@ static void adpcm_nib(unsigned nib, signed char far **o)
 }
 
 /* the samples of a block (kind as plat_sfx's) into out: their number */
+#if defined(__CC816__)
+void hz_adpcm(signed char far *out, const unsigned char far *src, unsigned bytes);
+void hz_pcm8(signed char far *out, const unsigned char far *src, unsigned bytes);
+#endif
+
 unsigned sb_decode(const unsigned char far *src, unsigned bytes, int kind, signed char far *out)
 {
     signed char far *o = out;
     unsigned i = 0;
+
+#if defined(__CC816__)
+    /* (the Atari816: the same in assembly, horizon/hz_adpcm.s) */
+    if (kind == 0) {
+        hz_pcm8(out, src, bytes);
+        return bytes;
+    }
+    if (kind == 1 && bytes) {
+        hz_adpcm(out, src, bytes);
+        return 2 * bytes - 1;
+    }
+#endif
 
     if (kind == 0) {
         for (; i < bytes; i++)
@@ -90,6 +107,20 @@ unsigned sb_decode(const unsigned char far *src, unsigned bytes, int kind, signe
     return (unsigned)(o - out);
 }
 
+/* a block's checksum (with its address and length, the platform's key for the samples
+   it made of it): every 61st byte and the last 16, cheap enough for each sound's start
+   (the whole block summed in C: up to 60 ms on the Atari816) */
+unsigned sb_sum(const unsigned char far *src, unsigned n)
+{
+    unsigned i, sum = n;
+
+    for (i = 0; i < n; i += 61)
+        sum = (unsigned)((sum << 1 | sum >> 15) + src[i]);
+    for (i = n > 16 ? n - 16 : 0; i < n; i++)
+        sum = (unsigned)((sum << 1 | sum >> 15) + src[i]);
+    return sum;
+}
+
 /* ---------------------------------------------------------------- the DSP */
 
 static void dsp_put(unsigned char v)
@@ -104,7 +135,7 @@ static void transfer(int kind)
     unsigned n = (args[0] | (unsigned)args[1] << 8) + 1u, d = 1, rate;
     unsigned long lin, samples;
     const unsigned char far *src;
-    unsigned i, sum = 0;
+    unsigned sum;
 
     (void)page_of;
     lin = ((unsigned long)dma_pg[d] << 16) | dma_a[d];
@@ -113,8 +144,7 @@ static void transfer(int kind)
     rate = (unsigned)(1000000UL / (256u - tc));
     samples = kind == 0 ? n : kind == 1 ? 1UL + 2UL * (n - 1) : 2UL * n;
     src = (const unsigned char far *)MK_FP((unsigned)(lin >> 4), (unsigned)(lin & 15));
-    for (i = 0; i < n; i++)
-        sum = (unsigned)((sum << 1 | sum >> 15) + src[i]);
+    sum = sb_sum(src, n);
     irq_at = plat_now() + samples * 1193182UL / rate;
     if (!irq_at)
         irq_at = 1;

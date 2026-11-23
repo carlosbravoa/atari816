@@ -190,6 +190,25 @@ char *strupr(char *s);
 char *strlwr(char *s);
 char *xd_getenv(const char *name);
 #define getenv(n)       xd_getenv(n)
+#if defined(__CC816__)
+/* seeks timed by /M (plat.h "self-timing") */
+long xd_lseek(int fd, long off, int how);
+int xd_fseek(FILE *f, long off, int how);
+#define lseek(fd, o, w) xd_lseek(fd, o, w)
+#define fseek(f, o, w)  xd_fseek(f, o, w)
+/* the packs read through the port's cache (plat/xdos.c "the packs in memory") */
+long xd_ftell(FILE *f);
+int xd_fgetc(FILE *f);
+int xd_ungetc(int c, FILE *f);
+int xd_ferror(FILE *f);
+int xd_feof(FILE *f);
+#define ftell(f)        xd_ftell(f)
+#define fgetc(f)        xd_fgetc(f)
+#define getc(f)         xd_fgetc(f)
+#define ungetc(c, f)    xd_ungetc(c, f)
+#define ferror(f)       xd_ferror(f)
+#define feof(f)         xd_feof(f)
+#endif
 /* The mode folder's letter (rdcount.asm's rd_dir): read-only opens try
    "<x>GA/name" first. */
 extern char rd_dir;

@@ -33,7 +33,10 @@ bad() { echo "FAIL  $1"; fail=1; }
 FILES=
 for f in data/card/*; do FILES="$FILES --file $f:/APPS/PRINCE/$(basename "$f")"; done
 run() {
-  python3 ../../sdk/tools/run816.py PRINCE.PRG --horizon "$HZ" --dest /APPS/PRINCE/PRINCE.PRG \
+# --fast-card: the card answers at once (emu816's old default). These scripts press keys at
+# fixed times after the start; on the board's card (run816's default since 2026-11-23: an OPEN
+# about 50 ms) the loads take longer and the keys come too early. To do: wait lines instead.
+  python3 ../../sdk/tools/run816.py PRINCE.PRG --horizon "$HZ" --fast-card --dest /APPS/PRINCE/PRINCE.PRG \
     $FILES "$@"
 }
 shell() {

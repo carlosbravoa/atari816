@@ -106,6 +106,16 @@ void plat_poll(void)
 {
 }
 
+/* the engine busy for long (the voxel lines): nothing here */
+void plat_busy_poll(void)
+{
+}
+
+/* a KEYS script's WAIT between two looks at the mouse (the virtual clock: nothing) */
+void plat_script_wait(void)
+{
+}
+
 /* No keyboard: the KEYS script gives the input. */
 unsigned plat_key(void)
 {
@@ -233,6 +243,13 @@ void plat_sfx(const unsigned char *src, unsigned bytes, unsigned rate, int kind,
     if (sb_log)
         fprintf(sb_log, "%lu sfx %d %u at %05lX %u Hz sum %04X samples %u\n",
                 vclock / 1193UL, kind, bytes, lin, rate, sum, n);
+}
+
+/* every effect once when loaded (the Atari816 decodes them then): nothing here */
+void plat_sfx_preload(const unsigned char *src, unsigned bytes, unsigned rate, int kind,
+                      unsigned long lin)
+{
+    (void)src; (void)bytes; (void)rate; (void)kind; (void)lin;
 }
 
 void plat_sfx_stop(void)

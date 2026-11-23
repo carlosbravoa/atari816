@@ -28,6 +28,7 @@ typedef struct Mailbox {
                                      * with a '.' in front, moved onto fhost at CLOSE */
     const char *root;               /* --sd directory, or NULL */
     uint64_t n_req, n_keyev, n_mouseev;
+    uint64_t n_op[32], op_bytes[32];  /* (--stats) requests by kind, bytes asked (READ/WRITE/LOAD) */
     /* keyboard: what the USB side holds now (4 usages + modifier bitmap), and what the
      * I/O processor has reported so far (firmware "Keyboard events" block) */
     uint8_t  kb_now[4], kb_now_mods;
@@ -64,6 +65,11 @@ extern double mailbox_pc_back;          /* --pc-back-at: emulated second it come
 /* --card-kbps R:W, --pc-kbps R:W: slow transfers (KB/s for READ / LOAD and WRITE; 0 = instant).
  * Given (either rate not 0): every request on that volume also costs a fixed time */
 extern double mailbox_card_kbps[2], mailbox_pc_kbps[2];
+/* --card-board: the board's card request by request (mailbox.c); the costs, --card-costs */
+enum { CC_OPEN, CC_STAT, CC_CLOSE, CC_CLOSEW, CC_SEEK, CC_OTHER, CC_READ, CC_WRITE, CC_RKBPS, CC_WKBPS, CC_N };
+extern int mailbox_card_board;
+extern double mailbox_card_board_at;
+extern double mailbox_card_cost[CC_N];
 extern long long mailbox_card_free;     /* --card-free BYTES (-1: no limit) */
 /* (Horizon 0.23) printing: --no-pc-print (the gateway cannot make PDFs: STAT /PC: without
  * bit 4), --classic-print FILE@SECONDS (a print job of the classic Atari's printer, P:) */

@@ -1,0 +1,2 @@
+# 2. menus and geoscape, scripted, the pointer circling by itself: ends after 150 s
+/M /MN PERFGEO /W /Q 150 NOINTRO KEYS PGEO.KEY

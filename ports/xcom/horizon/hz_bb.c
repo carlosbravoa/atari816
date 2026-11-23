@@ -183,8 +183,10 @@ static void wait_done(void)
 {
     send();
     if (pending) {
+        PERF_T0(pt0);
         hz_list_wait(0);
         pending = 0;
+        PERF_ADD(PF_BLIT, pt0);
     }
 }
 
@@ -320,6 +322,12 @@ static int place(unsigned w, unsigned h, unsigned *sh, unsigned *ax, unsigned *a
             hz_sheetnew sn;
             unsigned b = hg_banks(4);
             int s;
+            if (!b && xc_release()) {
+                /* the packs' cache gives its banks back (plat/xdos.c), then once more */
+                while (xc_release())
+                    ;
+                b = hg_banks(4);
+            }
             if (!b)
                 return 0;
             atl_addr[natl] = (unsigned long)b << 16;
@@ -540,6 +548,7 @@ int plat_bb_present(unsigned off, unsigned w, unsigned rows)
 {
     int x, y;
     hz_sheetrec *r;
+    PERF_T0(pt0);
 
     if (!ready)
         return 0;
@@ -562,6 +571,7 @@ int plat_bb_present(unsigned off, unsigned w, unsigned rows)
         r->y = (short)y;                /* the screen: framebuffer rows 0-199 */
     }
     wait_done();
+    PERF_ADD(PF_PRES, pt0);
     if (t_view && w == BB_W && rows == BB_ROWS) {
         printf("xcom: battle: the view shown at %lu ms\n", hz_uptime_us() / 1000);
         t_view = 0;

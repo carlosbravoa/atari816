@@ -48,8 +48,13 @@ struct VoxRun {
 };
 #pragma pack()
 
-static struct VoxRun *v;
+/* (speed) the block is copied in at vox_run's start and out at its end: the run reads
+   and writes it all the time, and a static's fields are cheaper than a far pointer's;
+   the map, MCD and unit tables' pointers are made once a call, not at every tile */
+static struct VoxRun vr;
+#define v (&vr)
 static const u8 far *vox;               /* DS: the voxel blob's segment, offset 0 */
+static const u8 far *vmap, *vmcd, *vunit;
 
 #define VW(off)     ((u16)(vox[(u16)(off)] | vox[(u16)((off) + 1)] << 8))
 
@@ -61,8 +66,8 @@ static u8 *oxyz(int a)
 /* The tile at v->ti: its parts' columns and whether C must add to them. */
 static void enter_tile(void)
 {
-    const u8 far *map = (const u8 far *)MK_FP(v->mapseg, 0);
-    const u8 far *mcd = (const u8 far *)MK_FP(v->mcdseg, 0);
+    const u8 far *map = vmap;
+    const u8 far *mcd = vmcd;
     u16 di = (u16)(v->ti << 2), si;
     u8 dl = 0;
     int p;
@@ -92,7 +97,7 @@ static void enter_tile(void)
     }
     si = (u16)v->ti;
     if (v->excl != 255) {
-        const u8 far *ua = (const u8 far *)MK_FP(v->unitseg, 0);
+        const u8 far *ua = vunit;
         u8 u = ua[si];
         if (u) {
             if (u != v->excl)
@@ -238,8 +243,16 @@ static u16 room_limit(u16 di, u16 d, u16 dr, int r)
 
     if (!d)
         return di;
-    t = (unsigned long)room_of(v->axis[r]) * (u16)v->d[0] + dr;
-    q = (u16)(t / d);
+    {
+        /* room is at most 23: in 16 bits while d0 < 2700 (dr < d0) */
+        u16 room = room_of(v->axis[r]), d0 = (u16)v->d[0];
+        if (d0 < 2700u)
+            q = (u16)((u16)(room * d0 + dr) / d);
+        else {
+            t = (unsigned long)room * d0 + dr;
+            q = (u16)(t / d);
+        }
+    }
     return q < di ? q : di;
 }
 
@@ -436,12 +449,27 @@ static int finish(int r)
     return r;
 }
 
+static int run(int resume);
+
 int __cdecl vox_run(void *block, int resume)
 {
     int r;
 
-    v = (struct VoxRun *)block;
+    plat_busy_poll();                   /* (an alien turn: thousands of lines) */
+    _fmemcpy(&vr, block, sizeof vr);
     vox = (const u8 far *)MK_FP(v->voxseg, 0);
+    vmap = (const u8 far *)MK_FP(v->mapseg, 0);
+    vmcd = (const u8 far *)MK_FP(v->mcdseg, 0);
+    vunit = (const u8 far *)MK_FP(v->unitseg, 0);
+    r = run(resume);
+    _fmemcpy(block, &vr, sizeof vr);
+    return r;
+}
+
+static int run(int resume)
+{
+    int r;
+
     if (resume) {
         if (v->phase == 1)
             goto chk1;

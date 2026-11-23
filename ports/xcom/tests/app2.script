@@ -7,11 +7,15 @@
 +500 \n
 +0 wait install:
 +800 \n
-+1500 {f10}
+# (the Desktop reads the new Programs list from the card: on the board's card a few
+# seconds after the install)
++6000 {f10}
 +400 {right}
-+600 {end}
+# (the Programs menu checks each program on the card as it opens: about 2 s on the
+# board's card, and the Games menu again)
++3000 {end}
 +400 \n
-+400 \n
++3000 \n
 +0 wait xcom: start
 +300 shot
 +0 wait xcom: ready for input

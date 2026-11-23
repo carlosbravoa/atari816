@@ -569,6 +569,14 @@ static void usage(void)
         "  --card-free BYTES    the card has room for BYTES more (written in the run): then a WRITE writes\n"
         "                       short, as on a full card, and MKDIR is denied (tests)\n"
         "                       (0:0 = instant, the default; the board: about 170:100)\n"
+        "  --card-board         the board's card, request by request (OPEN, STAT about 24 ms,\n"
+        "                       READ 4.5 ms + 220 KB/s, ...: emu/README.md \"The card's speed\");\n"
+        "                       run816.py's default. --card-kbps instead: its simpler model\n"
+        "  --card-board-at S    --card-board from S emulated seconds on (run816.py: from the\n"
+        "                       program's start; the boot keeps the instant card its tests expect)\n"
+        "  --card-costs O:S:C:CW:SK:X:R:W:RK:WK  --card-board with these costs (ms: OPEN, STAT,\n"
+        "                       CLOSE, CLOSE of a written file, SEEK, other; READ, WRITE fixed;\n"
+        "                       KB/s: READ, WRITE)\n"
         "  --pc-kbps R:W        slow PC volume: the same, + 6 ms a request (the board: about 100:55)\n"
         "  --ideal-timing       every CPU cycle ideal: no cache misses, SDRAM write or sweep stalls,\n"
         "                       the blitter's older speed model (the timing before Horizon 0.19)\n"
@@ -671,6 +679,17 @@ int main(int argc, char **argv)
         else if ((!strcmp(a, "--card-kbps") || !strcmp(a, "--pc-kbps")) && i + 1 < argc) {
             double *k = a[2] == 'c' ? mailbox_card_kbps : mailbox_pc_kbps;
             if (sscanf(argv[++i], "%lf:%lf", &k[0], &k[1]) != 2 || k[0] < 0 || k[1] < 0) usage();
+        }
+        else if (!strcmp(a, "--card-board")) mailbox_card_board = 1;
+        else if (!strcmp(a, "--card-board-at") && i + 1 < argc) {
+            mailbox_card_board = 1;
+            mailbox_card_board_at = atof(argv[++i]);
+        }
+        else if (!strcmp(a, "--card-costs") && i + 1 < argc) {
+            double *c = mailbox_card_cost;
+            mailbox_card_board = 1;
+            if (sscanf(argv[++i], "%lf:%lf:%lf:%lf:%lf:%lf:%lf:%lf:%lf:%lf", &c[0], &c[1], &c[2], &c[3], &c[4],
+                       &c[5], &c[6], &c[7], &c[8], &c[9]) != CC_N || c[CC_RKBPS] <= 0 || c[CC_WKBPS] <= 0) usage();
         }
         else if (!strcmp(a, "--card-free") && i + 1 < argc) mailbox_card_free = atoll(argv[++i]);
         else if (!strcmp(a, "--console-us") && i + 1 < argc) console_us = atof(argv[++i]);
@@ -879,6 +898,17 @@ int main(int argc, char **argv)
                 (unsigned long long)c->n_insn, (unsigned long long)c->n_irq, (unsigned long long)c->n_nmi,
                 (unsigned long long)c->n_abort, (unsigned long long)M.fr.n_refused, (unsigned long long)M.mb.n_req,
                 (unsigned long long)M.bl.n_blits, (unsigned long long)M.nvc.frames);
+        {
+            static const char *const nm[32] = { [1] = "OPEN", [2] = "CLOSE", [3] = "READ", [4] = "WRITE",
+                [5] = "SEEK", [6] = "STAT", [7] = "READDIR", [8] = "MKDIR", [9] = "DELETE", [10] = "RENAME",
+                [16] = "LOAD" };
+            fprintf(stderr, "emu816: mailbox requests by kind:");
+            for (int k = 0; k < 32; k++)
+                if (M.mb.n_op[k])
+                    fprintf(stderr, " %s %llu (%llu bytes)", nm[k] ? nm[k] : "op", (unsigned long long)M.mb.n_op[k],
+                            (unsigned long long)M.mb.op_bytes[k]);
+            fprintf(stderr, "\n");
+        }
         fprintf(stderr, "emu816: REV $%02X, %llu blit pixels, %llu blitter busy cycles, %llu STARTs while busy, "
                 "%llu register writes while busy, %llu stale reads, "
                 "%llu sound writes (%llu ignored: not frozen)\n", M.sys.rev,

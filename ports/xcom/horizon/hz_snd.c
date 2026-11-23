@@ -23,7 +23,7 @@
 #include "plat.h"
 #include "sb.h"
 
-#define SFX_VOL 160                     /* Lau volume (tests/sound.sh: RMS against the music) */
+#define SFX_VOL 255                     /* Lau volume: the full one, as Prince's and Xargon's effects (160 before: 4 dB softer; tests/sound.sh: RMS, no clipping) */
 
 static int rport = -1, mport = -1;
 
@@ -110,6 +110,26 @@ void plat_mus_play(int track, int loop, unsigned char *buf, unsigned len)
     b[3] = (unsigned char)len;
     b[4] = (unsigned char)(len >> 8);
     put(b);
+}
+
+/* /M: the music task's own timing (mus/musd.c 'M', 'R'): 1 and its reply in r[16] */
+int hz_snd_stats(int on, unsigned char *r)
+{
+    unsigned char b[16] = { 'M' };
+    hz_msg m;
+
+    if (mport < 0)
+        return 0;
+    if (on) {
+        b[1] = 1;
+        put(b);
+        return 0;
+    }
+    b[0] = 'R';
+    if (put(b) || get('R', 300, &m))
+        return 0;
+    memcpy(r, m.b, 16);
+    return 1;
 }
 
 void plat_mus_stop(void)
@@ -201,14 +221,26 @@ static hg_sound *sound_of(const unsigned char far *src, unsigned bytes, unsigned
 void plat_sfx(const unsigned char far *src, unsigned bytes, unsigned rate, int kind,
               unsigned long lin, unsigned sum)
 {
+    PERF_T0(pt0);
     hg_sound *s = sound_of(src, bytes, rate, kind, lin, sum);
 
     if (voice >= 0)
         hg_stop(voice);
     voice = s ? hg_play(s, SFX_VOL) : -1;
+    PERF_IO(PF_SFX, NULL, voice < 0 ? 1UL : 0UL, pt0);
     if (g_plat_virtual)
         printf("xcom: sfx %lu sfx %d %u at %05lX %u Hz sum %04X samples %lu voice %d\n",
                plat_now() / 1193UL, kind, bytes, lin, rate, sum, s ? s->len : 0UL, voice);
+}
+
+/* every effect decoded once, when the engine has loaded them all (the first geoscape):
+   starting one is then a cache hit and Lau's start, well under a millisecond */
+void plat_sfx_preload(const unsigned char far *src, unsigned bytes, unsigned rate, int kind,
+                      unsigned long lin)
+{
+    PERF_T0(pt0);
+    sound_of(src, bytes, rate, kind, lin, sb_sum(src, bytes));
+    PERF_IO(PF_SFXDEC, NULL, bytes, pt0);
 }
 
 void plat_sfx_stop(void)

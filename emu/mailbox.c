@@ -624,6 +624,8 @@ static void serve(Mailbox *m, uint8_t *msg)
     int pc = 0;
 
     m->n_req++;
+    m->n_op[msg[0] & 31]++;
+    m->op_bytes[msg[0] & 31] += len;
     switch (msg[0]) {
     case 0x01: {                                         /* OPEN */
         static const char *const mode[4] = { "rb", "r+b", "w+b", "ab" };
@@ -1080,19 +1082,27 @@ double mailbox_card_kbps[2], mailbox_pc_kbps[2];
 long long mailbox_card_free = -1;
 #define CARD_REQ_MS 1.0
 #define PC_REQ_MS   6.0
+/* --card-board (run816's default): the board's card, request by request, as measured with
+ * ports/xcom's /IOB and /M (emu/README.md "The card's speed"): ms for OPEN, STAT, CLOSE (a
+ * file read), CLOSE (a file written), SEEK, the others (READDIR, MKDIR, ...), READ and
+ * WRITE fixed parts; KB/s of READ (and LOAD), WRITE. --card-costs changes them. */
+int mailbox_card_board;
+double mailbox_card_board_at;           /* --card-board-at: from this emulated second on */
+double mailbox_card_cost[CC_N] = { 24.0, 24.0, 0.0, 16.0, 1.1, 24.0, 4.5, 3.0, 220.0, 100.0 };
 
-static uint64_t req_cycles(Mailbox *m, const uint8_t *msg, int *pc)
+static uint64_t req_cycles(Mailbox *m, const uint8_t *msg, int *pc, uint64_t now)
 {
     static char path[MAXPATH], host[4096];
     uint32_t len = msg[2] | msg[3] << 8, buf = msg[4] | msg[5] << 8 | msg[6] << 16;
     uint32_t arg0 = msg[8] | msg[9] << 8 | msg[10] << 16 | (uint32_t)msg[11] << 24;
-    int op = msg[0], rd = 1, xfer = 0;
+    int op = msg[0], rd = 1, xfer = 0, wrote = 0;
     double bytes = 0;
     *pc = 0;
     switch (op) {
     case 0x02: case 0x03: case 0x04: case 0x05:          /* CLOSE, READ, WRITE, SEEK: by the handle */
         if (arg0 >= MB_FILES || !m->f[arg0] || pc_dead(m, arg0)) return 0;     /* (refused at once) */
         *pc = m->fpc[arg0];
+        wrote = m->fdirty[arg0];
         if (op == 0x03 || op == 0x04) { xfer = 1; bytes = len; rd = op == 0x03; }
         break;
     case 0x01: case 0x06: case 0x07: case 0x08: case 0x09: case 0x0A: case 0x10:
@@ -1110,6 +1120,15 @@ static uint64_t req_cycles(Mailbox *m, const uint8_t *msg, int *pc)
         return 0;
     }
     const double *k = *pc ? mailbox_pc_kbps : mailbox_card_kbps;
+    if (!*pc && mailbox_card_board && !k[0] && !k[1] && now >= mailbox_card_board_at * CPU_HZ) { /* the board's card, by the request */
+        const double *c = mailbox_card_cost;
+        double ms = op == 0x01 ? c[CC_OPEN] : op == 0x06 ? c[CC_STAT]
+                  : op == 0x02 ? (wrote ? c[CC_CLOSEW] : c[CC_CLOSE]) : op == 0x05 ? c[CC_SEEK]
+                  : op == 0x03 || op == 0x10 ? c[CC_READ] : op == 0x04 ? c[CC_WRITE] : c[CC_OTHER];
+        double s = ms / 1000.0;
+        if (xfer) s += bytes / ((rd ? c[CC_RKBPS] : c[CC_WKBPS]) * 1024.0);
+        return (uint64_t)(s * CPU_HZ);
+    }
     if (!k[0] && !k[1]) return 0;                        /* not given: instant */
     double s = (*pc ? PC_REQ_MS : CARD_REQ_MS) / 1000.0;
     if (xfer && k[rd ? 0 : 1] > 0) s += bytes / (k[rd ? 0 : 1] * 1024.0);
@@ -1191,7 +1210,7 @@ void mailbox_poll(uint64_t now)
         return;
     }
     int pc;
-    uint64_t d = req_cycles(m, msg, &pc);
+    uint64_t d = req_cycles(m, msg, &pc, now);
     if (d) {                                             /* served one at a time: the answer later */
         memcpy(m->busy_msg, msg, 16);
         m->busy = 1;

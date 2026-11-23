@@ -263,6 +263,19 @@ test-app: app $(CARD)
 clean:
 	rm -rf build XCOM.PRG MUSD.PRG XCOM.HZA XCOM.map XCOM.lbl
 
+# ---------------------------------------------------------------- the board measuring kit
+# make kit: build/kit/APPS/XCOM/ (XCOM.PRG, MUSD.PRG, the KEYS scripts PGEO.KEY, PBAT.KEY)
+# and build/kit/ARGS/*.ARG (one XCOM.ARG per measurement: tests/perf/*.arg); tests/perf.sh
+# tries one in the emulator (README.TXT "Options: XCOM.ARG", horizon/hz_perf.c).
+kit: builds
+	rm -f build/kit/APPS/XCOM/* build/kit/ARGS/*
+	mkdir -p build/kit/APPS/XCOM build/kit/ARGS
+	cp XCOM.PRG MUSD.PRG build/kit/APPS/XCOM/
+	cp tests/perf/geo.keys build/kit/APPS/XCOM/PGEO.KEY
+	cp tests/perf/bat.keys build/kit/APPS/XCOM/PBAT.KEY
+	for f in tests/perf/*.arg; do cp $$f build/kit/ARGS/$$(basename $$f .arg | tr a-z A-Z).ARG; done
+	@ls build/kit/APPS/XCOM build/kit/ARGS
+
 .SECONDARY:
-.PHONY: all src data host host-run check-host refs-host builds test test-long refs refs-long run app card test-app speed clean FORCE
+.PHONY: kit all src data host host-run check-host refs-host builds test test-long refs refs-long run app card test-app speed clean FORCE
 FORCE:

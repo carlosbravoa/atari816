@@ -22,7 +22,11 @@
    game's:
      {'P', track, loop, u16 bytes}  play the track (bytes: the game's size of it)
      {'S'} stop   {'F', sfx} an FM effect   {'O', on} sound on / off   {'Q'} quit
-   It ends with its parent (looked for once a second), as MUSICD.PRG does. */
+   It ends with its parent (looked for once a second), as MUSICD.PRG does.
+   For XCOM.PRG's /M (horizon/hz_perf.c): {'M', 1} times the timer's wake-ups from then
+   on, {'R'} answers {'R', u16 wake-ups, u16 late ones (more than one tick due), u8 most
+   ticks due at once, u16 longest gap ms, u16 gaps over 30 ms, u16 over 100 ms} for the
+   time since the last 'R', and starts again. */
 #include <horizon.h>
 #include <stdlib.h>
 #include <string.h>
@@ -177,6 +181,9 @@ int main(int argc, char **argv)
     hz_msg m;
     unsigned rport, gen, last = 0, n, chk = 0;
     int port;
+    unsigned char timing = 0;
+    unsigned st_wakes = 0, st_late = 0, st_maxn = 0, st_gap = 0, st_g30 = 0, st_g100 = 0;
+    long st_t = 0;
 
     if (argc < 2)
         return 1;
@@ -205,6 +212,24 @@ int main(int argc, char **argv)
                 break;
             n = c - last;
             last = c;
+            if (timing) {
+                long t = hz_uptime_us();
+                unsigned g = (unsigned)((t - st_t) / 1000L);
+                if (st_t) {
+                    if (g > st_gap)
+                        st_gap = g;
+                    if (g > 30)
+                        st_g30++;
+                    if (g > 100)
+                        st_g100++;
+                }
+                st_t = t;
+                st_wakes++;
+                if (n > 1)
+                    st_late++;
+                if (n > st_maxn)
+                    st_maxn = n;
+            }
             if (n > 8)
                 n = 8;                  /* far behind: no more catching up */
             while (n--)
@@ -238,6 +263,26 @@ int main(int argc, char **argv)
             break;
         case 'O':
             g_sound_on = m.b[1];
+            break;
+        case 'M':
+            timing = m.b[1];
+            break;
+        case 'R':
+            memset(&m, 0, sizeof m);
+            m.b[0] = 'R';
+            m.b[1] = (unsigned char)st_wakes;
+            m.b[2] = (unsigned char)(st_wakes >> 8);
+            m.b[3] = (unsigned char)st_late;
+            m.b[4] = (unsigned char)(st_late >> 8);
+            m.b[5] = (unsigned char)(st_maxn > 255 ? 255 : st_maxn);
+            m.b[6] = (unsigned char)st_gap;
+            m.b[7] = (unsigned char)(st_gap >> 8);
+            m.b[8] = (unsigned char)st_g30;
+            m.b[9] = (unsigned char)(st_g30 >> 8);
+            m.b[10] = (unsigned char)st_g100;
+            m.b[11] = (unsigned char)(st_g100 >> 8);
+            hz_send(rport, &m);
+            st_wakes = st_late = st_maxn = st_gap = st_g30 = st_g100 = 0;
             break;
         case 'Q':
             goto quit;

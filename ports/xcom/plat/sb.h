@@ -27,4 +27,10 @@ void plat_mus_stop(void);
 void plat_mus_fx(int sfx);
 void plat_mus_sound(int on);
 
+/* a block's checksum (the platform's key with its address and length) */
+unsigned sb_sum(const unsigned char far *src, unsigned n);
+/* (patches/src-0007-sfx.patch) every effect once, when the engine has loaded them all */
+void plat_sfx_preload(const unsigned char far *src, unsigned bytes, unsigned rate, int kind,
+                      unsigned long lin);
+
 #endif

@@ -254,6 +254,27 @@ now:    lda     f:UPTIME                ; latches the upper bytes
         .a8
         rts
 
+.ifdef CARD
+; (cardtest.bin: built with -D CARD) --card-board: the board's card, request by request:
+; OPEN, STAT 24 ms, SEEK 1.1 ms, READ 4.5 ms + 220 KB/s, WRITE 3 ms + 100 KB/s, CLOSE of a file
+; read 0 ms, of a file written 16 ms (emu/README.md "The card's speed"); 3.9 units a ms
+;            label     path        tmin   tmax   op   len    buf    fl arg0  arg1
+steps:
+        STEP l_openr,  p_big,      92,    100,   $01, 0,     0,     0, 0,    0
+        STEP l_seek,   0,          3,     7,     $05, 0,     0,     0, 0,    100
+        STEP l_read,   0,          583,   592,   $03, $8000, DATA,  0, 0,    0
+        STEP l_close,  0,          0,     3,     $02, 0,     0,     0, 0,    0
+        STEP l_statc,  p_big,      92,    100,   $06, 0,     0,     0, 0,    0
+        STEP l_openc,  p_cnew,     92,    100,   $01, 0,     0,     2, 0,    0
+        STEP l_write,  0,          11,    15,    $04, 16,    wdata, 0, 0,    0
+        STEP l_closew, 0,          61,    66,    $02, 0,     0,     0, 0,    0
+        .word   0
+p_cnew:   .byte "/NEW.BIN", 0
+l_seek:   .byte "SEEK", 0
+l_statc:  .byte "STATCARD", 0
+l_openc:  .byte "OPENCARD2", 0
+l_closew: .byte "CLOSEWRITTEN", 0
+.else
 ; card 64:32 KB/s + 1 ms a request, the PC 100:8 KB/s + 6 ms; 3.9 units a ms
 ;            label     path        tmin   tmax   op   len    buf    fl arg0  arg1
 steps:
@@ -270,6 +291,7 @@ steps:
         STEP l_closeo, 0,          0,     2,     $02, 0,     0,     0, 0,    0
         STEP l_statpc, p_pc,       0,     2,     $06, 0,     0,     0, 0,    0
         .word   0
+.endif
 
 p_big:    .byte "/BIG.BIN", 0
 p_new:    .byte "/PC:/New.bin", 0

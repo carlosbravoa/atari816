@@ -21,7 +21,8 @@ next").
 | Host build (Linux) | the whole engine headless on a model of the DOS machine (`plat/xdos.c`), with DOS's 16-bit `int` (`tools/host16.py`): the reference |
 | Atari816 build | `hcc --code large --data far`: XCOM.PRG and MUSD.PRG (the music task) |
 | Tests | `make test`: 14 KEYS-script runs of every screen on both builds (same LOG, same pictures pixel for pixel, same saves, open files counted), the real mouse and keyboard three times (the clock as after the start, after 5 minutes, wrapping), a full card, the sound (OPL2 stream and Sound Blaster blocks against the host's, the beat, the volume); `make test-long`: longer runs (a big battle saved and loaded, the defeat slides, the campaign soak); `make test-app`: the app installed and started from the Desktop |
-| Screen | 320 x 200 on 320 x 180: every screen pans with the pointer; the battle view is split (the panel whole below 124 rows of the view) |
+| Screen | 320 x 200 on 320 x 180: the picture stands still, each kind of screen at its own rows (centred, or where its buttons are); the mouse wheel or F5 / F6 move it; the battle view is split (the panel whole below 124 rows of the view); the pointer is a hardware sprite |
+| On the board | `make kit`: a measuring kit (XCOM.ARG, `/M` self-timing to `/PC:/`, `/IOB` the card's costs); PORTING-NOTES.md section 4e |
 
 Read [PORTING-NOTES.md](PORTING-NOTES.md): the assessment, the measurements, the plan,
 what is next. The player's guide is [app/README.TXT](app/README.TXT) (it goes into the app).

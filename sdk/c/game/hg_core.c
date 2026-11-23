@@ -737,6 +737,8 @@ void hg__pause(void)
     st_last = 0;
 }
 
+static int wheel;                       /* wheel steps not yet taken (hg_mouse_wheel) */
+
 static void events(void)
 {
     hz_event ev;
@@ -776,6 +778,9 @@ static void events(void)
                 mclick |= hg_mouse_b & ~mlast;
                 mlast = hg_mouse_b;
             }
+            break;
+        case WE_WHEEL:
+            wheel += (int)ev.a;
             break;
         case WE_MENU:
             menupick = (int)((ev.a << 8) | (ev.b & 0xFF));
@@ -880,6 +885,14 @@ unsigned hg_key_next(void)
 unsigned hg_mouse_clicked(void)
 {
     return mclick;
+}
+
+int hg_mouse_wheel(void)
+{
+    int w = wheel;
+
+    wheel = 0;
+    return w;
 }
 
 int hg_menu(void)

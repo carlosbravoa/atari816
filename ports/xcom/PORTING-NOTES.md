@@ -599,7 +599,8 @@ pre-shaded copies of the pictures in the atlas (one per shade level) when the li
 
 ### The screen
 
-Implemented in `horizon/hz_plat.c`: every screen pans (the 180 lines show rows from
+(Stage 4a's way, `/PANPTR` since section 4e: the picture now stands still, the wheel
+moves it.) Implemented in `horizon/hz_plat.c`: every screen pans (the 180 lines show rows from
 `s * 20 / 179`, s the pointer's line; the pointer's row is `s + s * 20 / 179`); the
 battle view is split: the panel (rows 144-199) whole at lines 124-179, 124 of the view's
 144 rows above it, following the pointer while it is over them (the engine says so:
@@ -894,6 +895,138 @@ bank like C. XCOM.PRG 875,022 bytes; the main bank without movable code 50,597 b
 that must stay 9,299, constants 3,881, data 374, bss 37,043) + heap 2 KB + stack 8 KB =
 60,837 of 65,264: **4,427 bytes left** (3,850 more than before; hcc fills the room with
 4,387 bytes of movable C until a change needs it). `make test`: 91 PASS lines.
+
+## 4e. On the board (24 November 2026)
+
+The first tries on the board: "it works! music on ... the scrolling thing is a bit annoying
+... the game stutters a lot ... the battle is laggy". The emulator had promised a calm game.
+
+### The measuring kit (`make kit`)
+
+Programs started from the Desktop get no options, so the port reads **XCOM.ARG** in its
+folder when it gets none (README.TXT section 4; `#` comments). The port's own options for
+measuring:
+
+| Option | What |
+| --- | --- |
+| `/M`, `/MN NAME` | self-timing (`horizon/hz_perf.c`): counters of time per kind of work (the engine's file calls, the card's own calls, the blitter waits, the vertical-blank sleeps = the idle time, view and palette sends, the pointer, effects started and decoded), histograms of the gaps a player feels (between the engine's looks at the keyboard and at events, pointer move → pointer drawn, between pointer draws, between battle view presents), the music task's own lateness (`mus/musd.c` 'M'/'R'), the memory; a line every 5 s, a block every 30 s, the totals at the exit, appended to NAME.TXT in the program's folder and to `/PC:/NAME.TXT` (the PC link's folder; silently nothing without it) |
+| `/W` | the pointer circles by itself (a step every 20 ms): a KEYS script's run with the pointer moving |
+| `/Q n`, `/E` | end after n s; end at the first wait for input (after BENCH) |
+| `/C FILE` | copy FILE to `/PC:/` at the exit (BENCH.TXT) |
+| `/IOB` | the card's costs: each kind of Horizon file request timed alone (stat, open, close, seek, reads of 16 B to 32 KB, a LOG line's create/append), IOBENCH.TXT and `/PC:/`, then the end |
+
+A KEYS script's `WAIT` now sleeps to the next frame between its looks at the mouse on the
+real clock (`patches/src-0006-perf.patch`; the virtual clock: unchanged), as a player's
+input wait does, and ends the loading screen (it stayed up for a whole scripted run). A
+script's CLICK/MOVE keeps the pointer where it put it until the mouse (or `/W`) moves.
+`tests/perf.sh OUT S "XCOM.ARG text"` runs a kit run in the emulator as on the board (the
+app's folder, no options, the PC folder at OUT/pc); `tests/perfcmp.py BOARD EMU` puts two
+reports' totals side by side. The kit's runs: `tests/perf/*.arg` (0 IOB, 1 BENCH, 2
+menus and geoscape scripted, 3 a battle scripted, 4 and 5 by hand).
+
+### What the board showed (kit runs 1-3), against the emulator of then
+
+| Per call | Board | Emulator (instant card) | Emulator optimistic by |
+| --- | --- | --- | --- |
+| the engine's open (stat + open, 2-3 requests) | 54-66 ms | 4.3-4.7 ms | 13-14 x |
+| close of a file read / of a LOG line | 7 / 16 ms (with its write) | 1.3 / 1.6 ms | 5-10 x |
+| seek | 1.34 ms | 0.52 ms | 2.6 x |
+| read (the engine's, through stdio's buffer) | 1.7-3.1 ms | 0.55-0.76 ms | 3-4 x |
+| PALV.PAK (an open, seek, read and close at each palette) / NAMES.PAK / UIV.PAK / FA1V.PAK | 1,557 / 2,082 / 5,136 / 2,075 ms | 115 / 207 / 1,175 / 550 ms | 13 / 10 / 4.4 / 3.8 x |
+| plat_poll's work (events) | 1.06 ms | 0.85 ms | 1.2 x |
+| the pointer drawn, a view send, a palette, a blitter wait, a present, an effect started | 2.08 / 0.45 / 14.6 / 2.04 / 5.0 / 73 ms | 2.07 / 0.46 / 16.5 / 2.16 / 5.4 / 73 ms | none (within 10 %) |
+| BENCH (redraw 159 ms, scroll 93, cursor 21, present 11) | | the same | none |
+
+So the CPU, the blitter and the memory are modelled honestly; **the card was not**: the
+emulator answered every file request at once. On the board a request costs what the I/O
+processor's FatFs needs, whatever its size: an OPEN or a STAT about 25 ms. That was the
+stutter at every screen change (seconds of opens and small reads), and the music task's
+timing was fine all along (at most 26 ms between its wake-ups, no tick lost).
+
+### The fixes
+
+- **The emulator's card** (emu/README.md "The card's speed"): `--card-board`, each request
+  costs the board's time (OPEN, STAT 24 ms, CLOSE 0 / 16 ms after writing, SEEK 1.1 ms, READ
+  4.5 ms + 220 KB/s, WRITE 3 ms + 100 KB/s), fitted to the three board runs (within 10-30 %
+  per kind); run816 uses it from the program's start (`--card-board-at`; `--fast-card` for
+  the old instant card); `emu/tests/asm/cardtest`. Other ports: digger's and prince's
+  app tests needed longer waits after the install and around the Programs menu (it stats
+  each program as it opens); prince's and xargon's scripted games press keys at fixed
+  times, so their check.sh runs with `--fast-card` for now (a note there: wait lines to do).
+- **The packs in memory** (`plat/xdos.c`, "the packs in memory"): read-only opens of the
+  packs go through a cache: a name table (each path looked up once: there or not, its
+  size) and their contents in 16 KB blocks in far banks taken while at least 12 banks stay
+  free (at most 24; given back to the battle's atlas when it needs them), least recently
+  used reused. An open, a seek, a read of what is in memory make no card call; the engine
+  sees the same bytes, files and errors (`make test`: the host's LOGs, pictures and saves).
+  Measured (emulator, the board's card): no card call at all in steady play on the
+  geoscape or in a battle after its start; a screen's first visit 1-6 card calls (0.2 s),
+  later visits none; the start: machine on to the start menu 19.6 s (21.3 before), to a
+  quick battle 21.5 s (28.0). Memory: 7-8 banks of cache in the tests' runs.
+- **The pointer is a hardware sprite** (`horizon/hz_plat.c`, "the pointer"): vga_ms_draw /
+  vga_ms_erase (2 ms of CPU each, about 100 a second while the mouse moved) now give the
+  arrow's or the hourglass's picture to one of Marga's sprites, moved at each poll where
+  the mouse is (no lag behind the engine's own redraw), hidden when the engine has had no
+  pointer for 300 ms while it still polls. `/V` runs draw it as before (the test pictures
+  are the host's); `/CPUPTR` too.
+- **The screen stands still** (the user's decision): each kind of screen starts at its own
+  rows (by the DOS palette the engine sets: geoscape and its windows centred, rows 10-189;
+  base screens bottom-aligned, their buttons in rows 188-199; graphs and UFOpaedia articles
+  top-aligned, their buttons in rows 0-17; the battle's inventory rows 4-183, its OK in rows
+  1-10); the mouse wheel (5 rows a step: hgame's new `hg_mouse_wheel()`, sdk test gt_poll)
+  or F5 / F6 move it, 4 rows a poll at most; the battle view's 124 of 144 rows the same
+  (centred first). What the centred geoscape hides: the INTERCEPT button (rows 0-9: a wheel
+  step, or I) and the lower part of the globe buttons (rows 190-199: + / -, the arrows).
+  `/PANPTR` keeps the old way. View sends: none unless the wheel turns (17 a second before).
+  Squeezing 200 rows into 180 instead (every 10th row dropped; tried on the host's
+  pictures of the base information and the soldier list): the whole screen shows and
+  stays usable, but every second or third line of small text loses one of its rows ("SKY-
+  RANGER-1" in the soldier list, a few names, the bars' scales look broken), and it would
+  need a copy of the picture at every change (Marga cannot skip rows): not taken. A
+  640 x 360 mode with the picture doubled only across would stretch it to 2:1 against
+  the 1.2:1 it was drawn for (distorted): not taken either.
+- **Effects** (`horizon/hz_snd.c`, `horizon/hz_adpcm.s`, `patches/src-0007-sfx.patch`):
+  each start used to checksum the whole block in C and decode it the first time: 72-206 ms
+  a shot. Now every effect is decoded when the engine has loaded them all (23 effects, 0.96
+  s, in assembly: 3.7 s in C), and a start checksums 1 byte in 61 (`sb_sum`, both builds):
+  0.9 ms. Lau's volume 255 (Prince's and Xargon's; was 160). The Lau setup is theirs
+  (`hg_sound_from` of signed 8-bit samples in far banks, `hg_play`), nothing the hardware
+  would refuse. What a player hears: no effect in the menus or on buttons; a chime when a
+  UFO is detected; an interception's shots and hits; in a battle every step, shot, hit,
+  death, door, explosion.
+- **The alien turn**: 44 s without a poll in the scripted battle (FA1V, seed 6), the board
+  the same. The voxel line (`plat/voxrun.c`, 60 % of it) now copies its block in and out
+  instead of reaching it through a far pointer at every field, and makes its table
+  pointers once a call (a few per cent: the turn is still 44 s). It now calls
+  `plat_busy_poll` once a line: every 32nd call the platform reads its events and moves
+  the pointer (real clock only), so the pointer moves and keys queue during the turn (the
+  music has its task). NOEXACTAI (the engine's option, XCOM.ARG) makes the same turn 8 s.
+  Next: the voxel line in assembly (and the A* goal search).
+- **"xdos: FP_OFF of a pointer outside the DOS memory"** (8 lines in a battle): panel.c's
+  `FP_OFF(u)` of a unit in `g_units` (a global, in the main bank), only to test it for NULL:
+  the expected case the model already answers (non-zero); no longer reported for the main
+  bank's globals.
+- **BENCH's "CPU read of blitter-written memory"** (emu816's rule check): BENCH's own
+  screen checks read the screen (bank 4B in that run) right after a present whose list the
+  port did not wait for; on the board the reads could be stale (its CPU has a 4 KB cache;
+  hz_list_wait flushes it), the board's BENCH said "0 differ" all the same. BENCH only:
+  the game itself reads what Ali wrote after `plat_bb_sync` (the old CPU pointer read the
+  screen under the arrow: the sprite does not).
+
+### Expected on the board now (the emulator with the board's card; `/M` on)
+
+| Kit run | Figure | Before (board) | Now (emulator) |
+| --- | --- | --- | --- |
+| 0 IOB | stat / open / C open+close / seek / read 512 B / 4 KB / 32 KB / LOG line | (new) | 25 / 25 / 51 / 1.5-1.8 / 7.4 / 23 / 151 / 46 ms |
+| 1 BENCH | average full redraw / scroll / cursor step | 159 / 93 / 21 ms | 156 / 93 / 21 ms |
+| 2 GEO | to the start menu (ready for input after the start) | 10.4 s (+ card) | 13.0 s |
+| 2 GEO | idle on the geoscape at 5 Sec, the pointer circling | 44-47 % | 62-66 % |
+| 2 GEO | pointer move → drawn, at most / view sends a second | 40-52 ms / 17 | 30-40 ms / 0 |
+| 2 GEO | card calls in steady play / at a screen change | 0 / 220-1,400 calls, 0.6-1.6 s | 0 / 0-6 calls, 0-0.2 s |
+| 3 BAT | ready in a quick battle | 17.2 s (emu, board card) | 14.9 s |
+| 3 BAT | idle in the battle view, the pointer circling | 18-25 % | 40 % |
+| 3 BAT | an effect's start | 73 ms (206 at most) | 0.9 ms |
+| 3 BAT | the alien turn | 45 s, pointer frozen | 44 s, the pointer moves |
 
 ## 5. The plan
 

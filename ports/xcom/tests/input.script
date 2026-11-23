@@ -1,11 +1,13 @@
-# The real keyboard and mouse through Horizon (no KEYS script, the real clock): the
-# start menu, New Game, the difficulty, a base placed on the globe, the geoscape, the
-# base screen, back to the geoscape. Coordinates: 640 x 360 (each screen pixel 2 x 2).
-0 wait xcom: start
-+6000 move 315 198
+# The real keyboard and mouse through Horizon (no KEYS script, the real clock): the start
+# menu, New Game, the difficulty, a base placed on the globe, the geoscape, the base
+# screen, back to the geoscape. Coordinates: 640 x 360 (each screen pixel 2 x 2). The
+# picture stands still (horizon/hz_plat.c "the screen"): the menus and the geoscape show
+# rows 10-189, the base screens rows 20-199; the wheel moves it (2 steps up: rows 0-179).
+0 wait xcom: ready for input
++1500 move 315 198
 +500 shot
 +300 click
-+3000 move 320 100
++3000 move 320 90
 +500 shot
 +300 click
 +5000 shot
@@ -14,9 +16,12 @@
 +3000 shot
 +300 {enter}
 +4000 shot
-+300 move 577 38
+# the INTERCEPT / BASES buttons sit in rows 0-21: the wheel shows them (rows 0-179)
++300 wheel 2
++500 move 577 38
 +500 click
 +5000 shot
+# the base screen (rows 20-199 at once): GEOSCAPE, its bottom button
 +300 move 580 350
 +800 shot
 +300 click

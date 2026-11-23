@@ -82,6 +82,11 @@ Options:
                   the program's functions); --prof-from S --prof-to S: only from S to S
                   seconds after the program's start (as --shot's times)
   --expect TEXT   fail unless console.txt contains TEXT (repeatable)
+  --fast-card     the card answers at once (emu816's own default); without it the card
+                  costs what the board's does from the program's start on (emu816
+                  --card-board-at: an OPEN or STAT about 24 ms, a READ 4.5 ms + 220
+                  KB/s; emu/README.md "The card's speed"). An --emu-arg --card-kbps or
+                  --card-costs replaces it
   --emu-arg ARG   pass ARG to emu816 as it is (repeatable): e.g. --emu-arg --watch
                   --emu-arg 0B8080:10 (writes into a range logged in emu.err), --emu-arg
                   --dump-ram-on --emu-arg TEXT (the RAM when the program prints TEXT);
@@ -155,7 +160,7 @@ def main():
             opt['emu-args'].append(val()); i += 2
         elif w in ('--log-sound', '--log-sound-us', '--log-lau', '--log-lau-us', '--log-opl',
                    '--log-opl-us', '--log-bankwrap', '--must-stop', '--console-times',
-                   '--window', '--net'):
+                   '--window', '--net', '--fast-card'):
             opt[w[2:]] = True; i += 1
         elif w.startswith('--'):
             die(f'unknown option {w}')
@@ -285,7 +290,13 @@ def main():
         cmdl.append('--console-times')
     if opt.get('log-bankwrap'):
         cmdl.append('--log-bankwrap')
-    cmdl += opt['emu-args'] + os.environ.get('EMU816_ARGS', '').split()
+    extra = opt['emu-args'] + os.environ.get('EMU816_ARGS', '').split()
+    if not opt.get('fast-card') and not any(a.startswith('--card-') and a != '--card-free'
+                                            and a != '--card-date' for a in extra):
+        # the board's card from the program's start on (emu816 --card-board-at): each file
+        # request costs what it costs on the board (an OPEN or a STAT about 24 ms)
+        cmdl += ['--card-board-at', f'{t0 / 1000.0:g}']
+    cmdl += extra
     if opt.get('log-opl'):
         cmdl.append('--log-opl')
     if opt.get('log-opl-us'):

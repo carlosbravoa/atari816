@@ -234,6 +234,12 @@ static void set_pal(unsigned char t)
     if ((a & 7) && a != curp) {
         unsigned char was = curp;
         curp = a;
+#if defined(__CC816__)
+        {
+            void plat_screen_kind(int k);
+            plat_screen_kind(a & 7);
+        }
+#endif
         if ((was ^ a) & 7) {
             curb = 0;
             if (!read_at(8 + (long)((a & 7) - 1) * PALREC, g_vpal, 768))
@@ -477,12 +483,51 @@ static unsigned char far *mbox(int x, int y)
     return SCREEN + (unsigned)y * ROW + (unsigned)x;
 }
 
+#if defined(__CC816__)
+/* the pointer's picture, 16 x 16 (colour 0 clear), for the Atari816's hardware sprite
+   (horizon/hz_plat.c plat_pointer_draw): the arrow, or the hourglass as drawn now */
+void vga_ptr_image(unsigned char far *d, int arrow)
+{
+    int r, k;
+
+    _fmemset(d, 0, 256);
+    if (arrow) {
+        for (r = 0; r < 13; r++)
+            for (k = 0; k < 9; k++)
+                d[r * 16 + k] = cursor[r][k];
+        return;
+    }
+    for (r = 0; r < 14; r++) {
+        unsigned char m = g_ms_pm[r], f = g_ms_pf[r];
+        for (k = 0; k < 8; k++, m <<= 1, f <<= 1)
+            if (m & 0x80)
+                d[r * 16 + k] = f & 0x80 ? g_vmap[15] : g_vmap[0];
+    }
+}
+#endif
+
 /* 20 ms_draw_cga: the pointer, its background kept. */
 void vga_ms_draw(int x, int y)
 {
-    unsigned char far *d = mbox(x, y);
+    unsigned char far *d;
     int r, k;
+    PERF_T0(pt0);
 
+#if defined(__CC816__)
+    {
+        /* the Atari816 (not in /V runs): a hardware sprite shows the pointer, nothing is
+           drawn into the picture (2 ms of CPU a draw and an erase saved) */
+        int plat_pointer_draw(int x, int y, int arrow);
+        if (plat_pointer_draw(x, y, g_ms_pm[0] == 0x80)) {
+            if (g_perf && g_ms_pm[0] == 0x80) {
+                perf_add(PF_PTR, pt0);
+                perf_ptr_drawn();
+            }
+            return;
+        }
+    }
+#endif
+    d = mbox(x, y);
     for (r = 0; r < mh; r++)
         for (k = 0; k < mw; k++)
             msave[r][k] = d[(unsigned)r * ROW + k];
@@ -491,6 +536,12 @@ void vga_ms_draw(int x, int y)
             for (k = 0; k < mw; k++)
                 if (cursor[r][k])
                     d[(unsigned)r * ROW + k] = cursor[r][k];
+#if defined(__CC816__)
+        if (g_perf) {
+            perf_add(PF_PTR, pt0);
+            perf_ptr_drawn();
+        }
+#endif
         return;
     }
     for (r = 0; r < mh; r++) {          /* the hourglass: mask black, fill white */
@@ -504,14 +555,24 @@ void vga_ms_draw(int x, int y)
 /* 21 ms_erase_cga */
 void vga_ms_erase(int x, int y)
 {
-    unsigned char far *d = mbox(mx, my);
+    unsigned char far *d;
     int r, k;
+    PERF_T0(pt0);
 
     (void)x;
     (void)y;
+#if defined(__CC816__)
+    {
+        int plat_pointer_erase(void);
+        if (plat_pointer_erase())
+            return;
+    }
+#endif
+    d = mbox(mx, my);
     for (r = 0; r < mh; r++)
         for (k = 0; k < mw; k++)
             d[(unsigned)r * ROW + k] = msave[r][k];
+    PERF_ADD(PF_PTR, pt0);
 }
 
 /* ---------------------------------------------------------------- the geoscape (vgxasm.asm) */

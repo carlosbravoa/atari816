@@ -60,6 +60,12 @@ int main(void)
         hz_vsync();
     }
     check("the pointer moves without a button (hg_poll)", hg_mouse_x == 50 && hg_mouse_y == 150);
+    {
+        /* the wheel: the script turns it 3 steps up then 1 down at 2.6 s */
+        int w = hg_mouse_wheel();
+        printf("gt_poll: wheel %d\n", w);
+        check("the wheel's steps (hg_mouse_wheel), then 0", w == 2 && hg_mouse_wheel() == 0);
+    }
 
     /* 3. hg_split, then hg_view_send and no poll: shot 2 at 3.8 s shows rows 100-139 above
      * the split at line 40 and rows 220-359 below it */

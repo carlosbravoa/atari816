@@ -41,7 +41,10 @@ for f in data/card/*; do FILES="$FILES --file $f:/GAMES/XARGON/$(basename "$f")"
 run() {
   a=$1
   shift
-  python3 ../../sdk/tools/run816.py XARGON1.PRG --horizon "$HZ" \
+# --fast-card: the card answers at once (emu816's old default). These scripts press keys at
+# fixed times after the start; on the board's card (run816's default since 2026-11-23: an OPEN
+# about 50 ms) the loads take longer and the keys come too early. To do: wait lines instead.
+  python3 ../../sdk/tools/run816.py XARGON1.PRG --horizon "$HZ" --fast-card \
     --dest /GAMES/XARGON/XARGON1.PRG --mode shell --args "/STATS$a" $FILES "$@"
 }
 rm -rf build/test
