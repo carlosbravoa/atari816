@@ -141,14 +141,37 @@ first try once problems 3 and 4 were fixed, and the recorded demo replays exactl
 
 `make test` (`tests/check.sh`): the scripted game (title, menus, a save, the map with its
 journal, level 1 with a jump, a shot and a death, the game's menu, quit, high scores, a
-load) with 14 screenshots compared by checksum, the save files on the card, the loaded
+load) with 13 pictures compared by checksum, the save files on the card, the loaded
 game's position, Lau's writes and the recorded sound's level and clipping; then the
 recorded demo twice (the second time 30 ms a frame slower) to its frame 1,500, which
-must match `tests/demo.ref`. The game is deterministic in the emulator, so the
-screenshots repeat pixel for pixel; any change of timing moves them (`make refs`, then
-look at `tests/ref/`). The demo is the strongest check: 1,500 frames of the game logic
-(objects, collisions, `random()`), and its whole run (5,077 frames) ends with what the
-recording earned (no damage taken, 14 emeralds), the same on the slower machine.
+must match `tests/demo.ref`, with 7 pictures (the title, the menu, five of the demo's
+frames) that must be the same in both runs. The demo is the strongest check: 1,500
+frames of the game logic (objects, collisions, `random()`), and its whole run (5,077
+frames) ends with what the recording earned (no damage taken, 14 emeralds), the same on
+the slower machine.
+
+**The pictures' test.** At first the scripted game took 14 screenshots at fixed times.
+Any change of the program's timing (a compiler improvement, the code's place in its
+banks) moved the game by a frame or more, and 7 of them failed while the frame-exact
+demo passed. Now the program decides when a picture is taken (`/SHOTS:FILE`,
+`horizon/hz_frame.c`): `pN` is a screen that waits for keys (the title, a menu, a
+dialog: upstream's `checkctrl0` loops, one key poll a BIOS tick, the menu's cursor and the
+palette's cycling moved by each) at its Nth key poll with no page flip and no key read
+since; `fN` is the play loop's frame N (upstream's `gamecount`) at its page flip, when
+the flip before was of frame N - 1. There it finishes the drawing, shows it, prints
+`xargon: shot K at poll N` / `at frame N` and holds it for six vertical blanks; the
+emulator takes the picture two blanks after the line (`--shot-on`), and the scripts
+`wait` for each line before their next key. Level play is pictured only from the demo
+(the same inputs each frame); the keyboard game's pictures are of menus, dialogs and the
+map just after it starts (a new game, a loaded one). Two of them (the game's menu and the
+high scores over level 1) are taken but not compared: the level's frame behind them is
+the keys' timing. Three windows over the map are compared as their rectangle only
+(`crop:` in `tests/play.md5`): the map's palette (its pods) is cycled by its frames, and
+the frame the key that opened the window came at is again the keys' timing. Checked: the
+same pictures, three runs each, from the program built at -O2, at -O1 and at -O0, linked
+with `--main-room 0`, and run with `/BUSY:10` (the keyboard game and the first demo run)
+as well as the demo's `/BUSY:30`. (At -O0 the slower demo run does not reach frame 1,500
+within its 160 s; its pictures, which come before, are the same.)
 
 ## How long each kind of thing took
 

@@ -7,14 +7,21 @@
 #      again. Checked: the save on the card (SAVE_0.XR1, the name in CONFIG.XR1); the game
 #      loaded back where it was saved; the sound (Lau's writes for the effects, the music
 #      and the effects in the recorded output: loud enough, not clipped); the frame rate;
-#      the screenshots against tests/play.md5 (make refs: the pictures in tests/ref/ and
-#      their checksums, after a change meant to show: look at them first)
+#      the pictures of its screens (tests/play.shots) against tests/play.md5
 #   2. the recorded demo (tests/demo.script: DEMO-PREVIEW, DEMO_MAC.XR0) played twice, the
 #      second time on a slower machine (/BUSY:30: 30 ms more of the CPU each game frame,
 #      so the frames are late and fall elsewhere): at its frame 1,500 (of 5,077) the game
-#      must be exactly as
-#      tests/demo.ref says (score, health, emeralds, hero, objects): the game logic, frame
-#      for frame, and the compiler
+#      must be exactly as tests/demo.ref says (score, health, emeralds, hero, objects): the
+#      game logic, frame for frame, and the compiler; and both runs' pictures (the title,
+#      the menu, five frames of the demo: tests/demo.shots) as tests/demo.md5
+#
+# The pictures are of the game's frames, not of moments: the program (/SHOTS:FILE,
+# horizon/hz_frame.c) stops at each screen of the list, counted by the game (a screen that
+# waits for keys: its Nth key poll; a level: its game frame N), prints "xargon: shot K",
+# and the emulator takes the picture then (run816.py --shot-on); the scripts wait for those
+# lines before their next keys. So the pictures do not move when the program's speed does
+# (a change of its code, the compiler, /BUSY). --refs (make refs): the references written
+# anew (tests/play.md5, tests/demo.md5, the pictures in tests/ref/: look at them first).
 #
 # The game's own files must be in data/card (make data).
 HZ=${1:-../../horizon}
@@ -31,11 +38,23 @@ run() {
   python3 ../../sdk/tools/run816.py XARGON1.PRG --horizon "$HZ" \
     --dest /GAMES/XARGON/XARGON1.PRG --mode shell --args "/STATS$a" $FILES "$@"
 }
+rm -rf build/test
 mkdir -p build/test
 
+# (2.'s two runs of the demo go on meanwhile)
+for k in 1 2; do
+  extra=
+  [ $k = 2 ] && extra=" /BUSY:30"
+  run " /SHOTS:DEMO.SHT$extra" --file tests/demo.shots:/GAMES/XARGON/DEMO.SHT \
+    --script tests/demo.script --shot-on "xargon: shot" --seconds 160 \
+    --out build/test/demo$k > build/test/demo$k.log 2>&1 && touch build/test/demo$k.ok &
+done
+
 # ---------------------------------------------------------------- 1. the scripted game
-run "" --script tests/play.script --seconds 68 --log-lau --wav build/test/play.wav \
-  --out build/test/play > build/test/play.log 2>&1 || bad "the scripted game's run (killed?)"
+run " /SHOTS:PLAY.SHT" --file tests/play.shots:/GAMES/XARGON/PLAY.SHT \
+  --script tests/play.script --shot-on "xargon: shot" --seconds 80 --log-lau \
+  --wav build/test/play.wav --out build/test/play > build/test/play.log 2>&1 ||
+  bad "the scripted game's run (killed, or a wait not met: build/test/play.log)"
 con=build/test/play/console.txt
 card=build/test/play/card/GAMES/XARGON
 if grep -aq 'xargon: sound: effects 1, music 1 (Lau 1, OPL2 1, playing 1)' "$con"; then
@@ -56,22 +75,20 @@ case "$last" in
 esac
 fr=$(grep -a 'game frames' "$con" | tail -1 | tr -d '\r')
 if [ -n "$fr" ]; then ok "frames: $fr"; else bad "no frame statistics"; fi
-if [ "$REFS" = --refs ]; then
-  python3 tests/shots.py build/test/play tests/play.md5 --update || fail=1
-else
-  python3 tests/shots.py build/test/play tests/play.md5 || fail=1
-fi
+UPD=
+[ "$REFS" = --refs ] && UPD=--update
+python3 tests/shots.py build/test/play tests/play.md5 $UPD || fail=1
 
 # ---------------------------------------------------------------- 2. the recorded demo
+wait
 want=$(grep -v '^#' tests/demo.ref | head -1)
 for k in 1 2; do
-  extra=
-  [ $k = 2 ] && extra=" /BUSY:30"
-  run "$extra" --script tests/demo.script --seconds 160 --out build/test/demo$k \
-    > build/test/demo$k.log 2>&1 || bad "the demo's run $k (killed?)"
+  [ -f build/test/demo$k.ok ] || bad "the demo's run $k (killed, or a wait not met: build/test/demo$k.log)"
   got=$(grep -a '^xargon: demo reached' build/test/demo$k/console.txt | head -1 | tr -d '\r')
   if [ "$got" = "$want" ]; then ok "the demo$([ $k = 2 ] && echo ', slower,') as tests/demo.ref: $got"
   else bad "the demo$([ $k = 2 ] && echo ', slower,'): '$got', want '$want'"; fi
+  if [ $k = 1 ]; then python3 tests/shots.py build/test/demo1 tests/demo.md5 $UPD || fail=1
+  else python3 tests/shots.py build/test/demo2 tests/demo.md5 || fail=1; fi
 done
 
 [ $fail = 0 ] && echo "xargon: ALL TESTS PASSED"

@@ -4,12 +4,13 @@
 #                   make data GAME=DIR) converted for the port (tools/mkdata.py): data/card/
 #   make            XARGON1.PRG, XARGON2.PRG, XARGON3.PRG: the three episodes (one program
 #                   each, as upstream's XRFILE01-03.EXE)
-#   make run        episode 1 in the emulator with the scripted game (tests/play.script):
-#                   build/run/
-#   make test       the checks (tests/check.sh): the scripted game, its screenshots against
-#                   tests/play.md5, the saved game, the sound, the recorded demo
-#   make refs       new reference screenshots (tests/play.md5, the pictures in tests/ref/:
-#                   after a change meant to show; look at them first)
+#   make run        episode 1 in the emulator with the scripted game (tests/play.script,
+#                   its pictures at tests/play.shots): build/run/
+#   make test       the checks (tests/check.sh): the scripted game, the saved game, the
+#                   sound, the recorded demo, the pictures of both (taken at game frames)
+#                   against tests/play.md5 and tests/demo.md5
+#   make refs       new reference pictures (tests/play.md5, tests/demo.md5, the pictures
+#                   in tests/ref/: after a change meant to show; look at them first)
 #   make clean
 # HORIZON=DIR: a Horizon tree with a built card, 0.28 or later (a large program).
 
@@ -66,8 +67,9 @@ $(CARD):
 	$(MAKE) -C $(HORIZON)
 
 run: XARGON1.PRG data $(CARD)
-	$(RUN816) XARGON1.PRG --dest /GAMES/XARGON/XARGON1.PRG --mode desktop $(FILES) \
-	  --script tests/play.script --out build/run $(RUNFLAGS)
+	$(RUN816) XARGON1.PRG --dest /GAMES/XARGON/XARGON1.PRG --mode shell \
+	  --args /SHOTS:PLAY.SHT $(FILES) --file tests/play.shots:/GAMES/XARGON/PLAY.SHT \
+	  --script tests/play.script --shot-on "xargon: shot" --out build/run $(RUNFLAGS)
 
 test: XARGON1.PRG data $(CARD)
 	sh tests/check.sh $(HORIZON)

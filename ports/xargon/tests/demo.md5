@@ -1,0 +1,9 @@
+# tests/demo.md5: the recorded demo's pictures (tests/demo.script, tests/demo.shots), the
+# MD5 of each one's RGB pixels; both runs of the demo (the second slower) must give them
+3e370c976ec01511cee7c19e9b1a32ef  demo-1.png   the title (p120)
+ffc396ee5c776090c9bae6587213388c  demo-2.png   the main menu (p20)
+070c3983f7d4539196b379539f534c25  demo-3.png   the demo's frame 100: the first level, an enemy shot, its points
+b9c01d3ec71a91f529949393a21bfefc  demo-4.png   frame 300: the cave, two spiders, a message on the status bar
+6f623a94be69398f237a420204228980  demo-5.png   frame 700: a monster, the hero throwing a rock, health 2
+7af01c08033729680a4269bd05758b47  demo-6.png   frame 1000: a spider, a heart, the hero crouching, health 2
+ce4ecf69eaf78a5a7a4e8a3d6ba9b430  demo-7.png   frame 1300: the hero jumping, a torch, a heart, cherries, grapes

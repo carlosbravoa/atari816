@@ -1,6 +1,7 @@
 # tests/demo.script - the recorded demo (DEMO-PREVIEW in the main menu); tests/check.sh
-# compares the game at the demo's frame 1,500 with tests/demo.ref
-6000 key space 100
-13000 key d 100
-40000 shot
-95000 shot
+# compares the game at the demo's frame 1,500 with tests/demo.ref and the pictures of
+# tests/demo.shots with tests/demo.md5 (the program prints "xargon: shot K" at each)
+0 wait xargon: shot 1 at
++200 key space 100
++0 wait xargon: shot 2 at
++200 key d 100

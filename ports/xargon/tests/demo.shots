@@ -1,0 +1,4 @@
+# tests/demo.shots: the recorded demo's pictures (XARGON1.PRG /SHOTS:DEMO.SHT; horizon/
+# hz_frame.c): pN the Nth key poll of a screen waiting for keys, fN the game's frame N
+p120 p20
+f100 f300 f700 f1000 f1300

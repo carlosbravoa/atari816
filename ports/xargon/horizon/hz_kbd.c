@@ -69,12 +69,14 @@ void hzk_frame(void)
 
 int k_pressed(void)
 {
+    hzt_poll();                         /* (the pictures' test: hz_frame.c) */
     return qn ? (int)q[qh] : 0;
 }
 
 int k_read(void)
 {
     unsigned c;
+    hzt_polls = 0;
     while (!qn)
         hzf_pump();                     /* (the BIOS waits for a key) */
     c = q[qh];

@@ -1,0 +1,5 @@
+# tests/play.shots: the scripted game's pictures (XARGON1.PRG /SHOTS:PLAY.SHT; horizon/
+# hz_frame.c): pN the Nth key poll of a screen waiting for keys, fN the game's frame N.
+# Each is also where tests/play.script waits before its next key.
+p120 p20 f30 p20 p20
+p20 p20 p20 p20 p20 p20 f30 p20

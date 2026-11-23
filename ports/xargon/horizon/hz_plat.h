@@ -66,6 +66,9 @@ void hzf_flipped(void);                 /* a page flip (a game frame drawn) */
 void hzf_report(void);                  /* the frame statistics on the console */
 extern unsigned char hzf_stats;         /* /STATS: every 10 s too */
 extern unsigned hzf_busy;               /* /BUSY:ms: that long more each game frame */
+void hzt_shots(const char *name);       /* /SHOTS:FILE (p120 f40 ...): the pictures' test */
+void hzt_poll(void);                    /* ... a key poll */
+extern unsigned hzt_polls;              /* ... key polls since a flip or a key read */
 unsigned char hzf_gameport(void);       /* inportb(0x201) */
 void hzf_gameport_fire(void);           /* outportb(0x201, x): the one-shots start */
 int hzk_pressed(void);                  /* the BIOS keyboard (hz_kbd.c) */

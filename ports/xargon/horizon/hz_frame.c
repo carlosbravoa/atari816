@@ -63,6 +63,7 @@ static void demo_watch(void)
 /* one frame: hgame's (it waits for the next vertical blank: events, the sound's ticks),
  * then the page and palette for the next blank, the keys, the sound effects' ends */
 static unsigned served;                 /* the frame counter at the last service */
+static void shot_frame(void);
 
 /* the two joysticks (the kernel's call: hgame reads them once a frame of its own) */
 static void joysticks(void)
@@ -153,6 +154,7 @@ unsigned char hzf_retrace(void)
         zeros = 0;
         service(f);
         demo_watch();                   /* (a game frame has ended) */
+        shot_frame();
         return 9;
     }
     if (f != lastvbl) {
@@ -180,6 +182,7 @@ unsigned char hzf_retrace(void)
 void hzf_flipped(void)
 {
     unsigned f, len, busy;
+    hzt_polls = 0;                      /* (the pictures' test: a screen drawn anew) */
     if (hzf_busy) {                     /* (the CPU kept busy, as on a slower machine) */
         unsigned long t = hz_uptime();
         while (hz_uptime() - t < hzf_busy)
@@ -228,6 +231,88 @@ void hzf_report(void)
            "(most %u), %lu late; heap free %u, %u banks free\n", st_frames, st_blanks / n,
            st_blanks * 100 / n % 100, st_maxlen, st_busy / n, st_busy * 100 / n % 100,
            st_maxbusy, st_late, hz_heap_free(), hz_mem_info());
+}
+
+/* ---------------------------------------------------------------- the pictures' test */
+
+/* /SHOTS:FILE (tests/check.sh; in FILE: p120 p30 f40 ...): when to take the pictures, in
+ * order, counted by the game, not by the clock, so that a picture is the same whatever the
+ * program's speed (its code, the compiler, /BUSY):
+ *   pN  a screen that waits for keys (the title, a menu, a dialog: upstream's loops of
+ *       checkctrl0, one key poll a BIOS tick, the cursor and the palette's cycling moved by
+ *       each): its Nth key poll with no page flip and no key read since (a level or the map
+ *       flips a page each frame: never there). After a shot no other pN until a flip or a
+ *       key read (the same screen's later polls do not count)
+ *   fN  a game frame (the play loop, or the recorded demo: upstream's gamecount, from 0 at
+ *       each play or demo): its page flip, with gamecount N, when the flip before was
+ *       of N - 1 (so not a flip outside the play loop that happens to have gamecount N)
+ * There the program stops a moment: what is drawn is finished and shown (two vertical
+ * blanks), it prints "xargon: shot K at poll N" / "... at frame N", and the picture stays
+ * for six more blanks; the emulator takes it two blanks after the line (run816.py
+ * --shot-on "xargon: shot"). The game itself does not see the stop. */
+#define NSHOT 24
+static unsigned char shot_kind[NSHOT];
+static unsigned shot_at[NSHOT];
+static unsigned shot_n, shot_i;
+unsigned hzt_polls;                     /* key polls since a flip or a key read */
+static int flip_gc = -2;                /* gamecount at the last flip */
+
+/* the file: the targets (p120 f40 ...) between spaces or on lines, '#' to a line's end */
+void hzt_shots(const char *name)
+{
+    FILE *f = fopen(name, "r");
+    int c = 0;
+    if (!f) {
+        printf("xargon: no %s\n", name);
+        return;
+    }
+    while (c != EOF && shot_n < NSHOT) {
+        c = fgetc(f);
+        if (c == '#')
+            while (c != EOF && c != '\n')
+                c = fgetc(f);
+        else if (c == 'p' || c == 'f' || c == 'P' || c == 'F') {
+            unsigned n = 0;
+            shot_kind[shot_n] = (unsigned char)(c | 0x20);
+            while ((c = fgetc(f)) >= '0' && c <= '9')
+                n = n * 10 + (unsigned)(c - '0');
+            shot_at[shot_n++] = n;
+        }
+    }
+    fclose(f);
+}
+
+static void shot_take(const char *what, unsigned n)
+{
+    unsigned i;
+    hzv_sync();                         /* (all of it drawn) */
+    hzv_display();
+    hzf_pump();                         /* shown, with the palette set */
+    hzf_pump();
+    printf("xargon: shot %u at %s %u\n", shot_i + 1, what, n);
+    for (i = 0; i < 6; i++)
+        hzf_pump();
+    ++shot_i;
+}
+
+/* a key poll (k_pressed) */
+void hzt_poll(void)
+{
+    if (hzt_polls < 0x7FFF)
+        ++hzt_polls;
+    if (shot_i < shot_n && shot_kind[shot_i] == 'p' && hzt_polls == shot_at[shot_i]) {
+        shot_take("poll", hzt_polls);
+        hzt_polls = 0x8000;             /* (until a flip or a key read) */
+    }
+}
+
+/* a page flip, the game frame drawn */
+static void shot_frame(void)
+{
+    if (shot_i < shot_n && shot_kind[shot_i] == 'f' && gamecount == (int)shot_at[shot_i] &&
+        flip_gc == gamecount - 1)
+        shot_take("frame", (unsigned)gamecount);
+    flip_gc = gamecount;
 }
 
 /* the game port (201): bits 0 and 1 the X and Y one-shots (high for a time that grows

@@ -92,15 +92,23 @@ Details in `PORTING-NOTES.md`, "Speed".
    map (slot 1, "HZTEST"), the map's paths and its journal, level 1 (a jump, a shot, the
    water: the hero dies and starts again), the game's menu, quitting, the high scores,
    the game loaded again: the save on the card, the game loaded where it was saved, the
-   sound (Lau's writes, the recording's level and clipping), the frame statistics, 14
-   screenshots against `tests/play.md5`;
+   sound (Lau's writes, the recording's level and clipping), the frame statistics, 13
+   pictures of its screens (`tests/play.shots`) against `tests/play.md5`;
 2. the recorded demo (`DEMO_MAC.XR0`, the menu's DEMO-PREVIEW) twice, the second time on a
    slower machine (`/BUSY:30`): at its frame 1,500 the game must be as `tests/demo.ref`
-   says (score, health, emeralds, hero, objects), the same both times.
+   says (score, health, emeralds, hero, objects), the same both times; and both runs'
+   pictures (the title, the menu, the demo's frames 100, 300, 700, 1,000 and 1,300:
+   `tests/demo.shots`) as `tests/demo.md5`.
 
-The screenshots' references are kept as checksums (the game's pictures stay out of the
-repository, as its data); `make refs` writes new ones and the pictures into `tests/ref/`
-(look at them before you keep them).
+The pictures are taken at the game's frames, not at moments: with `/SHOTS:FILE` the
+program stops at each screen of FILE's list (`pN`: a screen waiting for keys, at its Nth
+key poll; `fN`: the game's frame N, at its page flip), prints `xargon: shot K at ...` and
+holds the picture; the emulator takes it then (`run816.py --shot-on`) and the scripts wait
+for those lines before their next keys. So the pictures stay the same when the program's
+speed changes (its code, the compiler's optimisation, `/BUSY`). Their references are
+kept as checksums (the game's pictures stay out of the repository, as its data); `make
+refs` writes new ones and the pictures into `tests/ref/` (look at them before you keep
+them).
 
 ## Files
 

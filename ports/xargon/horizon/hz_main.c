@@ -40,6 +40,8 @@ int main(int argc, char *argv[])
             hzf_stats = 1;
         else if (!strncmp(argv[n], "/BUSY:", 6) || !strncmp(argv[n], "/busy:", 6))
             hzf_busy = (unsigned)atoi(argv[n] + 6);
+        else if (!strncmp(argv[n], "/SHOTS:", 7) || !strncmp(argv[n], "/shots:", 7))
+            hzt_shots(argv[n] + 7);     /* (the pictures' test: hz_frame.c) */
     }
     atexit(hzf_report);
     shm_init(xshafile);                 /* (the atlas: the blitter's sheets need it) */
