@@ -47,6 +47,10 @@ typedef struct Mailbox {
     uint8_t  busy, busy_pc, busy_sess;
     uint64_t busy_until;
     uint8_t  busy_msg[16];
+    /* --card-board: the I/O processor's one sector window (FatFs FF_FS_TINY): the data sector
+     * of handle cw_h it holds, + 1 (0: none, or not a file's data) */
+    uint8_t  cw_h;
+    uint32_t cw_s;
     /* classic software ops $18-$1A (stub): what is mounted */
     uint8_t  cl_disk[4], cl_xex, cl_cart;
     /* SYS_RESTART ($1B, stub): 1 + ARG0 once answered; main.c then restarts the machine */
@@ -65,11 +69,15 @@ extern double mailbox_pc_back;          /* --pc-back-at: emulated second it come
 /* --card-kbps R:W, --pc-kbps R:W: slow transfers (KB/s for READ / LOAD and WRITE; 0 = instant).
  * Given (either rate not 0): every request on that volume also costs a fixed time */
 extern double mailbox_card_kbps[2], mailbox_pc_kbps[2];
-/* --card-board: the board's card request by request (mailbox.c); the costs, --card-costs */
-enum { CC_OPEN, CC_STAT, CC_CLOSE, CC_CLOSEW, CC_SEEK, CC_OTHER, CC_READ, CC_WRITE, CC_RKBPS, CC_WKBPS, CC_N };
+/* --card-board: the board's card request by request (mailbox.c); the costs, --card-costs
+ * (the first CC_N10 are the older 10-value form's) */
+enum { CC_OPEN, CC_STAT, CC_CLOSE, CC_CLOSEW, CC_SEEK, CC_OTHER, CC_READ, CC_WRITE, CC_RKBPS, CC_WKBPS,
+       CC_N10, CC_LEVEL = CC_N10, CC_SEEKFAR, CC_CREATE, CC_N };
 extern int mailbox_card_board;
+extern int mailbox_log_card;            /* --log-card: each card request's modelled time on stderr */
 extern double mailbox_card_board_at;
 extern double mailbox_card_cost[CC_N];
+extern const double mailbox_card_cost_old[CC_N];   /* --card-board-old: the firmware of v0.29 */
 extern long long mailbox_card_free;     /* --card-free BYTES (-1: no limit) */
 /* (Horizon 0.23) printing: --no-pc-print (the gateway cannot make PDFs: STAT /PC: without
  * bit 4), --classic-print FILE@SECONDS (a print job of the classic Atari's printer, P:) */

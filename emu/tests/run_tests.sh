@@ -291,16 +291,16 @@ if [ "$out" = "$(cat $T/expected/slowtest.txt)" ] && [ "$(cat "$TMP/spc/Old.txt"
    && [ "$(ls "$TMP/spc")" = "$(printf 'New.bin\nOld.txt')" ]; then
     ok "slowtest (slow card and PC, events during a request, mode 2 files: at CLOSE, none after a drop)"; else bad "slowtest" "$out"; fi
 
-# ── --card-board: the board's card, request by request (OPEN, STAT, SEEK, READ, WRITE, CLOSE
-# of a file read and of one written: each answer after the board's time); --card-board-at
-# after the requests: all instant ──
-rm -rf "$TMP/csd"; mkdir -p "$TMP/csd"; head -c 32768 /dev/urandom > "$TMP/csd/BIG.BIN"
-out=$($EMU --sd "$TMP/csd" --card-board --max-seconds 5 $T/asm/cardtest.bin 2>/dev/null)
-rm -rf "$TMP/csd"; mkdir -p "$TMP/csd"; head -c 32768 /dev/urandom > "$TMP/csd/BIG.BIN"
-out2=$($EMU --sd "$TMP/csd" --card-board-at 30 --max-seconds 5 $T/asm/cardtest.bin 2>/dev/null)
+# ── --card-board: the board's card, request by request (OPEN, STAT, a STAT one folder down
+# in a folder of 40, SEEK, READ, a create, WRITE, CLOSE of a file read and of one written:
+# each answer after the board's time); --card-board-at after the requests: all instant ──
+csd() { rm -rf "$TMP/csd"; mkdir -p "$TMP/csd/DIR"; head -c 32768 /dev/urandom > "$TMP/csd/BIG.BIN"
+        for i in $(seq 10 49); do : > "$TMP/csd/DIR/F$i.BIN"; done; }
+csd; out=$($EMU --sd "$TMP/csd" --card-board --max-seconds 5 $T/asm/cardtest.bin 2>/dev/null)
+csd; out2=$($EMU --sd "$TMP/csd" --card-board-at 30 --max-seconds 5 $T/asm/cardtest.bin 2>/dev/null)
 if [ "$out" = "$(cat $T/expected/cardtest.txt)" ] && [ "$(cmp -s "$TMP/csd/NEW.BIN" /dev/null; echo $?)" = 1 ] \
    && echo "$out2" | grep -q "^READ32K 00 00007F9C T 00" ; then
-    ok "cardtest (--card-board: OPEN, STAT 24 ms, SEEK, READ 4.5 ms + 220 KB/s, WRITE, CLOSE 0 / 16 ms; --card-board-at later: instant)"
+    ok "cardtest (--card-board, Horizon 0.30's card: a path 1.72 ms a level + 0.86 ms a folder sector, READ 0.5 ms + 0.86 ms a sector, create, WRITE, CLOSE 0.4 / 9 ms; --card-board-at later: instant)"
 else bad "cardtest" "$out $out2"; fi
 
 # ── the internet (PC link step 2): URL paths, stream handles 4-7, requests put aside (TAG),

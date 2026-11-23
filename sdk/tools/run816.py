@@ -84,9 +84,11 @@ Options:
   --expect TEXT   fail unless console.txt contains TEXT (repeatable)
   --fast-card     the card answers at once (emu816's own default); without it the card
                   costs what the board's does from the program's start on (emu816
-                  --card-board-at: an OPEN or STAT about 24 ms, a READ 4.5 ms + 220
-                  KB/s; emu/README.md "The card's speed"). An --emu-arg --card-kbps or
-                  --card-costs replaces it
+                  --card-board-at: the firmware of Horizon 0.30, the card at 10.7 MHz:
+                  an OPEN or STAT 8-16 ms, a READ 0.5 ms + 0.86 ms a sector;
+                  emu/README.md "The card's speed"). An --emu-arg --card-kbps or
+                  --card-board replaces it; --emu-arg --card-board-old (the firmware of
+                  v0.29, the card at 1.34 MHz) or --card-costs changes its costs
   --emu-arg ARG   pass ARG to emu816 as it is (repeatable): e.g. --emu-arg --watch
                   --emu-arg 0B8080:10 (writes into a range logged in emu.err), --emu-arg
                   --dump-ram-on --emu-arg TEXT (the RAM when the program prints TEXT);
@@ -291,10 +293,11 @@ def main():
     if opt.get('log-bankwrap'):
         cmdl.append('--log-bankwrap')
     extra = opt['emu-args'] + os.environ.get('EMU816_ARGS', '').split()
-    if not opt.get('fast-card') and not any(a.startswith('--card-') and a != '--card-free'
-                                            and a != '--card-date' for a in extra):
+    if not opt.get('fast-card') and not any(a in ('--card-kbps', '--card-board', '--card-board-at')
+                                            for a in extra):
         # the board's card from the program's start on (emu816 --card-board-at): each file
-        # request costs what it costs on the board (an OPEN or a STAT about 24 ms)
+        # request costs what it costs on the board (an OPEN or a STAT 8-16 ms); the costs
+        # of --card-costs / --card-board-old from the start too
         cmdl += ['--card-board-at', f'{t0 / 1000.0:g}']
     cmdl += extra
     if opt.get('log-opl'):

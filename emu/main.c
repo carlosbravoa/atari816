@@ -569,14 +569,19 @@ static void usage(void)
         "  --card-free BYTES    the card has room for BYTES more (written in the run): then a WRITE writes\n"
         "                       short, as on a full card, and MKDIR is denied (tests)\n"
         "                       (0:0 = instant, the default; the board: about 170:100)\n"
-        "  --card-board         the board's card, request by request (OPEN, STAT about 24 ms,\n"
-        "                       READ 4.5 ms + 220 KB/s, ...: emu/README.md \"The card's speed\");\n"
-        "                       run816.py's default. --card-kbps instead: its simpler model\n"
+        "  --card-board         the board's card, request by request, as the firmware of Horizon 0.30\n"
+        "                       runs it (10.7 MHz): an OPEN or STAT 1.25 ms a folder level + the\n"
+        "                       folder sectors scanned, a READ 0.5 ms + 0.86 ms a sector, ...:\n"
+        "                       emu/README.md \"The card's speed\"; run816.py's default.\n"
+        "                       --card-kbps instead: its simpler model\n"
+        "  --card-board-old     --card-board as the firmware of v0.29 (the card at 1.34 MHz)\n"
         "  --card-board-at S    --card-board from S emulated seconds on (run816.py: from the\n"
         "                       program's start; the boot keeps the instant card its tests expect)\n"
-        "  --card-costs O:S:C:CW:SK:X:R:W:RK:WK  --card-board with these costs (ms: OPEN, STAT,\n"
-        "                       CLOSE, CLOSE of a written file, SEEK, other; READ, WRITE fixed;\n"
-        "                       KB/s: READ, WRITE)\n"
+        "  --card-costs O:S:C:CW:SK:X:R:W:RK:WK[:LV:SF:CR]  --card-board with these costs (ms: OPEN,\n"
+        "                       STAT, CLOSE, CLOSE of a written file, SEEK, other; READ, WRITE fixed;\n"
+        "                       KB/s: READ (a sector), WRITE; ms: a folder level, a SEEK into\n"
+        "                       another cluster, a create; without the last three: 0)\n"
+        "  --log-card           each card request's --card-board time on stderr\n"
         "  --pc-kbps R:W        slow PC volume: the same, + 6 ms a request (the board: about 100:55)\n"
         "  --ideal-timing       every CPU cycle ideal: no cache misses, SDRAM write or sweep stalls,\n"
         "                       the blitter's older speed model (the timing before Horizon 0.19)\n"
@@ -685,11 +690,18 @@ int main(int argc, char **argv)
             mailbox_card_board = 1;
             mailbox_card_board_at = atof(argv[++i]);
         }
+        else if (!strcmp(a, "--card-board-old")) {
+            mailbox_card_board = 1;
+            memcpy(mailbox_card_cost, mailbox_card_cost_old, sizeof mailbox_card_cost);
+        }
+        else if (!strcmp(a, "--log-card")) mailbox_log_card = 1;
         else if (!strcmp(a, "--card-costs") && i + 1 < argc) {
             double *c = mailbox_card_cost;
             mailbox_card_board = 1;
-            if (sscanf(argv[++i], "%lf:%lf:%lf:%lf:%lf:%lf:%lf:%lf:%lf:%lf", &c[0], &c[1], &c[2], &c[3], &c[4],
-                       &c[5], &c[6], &c[7], &c[8], &c[9]) != CC_N || c[CC_RKBPS] <= 0 || c[CC_WKBPS] <= 0) usage();
+            c[CC_LEVEL] = c[CC_SEEKFAR] = c[CC_CREATE] = 0;     /* (the 10-value form: none) */
+            int n = sscanf(argv[++i], "%lf:%lf:%lf:%lf:%lf:%lf:%lf:%lf:%lf:%lf:%lf:%lf:%lf", &c[0], &c[1], &c[2], &c[3],
+                           &c[4], &c[5], &c[6], &c[7], &c[8], &c[9], &c[10], &c[11], &c[12]);
+            if ((n != CC_N10 && n != CC_N) || c[CC_RKBPS] <= 0 || c[CC_WKBPS] <= 0) usage();
         }
         else if (!strcmp(a, "--card-free") && i + 1 < argc) mailbox_card_free = atoll(argv[++i]);
         else if (!strcmp(a, "--console-us") && i + 1 < argc) console_us = atof(argv[++i]);

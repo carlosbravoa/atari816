@@ -255,20 +255,26 @@ now:    lda     f:UPTIME                ; latches the upper bytes
         rts
 
 .ifdef CARD
-; (cardtest.bin: built with -D CARD) --card-board: the board's card, request by request:
-; OPEN, STAT 24 ms, SEEK 1.1 ms, READ 4.5 ms + 220 KB/s, WRITE 3 ms + 100 KB/s, CLOSE of a file
-; read 0 ms, of a file written 16 ms (emu/README.md "The card's speed"); 3.9 units a ms
+; (cardtest.bin: built with -D CARD) --card-board: the board's card, request by request, as
+; the firmware of Horizon 0.30 runs it (emu/README.md "The card's speed"): a path 0.3 ms +
+; 1.72 ms a level + 0.86 ms a folder sector scanned (OPEN /BIG.BIN 2.9 ms, STAT of a name
+; not in /DIR of 40 files 7.2 ms), a create + 30 ms, SEEK in the cluster 0.4 ms, READ 0.5 ms
+; + 0.86 ms a sector (32668 bytes: 64), WRITE 1.4 ms + 180 KB/s, CLOSE of a file read
+; 0.4 ms, of a file written 9 ms; 3.9 units a ms
 ;            label     path        tmin   tmax   op   len    buf    fl arg0  arg1
 steps:
-        STEP l_openr,  p_big,      92,    100,   $01, 0,     0,     0, 0,    0
-        STEP l_seek,   0,          3,     7,     $05, 0,     0,     0, 0,    100
-        STEP l_read,   0,          583,   592,   $03, $8000, DATA,  0, 0,    0
-        STEP l_close,  0,          0,     3,     $02, 0,     0,     0, 0,    0
-        STEP l_statc,  p_big,      92,    100,   $06, 0,     0,     0, 0,    0
-        STEP l_openc,  p_cnew,     92,    100,   $01, 0,     0,     2, 0,    0
-        STEP l_write,  0,          11,    15,    $04, 16,    wdata, 0, 0,    0
-        STEP l_closew, 0,          61,    66,    $02, 0,     0,     0, 0,    0
+        STEP l_openr,  p_big,      10,    16,    $01, 0,     0,     0, 0,    0
+        STEP l_seek,   0,          0,     5,     $05, 0,     0,     0, 0,    100
+        STEP l_read,   0,          216,   222,   $03, $8000, DATA,  0, 0,    0
+        STEP l_close,  0,          0,     5,     $02, 0,     0,     0, 0,    0
+        STEP l_statc,  p_big,      10,    16,    $06, 0,     0,     0, 0,    0
+        STEP l_statd,  p_deep,     27,    33,    $06, 0,     0,     0, 0,    0
+        STEP l_openc,  p_cnew,     127,   133,   $01, 0,     0,     2, 0,    0
+        STEP l_write,  0,          5,     10,    $04, 16,    wdata, 0, 0,    0
+        STEP l_closew, 0,          34,    40,    $02, 0,     0,     0, 0,    0
         .word   0
+p_deep:   .byte "/DIR/ZZ.BIN", 0
+l_statd:  .byte "STATDEEP", 0
 p_cnew:   .byte "/NEW.BIN", 0
 l_seek:   .byte "SEEK", 0
 l_statc:  .byte "STATCARD", 0

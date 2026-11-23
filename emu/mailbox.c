@@ -1083,26 +1083,176 @@ long long mailbox_card_free = -1;
 #define CARD_REQ_MS 1.0
 #define PC_REQ_MS   6.0
 /* --card-board (run816's default): the board's card, request by request, as measured with
- * ports/xcom's /IOB and /M (emu/README.md "The card's speed"): ms for OPEN, STAT, CLOSE (a
- * file read), CLOSE (a file written), SEEK, the others (READDIR, MKDIR, ...), READ and
- * WRITE fixed parts; KB/s of READ (and LOAD), WRITE. --card-costs changes them. */
-int mailbox_card_board;
+ * ports/xcom's /IOB (emu/README.md "The card's speed"), modelled on what the firmware's
+ * FatFs (FF_FS_TINY: one sector window) reads: ms for OPEN, STAT (fixed parts), CLOSE (a
+ * file read), CLOSE (a file written), SEEK, the others (READDIR, MKDIR, ...: + their path),
+ * READ and WRITE fixed parts; KB/s of READ (and LOAD: every sector read, also a folder's)
+ * and WRITE; ms for each folder level of a path, a SEEK into another cluster, a create.
+ * --card-costs changes them. The default: the firmware's card at 10.7 MHz (Horizon 0.30);
+ * --card-board-old: at 1.34 MHz (the firmware of v0.29) */
+int mailbox_card_board, mailbox_log_card;
 double mailbox_card_board_at;           /* --card-board-at: from this emulated second on */
-double mailbox_card_cost[CC_N] = { 24.0, 24.0, 0.0, 16.0, 1.1, 24.0, 4.5, 3.0, 220.0, 100.0 };
+double mailbox_card_cost[CC_N] = { 0.3, 0.3, 0.4, 9.0, 0.4, 10.0, 0.5, 1.4, 581.0, 180.0, 1.72, 1.55, 30.0 };
+const double mailbox_card_cost_old[CC_N] = { 5.1, 5.1, 1.45, 17.5, 0.4, 20.0, 0.5, 3.6, 163.0, 100.0, 1.54, 3.4, 45.0 };
+
+#define CARD_CLUSTER 32768u             /* the cluster of a FAT32 card of 8-32 GB */
+
+/* a FAT name's directory entries: 1, + its long name's (13 characters each) unless it is
+ * an upper-case 8.3 name */
+static int dir_slots(const char *s)
+{
+    size_t n = strlen(s);
+    const char *dot = strrchr(s, '.');
+    size_t base = dot ? (size_t)(dot - s) : n, ext = dot ? n - base - 1 : 0;
+    int sfn = base >= 1 && base <= 8 && ext <= 3 && (!dot || ext);
+    for (const char *p = s; sfn && *p; p++)
+        if ((*p >= 'a' && *p <= 'z') || strchr(" +,;=[]", *p) || (*p == '.' && p != dot)) sfn = 0;
+    return sfn ? 1 : 1 + (int)((n + 12) / 13);
+}
+
+static int cmp_ci(const void *a, const void *b) { return strcasecmp(*(char *const *)a, *(char *const *)b); }
+
+/* What FatFs reads to follow a card path: its levels (the names in it), and the folder
+ * sectors it scans: in each folder the entries up to the name (in name order: a folder
+ * copied in order) or, for a name not there, all of them; whole = 1: the last name is a
+ * folder read through (READDIR) */
+static void card_walk(const char *fat, int whole, int *levels, int *sectors)
+{
+    char dir[4096];
+    *levels = *sectors = 0;
+    if (!M.mb.root) return;
+    if (fat[0] == '0' && fat[1] == ':') fat += 2;
+    snprintf(dir, sizeof dir, "%s", M.mb.root);
+    const char *p = fat;
+    for (int top = 1;; top = 0) {
+        while (*p == '/' || *p == '\\') p++;
+        const char *e = p;
+        while (*e && *e != '/' && *e != '\\') e++;
+        size_t cl = e - p;
+        if (!cl && !whole) return;
+        char comp[256];
+        if (cl >= sizeof comp) return;
+        memcpy(comp, p, cl);
+        comp[cl] = 0;
+        if (cl) ++*levels;
+        DIR *d = opendir(dir);
+        if (!d) return;
+        char **names = NULL, *match = NULL;
+        int nn = 0, cap = 0;
+        struct dirent *de;
+        while ((de = readdir(d))) {
+            if (!strcmp(de->d_name, ".") || !strcmp(de->d_name, "..")) continue;
+            if (nn == cap && !(names = realloc(names, (cap = cap ? 2 * cap : 64) * sizeof *names))) { closedir(d); return; }
+            names[nn++] = strdup(de->d_name);
+        }
+        closedir(d);
+        qsort(names, nn, sizeof *names, cmp_ci);
+        int slots = top ? 0 : 2;                         /* "." and ".." */
+        for (int i = 0; i < nn; i++) {
+            slots += dir_slots(names[i]);
+            if (cl && !strcasecmp(names[i], comp)) { match = names[i]; break; }
+        }
+        *sectors += slots ? (slots + 15) / 16 : 1;
+        if (match) snprintf(dir + strlen(dir), sizeof dir - strlen(dir), "/%s", match);
+        for (int i = 0; i < nn; i++) free(names[i]);
+        free(names);
+        if (!match) return;                              /* not there (or the folder read through) */
+        p = e;
+        while (*p == '/' || *p == '\\') p++;
+        if (!*p && !whole) return;
+    }
+}
+
+/* the --card-board time of a request on the card, in ms (the window state follows it) */
+static double card_ms(Mailbox *m, const uint8_t *msg, const char *path, uint32_t len)
+{
+    const double *c = mailbox_card_cost;
+    double sect = 500.0 / c[CC_RKBPS];                   /* one sector read */
+    uint32_t arg0 = msg[8] | msg[9] << 8 | msg[10] << 16 | (uint32_t)msg[11] << 24;
+    uint32_t arg1 = msg[12] | msg[13] << 8 | msg[14] << 16 | (uint32_t)msg[15] << 24;
+    int op = msg[0], lv = 0, ns = 0;
+    double ms = 0;
+    if (op == 0x02 || op == 0x03 || op == 0x04 || op == 0x05) {
+        FILE *f = m->f[arg0];
+        struct stat st;
+        long pos = ftell(f);
+        uint32_t size = !fstat(fileno(f), &st) ? (uint32_t)st.st_size : 0;
+        int mine = m->cw_s && m->cw_h == arg0;
+        if (pos < 0) pos = 0;
+        switch (op) {
+        case 0x02:
+            if (mine) m->cw_s = 0;
+            if (m->fdirty[arg0]) { m->cw_s = 0; return c[CC_CLOSEW]; }
+            return c[CC_CLOSE];
+        case 0x03: {                                     /* the sectors not in the window */
+            uint32_t n = (uint32_t)pos >= size ? 0 : size - (uint32_t)pos < len ? size - (uint32_t)pos : len;
+            ms = c[CC_READ];
+            if (!n) return ms;
+            uint32_t a = (uint32_t)pos, z = a + n, s0 = a / 512, s1 = (z - 1) / 512;
+            uint32_t k = s1 - s0 + 1;
+            if (mine && m->cw_s - 1 == s0 && (a % 512 || (s0 == s1 && z % 512))) k--;
+            ms += k * sect;
+            if ((a && a % CARD_CLUSTER == 0) || a / CARD_CLUSTER != (z - 1) / CARD_CLUSTER) m->cw_s = 0;   /* FAT */
+            if (z % 512) { m->cw_h = arg0; m->cw_s = s1 + 1; }
+            else if (a % 512) { m->cw_h = arg0; m->cw_s = s0 + 1; }
+            return ms;
+        }
+        case 0x04:
+            m->cw_s = 0;
+            return c[CC_WRITE] + len / (c[CC_WKBPS] * 1024.0) * 1000.0;
+        default: {                                       /* SEEK: into another cluster, a FAT walk */
+            uint32_t to = arg1;
+            if (!(m->fmode[arg0] & 2) && to > size) to = size;
+            ms = c[CC_SEEK];
+            if ((to ? (to - 1) / CARD_CLUSTER : 0) != (pos ? (uint32_t)(pos - 1) / CARD_CLUSTER : 0)) {
+                ms += c[CC_SEEKFAR];
+                m->cw_s = 0;
+            }
+            return ms;
+        }
+        }
+    }
+    m->cw_s = 0;                                         /* a path: the window holds folders */
+    card_walk(path, op == 0x07, &lv, &ns);
+    ms = lv * c[CC_LEVEL] + ns * sect;
+    switch (op) {
+    case 0x01:
+        ms += c[CC_OPEN];
+        if ((msg[7] & 3) == 2) ms += c[CC_CREATE];
+        else if ((msg[7] & 3) == 3) {                    /* append: the seek to the end */
+            char host[4096];
+            int p2;
+            struct stat st;
+            if (!resolve(path, host, sizeof host, &p2) && !stat(host, &st) && st.st_size > CARD_CLUSTER) ms += c[CC_SEEKFAR];
+        }
+        return ms;
+    case 0x06: return ms + c[CC_STAT];
+    case 0x10: {                                         /* LOAD: OPEN, READ of it all, CLOSE */
+        char host[4096];
+        int p2;
+        struct stat st;
+        ms += c[CC_OPEN] + c[CC_READ] + c[CC_CLOSE];
+        if (!resolve(path, host, sizeof host, &p2) && !stat(host, &st) && S_ISREG(st.st_mode))
+            ms += (double)((st.st_size + 511) / 512) * sect;
+        return ms;
+    }
+    default: return ms + c[CC_OTHER];
+    }
+}
 
 static uint64_t req_cycles(Mailbox *m, const uint8_t *msg, int *pc, uint64_t now)
 {
     static char path[MAXPATH], host[4096];
     uint32_t len = msg[2] | msg[3] << 8, buf = msg[4] | msg[5] << 8 | msg[6] << 16;
     uint32_t arg0 = msg[8] | msg[9] << 8 | msg[10] << 16 | (uint32_t)msg[11] << 24;
-    int op = msg[0], rd = 1, xfer = 0, wrote = 0;
+    int op = msg[0], rd = 1, xfer = 0;
     double bytes = 0;
     *pc = 0;
+    path[0] = 0;
     switch (op) {
     case 0x02: case 0x03: case 0x04: case 0x05:          /* CLOSE, READ, WRITE, SEEK: by the handle */
         if (arg0 >= MB_FILES || !m->f[arg0] || pc_dead(m, arg0)) return 0;     /* (refused at once) */
         *pc = m->fpc[arg0];
-        wrote = m->fdirty[arg0];
         if (op == 0x03 || op == 0x04) { xfer = 1; bytes = len; rd = op == 0x03; }
         break;
     case 0x01: case 0x06: case 0x07: case 0x08: case 0x09: case 0x0A: case 0x10:
@@ -1121,13 +1271,11 @@ static uint64_t req_cycles(Mailbox *m, const uint8_t *msg, int *pc, uint64_t now
     }
     const double *k = *pc ? mailbox_pc_kbps : mailbox_card_kbps;
     if (!*pc && mailbox_card_board && !k[0] && !k[1] && now >= mailbox_card_board_at * CPU_HZ) { /* the board's card, by the request */
-        const double *c = mailbox_card_cost;
-        double ms = op == 0x01 ? c[CC_OPEN] : op == 0x06 ? c[CC_STAT]
-                  : op == 0x02 ? (wrote ? c[CC_CLOSEW] : c[CC_CLOSE]) : op == 0x05 ? c[CC_SEEK]
-                  : op == 0x03 || op == 0x10 ? c[CC_READ] : op == 0x04 ? c[CC_WRITE] : c[CC_OTHER];
-        double s = ms / 1000.0;
-        if (xfer) s += bytes / ((rd ? c[CC_RKBPS] : c[CC_WKBPS]) * 1024.0);
-        return (uint64_t)(s * CPU_HZ);
+        double ms = card_ms(m, msg, path, len);
+        if (mailbox_log_card)
+            fprintf(stderr, "emu816: card %.6f s op $%02X %s %u -> %.2f ms\n", (double)now / CPU_HZ, op,
+                    path[0] ? path : "-", op >= 0x02 && op <= 0x05 ? (unsigned)(op == 0x05 ? (msg[12] | msg[13] << 8 | msg[14] << 16 | (uint32_t)msg[15] << 24) : len) : 0u, ms);
+        return (uint64_t)(ms / 1000.0 * CPU_HZ);
     }
     if (!k[0] && !k[1]) return 0;                        /* not given: instant */
     double s = (*pc ? PC_REQ_MS : CARD_REQ_MS) / 1000.0;

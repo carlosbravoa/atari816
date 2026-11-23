@@ -64,9 +64,11 @@ emu816 [--sd DIR] [--load FILE@ADDR]... [--max-seconds N] [--trace]
 | `--pc-drop-at SECONDS` | The PC link drops at this emulated time: open PC handles answer $88, new `/PC:` calls $87, the `PC:` entry leaves the root. Streams too (see "The internet"): open streams answer $88, requests put aside answer $88, each connection gets an $E4 event, new URL opens answer $87 |
 | `--pc-back-at SECONDS` | The link comes back at this time (after `--pc-drop-at`): a new session; handles from before the drop stay dead ($88) |
 | `--card-kbps R:W` | Slow card (see "Slow transfers"): READ and LOAD at R KB/s, WRITE at W KB/s, and 1 ms for every request on the card. 0 = instant. Default: off (every request instant). The board: about `170:100` |
-| `--card-board` | The board's card, request by request (see "The card's speed"): an OPEN or a STAT 24 ms, a READ 4.5 ms + 220 KB/s, ... Default: off (every request instant); `run816.py` turns it on from the program's start (`--card-board-at`) unless given `--fast-card` |
+| `--card-board` | The board's card, request by request, as the firmware of Horizon 0.30 runs it (the card at 10.7 MHz; see "The card's speed"): an OPEN or a STAT 1.72 ms a folder level + 0.86 ms a folder sector scanned, a READ 0.5 ms + 0.86 ms a sector, ... Default: off (every request instant); `run816.py` turns it on from the program's start (`--card-board-at`) unless given `--fast-card` |
+| `--card-board-old` | `--card-board` as the firmware of v0.29 runs it (the card at 1.34 MHz: the released boards until 0.30): the same model with the costs of that table (`run816.py --emu-arg --card-board-old`: from the program's start) |
 | `--card-board-at S` | `--card-board` from S emulated seconds on (the boot stays instant: tests with fixed boot times) |
-| `--card-costs O:S:C:CW:SK:X:R:W:RK:WK` | `--card-board` with other costs: ms for OPEN, STAT, CLOSE of a file read, CLOSE of a file written, SEEK, the other requests, READ and WRITE (fixed part); KB/s of READ (and LOAD) and WRITE |
+| `--card-costs O:S:C:CW:SK:X:R:W:RK:WK[:LV:SF:CR]` | `--card-board` with other costs: ms for OPEN, STAT (fixed parts), CLOSE of a file read, CLOSE of a file written, SEEK, the other requests (+ their path), READ and WRITE (fixed part); KB/s of READ (by the sector: also a folder's sectors, and LOAD) and WRITE; ms for a folder level of a path, a SEEK into another cluster, a create (OPEN mode 2). Without the last three (the older 10-value form): 0. The default: `0.3:0.3:0.4:9:0.4:10:0.5:1.4:581:180:1.72:1.55:30`; `--card-board-old`: `5.1:5.1:1.45:17.5:0.4:20:0.5:3.6:163:100:1.54:3.4:45` |
+| `--log-card` | Each card request's `--card-board` time on stderr: `emu816: card 4.923341 s op $06 /APPS/XCOM/PACKS.VER 0 -> 8.04 ms` (the emulated second it came, the op, its path, the length or the SEEK's place) |
 | `--card-free BYTES` | (Horizon 0.29's tests) The card has room for BYTES more, written in this run: once they are used up, a WRITE on the card writes what still fits and answers that count (FatFs on a full volume: FR_OK, fewer bytes), and MKDIR answers FR_DENIED. Default: no limit |
 | `--pc-kbps R:W` | Slow PC volume: the same, with 6 ms for every request on the PC. The board: about `100:55` |
 | `--net` | The Net service of the PC link (step 2): `tcp://host:port` paths are real TCP connections from the host (see "The internet (PC link step 2)"). Without it they answer $8A |
@@ -313,27 +315,55 @@ answered in the poll that takes it, as before):
   100 KB/s, write about 55 KB/s: `--card-kbps 170:100 --pc-kbps 100:55`.
 
 **The card's speed** (`--card-board`, 2026-11-23). The board's card answers slowly per
-request, whatever its size: measured on the board with ports/xcom's self-timing (`/M`, the
-same runs in the emulator beside them: `ports/xcom/tests/perfcmp.py`), an OPEN through the C
-library (a STAT, then the OPEN) about 50-65 ms, a CLOSE of a file read under 1 ms, of a file
-written about 20 ms (with its WRITE), a SEEK about 1.3 ms, a READ a few ms plus its bytes.
-The instant card made a program's file calls look 5-15 times cheaper than they are (a
-screen that opens and reads a few files: 0.3 s in the emulator, 2-3 s on the board). The
-model, per request (the I/O processor's time; the kernel's own time comes on top as before):
+request: an OPEN or a STAT costs 9-16 ms, a READ 1-2 ms before its bytes. The instant card
+made a program's file calls look 5-15 times cheaper than they are (a screen that opens and
+reads a few files: 0.3 s in the emulator, 2-3 s on the board). The model follows what the
+firmware's FatFs reads (FF_FS_TINY: one 512-byte sector window for the folders, the FAT and
+the files' partial sectors), per request (the I/O processor's time; the kernel's own time
+comes on top as before):
 
-| Request | ms |
-| --- | --- |
-| OPEN, STAT, and the others (READDIR, MKDIR, DELETE, RENAME) | 24 |
-| CLOSE of a file read / written | 0 / 16 |
-| SEEK | 1.1 |
-| READ (and LOAD) | 4.5 + bytes at 220 KB/s |
-| WRITE | 3 + bytes at 100 KB/s |
+| Request | ms: the default (Horizon 0.30, the card at 10.7 MHz) | `--card-board-old` (v0.29, 1.34 MHz) |
+| --- | --- | --- |
+| OPEN, STAT: a path | 0.3 + 1.72 a level + 0.86 a folder sector scanned | 5.1 + 1.54 a level + 3.07 a sector |
+| OPEN to create (mode 2) | + 30 | + 45 |
+| READDIR, MKDIR, DELETE, RENAME | 10 + the path (READDIR: the whole folder) | 20 + the path |
+| CLOSE of a file read / written | 0.4 / 9 | 1.45 / 17.5 |
+| SEEK | 0.4, + 1.55 into another cluster (32 KB) | 0.4, + 3.4 |
+| READ | 0.5 + 0.86 a sector not in the window | 0.5 + 3.07 a sector |
+| LOAD | OPEN + READ of it all + CLOSE | the same |
+| WRITE | 1.4 + bytes at 180 KB/s | 3.6 + bytes at 100 KB/s |
 
-Fitted to ports/xcom's three board runs (the geoscape, a battle, BENCH: the emulator's
-file time within 10-30 % of the board's for each kind of call); the program `/IOB` of
-ports/xcom times each kind alone on the board, to refine it (a STAT in a big folder may
-cost more than in a small one: not modelled). `tests/asm/cardtest.bin` checks the times.
-`--card-kbps` (below) stays the simpler model it was.
+A path's folder sectors: in each folder on the way, its entries up to the name in name
+order (a folder copied in order; "." and ".." first, a long name's entries too), or all of
+them for a name that is not there, 16 to a sector: `/APPS/XCOM/PACKS.VER` (3 small folders:
+3 sectors) about 8 ms, `/APPS/XCOM/VGA/UIV.PAK` (VGA a folder of 82) about 15 ms. A READ
+pays for each sector it touches, except the window's when the read starts in it (16 bytes
+after 16 bytes of the same sector: 0.5 ms; after a SEEK, a path or another file's request:
+a sector). Fitted to ports/xcom's `/IOB` (each kind of request timed alone through
+Horizon's calls, `horizon/hz_perf.c`), run on the board from Horizon and in the emulator
+on the same folders (`tests/perf.sh OUT 90 /IOB`, OUT/pc/IOBENCH.TXT):
+
+| /IOB line (ms) | board 10.7 MHz | emulator | board 1.34 MHz | `--card-board-old` |
+| --- | --- | --- | --- | --- |
+| stat VGA/UIV.PAK (a folder of 82) | 16.01 | 16.06 | 39.96 | 39.98 |
+| stat PACKS.VER (the app's folder) | 9.11 | 9.16 | 19.98 | 20.04 |
+| stat VGA/MISSING.PAK | 16.18 | 16.09 | 40.11 | 40.00 |
+| open PACKS.VER + close | 9.73 | 9.87 | 20.62 | 21.80 |
+| C library open() + close() VGA/UIV.PAK | 33.58 | 33.34 | 80.98 | 82.20 |
+| close (a file read) | 0.90 | 0.95 | 2.00 | 1.99 |
+| seek to a random place / the same place | 2.66 / 0.90 | 2.70 / 0.91 | 4.54 / 0.91 | 4.55 / 0.95 |
+| read 16 bytes after a seek / the next ones | 2.12 / 1.07 | 2.00 / 1.13 | 4.28 / 1.20 | 4.19 / 1.24 |
+| read 512 bytes, the next ones | 1.93 | 1.98 | 4.09 | 4.16 |
+| read 4096 bytes, the next ones | 8.06 | 7.98 | 25.55 | 25.66 |
+| read 32768 bytes, the next ones | 56.25 | 56.32 | 197.39 | 197.59 |
+| create + write 64 + close | 50.81 | 50.70 | 87.50 | 87.59 |
+| append + write 64 + close (a LOG line) | 20.75 | 20.74 | 42.51 | 42.63 |
+
+Every line of both tables within 6 %. Not measured, estimated: the WRITE rate (no large
+write in /IOB), READDIR, MKDIR, DELETE, RENAME. A folder's cost depends on the card's
+folders: the emulator's (run816's card) are small, a board's card may have more in its
+root. `tests/asm/cardtest.bin` checks the times. `--card-kbps` (below) stays the simpler
+model it was.
 
 **Keyboard events** follow the firmware's "Keyboard events" block (with the changes of the
 firmware of Horizon 0.21: events during a request, every key change in order):
@@ -744,7 +774,7 @@ every 512 CPU cycles here.
 | A816.BIN, slow console | The self test again with `--console-us 90`: same output |
 | tests/asm/mousetest | MOUSE events from a `--mouse` script: clamping with the remainder carried, a key event taking priority, motion discarded while KB_ROUTE = 1, a quick click (motion, press and release in one poll: three events) and a key tap in one poll (two events) |
 | tests/asm/kbtest | `core/sw/a816/kbtest.s`, unchanged, run with a `--keys` script: modifiers, the 4-key limit, F12 (KEY event + NMI), a key held before KB_ROUTE = 0, releases in the order they happened |
-| tests/asm/cardtest | `--card-board`: OPEN, SEEK, READ 32 KB, CLOSE, STAT, OPEN to create, WRITE 16, CLOSE of the written file, each answered after the board's time (slowtest.s built with `-D CARD`); with `--card-board-at 30` the same requests are instant |
+| tests/asm/cardtest | `--card-board` (Horizon 0.30's card): OPEN, SEEK, READ 32 KB, CLOSE, STAT, a STAT of a name not in /DIR (40 files: 2 levels, 4 folder sectors), OPEN to create, WRITE 16, CLOSE of the written file, each answered after the board's time (slowtest.s built with `-D CARD`); with `--card-board-at 30` the same requests are instant |
 | tests/asm/slowtest | `--card-kbps 64:32 --pc-kbps 100:8 --pc-drop-at 3`: each answer after its time (a 32 KB card read 0.5 s, PC requests 6 ms), KEY and MOUSE events (a quick click, a tap) printed while a request is in progress, a mode 2 PC file not there before CLOSE, a 32 KB PC write cut by the drop: $88, no file left, the older file as it was |
 | tests/asm/nettest1-3 | The internet (PC link step 2), from `nettest.s` built three ways. 1: Fetch (`--net-root`, `--pc-kbps 16:16`): STAT then OPEN of the same URL (the OPEN at once), READ to the end, WRITE 7, SEEK $82, a closed handle $80, 404 in ARG1 with $8F, ftp $8D, no host $8C, mode 2 7, a folder's listing (case, query, dot files), MKDIR / RENAME 7, READDIR / LOAD $82, no Net $8A, an unknown scheme $8B, `/PC:` $87, an 8 KB READ put aside (0.5 s) while a card STAT is answered, the 5th stream 18. 2: Net (`--net`, `tests/netserver.py`: an echo server on 127.0.0.1 at a free port): OPEN, WRITE, $E4, READ, STAT / SEEK $82, a refused port $8D, `tls://` $91, no Fetch $8A, no port $8B, the server closing: $90. 3: `--pc-drop-at 1.5` with a connection and a slow Fetch READ open: $E4 at the drop, $88 for the READ put aside and on the handles, CLOSE 0, $87 after. Outputs `tests/expected/nettestN.txt`; 2 and 3 are skipped without python3 |
 | BLITTEST.BIN | `core/sw/a816/blittest.s`: every blitter op against a 65C816 reference (REV $08 and up) |
