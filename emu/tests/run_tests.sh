@@ -177,6 +177,60 @@ out=$($EMU --max-seconds 5 --mouse "100:5:-3:0:0,150:300:-200:0:1,200:0:0:2:1,25
 out=$($EMU --max-seconds 20 --keys "0:1E:1,100:04:1,150:04:0,200:E1:1,220:05:1,260:05:0,300:E1:0,400:45:1,450:45:0,500:04:1,501:05:1,502:06:1,503:07:1,504:08:1,600:04:0,600:05:0,600:06:0,600:07:0,600:08:0,700:1E:0" $T/asm/kbtest.bin)
 [ "$out" = "$(cat $T/expected/kbtest.txt)" ] && ok "kbtest (KEY events, modifiers, 4-key limit, F12 NMI)" || bad "kbtest" "$out"
 
+# ── script waits (--keys t:W:HEX, step marks t:M:): kbtest and mousetest print a line at
+# once for each event. A line printed since the last mark counts for a wait, even when key
+# events came after it (the key's release); a mark forgets the lines before it; one line
+# ends one wait ──
+hx() { printf '%s' "$1" | od -An -tx1 | tr -d ' \n'; }
+W04=$(hx "KEY 04 00 01")
+out=$($EMU --max-seconds 2 --keys "100:M:,100:04:1,150:04:0,151:W:$W04,300:05:1,350:05:0" $T/asm/kbtest.bin 2>"$TMP/w.err")
+if printf '%s\n' "$out" | grep -q '^KEY 05 00 01$' && ! grep -q 'still waits' "$TMP/w.err"; then
+    ok "wait met by a line printed before a later key event of its step (the key's release)"
+else bad "wait after a key release" "$out$(cat "$TMP/w.err")"; fi
+out=$($EMU --max-seconds 2 --keys "100:M:,100:04:1,150:04:0,151:W:$W04,152:W:$W04,300:05:1,350:05:0" $T/asm/kbtest.bin 2>"$TMP/w.err")
+out2=$($EMU --max-seconds 2 --keys "100:M:,100:04:1,150:04:0,200:M:,201:W:$W04,300:05:1,350:05:0" $T/asm/kbtest.bin 2>"$TMP/w2.err")
+if ! printf '%s\n' "$out$out2" | grep -q '^KEY 05' && grep -q 'still waits for "KEY 04 00 01"' "$TMP/w.err" && grep -q 'still waits' "$TMP/w2.err"; then
+    ok "wait: one line ends one wait; a step mark forgets the lines before it"
+else bad "wait: used-up line / step mark" "$out / $out2"; fi
+# the same through the SDK's input scripts (sdk/tools/inputscript.py): "a" then "+0 wait"
+# (the program answered while the key was still held); a click then "+0 wait" for the
+# line of the button's release (the wait must not hold back the release, 80 ms later)
+IS=../sdk/tools/inputscript.py
+if [ -f $IS ] && command -v python3 >/dev/null; then
+    printf '100 a\n+0 wait KEY 04 00 01\n+100 b\n' > "$TMP/a.script"
+    out=$($EMU --max-seconds 2 --keys "$(python3 $IS "$TMP/a.script" --keys)" $T/asm/kbtest.bin 2>"$TMP/w.err")
+    if printf '%s\n' "$out" | grep -q '^KEY 05 00 01$' && ! grep -q 'still waits' "$TMP/w.err"; then
+        ok "inputscript: typed text, then +0 wait for the program's answer to it"
+    else bad "inputscript: wait after typed text" "$out$(cat "$TMP/w.err")"; fi
+    printf '100 click\n+0 wait MOUSE 00 00 00 00\n+50 a\n' > "$TMP/c.script"
+    out=$($EMU --max-seconds 2 --keys "$(python3 $IS "$TMP/c.script" --keys)" \
+          --mouse "$(python3 $IS "$TMP/c.script" --mouse)" $T/asm/mousetest.bin 2>"$TMP/w.err")
+    if printf '%s\n' "$out" | grep -q '^MOUSE 00 00 00 00$' && printf '%s\n' "$out" | grep -q '^KEY 04 00 01$' && ! grep -q 'still waits' "$TMP/w.err"; then
+        ok "inputscript: click, then +0 wait for the line of its release (the release is not held back)"
+    else bad "inputscript: wait after a click" "$out$(cat "$TMP/w.err")"; fi
+else skip "inputscript waits (no ../sdk/tools/inputscript.py or python3)"; fi
+
+# ── the PC link's screenshot (core/tools/a816_screen.py, atari.py shot816) read from the
+# RAM at exit (--dump-ram) must be emu816's own picture: the Desktop (with the pointer) and
+# the text console, on Horizon's card when it is built (a full-screen program's scroll
+# and split: shot816.py's example with Xargon) ──
+HSD=../horizon/build/sd
+if [ -f $HSD/SYSTEM/HORIZON.SYS ] && command -v python3 >/dev/null; then
+    cp -r $HSD "$TMP/hsd"
+    $EMU --sd "$TMP/hsd" --max-seconds 7 --mouse "6000:30:20:0:0" --dump-ram "$TMP/d.ram" \
+         --shot "$TMP/d.ppm" "$TMP/hsd/SYSTEM/HORIZON.SYS" >/dev/null 2>&1
+    out=$(python3 $T/shot816.py "$TMP/d.ram" "$TMP/d.ppm")
+    touch "$TMP/hsd/SYSTEM/NODESK"
+    $EMU --sd "$TMP/hsd" --max-seconds 5 --dump-ram "$TMP/t.ram" --shot "$TMP/t.ppm" \
+         "$TMP/hsd/SYSTEM/HORIZON.SYS" >/dev/null 2>&1
+    out2=$(python3 $T/shot816.py "$TMP/t.ram" "$TMP/t.ppm")
+    case "$out$out2" in
+        PASS*PASS*) ok "shot816: the PC tool's pictures of the Desktop and the text console are emu816's" ;;
+        *) bad "shot816 (the PC tool's screenshot)" "$out
+$out2" ;;
+    esac
+else skip "shot816 (no Horizon card in $HSD)"; fi
+
 # ── the PC volume (PC link step 1, --pc-folder): /PC: paths, the "PC:" entry at the end of the
 # card's root, STAT /PC: = the PC's clock (--pc-time), a file round trip, $89 for a RENAME
 # between the volumes, confinement (.., a symlink out); absent: $87; a drop: $88 ──

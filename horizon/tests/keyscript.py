@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""keyscript.py [--mouse] SCRIPT - turn typed text into an emu816 --keys list (with
---mouse: the script's mouse lines as an emu816 --mouse list).
+"""keyscript.py [--mouse] [--shots PREFIX N] SCRIPT - turn typed text into an emu816 --keys
+list (with --mouse: the script's mouse lines as an emu816 --mouse list).
 
 Script lines:  <time> <text>   time in ms, absolute ("2000") or after the previous
 line's start ("+3000"). Text escapes: \\n Enter, \\b Backspace, ^C ctrl-C, \\\\ backslash,
@@ -8,6 +8,11 @@ line's start ("+3000"). Text escapes: \\n Enter, \\b Backspace, ^C ctrl-C, \\\\ 
 down / up alone (to hold a key across other events).
 Each character is pressed for 20 ms, one every 50 ms; shifted characters hold left shift.
 A line whose text is "M dx:dy:wheel:buttons" is a mouse event at that time.
+(0.29) "wait TEXT": nothing more until the console shows a line holding TEXT (at once if one
+came since the input line before it began), then every later time moves by as long as the
+wait took; it starts after every key and mouse event of the lines before it (emu816's
+t:W:HEX, with a step mark t:M: at each input line). "shot": a screenshot that moves with the
+waits (PREFIX + its number .ppm, numbered from N + 1 in the script's order; shots.sh).
 Lines starting with # are comments."""
 import sys
 
@@ -45,24 +50,41 @@ def keys_of(text):
         i += 1
 
 mouse = sys.argv[1] == '--mouse'
+prefix, nshot = None, 0
+if '--shots' in sys.argv:
+    i = sys.argv.index('--shots'); prefix, nshot = sys.argv[i + 1], int(sys.argv[i + 2])
 out, mout, t = [], [], 0
+last = -1                               # the last key or mouse event (a wait comes after it)
 for ln in open(sys.argv[-1]):
     ln = ln.rstrip('\n')
     if not ln.strip() or ln.startswith('#'): continue
     when, _, text = ln.partition(' ')
     t = t + int(when[1:]) if when.startswith('+') else int(when)
+    if text.startswith('wait '):
+        t = max(t, last + 1)
+        out.append(f'{t}:W:{text[5:].encode("latin-1").hex()}')
+        continue
+    if text == 'shot':
+        if not prefix and not mouse: raise SystemExit('a shot line needs --shots PREFIX N')
+        nshot += 1
+        out.append(f'{t}:S:{(str(prefix) + str(nshot) + ".ppm").encode("latin-1").hex()}')
+        continue
+    out.append(f'{t}:M:')                 # (an input line: the console's lines count from here)
     if text.startswith('M '):
         mout.append(f'{t}:{text[2:].strip()}')
+        last = max(last, t)
         continue
     k = t
     for usage, mod in keys_of(text):
         if usage == 'raw':
             out.append(f'{k}:{mod[0]:02x}:{int(mod[1])}')
+            last = max(last, k)
             k += 50
             continue
         if mod: out.append(f'{k}:{mod:02x}:1')
         out.append(f'{k + 2}:{usage:02x}:1')
         out.append(f'{k + 22}:{usage:02x}:0')
         if mod: out.append(f'{k + 24}:{mod:02x}:0')
+        last = max(last, k + 24 if mod else k + 22)
         k += 50
 print(','.join(mout if mouse else out) or '0:0:0:0:0')

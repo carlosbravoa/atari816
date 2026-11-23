@@ -30,7 +30,7 @@ agents' own. "Fixed" means the SDK changed since; the lesson still holds.
 | 1 screenshot in 7 shows a half-drawn sprite (Digger) | the CPU drew into the shown framebuffer during the frame | draw into a buffer; copy changed rectangles right after the vertical blank | in 35 min |
 | Reference pictures fail on a fresh checkout (Digger) | made with a card built from someone's work in progress; `git archive` files keep old times, so `make -C horizon` did not rebuild | rebuild the card from a clean tree before writing references | in 35 min |
 | Scripted test broke on Horizon 0.29 ("no recording HZD50.DRF saved") | keys at fixed seconds; the Desktop now starts programs later; "up" fell during level drawing | `wait TEXT` lines on the program's own console lines | round 4 |
-| `+0 wait X` never ends although X is in `console.txt` | X was printed while the previous script line's keys were still being sent (typed text releases its last key 22 ms later); each key event clears the remembered lines | wait for a later line; check instant replies with `--expect` (found writing these notes) | - |
+| `+0 wait X` never ended although X was in `console.txt` | X came while the previous line's keys were still being sent (each key event forgot the lines before it); a wait at a click's own time held back the click's release | fixed in emu816 and `inputscript.py`: lines since the input line before the wait count, and a wait starts after the earlier lines' releases. If it happens again: X came before that input line, or one X already ended an earlier wait | - |
 | A held key stops acting after 1 s on the board, not in the emulator (Digger) | the board's keyboard firmware cleared keys after 1 s without a report | fixed in firmware; `run816.py --kbd-release 1000` reproduces the old board | round 2 |
 | Choppy effects while the game draws (board) | the 72.8 Hz sound steps ran from the frame loop: at 60 Hz, and none during 100 ms of drawing | the music timer: `hz_sample_timer(port, us)` + `hz_recv`, polled from the drawing code (`ports/digger/horizon/hz_timer.c`) | round 2 |
 | Scrolling in jumps (board) | the view moved only while the game waited | move the view at every vertical blank, also mid-work | round 2 |
@@ -73,8 +73,10 @@ agents' own. "Fixed" means the SDK changed since; the lesson still holds.
   was written"); `hcc --debug` prints what each stack and the heap used.
 - **4 file handles for the whole system.** Close files at once; `fopen` returns NULL
   with `errno == ENFILE` when none is left. Each open `FILE` takes 1 KB of heap.
-- **The current folder is not the program's folder.** Use `hz_prog_dir`
-  (`references/packaging.md`). No `\`, no drive letters; FAT names ignore case.
+- **The current folder is not the program's folder.** Always use `hz_prog_dir` /
+  `hz_task_path` (assembly: `task_path`) for your own files (`references/packaging.md`):
+  the starter decides it (the shell its folder, a shortcut `/`, Files the folder it shows,
+  the Programs menu an app's own folder). No `\`, no drive letters; FAT names ignore case.
 - **stdout is line-buffered**: end debug `printf`s with `\n`. Under the Desktop console
   output goes only to the log (`console.txt` in the emulator).
 - **Not there**: `system()`, `getenv()`, signals, time zones (they return failure);

@@ -71,7 +71,7 @@ ms after the program's start: absolute (`2000`) or relative to the previous line
 | `T wheel N` | wheel steps, positive = up |
 | `T M dx:dy:wheel:buttons` | one raw relative mouse event |
 | `T shot` | screenshot |
-| `T wait TEXT` | nothing more happens until the program prints a console line holding TEXT (or at once if it printed one since the step before); every later time moves by as long as the wait took. Shots after a wait move with it |
+| `T wait TEXT` | nothing more happens until the program prints a console line holding TEXT, or at once if it printed one since the input line before the wait began (even while that line's keys were still being sent). The wait starts after every key and button event of the lines before it (a click's release, a held key's release); every later time counts from its end. One line ends one wait. Shots after a wait move with it |
 
 Escapes in typed text: `\n` Enter, `\b` Backspace, `\t` Tab, `\\` backslash, `^A`..`^Z`
 ctrl+letter, `{esc} {up} {down} {left} {right} {home} {end} {pgup} {pgdn} {ins} {del}
@@ -81,11 +81,12 @@ key down/up by HID usage in hex.
 A script that follows the program (verified, `make test` of a scratch console program):
 
 ```
-# wait for the program's line, then type
+# wait for the program's line, then type, then wait for its answer
 0 wait t1: ready
 +300 shot
 +200 Ada\n
-+1000 shot
++0 wait t1: saved Ada
++300 shot
 ```
 
 `python3 SDK/tools/inputscript.py FILE --keys` (or `--mouse`, `--shots`) prints the
@@ -97,19 +98,17 @@ Script rules:
   state a test needs (Digger: `digger: title`, `digger: play`, `digger: dead`, `digger:
   initials`) and write `+0 wait digger: play`. Digger's fixed-time script broke when
   Horizon 0.29's Desktop started programs a little later.
-- **A line printed while the previous line's keys are still being sent is lost to the
-  next `wait`.** Each key event clears the remembered lines; typed text releases its last
-  key 22 ms after pressing it. Observed: `+300 Ada\n` then `+0 wait t1: saved` never
-  ended although the program printed `t1: saved Ada` at once. Wait only for lines that
-  come later than that (a state reached after work), and check instant replies with
-  `--expect`. The same for a `wait` at time 0 in shell mode: the shell's own Enter
-  release can clear a line the program prints in its first 20 ms.
+- **`+0 wait` right after an input line is the normal way** to wait for the program's
+  answer to it: `+300 Ada\n` then `+0 wait t1: saved`; `click` then `+0 wait CLICKS: 1`.
+  A line the program printed since that input line began counts, also one printed while
+  its keys were still down; a line from before it does not (it answered something else).
+  In shell and desktop mode, `0 wait` sees everything the program printed since it was
+  started.
+- Two waits for the same text need the program to print it twice: one line ends one wait.
 - Give a `move` time before the `click` (`+100 click`): the click does not wait for the
   move's steps.
-- **A `wait` at a click's own time holds back the click's release** (sent 80 ms after the
-  press): `+200 click` then `+0 wait CLICKS: 1` never ends, because the button never sees
-  the release. Write `+200 wait ...` after a click. Two clicks at one place less than about
-  a second apart are a double click: a button counts one (`examples/window/test.script`).
+- Two clicks at one place less than about a second apart are a double click: a button
+  counts one (`examples/window/test.script`).
 - Keys typed while a menu is open go to the menu. In desktop mode Files is open at
   (24, 24) and has the focus until your window opens; your menus come after "Horizon"
   and "Programs".
@@ -138,8 +137,8 @@ python3 SDK/tools/contact.py build/test/crop.png build/test/shot2.png --full --c
 
 Half size (default): one sheet pixel = one screen pixel, so coordinates read off the sheet
 are `move X Y` coordinates. `--full --crop X,Y,W,H` zooms into a part (screen pixels).
-Each shot is labelled with the number in its file name: `shot1` and `auto1` both show "1",
-so put them on separate sheets. Look for: text cut or overlapping, controls off the grid,
+Each shot is labelled with the number in its file name; a sheet that mixes `shot1` and
+`auto1` labels each with its whole name. Look for: text cut or overlapping, controls off the grid,
 trails of erased sprites, wrong colours, things not redrawn after a dialog closed.
 
 ## Checks

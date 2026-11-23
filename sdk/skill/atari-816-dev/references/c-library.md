@@ -128,8 +128,10 @@ In a window program keys come as `WE_KEY` events instead (references/hui.md).
   Name.txt` with spaces), **case-insensitive** (opened as `MIXED CASE NAME.TXT`, tested),
   `/` as separator, no drive letters, no `\`. Relative paths and `..` work from the
   current folder (tested). `FILENAME_MAX` is 128.
-- **The current folder** is whatever started the program: the shell's folder, `/` from
-  the Desktop. Do not rely on it. For data files next to the program:
+- **The current folder** is whatever started the program: the shell's folder; `/` from a
+  desktop shortcut or a `/SYSTEM/PROGRAMS` entry; the folder Files shows; an app's own
+  folder from the Programs menu's app list. Do not rely on it: always use `hz_prog_dir`
+  for files next to the program:
 
 ```c
 char path[128];                    /* tested: /APPS/LEVELS.DAT found */

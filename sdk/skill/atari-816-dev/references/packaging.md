@@ -41,7 +41,7 @@ every key optional; longer values are cut.
 | `description` | 63 | one line, shown by the Installer |
 | `types` | 47 | extensions it opens, comma-separated: `types=DIG,LVL`. A double click on such a file starts the app with the full path in quotes as its argument: `"/GAMES/LEVEL1.DIG"`. Horizon's own types keep their programs |
 | `icon` | 31 | a built-in icon name or an icon file in the folder |
-| `needs` | 47 | the same list as `hcc --needs`, for the Installer to show (the program checks itself) |
+| `needs` | 47 | the same list as `hcc --needs`, for the Installer to show (the program checks itself). Leave it out: `hzapp.py pack` copies the program's list into the archive's APP.INF |
 
 Built-in icon names (`apinames` in `horizon/user/desk.s`): `folder sd atari doc text
 writedoc sheetdoc picture basdoc disk xex cart program edit write sheet paint basic calc
@@ -65,7 +65,16 @@ double click could not play one. Only register a type the program opens from `ar
 ## Icons
 
 An icon file: 32 x 32 pixels, one palette index a byte, row by row, 255 = transparent:
-exactly 1024 bytes. Make one from a text drawing with Horizon's `tools/mkicons.py`
+exactly 1024 bytes. From a picture (a game's sprite as a PNG with alpha):
+
+```
+python3 SDK/tools/hzapp.py icon sprite.png build/HELLO/HELLO.ICN --preview build/icon.png
+```
+
+(Pillow needed.) Larger pictures are scaled down (pixel art by a whole-number step when its
+size allows), smaller ones centred; nearest colours of the Desktop's palette; alpha below
+128 transparent; the drop shadow added (`--no-shadow`: none). Look at the preview. Or make
+one from a text drawing with Horizon's `tools/mkicons.py`
 (format: the header of `horizon/sdfiles/icons.txt`): `color C N` lines map a character to
 a palette index (`.` must be mapped too: `color . 255`), then `icon NAME` and exactly 32
 rows of 32 characters. House style: 1-pixel black outline, light top/left inner edge, dark
@@ -77,8 +86,8 @@ python3 HORIZON/tools/mkicons.py icon.txt HELLO.ICN /dev/null     # -> 1024 byte
 ```
 
 (The third argument is a ca65 include of the icon numbers; not needed for an app.)
-Digger makes its icon from the game's sprite (`tools/mkdata.py --icon`). The pixel art
-rules: `references/pixel-art.md`.
+Digger makes its icon from the game's sprite (`tools/mkdata.py --icon`, the same method as
+`hzapp.py icon`). The pixel art rules: `references/pixel-art.md`.
 
 ## What a program needs: hcc --needs, HZ_NEEDS
 
@@ -144,9 +153,17 @@ version (major * 256 + minor) in A and the revision in X (`hz_x`).
 
 ```
 python3 SDK/tools/hzapp.py check FOLDER|FILE.HZA     # checks only; exit 1 on an error
-python3 SDK/tools/hzapp.py pack FOLDER [-o FILE.HZA] [--mtime N]
+python3 SDK/tools/hzapp.py pack FOLDER [-o FILE.HZA] [--mtime N] [--needs-from-program]
 python3 SDK/tools/hzapp.py list FILE.HZA             # its files and APP.INF
+python3 SDK/tools/hzapp.py icon IMAGE.png OUT.ICN    # an icon from a picture (above)
 ```
+
+The needs are written once, in the program. `pack` with an APP.INF without `needs=` puts
+the program's list into the archive's APP.INF (`hzapp: the archive's APP.INF:
+needs=horizon=0.29,mem=256K added, from HELLO.PRG (the folder's APP.INF is not changed)`).
+A `needs=` that differs from the program's is a warning; `--needs-from-program` replaces it
+in the archive. `check` prints what the program checks: `HELLO.PRG checks:
+horizon=0.29,mem=256K`.
 
 A real run (`build/HELLO` = APP.INF, HELLO.PRG built with `--needs
 horizon=0.29,mem=256K`, HELLO.ICN):
@@ -167,7 +184,8 @@ Hello 1.0 - Counts its runs in its own folder
 hzapp: OK
 ```
 
-What it checks: APP.INF present, known keys, values within the sizes; the program present
+What it checks: APP.INF present, known keys, values within the sizes; `icon=` a built-in
+name or a 1024-byte file in the folder (a warning); the program present
 (`program=`, else `FOLDER.PRG`, else the only `.PRG`) and an o65 Horizon program; its
 needs block against APP.INF's `needs=` (a warning); every name one FAT and the Installer
 accept (printable ASCII without `\ : * ? " < > |`, no part ending in `.` or space or
@@ -219,18 +237,27 @@ update would replace the user's file. Let the program create it when missing.
 - Refused: no APP.INF ("... has no APP.INF in its folder: it is not a Horizon app."), no
   program, links, unsafe names, anything outside the one top folder, GNU long names, a
   cut or damaged archive.
+- Each outcome is one console line, in the shell and in windows (the log, `console.txt`):
+  `install: installed /APPS/NAME`, `install: replaced /APPS/NAME`, `install: removed
+  /APPS/NAME`, `install: cancelled`, `install: failed: REASON` (`... the card is full`, `a
+  name that is not safe: GOOD/../EVIL.TXT`, ...). In windows the question too, just before
+  it shows: `install: asks: Install /APPS/NAME` (`Replace`, `Remove`). Test scripts wait
+  for these lines.
 
 ## Installing in the emulator
 
 **From the shell** (as `sdk/c/tests/run.py`'s apps test does): run the Installer itself
-with run816, then start the app by its path. Verified:
+with run816, then start the app by its path (the same steps as that test's, which waits for
+the `install:` lines; HELLO was verified with fixed delays before those lines existed):
 
 ```
-# install.script
-3000 /APPS/HELLO/HELLO.PRG\n
+# install.script (run816 started "install -y /HELLO.HZA")
+0 wait install: installed /APPS/HELLO
++500 /APPS/HELLO/HELLO.PRG\n
 +0 wait hello: folder
-+1000 install -y /HELLO.HZA\n
-+3000 /APPS/HELLO/HELLO.PRG\n
++500 install -y /HELLO.HZA\n
++0 wait install: replaced /APPS/HELLO
++500 /APPS/HELLO/HELLO.PRG\n
 ```
 
 ```
@@ -246,8 +273,11 @@ APP.INF, HELLO.ICN, HELLO.PRG and RUNS.TXT, which the update kept (it says 2).
 **From the Desktop, as a user** (`ports/digger/tests/app.script`, `make test-app`):
 `run816.py - --mode none --file DIGGER.HZA:/DIGGER.HZA --script tests/app.script`. Time 0
 is the Desktop with Files open at the root: type `digger\n` (Files finds and opens the
-archive), `\n` (Install), `\n` (the message), `{f10}` `{right}` (Programs), `{end}` `\n`
-("Games >" opens at the pointer), `{down}` `\n` (Digger), then `+0 wait digger: title`.
+archive), `+0 wait install: asks: Install /APPS/DIGGER`, `+500 \n` (Install), `+0 wait
+install: installed /APPS/DIGGER`, `+500 \n` (the message), `{f10}` `{right}` (Programs),
+`{end}` to "Games >" (the last line), `\n` (its pop-up opens beside the menu with its first
+app highlighted: Right does not open it), `\n` again (Digger), then `+0 wait digger:
+title`. (Digger's own script predates the `install:` lines and uses fixed delays there.)
 `tests/app.sh` checks the four files in `card/APPS/DIGGER`, the title line, and that
 `DIGGER.SCO` survived a second install (Replace). It passes.
 
@@ -256,10 +286,12 @@ archive), `\n` (Install), `\n` (the message), `{f10}` `{right}` (Programs), `{en
 **In the app's own folder.** Replace keeps every file the archive does not have, so
 scores, saved games and settings survive an update; "Remove app" deletes them.
 
-Never assume the current folder: the shell and Files start programs with another current
-folder (run816 shell and desktop modes both gave `/`; apps.md says the Desktop's Programs
-menu starts an app in its folder, but the program cannot know how it was started). Find
-the folder with `hz_prog_dir` (Horizon 0.28+; assembly: `task_path`, $35):
+Never assume the current folder: it is the starter's. The Programs menu starts an app in
+its own folder; Files in the folder it shows; a desktop shortcut and run816's desktop mode
+(a `/SYSTEM/PROGRAMS` entry) in `/`; a file of the app's type opened from Files in that
+file's folder; the shell in its own (run816 shell mode: `/`); and the program cannot know
+how it was started. Always find the folder with `hz_prog_dir` (Horizon 0.28+; assembly:
+`task_path`, $35):
 
 ```c
 #include <stdio.h>
@@ -287,8 +319,8 @@ the program file.
 
 ## Checklist
 
-- [ ] `hcc --needs ...` (or `HZ_NEEDS`) with what the program really needs; the same list
-      in APP.INF's `needs=` (`hzapp.py check` warns otherwise).
+- [ ] `hcc --needs ...` (or `HZ_NEEDS`) with what the program really needs; APP.INF
+      without `needs=` (pack copies the program's), or the same list.
 - [ ] Data files found through `hz_prog_dir`; saves written there; none in the archive.
 - [ ] `hzapp.py check` clean; `pack --mtime 0` in a `make app` target.
 - [ ] Installed in the emulator (shell `install -y`, or the Desktop script), started,

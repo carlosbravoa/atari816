@@ -432,7 +432,8 @@ the blitter: the software drawing paths; both must pass):
    icons (a file, a built-in name), ZZGAMES.HZA and ZZGAMEB.HZA installed from Files
    (typed, Enter, the Installer's question, Enter), the Programs menu with "Games >", its
    pop-up, Game A started from it (in its folder), /ZZDOC.ZZT opened with Game A (its
-   types=), Remove app... in Files' pop-up menu; 20 apps and the odd folders
+   types=), Remove app... in Files' pop-up menu (the Installer's steps wait for its
+   console lines, `install: asks: ...`); 20 apps and the odd folders
    (`tests/app29m.src`: a junk APP.INF, a missing program, no APP.INF, a program right in
    /APPS, a hidden folder; "More apps >" and its pop-up; the needs window of NEEDV).
 
@@ -1131,7 +1132,8 @@ bus time (see emu/README.md, "Memory timing"). Expect the same factor on the CPU
   are no shared libraries and no dependencies between apps.
 - **The Programs menu** (the Desktop, `user/desk.s`) lists the apps after the programs of
   `/SYSTEM/PROGRAMS`, below a line: those without a category one item each, then one item
-  per category ("Games >": choosing it opens a pop-up menu of its apps at the pointer),
+  per category ("Games >": choosing it opens a pop-up menu of its apps beside the
+  drop-down, level with that line, its first app highlighted, by mouse or keys alike),
   sorted by category and name, ignoring case. When they do not fit in the drop-down's 24
   lines, the last line is "More apps >" with the rest; a pop-up of more than 24 ends with
   "All apps in Files". A folder without APP.INF is listed by its folder's name when it
@@ -1156,7 +1158,11 @@ bus time (see emu/README.md, "Memory timing"). Expect the same factor on the CPU
   scores, settings) into the new one first. Any error deletes `/APPS/.INSTALL`: the old app
   stays. There is no call for the card's free space: a full card shows as a short write,
   and the install stops and cleans up. `install -r NAME` and Files' new **Remove app...**
-  (the pop-up menu of a folder in `/APPS`) delete an app after a question.
+  (the pop-up menu of a folder in `/APPS`) delete an app after a question. Each outcome is
+  one console line, in windows too (the log): `install: installed /APPS/NAME`, `install:
+  replaced /APPS/NAME`, `install: removed /APPS/NAME`, `install: cancelled`, `install:
+  failed: REASON`; in windows also `install: asks: Install /APPS/NAME` (Replace, Remove)
+  just before the question: test scripts wait for these lines.
 - **File types**: a file whose type has no Horizon program opens with the first app whose
   `types=` lists its extension (`ui_open` in the controls library: Files and the Desktop).
   Horizon's own types keep their programs. `.HZA` opens with the Installer; Files shows
@@ -1176,17 +1182,25 @@ bus time (see emu/README.md, "Memory timing"). Expect the same factor on the CPU
   (mn_close's win_close took kg_e): the menu kept its old items until the Desktop
   restarted. Now the window is fetched again.
 - **Kernel** +22 bytes in bank $01 (sys_info 14, the fix 8); 548 left.
-- **Programs' room** (of 65,280 bytes in the code bank): DESK 2,419 bytes left (it grew by
-  5,971 bytes: its apps code, the icons of app shortcuts, and uiapp; the app records live
-  in its icon bank, not in its own), WFILES 26,029 left (4.0 KB more: uiapp, Remove app...,
-  the parcel icon), the new INSTALL 21,263 left. Programs that link the controls library's
-  `ui_launch` (Settings, Printer) get `ui_open` with it and so uiapp too: 3.6 KB each
-  (26,637 and 31,946 left).
+- **Programs' room** (of 65,280 bytes in the code bank): DESK 2,237 bytes left (it grew by
+  6,153 bytes: its apps code, the icons of app shortcuts, uiapp, the pop-up's place beside
+  the Programs menu; the app records live in its icon bank, not in its own), WFILES 26,029
+  left (4.0 KB more: uiapp, Remove app..., the parcel icon), the new INSTALL 20,474 left
+  (with its console lines). Programs that link the controls library's `ui_launch`
+  (Settings, Printer) get `ui_open` with it and so uiapp too: 3.6 KB each (26,637 and
+  31,946 left).
 - **The emulator**: `--card-free BYTES`, a card that fills up (a short WRITE, MKDIR denied).
 - **Host tool**: `sdk/tools/hzapp.py pack | list | check` makes and checks archives.
 - **Compatibility**: programs and cards of 0.28 work unchanged; `/SYSTEM/PROGRAMS` works as
   before. On 0.28 and older the apps' folders are ordinary folders (start their programs
   from Files or the shell); a program with a needs block says there what it lacks.
+- **Input scripts follow the program**: emu816's `--keys` waits (`t:W:HEX`) count the
+  console lines printed since the last step mark (`t:M:`, the start of the input line
+  before; key events no longer forget them), and each line ends one wait; `sdk/tools/
+  inputscript.py` and `tests/keyscript.py` start a wait after every key and button event of
+  the lines before (a click's release is no longer held back). `tests/keyscript.py` and
+  `tests/mousegen.py` take `wait TEXT` and `shot` lines (`tests/shots.sh` numbers the shots
+  after its times): the app tests wait for the Installer's lines instead of fixed delays.
 - **Tests**: item 34 of the list above (`make test-29`, run by `make test`). The pictures
   that show About ("Horizon 0.29") and some that show a moment's free memory in the menu
   bar (the Desktop starts a little later: its scan of /APPS) were refreshed.

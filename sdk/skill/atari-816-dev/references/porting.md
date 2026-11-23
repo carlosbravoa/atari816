@@ -111,8 +111,9 @@ Rules learnt:
   (`hg_screen_fb` + `hg_split`); the PC's pixels were not square either.
 - **Late frames still need events.** A game whose frame runs longer than its tick never
   waits, so never calls `hg_frame`: call `hg_poll()` once a frame (keys, pause, music).
-- **Main program folder**: never rely on the current folder (the shell starts programs in
-  `/`). Digger's `main` does `hz_prog_dir(buf, 128)`, strips the last `/`, `hz_chdir(buf)`.
+- **Main program folder**: never rely on the current folder (it is the starter's: the
+  shell's, `/` in run816's modes; only the Programs menu's app list starts an app in its
+  own folder). Digger's `main` does `hz_prog_dir(buf, 128)`, strips the last `/`, `hz_chdir(buf)`.
 
 ## 16-bit int traps
 

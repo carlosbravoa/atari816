@@ -31,6 +31,7 @@ static SDL_AudioDeviceID adev;      /* the live sound (0: none) */
  * user mode), "k cycles" (the kernel otherwise: interrupts, other tasks) and "i cycles"
  * (WAI). Only between --prof-from and --prof-to (emulated seconds). */
 static const char *prof_path;
+static const char *dump_ram;            /* --dump-ram: the RAM written at exit */
 static double prof_from, prof_to = 1e30;
 static uint32_t *prof_u;            /* cycles by 24-bit address (user mode) */
 static uint8_t *prof_op;            /* the opcode seen there */
@@ -68,11 +69,12 @@ static void host_key(int usage, int down)
     mailbox_key(usage, down);
 }
 
-/* scripted input (--keys, --mouse), sorted by time. Two more kinds in --keys: a wait
+/* scripted input (--keys, --mouse), sorted by time. Three more kinds in --keys: a wait
  * ("t:W:HEX": from t on, nothing more until the program prints a console line holding that
- * text; then the rest comes as late as the wait took) and a screenshot ("t:S:HEX": that file,
- * two vertical blanks later), so a script can follow the program's progress */
-enum { K_KEY, K_MOUSE, K_WAIT, K_SHOT };
+ * text; then the rest comes as late as the wait took), a screenshot ("t:S:HEX": that file,
+ * two vertical blanks later) and a step mark ("t:M:": an input script's line starts here),
+ * so a script can follow the program's progress */
+enum { K_KEY, K_MOUSE, K_WAIT, K_SHOT, K_MARK };
 typedef struct { uint64_t cycle; int seq; uint8_t mouse, usage, down, btn; int16_t dx, dy, wheel; uint8_t kind; char *text; } KeyAt;
 static KeyAt *keys;
 static int nkeys, nextkey;
@@ -80,15 +82,24 @@ static const char *key_wait;            /* the text being waited for, NULL: none
 static uint64_t key_wait_at;
 static const char *key_shot;            /* a screenshot due (its file), in key_shot_req frames */
 static int key_shot_req;
-/* the console's lines since the script's last step: a wait is also met by a line that came
- * before its own time (the program may be quicker than the script thought) */
-#define KH_N 32
+/* the console's lines since the script's last step mark (the start of the last input line
+ * before a wait): a wait is also met by a line that came before its own time (the program
+ * may be quicker than the script thought, or answer while that line's keys are still being
+ * sent). Key and mouse events do not forget lines; a mark does. A line that meets a wait is
+ * used up (two waits for one text need two lines); the others stay for the waits after it.
+ * Without marks in the list every line since the start counts */
+#define KH_N 64
 static char key_hist[KH_N][128];
 static int key_hist_n;
 
-static int key_hist_has(const char *text)
+static int key_hist_take(const char *text)
 {
-    for (int i = 0; i < key_hist_n; i++) if (strstr(key_hist[i], text)) return 1;
+    for (int i = 0; i < key_hist_n; i++)
+        if (strstr(key_hist[i], text)) {
+            memmove(key_hist + i, key_hist + i + 1, sizeof key_hist[0] * (key_hist_n - i - 1));
+            key_hist_n--;
+            return 1;
+        }
     return 0;
 }
 
@@ -96,28 +107,27 @@ static void keys_due(uint64_t now)
 {
     while (!key_wait && nextkey < nkeys && keys[nextkey].cycle <= now) {
         KeyAt *k = &keys[nextkey++];
+        if (k->kind == K_MARK) { key_hist_n = 0; continue; }
         if (k->kind == K_WAIT) {
-            if (key_hist_has(k->text)) { key_hist_n = 0; continue; }   /* met already */
+            if (key_hist_take(k->text)) continue;       /* met already */
             key_wait = k->text; key_wait_at = k->cycle;
             continue;
         }
-        key_hist_n = 0;
         if (k->kind == K_SHOT) { key_shot = k->text; key_shot_req = 3; }
         else if (k->mouse) mailbox_mouse(k->btn, k->dx, k->dy, k->wheel);
         else host_key(k->usage, k->down);
     }
 }
 
-/* (a console line) the wait is over: the rest of the script moves on by the time it took */
+/* (a console line) kept for the waits to come, or the wait is over: the rest of the script
+ * moves on by the time it took */
 static void keys_wait_line(const char *line)
 {
-    if (!key_wait) {                                    /* (kept for a wait to come) */
+    if (!key_wait || !strstr(line, key_wait)) {
         if (key_hist_n == KH_N) { memmove(key_hist, key_hist + 1, sizeof key_hist[0] * (KH_N - 1)); key_hist_n--; }
         snprintf(key_hist[key_hist_n++], sizeof key_hist[0], "%s", line);
         return;
     }
-    if (!strstr(line, key_wait)) return;
-    key_hist_n = 0;
     uint64_t d = M.cpu.cycles > key_wait_at ? M.cpu.cycles - key_wait_at : 0;
     for (int i = nextkey; i < nkeys; i++) keys[i].cycle += d;
     key_wait = NULL;
@@ -145,11 +155,12 @@ static void parse_keys(const char *s)
     while (*s) {
         double ms; unsigned u, d; int n = 0;
         char kind;
-        if (sscanf(s, "%lf:%c:%n", &ms, &kind, &n) == 2 && n && (kind == 'W' || kind == 'S')) {
+        if (sscanf(s, "%lf:%c:%n", &ms, &kind, &n) == 2 && n && (kind == 'W' || kind == 'S' || kind == 'M')) {
             int h = (int)strspn(s + n, "0123456789abcdefABCDEF");
             keys = realloc(keys, (nkeys + 1) * sizeof *keys);
             keys[nkeys] = (KeyAt){ .cycle = (uint64_t)(ms * CPU_HZ / 1000.0), .seq = nkeys,
-                                   .kind = kind == 'W' ? K_WAIT : K_SHOT, .text = unhex(s + n, h) };
+                                   .kind = kind == 'W' ? K_WAIT : kind == 'S' ? K_SHOT : K_MARK,
+                                   .text = unhex(s + n, h) };
             nkeys++;
             s += n + h;
             if (*s == ',') s++;
@@ -437,6 +448,7 @@ static void usage(void)
         "  --prof FILE          the CPU's cycles by instruction address, syscall, kernel, idle (at exit)\n"
         "  --prof-from S, --prof-to S  only between these emulated seconds\n"
         "  --shot FILE.ppm      write the 1280x720 output frame (at exit, or at --shot-at); repeatable\n"
+        "  --dump-ram FILE      write the 8 MB of RAM at exit (as a PC tool reading memory sees it)\n"
         "  --shot-at SECONDS    emulated time for the preceding --shot (first VBLANK at or after it)\n"
         "  --shot-on TEXT       a screenshot each time the program prints a console line holding TEXT\n"
         "                       (two frames later): PREFIXn.ppm, n = 1, 2, ... (--shot-on-prefix PREFIX)\n"
@@ -468,7 +480,8 @@ static void usage(void)
         "  --console-us N       DBG_OUT busy for N us after each byte; bytes written while busy are dropped\n"
         "  --keys LIST          inject keys: \"t_ms:usage:down,...\" (usage in hex, e.g. 100:04:1,150:04:0)\n"
         "                       (also t_ms:W:HEX: wait until the console shows a line holding that text,\n"
-        "                       the rest later by as long; t_ms:S:HEX: a screenshot to that file)\n"
+        "                       the rest later by as long, or at once if one came since the last\n"
+        "                       t_ms:M: (a step mark: an input line starts); t_ms:S:HEX: a screenshot)\n"
         "  --mouse LIST         inject mouse: \"t_ms:dx:dy:wheel:buttons,...\" (e.g. 100:5:-3:0:1)\n"
         "  --rev N              SYS_REV to report: 6 (no sound, no blitter), 7 (sound), 8 (+ blitter),\n"
         "                       9 (+ blitter lists, raster events at the beam, NV_FRAME),\n"
@@ -518,6 +531,7 @@ int main(int argc, char **argv)
         }
         else if (!strcmp(a, "--shot-at") && i + 1 < argc && nshots) shot_at[nshots - 1] = atof(argv[++i]);
         else if (!strcmp(a, "--stats")) stats = 1;
+        else if (!strcmp(a, "--dump-ram") && i + 1 < argc) dump_ram = argv[++i];
         else if (!strcmp(a, "--ideal-timing")) M.fr.ideal = 1;
         else if (!strcmp(a, "--boot-cart") && i + 1 < argc) mailbox_boot_cart = argv[++i];
         else if ((!strcmp(a, "--card-date") || !strcmp(a, "--pc-time")) && i + 1 < argc) {
@@ -707,6 +721,11 @@ int main(int argc, char **argv)
     for (int i = 0; i < nshots; i++) if (!shot_done[i]) {
         nvc_render();
         if (nvc_write_ppm(shot_path[i])) fprintf(stderr, "emu816: cannot write %s\n", shot_path[i]);
+    }
+    if (dump_ram) {                                     /* the RAM at the end (tool tests) */
+        FILE *f = fopen(dump_ram, "wb");
+        if (!f || fwrite(M.ram, 1, RAM_SIZE, f) != RAM_SIZE) fprintf(stderr, "emu816: cannot write %s\n", dump_ram);
+        if (f) fclose(f);
     }
     if (stats) {
         double host = (double)(clock() - t0) / CLOCKS_PER_SEC, emu = c->cycles / CPU_HZ;

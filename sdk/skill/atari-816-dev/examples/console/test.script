@@ -1,3 +1,5 @@
-# make test: type a name once the program has started (it prints the sum first)
+# make test: type a name once the program has started (it prints the sum first), then wait
+# for its answer (printed at once, while the Enter key is still down: it counts)
 0 wait sum of
 +300 Ada\n
++0 wait saved Ada

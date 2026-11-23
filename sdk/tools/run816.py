@@ -40,7 +40,9 @@ Options:
   --shot SECONDS  a screenshot at that time (repeatable; at most 16 in all)
   --seconds N     how long to run after the start (default: the last event + 2 s)
   --out DIR       output folder (default: run-NAME)
-  --file SRC[:DEST]  copy a file onto the card too (DEST default /SRC-NAME; repeatable)
+  --file SRC[:DEST]  copy a file onto the card too (repeatable); without DEST it goes to
+                  the card's root, its name in capitals (data/main.c -> /MAIN.C; the
+                  card's names ignore case)
   --rev N         hardware revision to emulate (default: emu816's, REV $0C: the blitter
                   with command lists, Lau, sprites, fine scrolling, the OPL2); 11 no OPL2
                   (POKEY 2 and the DACs instead), 10 no sprites or scrolling, 9 no Lau,

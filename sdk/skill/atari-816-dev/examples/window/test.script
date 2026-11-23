@@ -1,10 +1,11 @@
 # make test: two clicks on the button (content (101, 96) + button (8..72, 40..60)), then
 # a picture. Give the pointer 500 ms after a move before clicking, and 1.5 s between the
-# clicks: two quick clicks would be one double click. The wait comes 200 ms after the
-# click: a wait at the click's own time would hold back the button's release (80 ms on).
+# clicks: two quick clicks would be one double click. "+0 wait" after a click starts after
+# the button's release (80 ms on), which is when a button counts the click.
 0 wait CLICKS: open
 +500 move 140 146
 +500 click
++0 wait CLICKS: 1
 +1500 click
-+200 wait CLICKS: 2
++0 wait CLICKS: 2
 +300 shot

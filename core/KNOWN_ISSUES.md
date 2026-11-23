@@ -176,11 +176,36 @@ cannot hold it:
 There is no useful partial VBXE (every feature software uses depends on the 512 KB VRAM).
 The Atari816's own video (Marga) is the way forward on this board.
 
-## OPEN: `shot816` shows a black picture for Xargon (the board's screen is right)
+## FIXED IN THE PC TOOL (to confirm on the board): `shot816` showed a black picture for Xargon
 
 2026-11-22. Xargon on the board plays correctly (picture, OPL2 music, speed: seen on the
-monitor), but `atari.py shot816` returns an all-black 320x180 picture while it runs (video
-state: mode 2, base $480000, stride 512). Digger and the Desktop are captured correctly.
-Xargon flips between two pages and loads its palette every frame: the tool probably reads the
-palette or the page from the wrong place for a program that does this. Only the PC tool is
-affected.
+monitor), but `atari.py shot816` returned an all-black 320x180 picture while it runs (video
+state: mode 2, base $480000, stride 512). Digger and the Desktop were captured correctly.
+
+**Cause** (found in the emulator, not on the board): not the palette, not the page flip as
+such. Xargon shows its pages through Marga's scroll registers (REV $0B fine scrolling,
+Horizon's `fs_scroll`): its framebuffer holds both pages (880 rows of 512 bytes from
+$480000), and the picture is the rows from `y` = page + 120 + 11 (rows wrapping as rings,
+`x` the playfield's horizontal scroll), then from the split line the status bar's rows
+(400 or 840). The kernel's video-state block ($01:F000, version 1) holds NV_BASE and
+NV_STRIDE but not the scroll set, so `a816_screen.py` read rows 0-179 from the base:
+rows above the view that Xargon never draws, black. Digger also enters full screen with a
+split, but its scroll set leaves every row where it is (y 0, the split's y2 = the split line),
+so reading from the base happened to be right.
+
+**Fix** (`core/tools/a816_screen.py`): the kernel's own copy of the scroll set (`fs_scr`,
+with `fs_act` and `k_rev`) is found by the code that uses it in the kernel's second segment
+($00:E100: `fs_regs`, `fs_noscroll`; one match each in today's kernel), and the picture is
+made row by row as Marga walks the rows (`emu/nvc.c`'s rules: the row of line 0, the
+pixels skipped with the horizontal wrap, the split's second set, the vertical wrap). Where
+the code is not found it falls back to the rows from the base. Checked against emu816's
+own pictures with `emu816 --dump-ram` and `emu/tests/shot816.py`: Xargon at 12, 33 and 42 s
+of its test game (title and level 1: `scroll=y131,x0,hwrap,split280:y400`, `y623,x32...`,
+`y245,x216...`) identical pixel for pixel (without the fix 46,001-57,585 of 57,600 pixels
+differ); Digger, the Desktop and the text console identical too. `emu/tests/run_tests.sh`
+keeps the Desktop and console checks. A cleaner fix later: the scroll set in the
+video-state block (a version 2, a kernel change of a few bytes).
+
+**To confirm on the board**: run Xargon, play into level 1, then `python3 core/tools/atari.py
+shot816 x.png --scale 2`; the line it prints has `scroll=y...,x...,hwrap,split280:y...`
+and the picture is the game. `--no-scroll` gives the old reading (black) for comparison.

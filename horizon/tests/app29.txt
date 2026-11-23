@@ -7,6 +7,7 @@
 Good App 1.0 - The apps test's app
 4 files, 3 KB, into /APPS/GOOD. (y/n) y
 Good App is installed: it is in the Programs menu.
+install: installed /APPS/GOOD
 > ls /APPS/GOOD
   APP.INF                                                102  2026-11-01 12:00
   DATA.TXT                                                12  2026-11-01 12:00
@@ -21,6 +22,7 @@ version one
 Good App 2.0 - The apps test's app
 6 files, 3 KB, into /APPS/GOOD (an update: your own files there stay).
 Good App is installed: it is in the Programs menu.
+install: replaced /APPS/GOOD
 > ls /APPS/GOOD
   APP.INF                                                102  2026-11-01 12:00
   DATA.TXT                                                12  2026-11-01 12:00
@@ -46,10 +48,12 @@ apptest: /APPS/GOOD/GOOD.PRG in / args []
 My Game
 3 files, 3 KB, into /APPS/My Game (2).
 My Game is installed: it is in the Programs menu.
+install: installed /APPS/My Game (2)
 > install -y /T/PAX.HZA
 Pax App
 2 files, 3 KB, into /APPS/PAXAPP.
 Pax App is installed: it is in the Programs menu.
+install: installed /APPS/PAXAPP
 > ls /APPS
   GOOD                                                 <DIR>  2026-01-01 00:00
   My Game (2)                                          <DIR>  2026-01-01 00:00
@@ -59,47 +63,58 @@ apptest: /APPS/My Game (2)/Start Me.PRG in / args ["/APPS/My Game (2)/Read me fi
 apptest: the file says: hello
 > install -y /T/BADSUM.HZA
 /T/BADSUM.HZA is damaged (a header's checksum is wrong).
+install: failed: /T/BADSUM.HZA is damaged (a checksum)
 exit 0001
 > install -y /T/CUT.HZA
 /T/CUT.HZA is cut short: the archive is damaged.
+install: failed: /T/CUT.HZA is cut short
 exit 0001
 > install -y /T/DOTDOT.HZA
 /T/DOTDOT.HZA holds a name that is not safe:
 GOOD/../EVIL.TXT
+install: failed: a name that is not safe: GOOD/../EVIL.TXT
 exit 0001
 > install -y /T/ABS.HZA
 /T/ABS.HZA holds a name that is not safe:
 /GOOD/APP.INF
+install: failed: a name that is not safe: /GOOD/APP.INF
 exit 0001
 > install -y /T/TWO.HZA
 /T/TWO.HZA must hold one folder (the app) with
 everything in it; this is outside it:
 OTHER/X.TXT
+install: failed: outside the app's folder: OTHER/X.TXT
 exit 0001
 > install -y /T/NOINF.HZA
 /T/NOINF.HZA has no APP.INF in its folder:
 it is not a Horizon app.
+install: failed: no APP.INF
 exit 0001
 > install -y /T/NOPRG.HZA
 /T/NOPRG.HZA has no program: APP.INF must name it
 (program=NAME.PRG), or the folder must hold one.
+install: failed: no program
 exit 0001
 > install -y /T/GNU.HZA
 /T/GNU.HZA uses GNU tar's long names (more than 100
 characters). Pack it with hzapp.py, or with
 tar --format=ustar.
+install: failed: /T/GNU.HZA uses GNU tar's long names
 exit 0001
 > install -y /T/LINK.HZA
 /T/LINK.HZA holds a link or a device:
 GOOD/LINK
 Only files and folders can be installed.
+install: failed: a link or a device: GOOD/LINK
 exit 0001
 > install -y /T/BADCH.HZA
 /T/BADCH.HZA holds a name that is not safe:
 GOOD/WHAT?.TXT
+install: failed: a name that is not safe: GOOD/WHAT?.TXT
 exit 0001
 > install -y /T/NOPE.HZA
 /T/NOPE.HZA cannot be opened.
+install: failed: /T/NOPE.HZA cannot be opened
 exit 0001
 > ls /APPS
   GOOD                                                 <DIR>  2026-01-01 00:00
@@ -121,14 +136,18 @@ apptest: /T/NEEDOK.PRG in /T args [arg]
 Remove the app Good App (/APPS/GOOD)
 and everything in that folder, saves too? (y/n) y
 Good App was removed.
+install: removed /APPS/GOOD
 > install -r PAXAPP
 Remove the app Pax App (/APPS/PAXAPP)
 and everything in that folder, saves too? (y/n) n
+install: cancelled
 > install -y -r NOPE
 There is no app NOPE in /APPS.
+install: failed: there is no app NOPE
 exit 0001
 > install -y -r /BIN
 /BIN is not an app's folder (/APPS/NAME).
+install: failed: /BIN is not an app's folder (/APPS/NAME)
 exit 0001
 > ls /APPS
   My Game (2)                                          <DIR>  2026-01-01 00:00

@@ -762,6 +762,96 @@ def run_ui(horizon, only, m="small"):
                else " | ".join(bad))
 
 
+def apps_tools(d, hza, app, checkout, horizon):
+    """(Horizon 0.29) hzapp.py: the program's needs into the archive's APP.INF (added when
+    missing, --needs-from-program when different), check printing them, the icon command;
+    its built-in icon names and palette against Horizon's sources and sdk/docs/apps.md"""
+    import tarfile
+    report("apps", "hzapp", "CWIN.PRG checks: horizon=0.29,mem=256K" in checkout,
+           "check prints the program's needs")
+    inf0 = open(os.path.join(app, "APP.INF")).read()
+    nn = os.path.join(d, "NONEEDS", "CWIN")
+    shutil.copytree(app, nn)
+    open(os.path.join(nn, "APP.INF"), "w").write(
+        "".join(ln for ln in inf0.splitlines(True) if not ln.startswith("needs=")))
+
+    def packed_inf(folder, hzaname, extra=()):
+        out = os.path.join(d, hzaname)
+        rc, o = sh(hza + ["pack", folder, "-o", out] + list(extra))
+        txt = ""
+        if rc == 0:
+            with tarfile.open(out) as tf:
+                txt = tf.extractfile("CWIN/APP.INF").read().decode("latin-1")
+        return rc, o, txt
+    rc, o, txt = packed_inf(nn, "NONEEDS.HZA")
+    ok = (rc == 0 and "needs=horizon=0.29,mem=256K\n" in txt and "warning" not in o and
+          "needs=" not in open(os.path.join(nn, "APP.INF")).read())
+    report("apps", "hzapp", ok, "pack: APP.INF without needs= gets the program's in the "
+           "archive (the folder's file unchanged)" + ("" if ok else ": " + o[-300:]))
+    df = os.path.join(d, "DIFFER", "CWIN")
+    shutil.copytree(app, df)
+    open(os.path.join(df, "APP.INF"), "w").write(inf0.replace("needs=horizon=0.29,mem=256K",
+                                                              "needs=horizon=0.28"))
+    rc1, o1, t1 = packed_inf(df, "DIFFER1.HZA")
+    rc2, o2, t2 = packed_inf(df, "DIFFER2.HZA", ["--needs-from-program"])
+    ok = (rc1 == 0 and "warning: APP.INF says needs=horizon=0.28, but CWIN.PRG checks "
+          "horizon=0.29,mem=256K" in o1 and "needs=horizon=0.28\n" in t1 and
+          rc2 == 0 and "warning" not in o2 and "needs=horizon=0.29,mem=256K\n" in t2 and
+          t2.count("needs=") == 1)
+    report("apps", "hzapp", ok, "pack: a different needs= is a warning; --needs-from-program "
+           "replaces it" + ("" if ok else ": " + o1[-200:] + o2[-200:]))
+    # the icon: a picture with alpha -> 32 x 32 bytes of the palette, 255 transparent
+    try:
+        from PIL import Image
+        im = Image.new("RGBA", (62, 62), (0, 0, 0, 0))   # (halved: pixel art, 31 + shadow)
+        for y in range(8, 54):
+            for x in range(8, 54):
+                im.putpixel((x, y), (250, 5, 0, 255) if x < 32 else (0, 0, 250, 255))
+        png, icn = os.path.join(d, "art.png"), os.path.join(d, "ART.ICN")
+        im.save(png)
+        rc, o = sh(hza + ["icon", png, icn])
+        ic = open(icn, "rb").read() if rc == 0 else b""
+        ok = (len(ic) == 1024 and ic[0] == 255 and ic[16 * 32 + 6] == 196 and
+              ic[16 * 32 + 24] == 21 and set(ic) == {255, 196, 21, 15} and
+              ic[27 * 32 + 27] == 15 and ic[28 * 32 + 28] == 255)
+        report("apps", "hzapp", ok, "icon: a 62 x 62 PNG -> 1024 bytes (red 196, blue 21, "
+               "transparent 255, the shadow 15)" + ("" if ok else ": " + o[-300:]))
+        ia = os.path.join(d, "ICONAPP", "CWIN")
+        shutil.copytree(app, ia)
+        shutil.copy(icn, os.path.join(ia, "ART.ICN"))
+        open(os.path.join(ia, "APP.INF"), "a").write("icon=ART.ICN\n")
+        rc1, o1 = sh(hza + ["check", ia])
+        open(os.path.join(ia, "APP.INF"), "a").write("icon=nosuch\n")
+        rc2, o2 = sh(hza + ["check", ia])
+        report("apps", "hzapp", rc1 == 0 and "warning" not in o1 and "icon=nosuch is neither"
+               in o2, "check: icon= a file of 1024 bytes; a name that is neither: a warning")
+    except ImportError:
+        report("apps", "hzapp", False, "icon: no Pillow")
+    # the built-in icon names: hzapp.py's list, the Desktop's (desk.s apinames), apps.md's
+    sys.path.insert(0, os.path.join(SDK, "tools"))
+    import hzapp
+    src = open(os.path.join(horizon, "user", "desk.s"), encoding="latin-1").read()
+    blk = src[src.index("apinames:"):]
+    blk = blk[:blk.index("        .byte   0\n")]
+    desk = re.findall(r'"([a-z]+)", 0, ICO_', blk)
+    doc = open(os.path.join(SDK, "docs", "apps.md"), encoding="utf-8").read()
+    row = [ln for ln in doc.splitlines() if ln.startswith("| `icon` |")]
+    docnames = re.findall(r"`([a-z]+)`", row[0].split("built-in icon", 1)[1].split(")", 1)[0]) \
+        if row else []
+    ok = desk == hzapp.BUILTIN_ICONS and sorted(docnames) == sorted(desk)
+    report("apps", "hzapp", ok, f"the {len(desk)} built-in icon names: hzapp.py, the Desktop "
+           f"and apps.md agree" + ("" if ok else f": desk {desk} hzapp {hzapp.BUILTIN_ICONS} "
+                                   f"doc {docnames}"))
+    import ast                          # (as horizon/tools/mkicons.py reads it)
+    psrc = open(os.path.join(horizon, "tools", "mkpalette.py")).read()
+    ui = ast.literal_eval(re.sub(r"#.*", "", re.search(r"^ui = (\[.*?^\])", psrc,
+                                                        re.S | re.M).group(1)))
+    pal = ([c for _, c in ui] + [(r * 51, g * 51, b * 51) for r in range(6) for g in range(6)
+                                 for b in range(6)] + [(8 + 10 * i,) * 3 for i in range(24)])
+    report("apps", "hzapp", pal == hzapp.PALETTE,
+           "hzapp.py's palette is Horizon's (tools/mkpalette.py)")
+
+
 def run_apps(horizon, only, models):
     """(Horizon 0.29) apps: hcc --needs, hzapp.py, the Installer, the needs checked at the
     start (tests/apps)"""
@@ -812,19 +902,27 @@ def run_apps(horizon, only, models):
                "needs: horizon=0.29,mem=256K" in out3 and rc4 == 0 and "warning" not in out4,
                "hzapp.py check, pack, list (CWIN, ASMAPP)" +
                ("" if okc else ": " + out[-300:]))
+        if m == models[0]:
+            apps_tools(d, hza, app, out, horizon)
         # the Installer (shell): both installed, then started from their folders
         inst = os.path.join(horizon, "build", "sd", "BIN", "INSTALL.PRG")
         scr = os.path.join(d, "install.script")
-        open(scr, "w").write("3000 install -y /ASMAPP.HZA\\n\n+3000 /APPS/CWIN/CWIN.PRG\\n\n"
-                             "+4000 /APPS/ASMAPP/ASMAPP.PRG\\n\n")
+        # (each step waits for the line before it: the Installer's "install: installed
+        # /APPS/NAME", the programs' own)
+        open(scr, "w").write("0 wait install: installed /APPS/CWIN\n"
+                             "+500 install -y /ASMAPP.HZA\\n\n"
+                             "+0 wait install: installed /APPS/ASMAPP\n"
+                             "+500 /APPS/CWIN/CWIN.PRG\\n\n+0 wait cwin: done\n"
+                             "+500 /APPS/ASMAPP/ASMAPP.PRG\\n\n+0 wait asmapp: running\n")
         sh([sys.executable, RUN816, inst, "--horizon", horizon, "--mode", "shell",
             "--dest", "/BIN/INSTALL.PRG", "--args", "-y /CWIN.HZA", "--script", scr,
-            "--seconds", "14", "--out", os.path.join(d, "run-install"),
+            "--seconds", "20", "--out", os.path.join(d, "run-install"),
             "--file", os.path.join(d, "CWIN.HZA") + ":/CWIN.HZA",
             "--file", os.path.join(d, "ASMAPP.HZA") + ":/ASMAPP.HZA"])
         p = os.path.join(d, "run-install", "console.txt")
         con = open(p, encoding="latin-1").read() if os.path.exists(p) else ""
         exp = ["C App is installed", "Assembly App is installed",
+               "install: installed /APPS/CWIN", "install: installed /APPS/ASMAPP",
                "cwin: in /APPS/CWIN/, current folder /, Horizon 0.29", "cwin: done",
                "asmapp: running"]
         miss = [e for e in exp if e not in con]

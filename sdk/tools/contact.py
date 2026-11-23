@@ -8,7 +8,9 @@ screen is 2 x 2). --half (the default) shrinks them to 640 x 360: one pixel of t
 sheet is one screen pixel, so coordinates read off the sheet are screen coordinates
 (for 'move X Y' in an input script). --crop takes a part of each shot, in screen pixels.
 Each shot is labelled in its top left corner with the number in its file name (shot7.png:
-7), whatever order the shell listed them in. Needs Pillow.
+7), whatever order the shell listed them in; when the names differ in more than their
+number (shot1.png and auto1.png on one sheet), with the whole name: shot1, auto1. Needs
+Pillow.
 """
 import os
 import re
@@ -41,6 +43,9 @@ def main():
             im = im.crop((x * 2, y * 2, (x + w) * 2, (y + h) * 2))
         im = im.resize((int(im.size[0] * scale), int(im.size[1] * scale)), Image.NEAREST)
         ims.append(im)
+    # the labels: the numbers, or the names when those alone would not tell the files apart
+    stems = [os.path.splitext(os.path.basename(f))[0] for f in shots]
+    kinds = {re.sub(r'\d+\D*$', '', st) for st in stems}
     w = max(im.size[0] for im in ims)
     h = max(im.size[1] for im in ims)
     cols = min(cols, len(ims))
@@ -50,8 +55,8 @@ def main():
     for k, im in enumerate(ims):
         x, y = (k % cols) * (w + 4), (k // cols) * (h + 4)
         sheet.paste(im, (x, y))
-        m = re.search(r'(\d+)\D*$', os.path.basename(shots[k]))
-        label = m.group(1) if m else str(k + 1)
+        m = re.search(r'(\d+)\D*$', stems[k])
+        label = stems[k] if len(kinds) > 1 or not m else m.group(1)
         d.rectangle((x, y, x + 6 + 6 * len(label), y + 11), fill=(255, 255, 0))
         d.text((x + 3, y), label, fill=(0, 0, 0))
     sheet.save(out)

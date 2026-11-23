@@ -43,14 +43,15 @@ not run here: it needs Horizon 0.30 or later"). You can still install it.
 
 Open the **Programs** menu of the Desktop. The apps come after Horizon's own programs,
 below a line, sorted by name. Apps of a category (such as Games) are under one item,
-"Games >": choose it, and a small menu with those apps opens.
+"Games >": choose it (a click, or Enter), and a small menu with those apps opens beside the
+Programs menu, its first app highlighted (Up and Down move, Enter starts one).
 
 The menu has room for 24 lines. When there are more apps than fit, the last line is
 "More apps >", with the others. A long list of that kind ends with "All apps in Files",
 which opens Files in `/APPS`.
 
 You can also start an app in Files (double click its program in its folder), or in the
-shell (`/APPS/DIGGER/DIGGER.PRG`). An app may open files of its own type: a double click
+shell (`/APPS/DIGGER/DIGGER.PRG`; it then runs in the shell's current folder). An app may open files of its own type: a double click
 on such a file in Files starts the app with that file.
 
 A shortcut to an app on the desktop (Files: select the app's program or folder, File >
@@ -79,10 +80,14 @@ folders: use Remove app... or `install -r` for an app.)
 ```
 
 The folder's name is the app's name on the card. Everything the app needs is inside it.
-The program finds its folder with `task_path` ($35; C: `hz_prog_dir`): never assume a
-fixed path, and never the current folder, because users can start the program from the
-shell, from Files or from the menu. (The Desktop's Programs menu starts an app with its
-folder as the current folder, but the shell and Files do not.)
+**Always find your own files with `hz_prog_dir`** (C; the whole path: `hz_task_path`;
+assembly: `task_path`, $35): never a fixed path, and never the current folder. The current
+folder a program starts in is its starter's: the Programs menu starts an app in its own
+folder; a double click in Files, in the folder Files shows (the program's own); a desktop
+shortcut, in `/`; a file of the app's type opened from Files, in that file's folder (the
+file's path is given whole); the shell, in the shell's folder (so that relative arguments
+mean what they mean at the prompt). Programs use the current folder as the user's folder
+(a file dialog starts there), which is why Horizon does not move every app to its own.
 
 **Saves go into the app's folder.** Replace keeps every file that the archive does not
 have, so a game's high scores, saved games and settings survive an update. Do not put a
@@ -120,8 +125,8 @@ needs=horizon=0.28
 | `version` | 15 | Shown by the Installer. |
 | `description` | 63 | One line, shown by the Installer. |
 | `types` | 47 | The file types (extensions) the app opens, separated by commas: `types=DIG,LVL`. A double click on such a file in Files (or on the Desktop) starts the app with the file's full path as its argument, in quotes: `"/GAMES/LEVEL1.DIG"`. Horizon's own types keep their programs (`.TXT` opens in Edit, whatever an app says). When several apps register a type, the first app folder the card lists wins. |
-| `icon` | 31 | The app's icon on the desktop (for a shortcut to the app). Either the name of a built-in icon (`program`, `calc`, `solitaire`, `freecell`, `music`, `paint`, `edit`, `write`, `sheet`, `basic`, `terminal`, `files`, `settings`, `text`, `doc`, `picture`, `disk`, `xex`, `cart`, `atari`, `folder`), or the name of an icon file in the folder: 32 x 32 pixels, 8 bits a pixel (one palette index each, row by row), 255 for transparent: exactly 1024 bytes. Horizon's `tools/mkicons.py` makes one from a text drawing (a file with one icon in the format of `sdfiles/icons.txt`). |
-| `needs` | 47 | What the program needs, for the Installer to show (the same list as `hcc --needs`, below). The program checks it itself; this line only informs. `hzapp.py` warns when it differs from the program's own block. |
+| `icon` | 31 | The app's icon on the desktop (for a shortcut to the app). Either the name of a built-in icon (`folder`, `sd`, `atari`, `doc`, `text`, `writedoc`, `sheetdoc`, `picture`, `basdoc`, `disk`, `xex`, `cart`, `program`, `edit`, `write`, `sheet`, `paint`, `basic`, `calc`, `solitaire`, `terminal`, `files`, `settings`, `about`, `pc`, `freecell`, `music`, `musicdoc`; case is ignored), or the name of an icon file in the folder: 32 x 32 pixels, 8 bits a pixel (one index of the Desktop's palette each, row by row), 255 for transparent: exactly 1024 bytes. `hzapp.py icon ART.png NAME.ICN` makes one from any picture (below); Horizon's `tools/mkicons.py` makes one from a text drawing (a file with one icon in the format of `sdfiles/icons.txt`). (The SDK's test checks this list against the Desktop's own, `apinames` in `horizon/user/desk.s`.) |
+| `needs` | 47 | What the program needs, for the Installer to show (the same list as `hcc --needs`, below). The program checks it itself; this line only informs. You need not write it: `hzapp.py pack` puts the program's own list into the archive's APP.INF when the line is missing (and warns when the two differ; `--needs-from-program` then takes the program's). |
 
 Values longer than the size are cut. A broken APP.INF never stops the Desktop: a folder
 whose `program=` file is missing is left out of the menu; junk lines are ignored.
@@ -236,17 +241,32 @@ back short; the Installer then stops, deletes what it wrote, and says "The card 
 python3 sdk/tools/hzapp.py pack DIGGER            # -> DIGGER.HZA
 python3 sdk/tools/hzapp.py list DIGGER.HZA        # its files and APP.INF
 python3 sdk/tools/hzapp.py check DIGGER           # a folder or an .HZA: the checks only
+python3 sdk/tools/hzapp.py icon art.png DIGGER/DIGGER.ICN   # an icon from a picture
 ```
 
 `pack` prints what it packed (the name, version, description, category, types, needs,
 the number of files and their size, the folder it will go to) and the archive's size.
 Errors stop it (exit code 1); warnings do not.
 
-`pack FOLDER [-o FILE.HZA] [--mtime N]` checks the folder with the Installer's rules and
-more: APP.INF is there and its values fit; the program is there and is a Horizon program;
-its needs block matches APP.INF's `needs=` (a warning, with the line to add, when it does
-not); every name is one the card and the Installer accept; files of 16 MB or more get a
-warning. Files and folders whose names start with `.` (`.DS_Store`, `.git`) are left out,
+`pack FOLDER [-o FILE.HZA] [--mtime N] [--needs-from-program]` checks the folder with the
+Installer's rules and more: APP.INF is there and its values fit; `icon=` is a built-in name
+or a file of 1024 bytes in the folder; the program is there and is a Horizon program; every
+name is one the card and the Installer accept; files of 16 MB or more get a warning.
+
+The needs are written once, in the program (`hcc --needs`, `HZ_NEEDS`): when APP.INF has
+no `needs=` line, `pack` adds the program's list to the APP.INF it puts into the archive
+(the file in your folder stays as it is) and says so. When APP.INF has a `needs=` that
+differs from the program's, `pack` warns and keeps APP.INF's; `--needs-from-program` puts
+the program's into the archive instead. `check` prints what the program checks
+(`DIGGER.PRG checks: horizon=0.28,sprites,mem=1280K`, or that it checks nothing).
+
+`icon IMAGE OUT.ICN [--no-shadow] [--preview FILE.png]` (needs Pillow) makes an icon file
+from any picture Pillow reads, a game's own sprite for example: a picture larger than the
+icon is scaled down (pixel art by a whole-number step when its size allows), a smaller one
+is centred; each pixel becomes the nearest colour of the Desktop's palette; pixels with
+alpha below 128 are transparent; then the house style's drop shadow (colour 15, one pixel
+right and down). `--preview` writes the icon four times enlarged on the desktop's colours:
+look at it. Files and folders whose names start with `.` (`.DS_Store`, `.git`) are left out,
 with a warning. `--mtime N` gives every entry the same time (seconds since 1970) for
 archives that are the same byte for byte.
 
@@ -306,7 +326,8 @@ in the emulator and plays it (below). What it took:
 3. **Its icon** is made at build time from the game's own art (`tools/mkdata.py --icon`):
    the VGA digger sprite (32 x 30 with its mask), its 16 colours as the nearest of the
    palette's colour cube, transparent where the mask is, the house style's drop shadow
-   (colour 15). 1024 bytes, `DIGGER.ICN`.
+   (colour 15). 1024 bytes, `DIGGER.ICN`. (Digger's tool came first; `hzapp.py icon` does
+   the same for any PNG of a sprite with alpha.)
 4. **The folder and the archive**: `build/app/DIGGER/` gets APP.INF, DIGGER.PRG, DIGGER.DAT
    and DIGGER.ICN, and `hzapp.py pack build/app/DIGGER -o DIGGER.HZA --mtime 0` packs it
    (420 KB). No `DIGGER.SCO` or `DIGGER.INI` in it: the program makes them.
@@ -315,7 +336,7 @@ in the emulator and plays it (below). What it took:
    relative names upstream uses: an update keeps them.
 6. **The test** (`ports/digger/tests/app.script`, `run816.py --mode none`: the Desktop with
    nothing started): `DIGGER.HZA` opened in Files (its name typed, Enter), Install, then
-   Programs (F10, Right), End to "Games >", Enter (its pop-up at the pointer), Down, Enter:
+   Programs (F10, Right), End to "Games >", Enter (its pop-up), Down, Enter:
    Digger's title; a game to a high score; Esc; the archive opened again: Replace. Then
    the card: the four files in `/APPS/DIGGER`, and `DIGGER.SCO` with the new score still
    there after the update. The script waits for the program's console lines (`wait

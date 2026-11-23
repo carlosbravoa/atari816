@@ -1,14 +1,16 @@
 # (0.29) apps on the Desktop (DESK=1; tests/mousegen.py makes tests/app29d.keys from this;
 # tests/mkapps.py desk1: /APPS/ONE and /APPS/TWO with shortcuts on the desktop (their icons
 # from APP.INF: a file, a built-in name), /ZZGAMES.HZA and /ZZGAMEB.HZA (category Games;
-# Game A opens .ZZT files), /ZZDOC.ZZT). Shots (s), compared by tests/apppic.py:
-#   1   6.5  Programs: the built-in programs, a line, "One App", "Two"; the two shortcuts
-#   2   9.5  Files: ZZGAMES.HZA opened (typed, Enter): the Installer asks (name, version,
-#            description, size, /APPS/GAMEA)
-#   3  17.0  Programs after both installs: "One App", "Two", "Games  >"
-#   4  19.5  "Games" chosen: its pop-up menu at the pointer (Game A, Game B)
-#   5  30    Files in /APPS, ONE selected, the menu key, Remove app...: the Installer asks
-#   6  37    Programs: "Two", "Games  >"
+# Game A opens .ZZT files), /ZZDOC.ZZT). Shots (the script's 'shot' lines; the Installer's
+# steps wait for its console lines "install: asks: ...", "install: installed ..."), compared
+# by tests/apppic.py:
+#   1  Programs: the built-in programs, a line, "One App", "Two"; the two shortcuts
+#   2  Files: ZZGAMES.HZA opened (typed, Enter): the Installer asks (name, version,
+#      description, size, /APPS/GAMEA)
+#   3  Programs after both installs: "One App", "Two", "Games  >"
+#   4  "Games" chosen: its pop-up menu beside the Programs menu (Game A highlighted, Game B)
+#   5  Files in /APPS, ONE selected, the menu key, Remove app...: the Installer asks
+#   6  Programs: "Two", "Games  >"
 # The console (tests/app29d.txt): Game A from the pop-up, in its folder; Game A again with
 # /ZZDOC.ZZT (Enter on it in Files: its type is Game A's).
 6000 M -100:-100:0:0
@@ -16,34 +18,46 @@
 6100 M -15:0:0:0
 6200 M 0:0:0:1
 6280 M 0:0:0:0
+6500 shot
 7200 {esc}
 8000 zzgames\n
+8000 wait install: asks: Install /APPS/GAMEA
+9000 shot
+9500 \n
+9500 wait install: installed /APPS/GAMEA
 10000 \n
+11000 zzgameb\n
+11000 wait install: asks: Install /APPS/GAMEB
 11500 \n
-12500 zzgameb\n
-14000 \n
-15000 \n
-16200 M 0:0:0:1
-16280 M 0:0:0:0
-17300 M -8:100:0:0
-17350 M 0:41:0:0
-17800 M 0:0:0:1
-17880 M 0:0:0:0
-20000 M 30:9:0:0
-20400 M 0:0:0:1
-20480 M 0:0:0:0
-22000 M 23:-100:0:0
-22050 M 0:-28:0:0
-22200 M 0:0:0:1
-22280 M 0:0:0:0
-22800 zzdoc\n
-24000 apps\n
-25500 one
-26500 {d65}{u65}
-27500 {down}{down}\n
-31000 \n
-32500 \n
-34000 M -45:-22:0:0
-34400 M 0:0:0:1
-34480 M 0:0:0:0
-38000 {esc}
+11500 wait install: installed /APPS/GAMEB
+12000 \n
+13200 M 0:0:0:1
+13280 M 0:0:0:0
+14000 shot
+14300 M -8:100:0:0
+14350 M 0:41:0:0
+14800 M 0:0:0:1
+14880 M 0:0:0:0
+16500 shot
+17000 M 78:1:0:0
+17400 M 0:0:0:1
+17480 M 0:0:0:0
+19000 M -25:-100:0:0
+19050 M 0:-20:0:0
+19200 M 0:0:0:1
+19280 M 0:0:0:0
+19800 zzdoc\n
+21000 apps\n
+22500 one
+23500 {d65}{u65}
+24500 {down}{down}\n
+24500 wait install: asks: Remove /APPS/ONE
+25500 shot
+26000 \n
+26000 wait install: removed /APPS/ONE
+26500 \n
+28000 M -45:-22:0:0
+28400 M 0:0:0:1
+28480 M 0:0:0:0
+31000 shot
+32000 {esc}

@@ -33,13 +33,18 @@ given to run816.py, 0 is the moment the program was started.
     T shot            a screenshot at this time
     T wait TEXT       wait for the program: from T on nothing more happens until the program
                       prints a console line that holds TEXT (printf, hz_puts), or at once if
-                      it printed one since the script's step before; then the script goes
-                      on, every later time moved by as long as the wait took. A wait comes
-                      after the key presses and releases of the lines before it
-                      (a script that follows the program's progress, not the clock: "wait
-                      digger: title", then "+500 key enter 100"). Screenshots after a wait
-                      move with it too. run816.py gives each wait 20 s more run time and
-                      fails the run when a wait never ended
+                      it printed one since the input line before the wait began (typed text,
+                      a key, a click: even while that line's keys were still being sent);
+                      then the script goes on, every later time moved by as long as the wait
+                      took. A wait comes after every key and button event of the lines before
+                      it (a click's release, a held key's release, a move's last step), so
+                      "+0 wait X" after "click" or "key x 100" means "then wait"; later
+                      times count from the wait's end. A line that ended one wait does not end
+                      another: two waits for one text need two lines. (A script that follows
+                      the program's progress, not the clock: "wait digger: title", then "+500
+                      key enter 100".) Screenshots after a wait move with it too. run816.py
+                      gives each wait 20 s more run time and fails the run when a wait never
+                      ended
 """
 import sys
 
@@ -128,6 +133,7 @@ def strokes(text):
 def parse(lines, offset=0):
     """-> (keys, mouse, shots): emu816 list items and screenshot times in seconds."""
     keys, mouse, shots = [], [], []
+    mtimes = [-1]                       # the mouse events' times (a wait comes after them)
     waited = False                      # (a shot after a wait goes into the keys' list)
     t = 0
     x, y = 320, 180
@@ -139,9 +145,13 @@ def parse(lines, offset=0):
         tt = t0
         while (x, y) != (tx, ty):
             dx = max(-step, min(step, tx - x)); dy = max(-step, min(step, ty - y))
-            mouse.append(f'{tt + offset}:{dx}:{dy}:0:{b}')
+            madd(tt, f'{dx}:{dy}:0:{b}')
             x += dx; y += dy; tt += dt
         return tt
+
+    def madd(tm, ev):
+        mouse.append(f'{tm + offset}:{ev}')
+        mtimes.append(tm)
 
     for no, ln in enumerate(lines, 1):
         ln = ln.rstrip('\n')
@@ -154,21 +164,24 @@ def parse(lines, offset=0):
             raise ScriptError(f'line {no}: bad time {when!r}')
         words = rest.split()
         cmd = words[0] if words else ''
-        try:
+        if not ((cmd == 'shot' and len(words) == 1) or (cmd == 'wait' and len(words) >= 2)):
+            keys.append((t, 'M', None))     # (an input line: the console's lines from here on
+        try:                                # count for the next wait)
             if rest.startswith('M '):
                 d = rest[2:].strip().split(':')
                 if len(d) != 4:
                     raise ScriptError('M needs dx:dy:wheel:buttons')
-                mouse.append(f'{t + offset}:{rest[2:].strip()}')
+                madd(t, rest[2:].strip())
                 x = max(0, min(639, x + int(d[0], 0))); y = max(0, min(359, y + int(d[1], 0)))
             elif cmd == 'shot' and len(words) == 1:
                 if waited:
                     keys.append((t, 'S', len(shots)))
                 shots.append((t + offset) / 1000.0 if not waited else -1.0)
             elif cmd == 'wait' and len(words) >= 2:
-                # (after every key event of the lines before: a key held from that line's
-                # time on is let go first, so "+0 wait" after "key x 100" means "then wait")
-                last = max([k[0] for k in keys if k[1] not in ('W', 'S')] + [t - 1])
+                # (after every key and mouse event of the lines before: a key held from that
+                # line's time on is let go first, so "+0 wait" after "key x 100" means "then
+                # wait"; the same for a click's release, 80 ms after its press)
+                last = max([k[0] for k in keys if k[1] not in ('W', 'S', 'M')] + mtimes + [t - 1])
                 t = max(t, last + 1)
                 keys.append((t, 'W', rest.split(None, 1)[1]))
                 waited = True
@@ -180,20 +193,20 @@ def parse(lines, offset=0):
             elif cmd in ('click', 'press', 'release', 'dclick') and len(words) <= 2:
                 b = BUTTONS[words[1]] if len(words) == 2 else 1
                 if cmd == 'click':
-                    mouse += [f'{t + offset}:0:0:0:{b}', f'{t + 80 + offset}:0:0:0:0']
+                    madd(t, f'0:0:0:{b}'); madd(t + 80, '0:0:0:0')
                     held = 0
                 elif cmd == 'dclick':
-                    mouse += [f'{t + offset}:0:0:0:1', f'{t + 80 + offset}:0:0:0:0',
-                              f'{t + 200 + offset}:0:0:0:1', f'{t + 280 + offset}:0:0:0:0']
+                    for dt, bb in ((0, 1), (80, 0), (200, 1), (280, 0)):
+                        madd(t + dt, f'0:0:0:{bb}')
                     held = 0
                 elif cmd == 'press':
                     held = b
-                    mouse.append(f'{t + offset}:0:0:0:{b}')
+                    madd(t, f'0:0:0:{b}')
                 else:
                     held = 0
-                    mouse.append(f'{t + offset}:0:0:0:0')
+                    madd(t, '0:0:0:0')
             elif cmd == 'wheel' and len(words) == 2:
-                mouse.append(f'{t + offset}:0:0:{int(words[1])}:{held}')
+                madd(t, f'0:0:{int(words[1])}:{held}')
             elif cmd == 'key' and len(words) == 3:
                 u, sh = key_of_name(words[1])
                 ms = int(words[2])
@@ -226,6 +239,8 @@ def parse(lines, offset=0):
     for k, u, d in keys:
         if u == 'W':
             klist.append(f'{k + offset}:W:{d.encode("latin-1").hex()}')
+        elif u == 'M':                  # (a step mark)
+            klist.append(f'{k + offset}:M:')
         elif u == 'S':                  # (run816.py puts the file's name in: @SHOTn@)
             klist.append(f'{k + offset}:S:@SHOT{d}@')
         else:

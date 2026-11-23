@@ -1,40 +1,54 @@
 # (0.29) apps on the Desktop (DESK=1; tests/mousegen.py makes tests/app29d.keys from this;
 # tests/mkapps.py desk1: /APPS/ONE and /APPS/TWO with shortcuts on the desktop (their icons
 # from APP.INF: a file, a built-in name), /ZZGAMES.HZA and /ZZGAMEB.HZA (category Games;
-# Game A opens .ZZT files), /ZZDOC.ZZT). Shots (s), compared by tests/apppic.py:
-#   1   6.5  Programs: the built-in programs, a line, "One App", "Two"; the two shortcuts
-#   2   9.5  Files: ZZGAMES.HZA opened (typed, Enter): the Installer asks (name, version,
-#            description, size, /APPS/GAMEA)
-#   3  17.0  Programs after both installs: "One App", "Two", "Games  >"
-#   4  19.5  "Games" chosen: its pop-up menu at the pointer (Game A, Game B)
-#   5  30    Files in /APPS, ONE selected, the menu key, Remove app...: the Installer asks
-#   6  37    Programs: "Two", "Games  >"
+# Game A opens .ZZT files), /ZZDOC.ZZT). Shots (the script's 'shot' lines; the Installer's
+# steps wait for its console lines "install: asks: ...", "install: installed ..."), compared
+# by tests/apppic.py:
+#   1  Programs: the built-in programs, a line, "One App", "Two"; the two shortcuts
+#   2  Files: ZZGAMES.HZA opened (typed, Enter): the Installer asks (name, version,
+#      description, size, /APPS/GAMEA)
+#   3  Programs after both installs: "One App", "Two", "Games  >"
+#   4  "Games" chosen: its pop-up menu beside the Programs menu (Game A highlighted, Game B)
+#   5  Files in /APPS, ONE selected, the menu key, Remove app...: the Installer asks
+#   6  Programs: "Two", "Games  >"
 # The console (tests/app29d.txt): Game A from the pop-up, in its folder; Game A again with
 # /ZZDOC.ZZT (Enter on it in Files: its type is Game A's).
 6000 move 105 8
 6200 click
+6500 shot
 7200 key {esc}
 8000 key zzgames\n
-10000 key \n
-11500 key \n
-12500 key zzgameb\n
-14000 key \n
-15000 key \n
-16000 move 105 8
-16200 click
-17300 move 97 149
-17800 click
-20000 move 127 158
-20400 click
-22000 move 150 30
-22200 click
-22800 key zzdoc\n
-24000 key apps\n
-25500 key one
-26500 key {d65}{u65}
-27500 key {down}{down}\n
-31000 key \n
-32500 key \n
-34000 move 105 8
-34400 click
-38000 key {esc}
++0 wait install: asks: Install /APPS/GAMEA
++1000 shot
++500 key \n
++0 wait install: installed /APPS/GAMEA
++500 key \n
++1000 key zzgameb\n
++0 wait install: asks: Install /APPS/GAMEB
++500 key \n
++0 wait install: installed /APPS/GAMEB
++500 key \n
++1000 move 105 8
++200 click
++800 shot
++300 move 97 149
++500 click
++1700 shot
++500 move 175 150
++400 click
++1600 move 150 30
++200 click
++600 key zzdoc\n
++1200 key apps\n
++1500 key one
++1000 key {d65}{u65}
++1000 key {down}{down}\n
++0 wait install: asks: Remove /APPS/ONE
++1000 shot
++500 key \n
++0 wait install: removed /APPS/ONE
++500 key \n
++1500 move 105 8
++400 click
++2600 shot
++1000 key {esc}

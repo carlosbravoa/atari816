@@ -1,6 +1,8 @@
 #!/bin/sh
 # shots.sh EMU SD NAME SECONDS T1 T2 ... - run tests/NAME.keys (keys and mouse) on a fresh
 # copy of the SD card SD (with /SYSTEM/NODESK: the text shell, unless DESK=1), take a picture at each time Tn (seconds), and write
+# (0.29: and at each "shot" line of the keys file, numbered after the times: they move with
+# the script's "wait" lines)
 #   build/NAMEn.ppm, build/NAME.md5 (their md5), build/NAME.out (console),
 #   build/NAME.err (emu816's own log, e.g. the classic-machine ops).
 set -e
@@ -18,8 +20,10 @@ cp -r "$sd" build/run-pic
 [ -z "$PREP" ] || (cd build/run-pic && sh -c "$PREP")
 n=0 args=""
 for t in "$@"; do n=$((n + 1)); args="$args --shot build/$name$n.ppm --shot-at $t"; done
+ks=$(python3 tests/keyscript.py --shots "build/$name" $n "$keys")
+n=$((n + $(grep -c '^[+0-9]* shot$' "$keys" || true)))
 $emu --headless --sd build/run-pic --max-seconds "$secs" \
-    --keys "$(python3 tests/keyscript.py "$keys")" \
+    --keys "$ks" \
     --mouse "$(python3 tests/keyscript.py --mouse "$keys")" \
     $args "$sd/SYSTEM/HORIZON.SYS" > "build/$name.out" 2> "build/$name.err" || true
 files=$(i=0; while [ $i -lt $n ]; do i=$((i + 1)); echo "$name$i.ppm"; done | LC_ALL=C sort)

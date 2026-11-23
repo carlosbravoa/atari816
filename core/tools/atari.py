@@ -21,7 +21,8 @@ Usage:
   atari.py run816 [FILE] [--name N] # Atari816: send a 65C816 program (default
                                      #   /A816.BIN), restart the 65C816, show its log
   atari.py shot816 OUT.png [-p P]   # Atari816: screenshot of the native screen
-                                     #   (--mode/--base/--stride override, --scale N)
+                                     #   (--mode/--base/--stride override, --scale N;
+                                     #   a full-screen program's scroll/split followed)
   atari.py peek816 ADDR [LEN] [-p P] # hex dump of 65C816 memory (24-bit address)
   atari.py reset [--warm] [-p P]     # eject virtual .xex + cold boot (--warm =
                                      #   warm start; --keep = don't eject)
@@ -214,7 +215,7 @@ def cmd_shot816(args):
     with AtariLink(args.port) as l:
         try:
             shot = l.shot816(args.out, pointer=not args.no_pointer, scale=args.scale,
-                             horizon=not args.no_horizon, **kw)
+                             horizon=not args.no_horizon, scroll=not args.no_scroll, **kw)
         except ValueError as e:
             sys.exit(f"shot816: {e}")
     info = " ".join(f"{k}={v:#x}" if k == "base" else f"{k}={v}" for k, v in shot.info.items())
@@ -280,7 +281,10 @@ def main():
         lambda sp: sp.add_argument("--scale", type=int, default=1),
         lambda sp: sp.add_argument("--no-pointer", action="store_true"),
         lambda sp: sp.add_argument("--no-horizon", action="store_true",
-                                   help="don't read the video state from the Horizon kernel"))
+                                   help="don't read the video state from the Horizon kernel"),
+        lambda sp: sp.add_argument("--no-scroll", action="store_true",
+                                   help="ignore a full-screen program's scroll registers "
+                                        "(the rows from the base, as before 2026-11-22)"))
     add("peek816", cmd_peek816, lambda sp: sp.add_argument("addr"),
         lambda sp: sp.add_argument("len", nargs="?", default="64"))
     add("reset", cmd_reset,

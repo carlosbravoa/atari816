@@ -29,6 +29,11 @@
 ; at most 112 characters, and /APPS/NAME/path at most 127.
 ; There is no call for the card's free space: a full card shows as a write that comes back
 ; short; the install then stops, deletes what it wrote, and says so.
+; Each outcome is also one console line, in windows too (there it goes to the log), for
+; scripts and tests to wait on: "install: installed /APPS/NAME", "install: replaced
+; /APPS/NAME", "install: removed /APPS/NAME", "install: cancelled", "install: failed:
+; REASON"; in windows the question too, before it is asked: "install: asks: Install
+; /APPS/NAME" (Replace, Remove).
         .include "horizon.inc"
         .include "ui.inc"
 
@@ -109,6 +114,11 @@ start:  jsr     args_init               ; the options, then the path
         jmp     quit
 :       jsr     info                    ; the question
         bcs     @no
+        jsr     isdest                  ; (the outcome: a new app or an update)
+        lda     #.loword(o_inst)
+        bcs     :+
+        lda     #.loword(o_repl)
+:       sta     ocx
         jsr     extract
         bcc     :+
         jmp     fail
@@ -122,14 +132,17 @@ start:  jsr     args_init               ; the options, then the path
         jsr     say
         lda     #0
         jmp     quit
-@no:    lda     #0
-        jmp     quit
+@no:    jmp     cancel
 
 usage:  print   "install FILE.HZA     install an app (-y: no question, -l: list its files)\n"
         print   "install -r NAME      remove the app /APPS/NAME (-y: no question)\n"
         lda     #1
         jmp     quit
 
+; the question answered no: said on the console, exit 0
+cancel: ldx     #.loword(o_cancel)
+        jsr     oline
+        lda     #0
 ; A = the exit code: the window system stopped if we started it
 quit:   pha
         lda     z:wsown
@@ -144,6 +157,8 @@ fail:   pha
         pla
         asl     a
         tax
+        lda     omsg,x                  ; (the console's line)
+        sta     ocx
         lda     emsg,x
         tax
         jsr     mfmt
@@ -235,8 +250,8 @@ mfmt:   lda     a:0,x
         bra     mfmt
 @out:   rts
 
-; msg said: A = AL_* kind, X = the title (windows). In the console: printed (its lines).
-; In windows: an alert with OK -> A = 0
+; msg said: A = AL_* kind, X = the title (windows). In the console: printed (its lines),
+; then the outcome line ocx. In windows: the outcome line, then an alert with OK -> A = 0
 say:    sta     al
         stx     al+2
         lda     z:fw
@@ -245,8 +260,12 @@ say:    sta     al
         ldy     #^msg
         jsr     out_str
         jsr     put_nl
-        jmp     out_flush
-:       lda     #.loword(msg)
+        jsr     out_flush
+        ldx     ocx
+        jmp     oline
+:       ldx     ocx
+        jsr     oline
+        lda     #.loword(msg)
         sta     al+4
         lda     #.loword(s_ok)
         sta     al+6
@@ -285,6 +304,8 @@ ask:    sta     al+6
         rts
 @win:   lda     z:fy
         bne     @yes
+        ldx     #.loword(o_ask)         ; "install: asks: Install /APPS/NAME"
+        jsr     oline
         lda     #AL_QUESTION
         sta     al
         lda     #.loword(msg)
@@ -300,6 +321,41 @@ ask:    sta     al+6
         rts
 :       sec
         rts
+
+; the outcome line "install: ..." on the console, from the template X (0: none): '%' the
+; path argument, '&' the entry's name, '@' dest, '#' the question's button (al+6)
+oline:  cpx     #0
+        beq     @out
+        phx
+        print   "install: "
+        plx
+@c:     lda     a:0,x
+        and     #$00FF
+        beq     @end
+        phx
+        ldy     #.loword(path)
+        cmp     #'%'
+        beq     @s
+        ldy     #.loword(ename)
+        cmp     #'&'
+        beq     @s
+        ldy     #.loword(dest)
+        cmp     #'@'
+        beq     @s
+        ldy     al+6
+        cmp     #'#'
+        beq     @s
+        jsr     put_char
+        bra     @n
+@s:     tyx
+        ldy     #^path
+        jsr     out_str
+@n:     plx
+        inx
+        bra     @c
+@end:   jsr     put_nl
+        jmp     out_flush
+@out:   rts
 
 ; ---------------------------------------------------------------- the first pass
 ; the archive's headers -> root, the counts, the size, APP.INF parsed (ui_ap*), the
@@ -1771,16 +1827,16 @@ remove: lda     path                    ; NAME or /APPS/NAME
         and     #$00FF
         jeq     @bad
         cmp     #'.'
-        beq     @bad
+        jeq     @bad
 :       lda     dest,x
         and     #$00FF
         beq     :+
         cmp     #'/'
-        beq     @bad
+        jeq     @bad
         inx
         bra     :-
 :       jsr     isdest
-        bcs     @none
+        jcs     @none
         ldx     #.loword(dest)          ; its name (APP.INF)
         jsr     ui_appinf
         lda     ui_apname
@@ -1803,10 +1859,12 @@ remove: lda     path                    ; NAME or /APPS/NAME
         lda     #.loword(s_remove)
         ldx     #.loword(t_rm)
         jsr     ask
-        bcs     @no
+        jcs     cancel
         ldx     #.loword(dest)
         jsr     ui_rmtree
         bcs     @err
+        lda     #.loword(o_rmd)
+        sta     ocx
         jsr     m_start
         ldx     #.loword(ui_apname)
         jsr     mcat
@@ -1815,14 +1873,18 @@ remove: lda     path                    ; NAME or /APPS/NAME
         lda     #AL_INFO
         ldx     #.loword(t_rm)
         jsr     say
-@no:    lda     #0
+        lda     #0
         jmp     quit
-@bad:   ldx     #.loword(m_notapp)
+@bad:   ldx     #.loword(o_notapp)
+        ldy     #.loword(m_notapp)
         bra     :+
-@none:  ldx     #.loword(m_noapp)
+@none:  ldx     #.loword(o_noapp)
+        ldy     #.loword(m_noapp)
         bra     :+
-@err:   ldx     #.loword(m_rmerr)
-:       phx
+@err:   ldx     #.loword(o_rmerr)
+        ldy     #.loword(m_rmerr)
+:       stx     ocx
+        phy
         jsr     m_start
         plx
         jsr     mfmt
@@ -1916,6 +1978,32 @@ e12:    .byte   "Cannot write to the card. Nothing was installed.", 0
 e13:    .byte   "% could not be read to its end.", 0
 e14:    .byte   "% holds a file too large (its size).", 0
 
+; the console's lines (oline)
+o_inst: .byte   "installed @", 0
+o_repl: .byte   "replaced @", 0
+o_rmd:  .byte   "removed @", 0
+o_cancel: .byte "cancelled", 0
+o_ask:  .byte   "asks: # @", 0
+o_notapp: .byte "failed: % is not an app's folder (/APPS/NAME)", 0
+o_noapp: .byte  "failed: there is no app %", 0
+o_rmerr: .byte  "failed: % could not be removed completely", 0
+omsg:   .addr   f0, f1, f2, f3, f4, f5, f6, f7, f8, f9, f10, f11, f12, f13, f14
+f0:     .byte   "failed: % cannot be opened", 0
+f1:     .byte   "failed: % is cut short", 0
+f2:     .byte   "failed: % is damaged (a checksum)", 0
+f3:     .byte   "failed: % uses GNU tar's long names", 0
+f4:     .byte   "failed: a link or a device: &", 0
+f5:     .byte   "failed: a name that is not safe: &", 0
+f6:     .byte   "failed: outside the app's folder: &", 0
+f7:     .byte   "failed: a name too long: &", 0
+f8:     .byte   "failed: no APP.INF", 0
+f9:     .byte   "failed: no program", 0
+f10:    .byte   "failed: % is empty", 0
+f11:    .byte   "failed: the card is full", 0
+f12:    .byte   "failed: cannot write to the card", 0
+f13:    .byte   "failed: % could not be read", 0
+f14:    .byte   "failed: % holds a file too large", 0
+
         .segment "DATA"
 al:     .word   0, 0, 0, 0, 0, 0        ; the alert
 ; the progress window: two labels
@@ -1957,6 +2045,7 @@ hasinf: .res    2
 nprg:   .res    2
 hzver:  .res    2
 hzrev:  .res    2
+ocx:    .res    2                       ; the outcome line's template (oline), 0: none
 rw:     .res    6
 rd:     .res    10
 rn:     .res    6

@@ -3,6 +3,7 @@ Good App 1.0 - The apps test's app
 4 files, 3 KB, into /APPS/GOOD.
 The card is full. Nothing was installed
 (what was written is deleted again).
+install: failed: the card is full
 exit 0001
 > ls /APPS
 > ls /APPS/GOOD

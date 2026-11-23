@@ -27,6 +27,17 @@ Older kernels: the variables are found in the kernel's code, as follows (the fal
   - the pointer: ms_x / ms_y, image at $7F:F000 (the arrow: which shape is set is not
     kept in memory), colours as ws_desk_mode / ws_text_mode set them.
 
+Full screen (REV $0B+): a program in Horizon's full-screen mode chooses the rows Marga shows
+with the scroll registers (kernel fs_scroll: the row of line 0, the pixels skipped, a second
+set from a split line, a vertical wrap, rows as rings): Xargon shows one of its two pages
+and its status bar that way, from rows far below NV_BASE. The video-state block does not
+hold them (version 1), so they are read from the kernel's own copy (fs_scr, with fs_act
+and k_rev), found by the code that uses them in the kernel's second segment ($00:E100:
+fs_regs' "ldx #8 / lda fs_scr,x / sta f:NV_SCROLLX,x", fs_noscroll's "stz fs_act / ... /
+lda k_rev / cmp #$0B"). The picture is then made row by row as Marga walks the rows
+(emu/nvc.c, bit-exact with the RTL). Where the code is not found the rows from NV_BASE
+are shown, as before (scroll=False: always). Sprites are not drawn.
+
 Without Horizon (or with overrides) mode / base / stride / palette can be given by hand;
 the fallback palette is Marga's reset palette (core/src/nvc_palette.hex).
 """
@@ -203,6 +214,88 @@ def video_state(link, tries=3):
                 palette=[tuple(pal[3 * i:3 * i + 3]) for i in range(256)])
 
 
+K2_AT, K2_LEN = 0x00E100, 0x1E00          # the kernel's second code segment (kernel.cfg K2)
+_scroll_cache = {}
+
+
+def scroll_state(link):
+    """The full-screen scroll set the kernel keeps (k2fs.s fs_scr: x, y, x2, y2, vheight,
+    split line, ctrl), whether the full-screen program's screen is on Marga (fs_act) and the
+    hardware revision (k_rev), as a dict; None when the kernel code is not recognised."""
+    code = link.peek816(K2_AT, K2_LEN, xor2=True)
+    key = zlib.crc32(code)
+    if key not in _scroll_cache:
+        a = [m for m in re.finditer(rb"\xA2\x08\x00\xBD(..)\x9F\x30\xD9\x00", code, re.S)]
+        b = [m for m in re.finditer(rb"\x9C(..)\x9C..\x20..\xAD(..)\xC9\x0B\x00", code, re.S)]
+        _scroll_cache[key] = (None if len(a) != 1 or len(b) != 1 else
+                              (KBASE | _w(a[0].group(1), 0), KBASE | _w(b[0].group(1), 0),
+                               KBASE | _w(b[0].group(2), 0)))
+    addrs = _scroll_cache[key]
+    if addrs is None:
+        return None
+    scr, act, rev = addrs
+    s = link.peek816(scr, 14)
+    st = dict(x=_w(s, 0), y=_w(s, 2), x2=_w(s, 4), y2=_w(s, 6), vheight=_w(s, 8),
+              split=_w(s, 10), ctrl=s[12], act=_w(link.peek816(act, 2), 0),
+              rev=link.peek816(rev, 1)[0])
+    return st
+
+
+def scroll_rows(mode, sc):
+    """Each screen row as Marga fetches it: (the framebuffer row, the pixels skipped), for
+    the scroll set sc (emu/nvc.c trigger(): 360 lines, mode 2 a row every second line; the
+    row of line 0 is y; from the split line (SPLIT) y2 with x2; rows wrap to 0 at vheight)"""
+    out = []
+    rl, x0 = sc["y"], sc["x"]
+    for t in range(360):
+        if t == 0:
+            rl, x0 = sc["y"], sc["x"]
+        elif sc["ctrl"] & 2 and t == sc["split"]:
+            rl, x0 = sc["y2"], sc["x2"]
+        elif mode != 2 or not t & 1:
+            rl = 0 if sc["vheight"] and (rl + 1) & 0x3FF == sc["vheight"] else (rl + 1) & 0x3FF
+        if mode != 2 or not t & 1:
+            out.append((rl, x0))
+    return out
+
+
+def scrolled_fb(link, mode, base, stride, wb, sc):
+    """The screen's bytes (wb a row) through the scroll set: each row read at its place"""
+    rows = scroll_rows(mode, sc)
+    wrap = sc["ctrl"] & 1 and stride
+    nb = lambda x0: (x0 >> 1 if mode == 1 else x0)            # noqa: E731 (pixels -> bytes)
+    width = stride if wrap else max(nb(x0) for _, x0 in rows) + wb + 1
+    need = sorted({r for r, _ in rows})
+    got = {}
+    i = 0
+    while i < len(need):                     # runs of consecutive rows, one read each
+        j = i
+        while j + 1 < len(need) and need[j + 1] == need[j] + 1:
+            j += 1
+        data = link.peek816((base & 0xFFFF00) + need[i] * stride, width=width,
+                            rows=j - i + 1, stride=stride, xor2=True)
+        for k in range(j - i + 1):
+            got[need[i + k]] = data[k * width:(k + 1) * width]
+        i = j + 1
+    out = bytearray()
+    for r, x0 in rows:
+        row = got[r]
+        if mode == 1:                        # 4 bpp: x0 may start in the middle of a byte
+            pix = bytearray()
+            for x in range(x0, x0 + 2 * wb):
+                b = x >> 1
+                if wrap:
+                    b %= stride
+                v = row[b]
+                pix.append(v & 15 if x & 1 else v >> 4)
+            out += bytes((pix[2 * k] << 4) | pix[2 * k + 1] for k in range(wb))
+        elif wrap:
+            out += bytes(row[(x0 + x) % stride] for x in range(wb))
+        else:
+            out += row[x0:x0 + wb]
+    return bytes(out)
+
+
 def draw_pointer(link, idx, w, h, mode, x, y, hot, img_addr, colours):
     """The NVC's 32x32 2 bpp pointer into the index buffer, its hot spot at (x, y)."""
     img = link.peek816(img_addr, 256)
@@ -244,10 +337,17 @@ class Shot:
 
 
 def capture(link, mode=None, base=None, stride=None, palette=None, pointer=True,
-            scale=1, horizon=True):
+            scale=1, horizon=True, scroll=True):
     """Read the screen. Overrides: mode (0/1/2), base (24-bit), stride, palette (256 RGB
-    tuples). horizon=False skips reading the kernel (then mode/base/stride are needed)."""
+    tuples). horizon=False skips reading the kernel (then mode/base/stride are needed);
+    scroll=False ignores a full-screen program's scroll registers (the rows from base)."""
     info = {}
+    sc = None
+    if horizon and scroll and base is None and stride is None:
+        try:
+            sc = scroll_state(link)
+        except Exception:                    # (a link error: the rows from base)
+            sc = None
     st = None
     vs = None
     if horizon:
@@ -279,7 +379,11 @@ def capture(link, mode=None, base=None, stride=None, palette=None, pointer=True,
             ptr = (vs["ptr_x"], vs["ptr_y"], vs["ptr_c"], vs["ptr_hot"], vs["ptr_img"])
             info.update(ptr_shape=("arrow", "drag", "crosshair")[vs["ptr_shape"]]
                         if vs["ptr_shape"] < 3 else vs["ptr_shape"])
+        if not (sc and sc["act"] and sc["rev"] >= 0x0B and not vs["classic"] and
+                (sc["x"] or sc["y"] or sc["ctrl"] & 3)):
+            sc = None                        # (no full screen on Marga, or nothing scrolled)
     elif st:
+        sc = None
         ctrl = st["scr_ctrl"]
         info.update(scr_ctrl=ctrl, cls_on=st["cls_on"])
         if st["cls_on"]:
@@ -313,7 +417,14 @@ def capture(link, mode=None, base=None, stride=None, palette=None, pointer=True,
     w, h, wb = {0: (640, 360, 640), 1: (640, 360, 320), 2: (320, 180, 320)}[mode]
     if stride is None:
         stride = 640 if mode == 0 else 320
-    fb = link.peek816(base & 0xFFFF00, width=wb, rows=h, stride=stride, xor2=True)
+    if sc:
+        fb = scrolled_fb(link, mode, base, stride, wb, sc)
+        info["scroll"] = "y%d,x%d%s%s%s" % (sc["y"], sc["x"], ",hwrap" if sc["ctrl"] & 1 else "",
+                                           ",split%d:y%d,x%d" % (sc["split"], sc["y2"], sc["x2"])
+                                           if sc["ctrl"] & 2 else "",
+                                           ",vheight%d" % sc["vheight"] if sc["vheight"] else "")
+    else:
+        fb = link.peek816(base & 0xFFFF00, width=wb, rows=h, stride=stride, xor2=True)
     idx = bytearray(w * h)
     if mode == 1:
         for y in range(h):

@@ -1034,6 +1034,7 @@ apmrec: ldx     z:mp
 ; WE_MENU in Programs at item A (>= nprog): the separator, an app, a category's pop-up,
 ; More apps' pop-up
 apchoose:
+        sta     poprow                  ; (its row: the pop-up opens beside it)
         sec
         sbc     z:nprog
         beq     @out                    ; (the separator)
@@ -1110,9 +1111,10 @@ apchoose:
         bra     @add
 @show:  ldx     apmp
         stz     a:0,x
+        jsr     popxy
         lda     z:back
         ldx     #.loword(pbuf)
-        jsr     ui_popup
+        jsr     ui_popat                ; (its first item highlighted: Enter takes it)
         cmp     apj
         bcs     @no
         asl     a
@@ -1126,6 +1128,91 @@ apchoose:
         lda     #.loword(t_files)
         jmp     ui_launch
 @no:    rts
+
+; ui_x, ui_y: just right of the Programs drop-down, its first item level with row poprow,
+; whether the item was clicked or chosen with the keys. The kernel's layout (kernel/menu.s):
+; the bar's titles from x = 8, each its text's width + 16 ("Horizon", then "Programs"); the
+; drop-down at the title's x, y = 15, as wide as its widest item + 24 (40 at least; an item
+; with a TAB: its label + 16 + the rest), its rows at 2 + 14 i
+popxy:  ldx     #.loword(m_sys)         ; "Horizon"
+        lda     #0
+        jsr     ui_twidth
+        clc
+        adc     #8 + 16 + 24 - 1        ; (its right edge, the pop-up's point)
+        sta     z:ui_x
+        lda     #40
+        sta     popw
+        lda     #.loword(menu)
+        clc
+        adc     #m_sys_end - m_sys
+        tax
+@it:    stx     popp                    ; each item of Programs
+        lda     a:0,x
+        and     #$00FF
+        beq     @end
+        lda     #0
+        jsr     ui_twidth
+        sta     popt
+        ldx     popp
+:       lda     a:0,x                   ; a TAB: the label's + 16 + the rest's
+        and     #$00FF
+        beq     @w
+        inx
+        cmp     #9
+        bne     :-
+        phx
+        lda     #0
+        jsr     ui_twidth
+        clc
+        adc     #16
+        sta     popt
+        plx
+        dex
+        phx
+        sep     #$20
+        .a8
+        stz     a:0,x
+        rep     #$20
+        .a16
+        ldx     popp
+        lda     #0
+        jsr     ui_twidth
+        clc
+        adc     popt
+        sta     popt
+        plx
+        lda     #9
+        sep     #$20
+        .a8
+        sta     a:0,x
+        rep     #$20
+        .a16
+@w:     lda     popt
+        cmp     popw
+        bcc     :+
+        sta     popw
+:       ldx     popp
+        jsr     ui_strlen
+        sec
+        adc     popp
+        tax
+        bra     @it
+@end:   lda     popw
+        clc
+        adc     z:ui_x
+        sta     z:ui_x
+        lda     poprow                  ; y = 15 + 14 row - 1, less the backdrop's
+        asl     a                       ; content's 16
+        sta     popt
+        asl     a
+        asl     a
+        asl     a
+        sec
+        sbc     popt
+        dec     a
+        dec     a
+        sta     z:ui_y
+        rts
 
 ; the app at sorted position A started (detached), in its folder
 aplaunch:
@@ -6184,6 +6271,10 @@ apa_c:  .res    2
 apnr:   .res    2                       ; the menu's app rows
 aproom: .res    2
 apmp:   .res    2                       ; a pop-up's items: the end
+poprow: .res    2                       ; (popxy) the Programs row chosen, the widest item,
+popw:   .res    2                       ; a width, the item
+popt:   .res    2
+popp:   .res    2
 mrow:   .res    (MROWS + 1) * 2
 popmap: .res    MROWS * 2
 apth:   .res    128

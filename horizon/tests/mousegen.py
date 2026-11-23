@@ -5,11 +5,14 @@ SRC lines: '#...' copied; 'T key TEXT'; 'T move X Y'; 'T click'; 'T dclick'; 'T 
 'T rpress', 'T rdrag X Y', 'T rrelease' (the right button held). T in ms.
 (0.15) A button change never comes before the end of the move before it: a click written
 while the pointer is still on its way waits for it (it would land wherever the pointer
-happened to be, which depends on the kernel's timing)."""
+happened to be, which depends on the kernel's timing).
+(0.29) 'T wait TEXT' and 'T shot' are passed on (tests/keyscript.py: a wait for a console
+line, a screenshot that moves with the waits); T may be '+MS', after the line before."""
 import sys
 x, y = 320, 180
 out = []
 busy = 0                                # the end of the last move
+prev = 0                                # the time of the line before (for '+MS')
 def mv(t, tx, ty, step, dt, b):
     global x, y
     while (x, y) != (tx, ty):
@@ -21,9 +24,12 @@ for ln in open(sys.argv[1]):
     if not ln.strip(): continue
     if ln.startswith('#'): out.append(ln); continue
     t, cmd, *rest = ln.split(' ', 2)
-    t = int(t)
+    t = prev + int(t[1:]) if t.startswith('+') else int(t)
+    prev = t
     if cmd in ('click', 'dclick', 'rclick', 'press', 'release', 'rpress', 'rrelease'): t = max(t, busy)
     if cmd == 'key': out.append(f'{t} {rest[0]}')
+    elif cmd == 'wait': out.append(f'{t} wait {rest[0]}')
+    elif cmd == 'shot': out.append(f'{t} shot')
     elif cmd == 'move': a = rest[0].split(); busy = mv(t, int(a[0]), int(a[1]), 100, 50, 0)
     elif cmd == 'drag': a = rest[0].split(); busy = mv(t, int(a[0]), int(a[1]), 30, 60, 1)
     elif cmd == 'rdrag': a = rest[0].split(); busy = mv(t, int(a[0]), int(a[1]), 30, 60, 2)

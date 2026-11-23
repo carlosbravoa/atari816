@@ -1059,7 +1059,6 @@ $(B)/apscan.prg: user/apscan.s user/horizon.inc user/ui.inc user/prog.cfg $(B)/u
 	$(CA65) -I user -o $(B)/apscan.o $<
 	$(LD65) -C user/prog.cfg -o $@ $(B)/apscan.o $(B)/ulib.o $(B)/ui.lib
 APP29TXT = $(if $(PRE12),app29-rev11.txt,app29.txt)
-A29DSHOTS := 6.5 9.5 17 19.5 30 37
 A29MSHOTS := 6.5 9 13.5
 test-29: all $(EMU) $(APP29PRGS)
 	@rm -rf build/run-sd; cp -r $(SD) build/run-sd; rm -rf build/run-sd/Music; touch build/run-sd/SYSTEM/NODESK
@@ -1086,7 +1085,7 @@ test-29: all $(EMU) $(APP29PRGS)
 	@grep -a '^apscan: ' $(B)/app29s.out > $(B)/app29s.txt || true
 	@if python3 tests/compare.py tests/app29s.txt $(B)/app29s.txt; then echo "PASS  0.29 the Desktop's scan of 20 apps at the board's card speed: $$(cut -c9- $(B)/app29s.txt)"; \
 	else echo "FAIL  0.29 the scan time ($(B)/app29s.out)"; exit 1; fi
-	@PREP='python3 ../../tests/mkapps.py desk1 ../../$(B) .' DESK=1 sh tests/shots.sh "$(EMU) $(EMUFLAGS) $(CARDDATE)" $(SD) app29d 42 $(A29DSHOTS)
+	@PREP='python3 ../../tests/mkapps.py desk1 ../../$(B) .' DESK=1 sh tests/shots.sh "$(EMU) $(EMUFLAGS) $(CARDDATE)" $(SD) app29d 60
 	@python3 tests/apppic.py app29d
 	@if diff -u tests/pictures/app29d.md5 $(B)/app29d.pic; then echo "PASS  0.29 the Desktop: one app, an archive installed from Files (category Games), its pop-up, a file opened by its app, Remove app... in Files"; \
 	else echo "FAIL  0.29 the Desktop's apps pictures (look at $(B)/app29d*.ppm, then make pictures-29)"; exit 1; fi

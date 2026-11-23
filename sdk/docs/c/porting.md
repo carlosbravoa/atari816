@@ -19,7 +19,7 @@ comes to Horizon, and how to find it. The SDK's compiler is cc816. The details a
 | recursion, big locals | megabytes of stack | local arrays, structures and `&x` locals on an 8 KB software stack (`hcc --stack N`), the rest on a 32 KB hardware stack | arrays of more than a few hundred bytes as `static` or from `malloc`, not as locals. `hcc --debug` reports the stacks a run used; an overflow is reported at exit |
 | files | as many as you like | **4 file handles for the whole system** (every program together) | close files as soon as you can; `fopen` returns NULL with `errno == ENFILE` when none is left. Do not keep a log file open across the program's life |
 | paths | `/home/x/file.txt`, `C:\x` | FAT, case-insensitive, `/` separators, long names; relative to the current folder | no `\`; no drive letters |
-| the program's own folder | `argv[0]`, the executable's path | `argv[0]` is only the program's name, and the current folder may be any folder (the Desktop starts programs in `/`) | data files next to the program: `hz_prog_dir(buf, 128)` gives its folder, `/GAMES/MINE/` (Horizon 0.28; `hz_task_path` the whole path) |
+| the program's own folder | `argv[0]`, the executable's path | `argv[0]` is only the program's name, and the current folder may be any folder (the Programs menu starts an app in its own folder; Files in the folder it shows; a shortcut in `/`; the shell in its own folder) | always find data files next to the program with `hz_prog_dir(buf, 128)`: its folder, `/GAMES/MINE/` (Horizon 0.28; `hz_task_path` the whole path) |
 | `printf("%lld")`, `%a` | yes | yes (`%a` in programs with floating point) | nothing (`%zu` works too) |
 | `fopen(..., "rb")` | binary vs text | the same (no line-end conversion) | nothing |
 | `system()`, `getenv()`, signals, `time` zones | yes | not there (they return failure); `time()` counts from Horizon's clock | `hz_spawn_path` to start another program |
@@ -326,7 +326,7 @@ calls the same functions as before.
   and the game goes elsewhere. Let the program print a line at each state a script waits
   for (Digger: `digger: title`, `digger: play`, `digger: dead`, `digger: initials`) and
   write `+0 wait digger: play` in the script: the next steps come when the line has been
-  printed (or at once if it came since the step before), every later time moved by as
+  printed (or at once if it came since the input line before), every later time moved by as
   long as the wait took (`sdk/tools/inputscript.py`). Digger's `tests/play.script` still
   passes with the program's start delayed by 1.5 or 3 seconds.
 - [ ] **Pictures of game states, not of moments.** Compare screenshots pixel for pixel
