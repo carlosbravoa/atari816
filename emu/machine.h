@@ -27,13 +27,30 @@ typedef struct Machine {
     Opl      opl;
     uint64_t next_event;                /* earliest cycle at which some device needs to run */
     int      trace;
+    uint32_t ipc;                       /* PBR:PC of the instruction being executed (--watch) */
+    int      nwatch;                    /* --watch: physical ranges [lo, hi) logged when written */
+    uint32_t watch_lo[16], watch_hi[16];
 } Machine;
 
 extern Machine M;
 
+/* --watch (main.c): log a write of v at physical address a (dma: not the CPU's) */
+void watch_hit(uint32_t a, uint8_t v, int dma);
+static inline void watch_check(uint32_t a, uint8_t v, int dma)
+{
+    for (int i = 0; i < M.nwatch; i++)
+        if (a >= M.watch_lo[i] && a < M.watch_hi[i]) { watch_hit(a, v, dma); return; }
+}
+
 /* physical (DMA) access: no window, no protection, nothing above 8 MB */
 static inline uint8_t phys_rd(uint32_t a) { return a < RAM_SIZE ? M.ram[a] : 0; }
-static inline void phys_wr(uint32_t a, uint8_t v) { if (a < RAM_SIZE) M.ram[a] = v; }
+static inline void phys_wr(uint32_t a, uint8_t v)
+{
+    if (a < RAM_SIZE) {
+        if (M.nwatch) watch_check(a, v, 1);
+        M.ram[a] = v;
+    }
+}
 
 /* bring every device up to the CPU's current cycle (cheap when nothing is due) */
 void machine_sync_slow(void);

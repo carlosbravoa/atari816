@@ -68,6 +68,12 @@ Options:
                   the program's functions); --prof-from S --prof-to S: only from S to S
                   seconds after the program's start (as --shot's times)
   --expect TEXT   fail unless console.txt contains TEXT (repeatable)
+  --emu-arg ARG   pass ARG to emu816 as it is (repeatable): e.g. --emu-arg --watch
+                  --emu-arg 0B8080:10 (writes into a range logged in emu.err), --emu-arg
+                  --dump-ram-on --emu-arg TEXT (the RAM when the program prints TEXT);
+                  relative paths are the emulator's: give absolute ones. The environment
+                  variable EMU816_ARGS adds its words the same way to every run (a port's
+                  whole make test with --ram-random 5, --log-bankwrap, ...)
   --window        open the emulator's SDL window instead (needs emu816 built with SDL=1;
                   real time; type and click yourself)
 Exit code 0 when the run went as expected; 1 when the program was killed by the kernel
@@ -106,7 +112,7 @@ def main():
     if not a or a[0] in ('-h', '--help'):
         print(__doc__)
         return 0
-    opt = {'mode': 'desktop', 'shots': [], 'files': [], 'expect': [], 'args': ''}
+    opt = {'mode': 'desktop', 'shots': [], 'files': [], 'expect': [], 'args': '', 'emu-args': []}
     prog = None
     i = 0
     while i < len(a):
@@ -125,6 +131,8 @@ def main():
             opt['files'].append(val()); i += 2
         elif w == '--expect':
             opt['expect'].append(val()); i += 2
+        elif w == '--emu-arg':
+            opt['emu-args'].append(val()); i += 2
         elif w in ('--log-sound', '--log-sound-us', '--log-lau', '--log-opl', '--log-opl-us',
                    '--log-bankwrap',
                    '--window', '--net'):
@@ -245,6 +253,7 @@ def main():
         cmdl.append('--log-lau')
     if opt.get('log-bankwrap'):
         cmdl.append('--log-bankwrap')
+    cmdl += opt['emu-args'] + os.environ.get('EMU816_ARGS', '').split()
     if opt.get('log-opl'):
         cmdl.append('--log-opl')
     if opt.get('log-opl-us'):

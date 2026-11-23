@@ -314,12 +314,48 @@ static const char *shoton_text, *shoton_prefix;
 static char shoton_line[256];
 static int shoton_len, shoton_req, shoton_n;
 
+/* --dump-ram-on TEXT, --dump-ram-prefix PATH: the 8 MB of RAM written (PATH1.bin, PATH2.bin, ...)
+ * each time the program prints a console line holding TEXT, at once (the state at that point
+ * of the program's progress) */
+static const char *dumpon_text, *dumpon_prefix;
+static int dumpon_n;
+
+static void dump_ram_to(const char *path)
+{
+    FILE *f = fopen(path, "wb");
+    if (!f || fwrite(M.ram, 1, RAM_SIZE, f) != RAM_SIZE) fprintf(stderr, "emu816: cannot write %s\n", path);
+    if (f) fclose(f);
+}
+
+/* --watch ADDR[:LEN]: every write into the physical range is logged on stderr:
+ *   watch T_US PC=BB:PPPP U|S task N DB=BB $AAAAAA = $VV (was $OO)
+ * (PC the instruction's own address; "dma" for the I/O processor's or the blitter's writes) */
+static unsigned long watch_max = 200000, watch_n;
+
+void watch_hit(uint32_t a, uint8_t v, int dma)
+{
+    if (watch_n >= watch_max) return;
+    if (++watch_n == watch_max) fprintf(stderr, "watch: --watch-max %lu lines reached\n", watch_max);
+    unsigned long long us = (unsigned long long)(M.cpu.cycles / CPU_HZ * 1e6);
+    if (dma)
+        fprintf(stderr, "watch %llu dma $%06X = $%02X\n", us, a, v);
+    else
+        fprintf(stderr, "watch %llu PC=%02X:%04X %c task %u DB=%02X $%06X = $%02X (was $%02X)\n", us,
+                M.ipc >> 16, M.ipc & 0xFFFF, M.fr.mode_user ? 'U' : 'S', M.fr.cur_task, M.cpu.dbr,
+                a, v, M.ram[a]);
+}
+
 void emu_console_byte(uint8_t v)
 {
-    if (!shoton_text && !nkeys) return;
+    if (!shoton_text && !nkeys && !dumpon_text) return;
     if (v == 10 || v == 13) {
         shoton_line[shoton_len] = 0;
         if (shoton_text && shoton_len && strstr(shoton_line, shoton_text) && !shoton_req) shoton_req = 3;
+        if (dumpon_text && shoton_len && strstr(shoton_line, dumpon_text)) {
+            char path[1024];
+            snprintf(path, sizeof path, "%s%d.bin", dumpon_prefix ? dumpon_prefix : "dumpon", ++dumpon_n);
+            dump_ram_to(path);
+        }
         if (shoton_len) keys_wait_line(shoton_line);
         shoton_len = 0;
     } else if (shoton_len < (int)sizeof shoton_line - 1)
@@ -449,6 +485,16 @@ static void usage(void)
         "  --prof-from S, --prof-to S  only between these emulated seconds\n"
         "  --shot FILE.ppm      write the 1280x720 output frame (at exit, or at --shot-at); repeatable\n"
         "  --dump-ram FILE      write the 8 MB of RAM at exit (as a PC tool reading memory sees it)\n"
+        "  --dump-ram-on TEXT   write it each time the program prints a console line holding TEXT, at once:\n"
+        "                       PREFIXn.bin, n = 1, 2, ... (--dump-ram-prefix PREFIX; default dumpon)\n"
+        "  --watch ADDR[:LEN]   log every write into physical RAM ADDR..ADDR+LEN-1 (hex; LEN default 1;\n"
+        "                       repeatable, 16 at most) on stderr: the time (us), the instruction's\n"
+        "                       PBR:PC, user/supervisor, the task, DBR, the value and the old value;\n"
+        "                       \"dma\" for the I/O processor's and the blitter's writes\n"
+        "  --watch-max N        at most N watch lines (default 200000)\n"
+        "  --ram-fill HH        the RAM at power-on all HH (hex) instead of the pattern $EA ^ (address & $FF)\n"
+        "  --ram-random SEED    ... or pseudo-random bytes from SEED: memory a program never wrote is\n"
+        "                       whatever the board's was (programs that read it differ from run to run)\n"
         "  --shot-at SECONDS    emulated time for the preceding --shot (first VBLANK at or after it)\n"
         "  --shot-on TEXT       a screenshot each time the program prints a console line holding TEXT\n"
         "                       (two frames later): PREFIXn.ppm, n = 1, 2, ... (--shot-on-prefix PREFIX)\n"
@@ -515,6 +561,8 @@ int main(int argc, char **argv)
     double console_us = 0;
     double max_sec = -1;
     const char *wav_path = NULL;
+    int ram_fill = -1;                  /* -1: the pattern; -2: --ram-random; else the byte */
+    uint32_t ram_seed = 0;
 
     for (int i = 1; i < argc; i++) {
         const char *a = argv[i];
@@ -532,6 +580,26 @@ int main(int argc, char **argv)
         else if (!strcmp(a, "--shot-at") && i + 1 < argc && nshots) shot_at[nshots - 1] = atof(argv[++i]);
         else if (!strcmp(a, "--stats")) stats = 1;
         else if (!strcmp(a, "--dump-ram") && i + 1 < argc) dump_ram = argv[++i];
+        else if (!strcmp(a, "--dump-ram-on") && i + 1 < argc) dumpon_text = argv[++i];
+        else if (!strcmp(a, "--dump-ram-prefix") && i + 1 < argc) dumpon_prefix = argv[++i];
+        else if (!strcmp(a, "--watch") && i + 1 < argc) {
+            char buf[64];
+            snprintf(buf, sizeof buf, "%s", argv[++i]);
+            /* ADDR is BBAAAA or BB:AAAA; a last ':' after BBAAAA (or a second ':') starts LEN */
+            char *colon = strrchr(buf, ':'), *b = buf + (buf[0] == '$');
+            uint32_t len = 1;
+            if (colon && (strchr(buf, ':') != colon || colon - b > 2)) {
+                *colon = 0;
+                len = (uint32_t)strtoul(colon + 1 + (colon[1] == '$'), NULL, 16);
+            }
+            uint32_t lo = parse_addr(buf);
+            if (M.nwatch >= 16 || !len || lo >= RAM_SIZE) usage();
+            M.watch_lo[M.nwatch] = lo;
+            M.watch_hi[M.nwatch++] = lo + len;
+        }
+        else if (!strcmp(a, "--ram-fill") && i + 1 < argc) ram_fill = (int)(strtoul(argv[++i], NULL, 16) & 0xFF);
+        else if (!strcmp(a, "--ram-random") && i + 1 < argc) { ram_fill = -2; ram_seed = (uint32_t)strtoul(argv[++i], NULL, 0); }
+        else if (!strcmp(a, "--watch-max") && i + 1 < argc) watch_max = strtoul(argv[++i], NULL, 0);
         else if (!strcmp(a, "--ideal-timing")) M.fr.ideal = 1;
         else if (!strcmp(a, "--boot-cart") && i + 1 < argc) mailbox_boot_cart = argv[++i];
         else if ((!strcmp(a, "--card-date") || !strcmp(a, "--pc-time")) && i + 1 < argc) {
@@ -589,7 +657,16 @@ int main(int argc, char **argv)
     M.ram = malloc(RAM_SIZE);
     M.nvc.out = calloc(NV_OUT_W * NV_OUT_H, 4);
     if (!M.ram || !M.nvc.out) { fprintf(stderr, "emu816: out of memory\n"); return 1; }
-    for (uint32_t i = 0; i < RAM_SIZE; i++) M.ram[i] = 0xEA ^ (i & 0xFF);
+    if (ram_fill == -1)
+        for (uint32_t i = 0; i < RAM_SIZE; i++) M.ram[i] = 0xEA ^ (i & 0xFF);
+    else if (ram_fill == -2) {                         /* --ram-random SEED: xorshift32 */
+        uint32_t x = ram_seed ? ram_seed : 1;
+        for (uint32_t i = 0; i < RAM_SIZE; i++) {
+            x ^= x << 13; x ^= x >> 17; x ^= x << 5;
+            M.ram[i] = (uint8_t)x;
+        }
+    } else
+        memset(M.ram, ram_fill, RAM_SIZE);
     reset_stub();
     load_file(prog, 0x010000, 0xFF00);              /* the firmware reads at most $FF00 bytes */
     for (int i = 0; i < nloads; i++) {
@@ -686,6 +763,7 @@ int main(int argc, char **argv)
             else trace_line();
         }
         uint64_t na = c->n_abort;
+        M.ipc = (uint32_t)c->pbr << 16 | c->pc;
         if (prof_u) {
             uint64_t p0 = c->cycles;
             uint32_t pa = (uint32_t)c->pbr << 16 | c->pc;
@@ -723,11 +801,7 @@ int main(int argc, char **argv)
         nvc_render();
         if (nvc_write_ppm(shot_path[i])) fprintf(stderr, "emu816: cannot write %s\n", shot_path[i]);
     }
-    if (dump_ram) {                                     /* the RAM at the end (tool tests) */
-        FILE *f = fopen(dump_ram, "wb");
-        if (!f || fwrite(M.ram, 1, RAM_SIZE, f) != RAM_SIZE) fprintf(stderr, "emu816: cannot write %s\n", dump_ram);
-        if (f) fclose(f);
-    }
+    if (dump_ram) dump_ram_to(dump_ram);                /* the RAM at the end (tool tests) */
     if (stats) {
         double host = (double)(clock() - t0) / CLOCKS_PER_SEC, emu = c->cycles / CPU_HZ;
         fprintf(stderr, "emu816: %s after %.3f s emulated (%llu cycles), %.3f s host: %.1f MHz (%.1fx real time)\n",

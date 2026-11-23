@@ -279,7 +279,11 @@ static int mb_get(uint32_t n, uint8_t *dst, uint32_t len)
 }
 static int mb_put(uint32_t n, const uint8_t *src, uint32_t len)
 {
-    for (uint32_t i = 0; i < len; i++) { if (!addr_ok(n + i)) return 0; M.ram[n + i] = src[i]; }
+    for (uint32_t i = 0; i < len; i++) {
+        if (!addr_ok(n + i)) return 0;
+        if (M.nwatch) watch_check(n + i, src[i], 1);
+        M.ram[n + i] = src[i];
+    }
     return 1;
 }
 static int mb_path(uint32_t n, char *dst, int max)
@@ -419,6 +423,8 @@ static uint32_t xfer(FILE *f, uint32_t n, uint32_t len, int wr, uint32_t *res)
         if (room > len) room = len;
         if (room > 0x8000) room = 0x8000;
         size_t got = wr ? fwrite(M.ram + n, 1, room, f) : fread(M.ram + n, 1, room, f);
+        if (!wr && M.nwatch)                            /* --watch: the bytes read in */
+            for (uint32_t i = 0; i < got; i++) watch_check(n + i, M.ram[n + i], 1);
         if (got < room && ferror(f)) *res = FR_DISK_ERR;
         done += got; n += got; len -= got;
         if (*res || got < room) break;

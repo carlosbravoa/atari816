@@ -319,6 +319,34 @@ else
     skip "nettest 2 and 3 (no python3 for the loopback server)"
 fi
 
+# ── debugging tools: --watch (writes into a range, with the instruction's PC), --dump-ram-on
+# (the RAM when the console shows a line), --ram-fill / --ram-random (power-on contents).
+# A program of a few bytes: REP #$30; LDA #$1234; STA $03:2000; SEP #$20; LDA #'A';
+# STA DBG_OUT; LDA #10; STA DBG_OUT; LDA #$99; STA $03:2002; STP ──
+printf '\302\060\251\064\022\217\000\040\003\342\040\251\101\217\360\336\000\251\012\217\360\336\000\251\231\217\002\040\003\333' > "$TMP/w.bin"
+out=$($EMU --max-seconds 1 --ram-fill 5A --watch 03:2000:3 --watch 0400FF --dump-ram-on A \
+      --dump-ram-prefix "$TMP/won" --dump-ram "$TMP/wend.ram" "$TMP/w.bin" 2>"$TMP/w.err")
+exp='watch PC=01:0005 S task 0 DB=00 $032000 = $34 (was $5A)
+watch PC=01:0005 S task 0 DB=00 $032001 = $12 (was $5A)
+watch PC=01:0019 S task 0 DB=00 $032002 = $99 (was $5A)'
+got=$(grep '^watch' "$TMP/w.err" | sed 's/^watch [0-9]* /watch /')
+if [ "$out" = "A" ] && [ "$got" = "$exp" ]; then ok "--watch: three writes into \$03:2000-2002 with their instructions' PC and the old values (--ram-fill 5A)"
+else bad "--watch" "$out
+$got"; fi
+at() { od -An -tx1 -j $(($2)) -N $3 "$1" | tr -d ' \n'; }
+if [ "$(at "$TMP/won1.bin" 0x032000 3)" = "34125a" ] && [ "$(at "$TMP/wend.ram" 0x032000 3)" = "341299" ] && [ ! -e "$TMP/won2.bin" ]; then
+    ok "--dump-ram-on: the RAM at the console line (before the last write), --dump-ram at the end"
+else bad "--dump-ram-on" "$(at "$TMP/won1.bin" 0x032000 3) $(at "$TMP/wend.ram" 0x032000 3)"; fi
+$EMU --max-seconds 1 --ram-random 7 --dump-ram "$TMP/r7a.ram" "$TMP/w.bin" >/dev/null 2>&1
+$EMU --max-seconds 1 --ram-random 7 --dump-ram "$TMP/r7b.ram" "$TMP/w.bin" >/dev/null 2>&1
+$EMU --max-seconds 1 --ram-random 8 --dump-ram "$TMP/r8.ram" "$TMP/w.bin" >/dev/null 2>&1
+$EMU --max-seconds 1 --dump-ram "$TMP/rp.ram" "$TMP/w.bin" >/dev/null 2>&1
+if [ "$(at "$TMP/r7a.ram" 0x050000 16)" = "$(at "$TMP/r7b.ram" 0x050000 16)" ] && \
+   [ "$(at "$TMP/r7a.ram" 0x050000 16)" != "$(at "$TMP/r8.ram" 0x050000 16)" ] && \
+   [ "$(at "$TMP/rp.ram" 0x0500FE 4)" = "1415eaeb" ]; then
+    ok "--ram-random: the same seed the same RAM, another seed another; the default pattern \$EA ^ address"
+else bad "--ram-random" "$(at "$TMP/r7a.ram" 0x050000 16) $(at "$TMP/r8.ram" 0x050000 16) $(at "$TMP/rp.ram" 0x0500FE 4)"; fi
+
 # ── 4. CPU: SingleStepTests/65816 sample (tests/fetch_sst.py downloads it) ──
 if ls $T/sst/*.txt >/dev/null 2>&1; then
     res=$($T/cputest $T/sst/*.txt | tail -1)

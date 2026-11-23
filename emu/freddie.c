@@ -216,6 +216,7 @@ void bus_write(void *ctx, uint32_t a, uint8_t v, int flags)
     if (is_io(a)) io_write(a, v);
     else if (a < RAM_SIZE) {
         if (!f->ideal) { tpend(f); stall(1); }
+        if (M.nwatch) watch_check(phys(f, a), v, 0);
         M.ram[phys(f, a)] = v;
     }
 }
