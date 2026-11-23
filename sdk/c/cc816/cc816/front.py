@@ -748,6 +748,9 @@ class Front:
         while t and t[-1] in 'ul':
             suf = t[-1] + suf
             t = t[:-1]
+        if t in ('0x', '0b', ''):
+            # (0x with no digits: the robustness test's changed programs met it)
+            self.err(f'bad integer constant {s}', e)
         if t.startswith('0x'):
             v = int(t[2:], 16)
             dec = False
@@ -4216,11 +4219,11 @@ def unescape_wide(s, size):
             j = i + 1
             while j < len(s) and s[j] in '0123456789abcdefABCDEF':
                 j += 1
-            out.append(int(s[i + 1:j], 16) & lim)
+            out.append(_hexval(s[i + 1:j], '\\x') & lim)
             i = j
         elif c in 'uU':
             n = 4 if c == 'u' else 8
-            out.append(int(s[i + 1:i + 1 + n], 16) & lim)
+            out.append(_hexval(s[i + 1:i + 1 + n], '\\' + c) & lim)
             i += 1 + n
         elif c in '01234567':
             j = i
@@ -4233,6 +4236,14 @@ def unescape_wide(s, size):
             i += 1
     flush()
     return out
+
+
+def _hexval(digits, esc):
+    """the value of an escape's hexadecimal digits (an error when there are none)"""
+    try:
+        return int(digits, 16)
+    except ValueError:
+        raise CError(f'{esc} used with no hexadecimal digits after it')
 
 
 def unescape(s):
@@ -4252,11 +4263,12 @@ def unescape(s):
             j = i + 1
             while j < len(s) and s[j] in '0123456789abcdefABCDEF':
                 j += 1
-            out.append(int(s[i + 1:j], 16) & 0xFF)
+            out.append(_hexval(s[i + 1:j], '\\x') & 0xFF)
             i = j
         elif c in 'uU':                     # a universal character: its UTF-8
             n = 4 if c == 'u' else 8
-            out += list(chr(int(s[i + 1:i + 1 + n], 16)).encode('utf-8'))
+            out += list(chr(_hexval(s[i + 1:i + 1 + n], '\\' + c) % 0x110000).encode(
+                'utf-8', 'replace'))
             i += 1 + n
         elif c in '01234567':
             j = i
