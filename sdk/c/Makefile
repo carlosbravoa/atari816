@@ -2,6 +2,7 @@
 # controls library's binding (ui/), the game library (game/).
 #
 #   make            the C library for both code models (build/lib/small, build/lib/large)
+#                   and for the far data model (build/lib/large-far: hcc --data far)
 #   make gen        include/hzsys.h again from horizon.inc, ABI.md, tools/syscalls.tab;
 #                   include/huigen.h from ui.inc, icons.inc and ui/hui.tab
 #   make check      include/hzsys.h against horizon.inc and ABI.md (count, numbers, names);
@@ -29,12 +30,14 @@ EXAMPLES += examples/guests examples/viewer
 # in another bank: a controls-library program and a game; the game library's tests run in
 # that model too: game/Makefile)
 LARGE_EXAMPLES := examples/viewer examples/glimmer
+# built with far data too (hcc --code large --data far): a console program and a game
+FAR_EXAMPLES := examples/hello examples/wc examples/glimmer
 
 # the skill's examples (sdk/skill/atari-816-dev/examples/*: built and tested there)
 SKILL := ../skill/atari-816-dev
 
 all:
-	$(PYTHON) bin/hcc --build-lib small large
+	$(PYTHON) bin/hcc --build-lib small large large-far
 
 gen:
 	$(PYTHON) tools/gensys.py --horizon $(HORIZON)
@@ -52,6 +55,9 @@ test: check
 	@set -e; for p in $(LARGE_EXAMPLES); do echo "== $$p (--code large)"; \
 	  $(MAKE) --no-print-directory -C $$p test HORIZON=$(HORIZON) HZ_CODE=large \
 	  HCCFLAGS="--main-room 0 --bank-room 16384"; done
+	@set -e; for p in $(FAR_EXAMPLES); do echo "== $$p (--code large --data far)"; \
+	  $(MAKE) --no-print-directory -C $$p test HORIZON=$(HORIZON) HZ_CODE=large \
+	  HZ_DATA=far HCCFLAGS="--main-room 0 --bank-room 16384"; done
 	$(PYTHON) $(SKILL)/examples/check.py --horizon $(HORIZON)
 	@echo "C SDK: ALL TESTS PASSED"
 

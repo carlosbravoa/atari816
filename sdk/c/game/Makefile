@@ -19,8 +19,9 @@ HORIZON ?= $(abspath ../../../horizon)
 export HORIZON
 PYTHON  ?= python3
 PROGRAMS := ../examples/glimmer ../examples/catch ../examples/tutorial ../../templates/c-game
-# the code models tests/run.py runs in
-CODES   ?= small large
+# the code models tests/run.py runs in (largefar: the large one with far data, hcc --data
+# far)
+CODES   ?= small large largefar
 
 all:
 	$(PYTHON) hgbuild.py

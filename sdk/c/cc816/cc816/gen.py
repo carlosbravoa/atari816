@@ -384,6 +384,31 @@ class Gen:
 
     def g_add(self, i):
         d, a, b = i.d, i.a, i.b
+        if self.far_model and d.size == 4 and a is d and d.loc[0] == 'dp' and \
+                isinstance(b, Imm) and (b.val <= 0xFF or b.val == 0xFFFFFFFF) and b.val:
+            # (far data: a far pointer stepped in place, p++ and p += k: the high word only
+            # when the low one carries; A and the flags are free after an add)
+            skip = self.newlab()
+            if b.val == 1:
+                self.I('inc', self.vaddr(d, 0))
+                self.I('bne', skip)
+                self.I('inc', self.vaddr(d, 1))
+            elif b.val == 0xFFFFFFFF:
+                self.I('lda', self.vaddr(d, 0))
+                self.I('bne', skip)
+                self.I('dec', self.vaddr(d, 1))
+                self.L(skip)
+                self.I('dec', self.vaddr(d, 0))
+                return
+            else:
+                self.I('lda', self.vaddr(d, 0))
+                self.I('clc')
+                self.I('adc', '#' + hexw(b.val))
+                self.I('sta', self.vaddr(d, 0))
+                self.I('bcc', skip)
+                self.I('inc', self.vaddr(d, 1))
+            self.L(skip)
+            return
         if d.size == 2:
             if isinstance(b, Imm) and b.val in (1, 2, 0xFFFF, 0xFFFE) and a is d and d.loc[0] == 'dp':
                 m = 'inc' if b.val in (1, 2) else 'dec'

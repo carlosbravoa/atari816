@@ -102,7 +102,10 @@ def farprog(only, horizon):
             + ("" if sizes else " (no --sizes report)")))
     # a near-data object in a far-data program: refused, in words
     near_o = os.path.join(b, "near.o")
-    rc1, out1 = sh([sys.executable, HCC] + LARGE_CODE[:2] + ["-c", "-o", near_o, src])
+    small = os.path.join(b, "small.c")
+    with open(small, "w") as f:
+        f.write("int main(void) { return 0; }\n")
+    rc1, out1 = sh([sys.executable, HCC] + LARGE_CODE[:2] + ["-c", "-o", near_o, small])
     rc2, out2 = hcc(os.path.join(b, "MIX.PRG"), [near_o], "largefar")
     ok = rc1 == 0 and rc2 != 0 and "far data" in out2 and "--data" in out2
     report("far", "mixed", ok, "a near-data object refused in a far-data program" if ok
@@ -372,7 +375,7 @@ def run_model(model, horizon, only):
             rc, con, _ = emu(prg, os.path.join(b, "run-stackd"), horizon, args="ok", seconds=3)
             m = re.search(r"stack: (\d+) of (\d+) bytes used", con)
             m2 = re.search(r"software stack: (\d+) of (\d+) bytes used", con)
-            m3 = re.search(r"heap: (\d+) of (\d+) bytes used at most", con)
+            m3 = re.search(r"heap: (\d+) (of (\d+) )?bytes used at most", con)
             ok = bool(m and m2 and m3) and "overflow" not in con
             report("stackdbg", model, ok, (m.group(0) if m else "no report") +
                    (", " + m2.group(0) if m2 else "") + (", " + m3.group(0) if m3 else ""))

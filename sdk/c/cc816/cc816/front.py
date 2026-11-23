@@ -3371,6 +3371,18 @@ class Front:
         size = pt.to.size if not pt.to.is_void else 1
         if pt.to.is_func:
             size = 1
+        if pt.isfar and b.t.is_int and b.t.size == 4 and (
+                isinstance(b.op, Imm) or MODEL['far_data']):
+            # a far pointer plus a long (p + 39999: a decimal constant over 32,767 is a
+            # long): the whole 32-bit value, not its low word as an int (which made
+            # 39999 -25537)
+            if isinstance(b.op, Imm):
+                k = self.wrap(b.op.val, b.t) * size
+                return self.binop('add', a.op, Imm(-k if op == '-' else k, 4), pt, dst)
+            z = b.op
+            if size > 1:
+                z = self.binop('mul', z, Imm(size, 4), b.t).op
+            return self.binop('add' if op == '+' else 'sub', a.op, z, pt, dst)
         i = self.convert(b, INT if b.t.signed else UINT)
         if isinstance(i.op, Imm):
             # (an unsigned index is zero-extended: far + 65535u is 65,535 bytes on)

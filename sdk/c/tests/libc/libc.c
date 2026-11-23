@@ -144,19 +144,26 @@ static void t_malloc(void)
     q = calloc(100, 10);
     check(q && q[0] == 0 && q[999] == 0, "calloc zeroes");
     free(q);
+#ifdef __CC816_FAR_DATA__
+    /* (far data: the heap takes banks from Horizon: blocks of 40,000 bytes until none
+     * is left; each in a bank) */
+#define BLK 40000u
+#else
+#define BLK 1024
+#endif
     /* fill the heap with 1 KB blocks until malloc says no */
-    while (n < 200 && (p[n] = malloc(1024)) != 0) {
+    while (n < 200 && (p[n] = malloc(BLK)) != 0) {
         p[n][0] = (char)n;
-        p[n][1023] = (char)n;
-        total += 1024;
+        p[n][BLK - 1] = (char)n;
+        total += BLK;
         ++n;
     }
     check(n > 0 && n < 200, "malloc runs out and returns NULL");
     for (i = 0; i < n; i++)
-        if (p[i][0] != (char)i || p[i][1023] != (char)i)
+        if (p[i][0] != (char)i || p[i][BLK - 1] != (char)i)
             break;
     check(i == n, "malloc blocks do not overlap");
-    printf("heap: %u blocks of 1 KB (%lu bytes) before NULL\n", n, total);
+    printf("heap: %u blocks of %u bytes (%lu bytes) before NULL\n", n, BLK, total);
     while (n)
         free(p[--n]);
     q = malloc(4000);
@@ -329,16 +336,33 @@ static void t_fullheap(void)
 {
     static void *p[400];
     FILE *f;
-    unsigned n = 0, k, peak0 = hz_heap_peak(), free0 = hz_heap_free();
+    unsigned n = 0, k, first512 = 0;
+#ifdef __CC816_FAR_DATA__
+    /* (far data: the heap's counts are long; a bank is kept when the heap is emptied, so
+     * the free bytes are at least what they were) */
+    unsigned long peak0 = hz_heap_peak(), free0 = hz_heap_free();
+#define HEAPAGAIN(x) ((x) >= free0)
+#else
+    unsigned peak0 = hz_heap_peak(), free0 = hz_heap_free();
+#define HEAPAGAIN(x) ((x) == free0)
+#endif
     char line[64];
     check(free0 >= hz_heap_largest() && hz_heap_largest() > 1024, "hz_heap_free, largest");
+#ifdef __CC816_FAR_DATA__
+    while (n < 150 && (p[n] = malloc(65000u)) != 0)         /* every bank Horizon has */
+        n++;
+    first512 = n;
+    while (n < 300 && (p[n] = malloc(512)) != 0)            /* the heap filled ... */
+        n++;
+#else
     while (n < 200 && (p[n] = malloc(512)) != 0)            /* the heap filled ... */
         n++;
+#endif
     k = n;
     while (n < 400 && (p[n] = malloc(6)) != 0)              /* ... to the last bytes */
         n++;
     check(k > 10 && n < 400 && hz_heap_largest() < 6, "the heap filled");
-    check(hz_heap_peak() >= peak0 && hz_heap_peak() >= 512u * k, "hz_heap_peak");
+    check(hz_heap_peak() >= peak0 && hz_heap_peak() >= 512UL * k, "hz_heap_peak");
     f = fopen("/CFULL.TXT", "w");
     check(f != 0 && f->size == 2, "fopen with the heap full");
     if (f) {
@@ -346,8 +370,8 @@ static void t_fullheap(void)
             fprintf(f, "%03u\n", k);
         check(fclose(f) == 0, "fclose with the heap full");
     }
-    free(p[0]);                 /* 512 bytes free: the 128-byte buffer this time */
-    p[0] = 0;
+    free(p[first512]);          /* 512 bytes free: the 128-byte buffer this time */
+    p[first512] = 0;
     f = fopen("/CFULL.TXT", "r");
     check(f != 0 && f->size == 128, "fopen r with the heap nearly full");
     if (f) {
@@ -360,9 +384,9 @@ static void t_fullheap(void)
     }
     while (n)
         free(p[--n]);
-    check(hz_heap_free() == free0, "the heap whole again");
+    check(HEAPAGAIN(hz_heap_free()), "the heap whole again");
     f = fopen("/CFULL.TXT", "r");
-    check(f != 0 && setvbuf(f, NULL, _IONBF, 0) == 0 && hz_heap_free() == free0,
+    check(f != 0 && setvbuf(f, NULL, _IONBF, 0) == 0 && HEAPAGAIN(hz_heap_free()),
           "setvbuf _IONBF gives the buffer back");
     if (f) {
         check(fgets(line, sizeof line, f) && !strcmp(line, "000\n"), "read unbuffered");

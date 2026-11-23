@@ -192,8 +192,25 @@ class StructT(T):
         self.uid = StructT._n    # the same structure (copies made by qualifiers keep it)
         self.tag = tag
         self.union = union
-        self.fields = None       # None = incomplete
-        self.size = 0
+        # the members and the size, shared with the copies qualifiers make (a `struct s
+        # __near *` declared before struct s is defined sees the definition)
+        self.body = {'fields': None, 'size': 0}
+
+    @property
+    def fields(self):
+        return self.body['fields']   # None = incomplete
+
+    @fields.setter
+    def fields(self, v):
+        self.body['fields'] = v
+
+    @property
+    def size(self):
+        return self.body['size']
+
+    @size.setter
+    def size(self, v):
+        self.body['size'] = v
 
     @property
     def complete(self): return self.fields is not None
