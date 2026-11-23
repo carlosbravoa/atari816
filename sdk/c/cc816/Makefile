@@ -4,9 +4,10 @@
 #                        small large; hcc --code large): the messages (tests/diag/*.c,
 #                        tests/diag.py, no emulator), tests/regress/*.c, tests/lang/*.c,
 #                        the random programs (fuzz/genfuzz.py, seeds 1, 2 and 3: 200 x seed
-#                        programs; SEEDS=1,2 to change) and the random floating-point
-#                        programs (100 x seed) in emu816, and the c-testsuite when
-#                        CTS=<checkout> is given
+#                        programs; SEEDS=1,2 to change), the random negative-index and
+#                        floating-point programs (100 x seed each) in emu816, and the
+#                        c-testsuite when CTS=<checkout> is given; every program under
+#                        emu816 --log-bankwrap (an access carried into the next bank fails)
 #   make diag            the messages only (a few seconds)
 #   make quick           the same with 50 random programs a seed (25 float ones)
 #   make sdk             compile (not run) every C file of the SDK (tests/sdkcompile.py)

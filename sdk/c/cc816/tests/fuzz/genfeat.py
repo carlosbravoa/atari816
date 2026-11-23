@@ -46,12 +46,20 @@ same type, no structure layout in the checksums.
               initialisers, pointers, parameters and results, variadic doubles,
               sprintf %f %e %g; checked bit for bit (NaNs as one) against gcc's SSE
               single precision
+    index     (not in "all": --features basic,index) negative and wrapping indexes: pointers
+              into the middle of local and global arrays (every width, structures, 2-D
+              rows) indexed with negative int and signed char values, p[i - 1],
+              p[i + 2], *(p - n), a[k + mid], loops down to 0 and from -mid up, stores,
+              and p[u] with an unsigned u meant as negative (WIX: the host reads p[(int16_t)u];
+              far data, which does not wrap an offset, the same); checked against gcc
+              and, as every program, under emu816 --log-bankwrap (no access may carry
+              into the next bank)
 """
 from genfuzz import TYPES, OPS, CMPS, Gen
 
 FEATURES = ['basic', 'struct', 'bitfield', 'fptr', 'vararg', 'far', 'switch', 'spill', 'ptr',
             'globals', 'init', 'union', 'goto', 'misc', 'llong', 'constop']
-EXTRA_FEATURES = ['float']          # chosen by name only (all keeps its old programs)
+EXTRA_FEATURES = ['float', 'index']  # chosen by name only (all keeps its old programs)
 AVOID_KNOWN = False     # True: leave out the shapes of the compiler bugs in regress/ (while they are open)
 LOWOPS = ['add', 'sub', 'mul', 'and', 'or', 'xor']      # low bits independent of the width
 CSYM = {'add': '+', 'sub': '-', 'mul': '*', 'and': '&', 'or': '|', 'xor': '^'}
@@ -1436,6 +1444,103 @@ class FGen(Gen):
         return self.tail(L, vars_)
 
     # ------------------------------------------------------------------ program
+    # ------------------------------------------------------------------ negative indexes
+    def feat_index(self, idx):
+        r = self.r
+        P = f'F{idx}_'
+        G = self.G
+        ts = r.sample(list(TYPES), 3)
+        G.append(f'static int16_t {P}ix(int16_t v, int16_t lo, int16_t n) {{ int16_t m = (int16_t)(v % n); '
+                 f'if (m < 0) m = (int16_t)(m + n); return (int16_t)(lo + m); }}')
+        for t in ts:
+            T = tn(t)
+            G.append(f'static {T} {P}g_{t}({T} *p, int16_t i) {{ return p[i]; }}')
+            G.append(f'static {T} {P}gc_{t}({T} *p, int8_t i) {{ return p[i]; }}')
+            G.append(f'static {T} {P}gm_{t}({T} *p, int16_t i) {{ return p[i - 1]; }}')
+            G.append(f'static {T} {P}gp_{t}({T} *p, int16_t i) {{ return p[i + 2]; }}')
+            G.append(f'static {T} {P}gs_{t}({T} *p, int16_t n) {{ return *(p - n); }}')
+            G.append(f'static {T} {P}gu_{t}({T} *p, uint16_t u) {{ return p[WIX(u)]; }}')
+            G.append(f'static void {P}s_{t}({T} *p, int16_t i, {T} v) {{ p[i] = v; p[i - 1] ^= ({T})1; }}')
+        ne, rr, cc = r.randint(4, 12), r.randint(3, 8), r.randint(2, 9)
+        G.append(f'struct {P}E {{ int16_t a; uint8_t b; int32_t c; }};')
+        G.append(f'static struct {P}E {P}ge[{ne}];')
+        G.append(f'static int16_t {P}g2[{rr}][{cc}];')
+        G.append(f'static int32_t {P}gec(struct {P}E *p, int16_t i) {{ return ADD_i32(p[i].c, p[i].a); }}')
+        G.append(f'static int16_t {P}g2get(int16_t (*q)[{cc}], int16_t i, int16_t j) {{ return q[i][j]; }}')
+        arrs = []           # (name, type, count, mid)
+        for k, t in enumerate(ts):
+            n = r.randint(6, 30)
+            arrs.append((f'{P}ga{k}', t, n, r.randint(1, n - 1), True))
+            G.append(f'static {tn(t)} {P}ga{k}[{n}];')
+        L = self.head(idx)
+        vars_ = self.scalars(L, r.randint(3, 5))
+        for k, t in enumerate(ts):
+            n = r.randint(6, 30)
+            arrs.append((f'la{k}', t, n, r.randint(1, n - 1), False))
+            L.append(f'    {tn(t)} la{k}[{n}];')
+        for a, t, n, mid, _g in arrs:
+            L.append(f'    {tn(t)} *m_{a} = &{a}[{mid}];')
+        L.append('    int16_t k, k2; int8_t c8;')
+        L.append(f'    struct {P}E *pe = &{P}ge[{r.randrange(ne)}];')
+        r0 = r.randrange(rr)
+        L.append(f'    int16_t (*q2)[{cc}] = &{P}g2[{r0}];')
+        L.append('    H = 0;')
+        for a, t, n, mid, _g in arrs:
+            L.append(f'    for (i = 0; i < {n}; i++) {a}[i] = ({tn(t)})MUL_{t}(ADD_{t}(i, {self.const(t)}), {self.const(t)});')
+        L.append(f'    for (i = 0; i < {ne}; i++) {{ {P}ge[i].a = (int16_t)MUL_i16(i, {r.randint(-999, 999)}); '
+                 f'{P}ge[i].b = (uint8_t)(i * 7); {P}ge[i].c = MUL_i32(i, {r.randint(-99999, 99999)}L); }}')
+        L.append(f'    for (i = 0; i < {rr}; i++) for (j = 0; j < {cc}; j++) {P}g2[i][j] = (int16_t)MUL_i16(ADD_i16(MUL_i16(i, {cc}), j), {r.randint(-999, 999)});')
+        L.append(f'    pe = &{P}ge[{r.randrange(ne)}];')
+        pe_mid = None
+        for _ in range(r.randint(10, 18)):
+            a, t, n, mid, isg = r.choice(arrs)
+            T = tn(t)
+            m = f'm_{a}'
+            e = self.expr('i16', vars_, 2)
+            kk = r.random()
+            # k in [-mid, n - mid): m[k] is a[mid + k]
+            L.append(f'    k = {P}ix({e}, {-mid}, {n});')
+            if kk < 0.1:
+                L.append(f'    mix((uint32_t){m}[k]); mix((uint32_t)*({m} + k));')
+            elif kk < 0.18:
+                L.append(f'    mix((uint32_t){P}g_{t}({m}, k)); c8 = (int8_t)k; mix((uint32_t){P}gc_{t}({m}, c8));' if t in ts else
+                         f'    mix((uint32_t){m}[k]);')
+            elif kk < 0.26:
+                L.append(f'    k2 = (int16_t)(k + 1); mix((uint32_t){P}gm_{t}({m}, k2)); mix((uint32_t){m}[k2 - 1]);')
+            elif kk < 0.33:
+                L.append(f'    k2 = (int16_t)(k - 2); mix((uint32_t){P}gp_{t}({m}, k2)); mix((uint32_t){m}[k2 + 2]);')
+            elif kk < 0.4:
+                L.append(f'    k2 = (int16_t)-k; mix((uint32_t){P}gs_{t}({m}, k2)); mix((uint32_t)*({m} - k2));')
+            elif kk < 0.48:
+                L.append(f'    mix((uint32_t){P}gu_{t}({m}, (uint16_t)k)); mix((uint32_t){m}[WIX((uint16_t)k)]);')
+            elif kk < 0.56:
+                L.append(f'    if (k > {-mid}) {P}s_{t}({m}, k, ({T}){self.expr(t, vars_, 1)}); '
+                         f'mix((uint32_t){a}[{mid} + k]);')
+            elif kk < 0.62:
+                L.append(f'    {m}[k] {CSYM[r.choice(LOWOPS)]}= ({T}){self.expr(t, vars_, 1)}; mix((uint32_t){a}[k + {mid}]);')
+            elif kk < 0.68:
+                L.append(f'    k2 = (int16_t)(k + {mid}); mix((uint32_t){a}[k2]); mix((uint32_t){a}[k2 - 1 < 0 ? 0 : k2 - 1]);')
+            elif kk < 0.74:
+                L.append(f'    for (k2 = {n}; k2 > 0; k2--) mix((uint32_t){a}[k2 - 1]);')
+            elif kk < 0.8:
+                L.append(f'    for (k2 = {-mid}; k2 < {n - mid}; k2++) mix((uint32_t){m}[k2]);')
+            elif kk < 0.86:
+                L.append(f'    k2 = {n - mid}; while (--k2 >= {-mid}) {m}[k2] = ({T})ADD_{t}({m}[k2], 3);')
+            elif kk < 0.93:
+                o = r.randrange(ne)
+                L.append(f'    pe = &{P}ge[{o}]; k2 = {P}ix({e}, {-o}, {ne}); mix((uint32_t){P}gec(pe, k2)); '
+                         f'pe[k2].b++; mix((uint32_t)pe[k2].b); mix((uint32_t)pe[k2].c);')
+            else:
+                L.append(f'    k2 = {P}ix({e}, {-r0}, {rr}); mix((uint32_t){P}g2get(q2, k2, {r.randrange(cc)})); '
+                         f'mix((uint32_t)q2[k2][{r.randrange(cc)}]);')
+            if r.random() < 0.3:
+                n0, t0 = r.choice(vars_)
+                L.append(f'    {n0} = ({tn(t0)})ADD_{t0}({n0}, k);')
+        for a, t, n, mid, _g in arrs:
+            L.append(f'    for (i = 0; i < {n}; i++) mix((uint32_t){a}[i]);')
+        L.append(f'    for (i = 0; i < {ne}; i++) mix((uint32_t){P}ge[i].b);')
+        return self.tail(L, vars_)
+
     def program_feats(self, feats):
         r = self.r
         G = self.base_globals()
@@ -1444,6 +1549,8 @@ class FGen(Gen):
         pick = []
         if extra == ['float']:
             pick = ['float'] * r.randint(2, 3)
+        elif extra == ['index']:
+            pick = ['index'] * r.randint(2, 3)
         elif extra:
             pick = r.sample(extra, min(len(extra), r.randint(2, 4)))
         nb = (r.randint(1, 2) if extra else r.randint(3, 6)) if 'basic' in feats else 0

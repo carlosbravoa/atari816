@@ -11,7 +11,8 @@ known to need long (its name and its seconds) runs in a batch of its own with th
 
 A test passes when it exits with 0 and, if FILE.c.expected exists, its console output
 equals that file. Results: OUT/results.json and a summary on stdout.
-Statuses: pass, fail (wrong exit code or output), unsupported (cc816 says a feature is
+Statuses: pass, fail (wrong exit code or output), bankwrap (an indexed access carried
+into the next bank: emu816 --log-bankwrap, run with every batch), unsupported (cc816 says a feature is
 not supported), compile-error (cc816 rejects the program), crash (cc816 raised an
 internal error), asm-error (ca65/ld65 rejected cc816's output), killed (the kernel killed
 the test), timeout (no end marker: hung)."""
@@ -61,9 +62,15 @@ def run_batch(out, ks, runner, seconds):
            '--out', os.path.join(out, f'run-{first}')]
     for k in ks:
         cmd += ['--file', os.path.join(out, f'T{k:03d}.PRG') + f':/T/T{k:03d}.PRG']
+    cmd.append('--log-bankwrap')
     subprocess.run(cmd, capture_output=True, text=True)
     con = open(os.path.join(out, f'run-{first}', 'console.txt'), encoding='latin-1').read()
-    res = {}
+    try:
+        err = open(os.path.join(out, f'run-{first}', 'emu.err'), encoding='latin-1').read()
+    except OSError:
+        err = ''
+    wraps = [ln for ln in err.splitlines() if ln.startswith('bankwrap ')]
+    res = {'wraps': wraps}
     for k in ks:
         m = re.search(rf'@@BEGIN {k}\n(.*?)\n@@END {k} (exit|spawn-error) (\d+)', con, re.S)
         if not m:
@@ -146,6 +153,16 @@ def main():
                 else:
                     results[k].update(status='fail', msg=(f'exit {code}' if code else '') +
                                       ('' if got_ok else ' output differs: ' + repr(text[:100])))
+            if r['wraps']:
+                # an indexed access carried out of its bank (emu816 --log-bankwrap: a
+                # negative index register, cc816's fault): which program did it
+                run = [k for k in ks[:done] if results[k]['status'] in ('pass', 'fail')]
+                for k in run if len(run) > 1 else ():
+                    r1 = run_batch(out, [k], runner, max(30, int(6 + spt)))
+                    if r1['wraps']:
+                        results[k].update(status='bankwrap', msg=r1['wraps'][0])
+                if len(run) == 1:
+                    results[run[0]].update(status='bankwrap', msg=r['wraps'][0])
             if done == 0:
                 for k in ks:
                     results[k].update(status='timeout', msg='batch produced nothing')

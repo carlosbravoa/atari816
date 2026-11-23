@@ -21,12 +21,16 @@ in far data; results in build/cc816-largefar).
   fuzz      random programs from fuzz/genfuzz.py checked against the host's gcc (seeds 1
             and 2, 200 and 400 programs; --fuzz N programs a seed, --seeds to choose;
             --features: genfuzz.py's shapes, all by default, basic for the original ones)
+  fuzzix    random programs of negative and wrapping indexes (genfuzz.py --features
+            basic,index: 100 x seed programs a seed, --fuzz N too)
   fuzzfp    random floating-point programs (genfuzz.py --features basic,float: 100 x seed
             programs a seed, --fuzz N too) checked bit for bit against gcc's SSE single
             precision; --no-float leaves them out
   cts       the c-testsuite (git clone https://github.com/c-testsuite/c-testsuite), when
             --cts DIR (or $CTS) points at a checkout: its single-exec tests
 
+Every program runs under emu816 --log-bankwrap: an indexed access that carries into the
+next bank fails it (conform.py's status bankwrap).
 Prints a summary line for each part and every program that did not pass; exit code 1 when
 a diag, regress, lang or fuzz program failed, or a c-testsuite program that is not
 explained in tests/cts-known.txt (what cc816 does not support is listed there, with the
@@ -152,6 +156,22 @@ def main():
                             str(seed), '--features', feats], check=True, capture_output=True)
         res = conform(sorted(glob.glob(os.path.join(src, 'fz*.c'))),
                       os.path.join(prog.BUILD, f'fuzz{seed}'), 2)
+        bad += sum(1 for r in res.values() if r['status'] != 'pass')
+    for seed in seeds:
+        # negative and wrapping indexes (genfeat.py's index: pointers into the middle of
+        # arrays), every program also under --log-bankwrap as all are
+        n = (count // 2 if count else 100 * seed)
+        print(f'== fuzz index, seed {seed}: {n} programs')
+        src = os.path.join(prog.SRCBUILD, f'fuzzixsrc{seed}-{n}-{gen_tag()}')
+        if len(glob.glob(os.path.join(src, 'fz*.c'))) < n * 9 // 10:
+            import shutil
+            shutil.rmtree(src, ignore_errors=True)
+            drop_old(f'fuzzixsrc{seed}-{n}', src)
+            subprocess.run([sys.executable, os.path.join(HERE, 'fuzz', 'genfuzz.py'), src, str(n),
+                            str(seed), '--features', 'basic,index'], check=True,
+                           capture_output=True)
+        res = conform(sorted(glob.glob(os.path.join(src, 'fz*.c'))),
+                      os.path.join(prog.BUILD, f'fuzzix{seed}'), 2)
         bad += sum(1 for r in res.values() if r['status'] != 'pass')
     for seed in seeds if flt else ():
         n = (count // 2 if count else 100 * seed)

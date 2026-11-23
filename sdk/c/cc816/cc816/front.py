@@ -38,10 +38,15 @@ class RV:
 
 class LV:
     """an lvalue: kind 'reg' (op = V) or 'mem' (base, idx, off); bit-fields: fld"""
-    __slots__ = ('kind', 'op', 'base', 'idx', 'off', 't', 'fld', 'vol', 'post', 'farobj')
+    __slots__ = ('kind', 'op', 'base', 'idx', 'off', 't', 'fld', 'vol', 'post', 'farobj',
+                 'nnidx')
 
     def __init__(self, kind, t, op=None, base=None, idx=None, off=0, fld=None):
         self.farobj = False  # inside a __far object (in one bank: [base],y with a 16-bit Y)
+        # idx is made of subscripts of array objects alone, each without a positive
+        # constant part (a[i], a[i][j], s.m[i], p->m[i]: C wants each such index in its
+        # array, so 0 or more): the load or store says so (ilo 0, gen.addr)
+        self.nnidx = False
         self.kind = kind
         self.t = t
         self.op = op
@@ -2538,6 +2543,7 @@ class Front:
             lv = LV('mem', ft, base=base.base, idx=base.idx, off=base.off + foff,
                     fld=f if f.bits is not None else None)
             lv.vol = lv.vol or base.vol
+            lv.nnidx = base.nnidx
             lv.farobj = base.farobj and e.type == '.'
             return lv
         if isinstance(e, c_ast.CompoundLiteral):
@@ -2612,23 +2618,21 @@ class Front:
         size = el.size if not el.is_void else 1
         # constant part of the index: a[i + 3] -> base + i*size, offset 3*size
         koff = 0
-        whole = idx
         while isinstance(idx, c_ast.BinaryOp) and idx.op in ('+', '-') and self.const_eval(idx.right) is not None:
             k = self.const_eval(idx.right)
             koff += k if idx.op == '+' else -k
             idx = idx.left
         kv = self.const_eval(idx)
-        if kv is None and koff > 0 and self.expr_type(idx).signed:
-            # a[d + 1] with a signed d: d alone may be negative (d = -1: a[0]), and a
-            # negative index register carries into the next bank (abs,x and (dp),y add
-            # 24 bits): keep the constant in the index (the Prince of Persia port)
-            idx, koff = whole, 0
+        # (a[d + 1] with d = -1: the index register holds d alone, $FFFF, and the base is
+        # a + 1: gen.addr adds the two in 16 bits unless d is known non-negative (an index
+        # register carries into the next bank: r040, the Prince of Persia port)
         # the base address: an array (a variable, an element of an array of arrays, a
         # member) as an lvalue, its element's index added to its own (a[i][j]: one 16-bit
         # index); else a pointer's value
-        if isinstance(arr, (c_ast.ID, c_ast.ArrayRef, c_ast.StructRef)) and \
-                self.expr_type(arr).is_arr and \
-                not (isinstance(arr, c_ast.ID) and not self.lookup(arr.name)):
+        isarr = isinstance(arr, (c_ast.ID, c_ast.ArrayRef, c_ast.StructRef)) and \
+            self.expr_type(arr).is_arr and \
+            not (isinstance(arr, c_ast.ID) and not self.lookup(arr.name))
+        if isarr:
             base = self.lval(arr)
         else:
             p = self.rv(arr)
@@ -2636,6 +2640,7 @@ class Front:
         if kv is not None:
             lv = LV('mem', el, base=base.base, idx=base.idx, off=base.off + (kv + koff) * size)
             lv.farobj = base.farobj
+            lv.nnidx = base.nnidx
             return lv
         iv = self.convert(self.rv(idx), INT if self.expr_type(idx).signed else UINT)
         sc = self.scale(iv.op, size)
@@ -2655,10 +2660,17 @@ class Front:
                 not base.farobj and iv.t.signed and MODEL['far_data']:
             # (far data: a far pointer + a signed index: the index added to the offset
             # alone, as DOS's far pointers do (the element is in the pointer's object, so
-            # in its bank): 20 cycles less than widening the index to 32 bits and adding)
+            # in its bank): 20 cycles less than widening the index to 32 bits and adding).
+            # The constant part of the index goes into the offset too: p[d + 1] with
+            # d = -1 at a bank's start would put p + d out of the bank (the offset wraps
+            # to $FFFE, and [p],y with Y = 2 carries into the next bank)
+            if koff:
+                k = self.newv(2)
+                self.emit(Ins('add', k, sc, Imm((koff * size) & 0xFFFF)))
+                sc = k
             nv = self.newv(4)
             self.emit(Ins('addlo', nv, base.base, sc))
-            return LV('mem', el, base=nv, off=base.off + koff * size)
+            return LV('mem', el, base=nv, off=base.off)
         if isinstance(base.base, V) and base.base.size == 4 and \
                 not base.farobj and iv.t.signed:
             # far pointer + a signed index: a 32-bit step (the index may be negative)
@@ -2671,6 +2683,9 @@ class Front:
         # in one bank: the index in Y, [pointer],y; the Xargon port's 2-D board)
         lv = LV('mem', el, base=base.base, idx=sc, off=base.off + koff * size)
         lv.farobj = base.farobj
+        # (an array object's index: 0 or more; without a positive constant part (a[d + 1]:
+        # d may be -1) the part in the register is 0 or more too)
+        lv.nnidx = isarr and koff <= 0 and (base.idx is None or base.nnidx)
         return lv
 
     def scale(self, op, size):
@@ -2711,18 +2726,20 @@ class Front:
         size = t.size
         d = dst if dst is not None and dst.size == vsz(t) else self.newv(vsz(t))
         self.emit(Ins('ld', d, base=lv.base, idx=lv.idx, off=lv.off, sz=size,
-                      sgn=t.is_int and t.signed, vol=lv.vol))
+                      sgn=t.is_int and t.signed, vol=lv.vol, **_nn(lv)))
         return self.to_dst(RV(d, t), dst)
 
-    def store(self, base, idx, off, t, val, vol=False):
-        self.emit(Ins('st', a=val, base=base, idx=idx, off=off, sz=t.size, vol=vol))
+    def store(self, base, idx, off, t, val, vol=False, lv=None):
+        self.emit(Ins('st', a=val, base=base, idx=idx, off=off, sz=t.size, vol=vol,
+                      **(_nn(lv) if lv is not None else {})))
 
     def load_bits(self, lv, dst):
         f = lv.fld
         ut = UINT if f.type.size <= 2 else ULONG
         sz = f.type.size
         w = self.newv(4 if sz == 4 else 2)
-        self.emit(Ins('ld', w, base=lv.base, idx=lv.idx, off=lv.off, sz=sz, sgn=False, vol=lv.vol))
+        self.emit(Ins('ld', w, base=lv.base, idx=lv.idx, off=lv.off, sz=sz, sgn=False, vol=lv.vol,
+                      **_nn(lv)))
         bits = 8 * (4 if sz == 4 else 2)
         r = w
         if f.type.signed:
@@ -2751,7 +2768,8 @@ class Front:
         vs = 4 if sz == 4 else 2
         mask = ((1 << f.bits) - 1)
         w = self.newv(vs)
-        self.emit(Ins('ld', w, base=lv.base, idx=lv.idx, off=lv.off, sz=sz, sgn=False, vol=lv.vol))
+        self.emit(Ins('ld', w, base=lv.base, idx=lv.idx, off=lv.off, sz=sz, sgn=False, vol=lv.vol,
+                      **_nn(lv)))
         a = self.newv(vs)
         self.emit(Ins('and', a, w, Imm(~(mask << f.bitpos), vs)))
         v = self.conv_op(val, vs)
@@ -2763,7 +2781,8 @@ class Front:
             b = c
         o = self.newv(vs)
         self.emit(Ins('or', o, a, b))
-        self.emit(Ins('st', a=o, base=lv.base, idx=lv.idx, off=lv.off, sz=sz, vol=lv.vol))
+        self.emit(Ins('st', a=o, base=lv.base, idx=lv.idx, off=lv.off, sz=sz, vol=lv.vol,
+                      **_nn(lv)))
 
     def bits_value(self, r, f):
         """the value a bit-field holds after r was stored in it: r cut to the field's width
@@ -2858,7 +2877,7 @@ class Front:
         if lv.fld is not None:
             self.store_bits(lv, r)
             return self.bits_value(r, lv.fld)
-        self.store(lv.base, lv.idx, lv.off, t, r.op, lv.vol)
+        self.store(lv.base, lv.idx, lv.off, t, r.op, lv.vol, lv=lv)
         self.finish(lv)
         return r
 
@@ -2980,7 +2999,7 @@ class Front:
             res = self.bits_value(res, lv.fld)
         else:
             res = self.convert(res, lv.t.unqual())
-            self.store(lv.base, lv.idx, lv.off, lv.t, res.op, lv.vol)
+            self.store(lv.base, lv.idx, lv.off, lv.t, res.op, lv.vol, lv=lv)
             self.finish(lv)
         return self.to_dst(RV(res.op, lv.t.unqual()), dst) if want else None
 
@@ -3033,7 +3052,7 @@ class Front:
             if want and not post:
                 return self.load(lv, dst)
         else:
-            self.store(lv.base, lv.idx, lv.off, t, nv, lv.vol)
+            self.store(lv.base, lv.idx, lv.off, t, nv, lv.vol, lv=lv)
             self.finish(lv)
         if not want:
             return None
@@ -3057,7 +3076,7 @@ class Front:
         nv = lv.op if lv.kind == 'reg' else self.newv(4)
         self.emit(Ins(irop, nv, cur.op, Imm(0x3F800000, 4)))
         if lv.kind != 'reg':
-            self.store(lv.base, lv.idx, lv.off, t, nv, lv.vol)
+            self.store(lv.base, lv.idx, lv.off, t, nv, lv.vol, lv=lv)
             self.finish(lv)
         if not want:
             return None
@@ -3875,7 +3894,7 @@ class Front:
             lv = self.lval(args[0])
             d = self.newv(4)
             self.emit(Ins('vastart', d))
-            self.store(lv.base, lv.idx, lv.off, lv.t, d) if lv.kind == 'mem' else \
+            self.store(lv.base, lv.idx, lv.off, lv.t, d, lv=lv) if lv.kind == 'mem' else \
                 self.emit(Ins('mov', lv.op, d))
             return RV(Imm(0), VOID)
         if name == '__cop':
@@ -4136,6 +4155,11 @@ SETJMP_NAMES = {'setjmp', '_setjmp', 'sigsetjmp', '__sigsetjmp'}
 PRINTF_NAMES = {'printf', 'fprintf', 'sprintf', 'snprintf', 'vprintf', 'vfprintf', 'vsprintf',
                 'vsnprintf'}
 SCANF_NAMES = {'scanf', 'fscanf', 'sscanf', 'vscanf', 'vfscanf', 'vsscanf'}
+
+
+def _nn(lv):
+    """a load's or store's ilo when its index is an array object's (LV.nnidx)"""
+    return {'ilo': 0} if lv.nnidx and isinstance(lv.idx, V) else {}
 
 
 def decay(t):

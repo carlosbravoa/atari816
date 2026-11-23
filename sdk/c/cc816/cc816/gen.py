@@ -1426,9 +1426,34 @@ class Gen:
         self.sta(i.d, 1)
 
     # --- memory
-    def addr(self, base, idx, off):
+    # An index register never carries an access out of its bank. The 65816 adds X or Y to
+    # the 16-bit base of abs,x / abs,y / (dp),y / (sr,s),y in 24 bits: base + index past
+    # $FFFF is the next bank, not the bank's start, so a near address is right only when
+    # the base is at or below the address and the index is the (non-negative) difference.
+    # The forms below keep that invariant:
+    #   - a Frame (the software stack): Y = the element's offset from __sp, computed in
+    #     16 bits (an object in the frame lies above __sp): always.
+    #   - a symbol name+o with X: when o <= 0 (the base is at or below the object's start,
+    #     every access through it is at or above it), or when the index is known to be a
+    #     non-negative offset (ilo: opt.index_bounds); else X = index + o (16-bit sum) and
+    #     the base is the bare name.
+    #   - a near pointer p with Y: when the index is known non-negative and ilo + off >= 0
+    #     (Y = index + off is then the real distance from p); else p + index + off is
+    #     added in 16 bits into __h2, read as (__h2) (Y = 0, 2 for the next words).
+    #   - a far pointer [p],y: Y is part of the 32-bit address by design (an unsigned
+    #     index; front.py adds a signed one to the pointer, or to its offset with far data).
+    # (dp),y with a constant Y (a member's offset, off >= 0) carries only for an object
+    # that crosses the top of the bank, which cannot exist; a negative constant offset is
+    # added to the pointer (below). docs/c/reference.md, "Negative indexes".
+    def addr(self, base, idx, off, ilo=None):
         """set up X/Y for an access; returns a function part -> operand text.
-        May clobber A."""
+        May clobber A. ilo: a lower bound of idx's value known by opt.index_bounds (a
+        non-negative offset), or None."""
+        if isinstance(idx, Imm) and not (isinstance(base, V) and base.size == 4) and \
+                not (isinstance(base, Imm) and base.size == 4):
+            # a constant index (a propagated value): a 16-bit constant offset, wrapping
+            k = idx.val & 0xFFFF
+            off, idx = off + (k - 0x10000 if k >= 0x8000 else k), None
         if isinstance(base, Imm):
             # a constant address (the optimiser put a constant pointer's value here)
             v = base.val
@@ -1451,8 +1476,13 @@ class Gen:
             fa = 'f:' if self.farsym(name) else ''
             if idx is None:
                 return lambda p: fa + self.symoff(name, o + 2 * p)
-            if isinstance(idx, Imm):
-                return lambda p: fa + self.symoff(name, o + idx.val + 2 * p)
+            if o > 0 and ilo is None:
+                # (the index may be negative: X = index + o, the base the object's start)
+                self.lda(idx)
+                self.I('clc')
+                self.I('adc', '#' + hexw(o & 0xFFFF))
+                self.I('tax')
+                return lambda p: fa + self.symoff(name, 2 * p) + ',x'
             self.ldx(idx)
             return lambda p: fa + self.symoff(name, o + 2 * p) + ',x'
         if isinstance(base, Frame):
@@ -1489,6 +1519,26 @@ class Gen:
             else:
                 self.add_to_y(idx, off)
             return self.yseq(f'[{ptr}],y', off if idx is None else None)
+        if isinstance(base, V) and idx is not None and (ilo is None or ilo + off < 0):
+            # a near pointer and an index that may be negative: the address added in 16
+            # bits (it wraps in the bank, as C's near pointers do)
+            self.lda(base)
+            self.I('clc')
+            self.I('adc', self.opsrc(idx))
+            if off & 0xFFFF:
+                self.I('clc')
+                self.I('adc', '#' + hexw(off & 0xFFFF))
+            self.I('sta', '__h2')
+            state = {'y': 0}
+
+            def part(p):
+                if p == 0:
+                    return '(__h2)'
+                if state['y'] != 2 * p:
+                    self.I('ldy', '#' + hexw(2 * p))
+                    state['y'] = 2 * p
+                return '(__h2),y'
+            return part
         if isinstance(base, V):
             if base.loc[0] == 'dp':
                 ind = f'({self.vaddr(base)}),y'
@@ -1538,7 +1588,7 @@ class Gen:
     def g_ld(self, i):
         d = i.d
         sz = i.x['sz']
-        acc = self.addr(i.x['base'], i.x['idx'], i.x['off'])
+        acc = self.addr(i.x['base'], i.x['idx'], i.x['off'], i.x.get('ilo'))
         if sz >= 4:
             b = i.x['base']
             # (a word stored before the last one is read must not be part of the pointer)
@@ -1583,7 +1633,7 @@ class Gen:
     def g_st(self, i):
         sz = i.x['sz']
         a = i.a
-        acc = self.addr(i.x['base'], i.x['idx'], i.x['off'])
+        acc = self.addr(i.x['base'], i.x['idx'], i.x['off'], i.x.get('ilo'))
         if sz == 1:
             self.I('sep', '#$20')
             t = acc(0)

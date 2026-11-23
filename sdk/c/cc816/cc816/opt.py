@@ -785,6 +785,180 @@ NEGCC = {'eq': 'ne', 'ne': 'eq', 'ult': 'uge', 'uge': 'ult', 'ule': 'ugt', 'ugt'
          'slt': 'sge', 'sge': 'slt', 'sle': 'sgt', 'sgt': 'sle'}
 
 
+# ---------------------------------------------------------------------- index bounds
+_CAP = 0x7FFF
+
+
+def _lo_of(st, o):
+    """a lower bound of operand o as a non-negative offset in state st, or None"""
+    if isinstance(o, Imm):
+        return o.val if o.size == 2 and o.val < 0x8000 else None
+    if isinstance(o, V) and o.size == 2:
+        return st.get(o)
+    return None
+
+
+def _lo_def(st, ins):
+    """the bound of the value ins defines (2 bytes) from the bounds of its operands"""
+    op, a, b = ins.op, ins.a, ins.b
+    if op == 'mov':
+        return _lo_of(st, a)
+    if op in ('x8u', 'set'):
+        return 0
+    if op == 'ld':
+        return 0 if ins.x['sz'] == 1 and not ins.x.get('sgn') else None
+    la, lb = _lo_of(st, a), _lo_of(st, b)
+    kb = b.val if isinstance(b, Imm) else None
+    if op == 'add':
+        return None if la is None or lb is None else min(la + lb, _CAP)
+    if op == 'mul':
+        return None if la is None or lb is None else min(la * lb, _CAP)
+    if op == 'shl':
+        return None if la is None or kb is None or kb > 15 else min(la << kb, _CAP)
+    if op == 'and':
+        return 0 if la is not None or lb is not None else None
+    if op == 'or':
+        return None if la is None or lb is None else max(la, lb)
+    if op == 'xor':
+        return 0 if la is not None and lb is not None else None
+    if op == 'ushr':
+        return 0 if la is not None or (kb is not None and kb >= 1) else None
+    if op in ('sshr', 'smod'):
+        return 0 if la is not None else None
+    if op == 'udiv':
+        return 0 if la is not None or (kb is not None and kb >= 2) else None
+    if op == 'sdiv':
+        return 0 if la is not None and lb is not None else None
+    if op == 'umod':
+        return 0 if la is not None or lb is not None or \
+            (kb is not None and 1 <= kb <= 0x8000) else None
+    return None
+
+
+def _guard(st, t, taken):
+    """the state on an edge of branch t (taken: its true edge): a compare of a value with
+    a constant bounds it from below (i >= 0, i > k, i < K unsigned with K <= $8000)"""
+    a, b = t.a, t.b
+    if not (isinstance(a, V) and a.size == 2 and isinstance(b, Imm) and b.size == 2):
+        return st
+    cc = t.x['cc'] if taken else NEGCC[t.x['cc']]
+    k = b.val - 0x10000 if b.val >= 0x8000 else b.val
+    n = None
+    if cc == 'sge' and k >= 0:
+        n = k
+    elif cc == 'sgt' and k >= -1:
+        n = k + 1
+    elif cc == 'eq' and k >= 0:
+        n = k
+    elif cc == 'ult' and b.val <= 0x8000 or cc == 'ule' and b.val < 0x8000:
+        n = 0
+    if n is None:
+        return st
+    cur = st.get(a)
+    if cur is not None and cur >= n:
+        return st
+    st = dict(st)
+    st[a] = n
+    return st
+
+
+def index_bounds(f):
+    """which loads and stores have an index register known to hold a non-negative
+    offset: ld/st x['ilo'] = a lower bound of idx's value there (gen.addr keeps the
+    indexed forms for them; any other index is added to its base in 16 bits: an index
+    register carries into the next bank). A forward dataflow over the blocks, from
+    optimistic at the loops' heads: a value is a non-negative offset when it is a
+    constant below $8000, an unsigned byte (a load, x8u), a mask (and with such a value),
+    a right shift, an unsigned quotient or remainder, a compare's 0/1, a sum / product /
+    left shift of such values (an induction variable counting up from a non-negative
+    start: i = 0 ... i += c), or a value a branch has compared (i >= 0, i < K unsigned,
+    K <= $8000: the loop i = n; while (--i >= 0) p[i]). A subtraction, a signed byte, a
+    16-bit load, a parameter, a call's result are not: a negative index, or an unsigned
+    one meant to wrap (p[u] with u = $FFFF is p[-1] through a near pointer).
+    Run twice (before the loops' passes, which turn i's compare and i * 2 into separate
+    values, and at the end); a bound found by either stays: the passes keep every
+    instruction's operands' values (an index replaced by an equal value), and local_prop's
+    folding of p = &a[i] into a load gives it a new index only where it had none."""
+    rel = set()
+    for b in f.blocks:
+        for ins in b.ins:
+            if ins.op in ('ld', 'st') and isinstance(ins.x.get('idx'), V):
+                rel.add(ins.x['idx'])
+    if not rel:
+        return
+    # the values the indexes are computed from
+    defs = {}
+    for b in f.blocks:
+        for ins in b.ins:
+            for d in ins.defs():
+                defs.setdefault(d, []).append(ins)
+    work = list(rel)
+    while work:
+        v = work.pop()
+        for ins in defs.get(v, ()):
+            for o in (ins.a, ins.b):
+                if isinstance(o, V) and o.size == 2 and o not in rel:
+                    rel.add(o)
+                    work.append(o)
+    preds(f)
+    order = f.blocks
+    out = {}            # block -> state (V -> bound) after it; absent: not reached yet
+
+    def edge(p, b):
+        st = out[p]
+        t = p.term
+        if t is not None and t.op == 'br' and t.x['t'] is not t.x['f']:
+            st = _guard(st, t, t.x['t'] is b)
+        return st
+
+    def entry(b):
+        ins_ = [edge(p, b) for p in b.preds if p in out]
+        if b is order[0] or not ins_:
+            return {}
+        st = dict(ins_[0])
+        for o in ins_[1:]:
+            for v in list(st):
+                w = o.get(v)
+                if w is None:
+                    del st[v]
+                elif w < st[v]:
+                    st[v] = w
+        return st
+
+    def walk(b, st, mark=False):
+        for ins in b.ins:
+            if mark and ins.op in ('ld', 'st'):
+                i = ins.x.get('idx')
+                r = st.get(i) if isinstance(i, V) else None
+                if r is not None:
+                    ins.x['ilo'] = max(r, ins.x.get('ilo', 0))
+            for d in ins.defs():
+                if d not in rel:
+                    continue
+                r = _lo_def(st, ins) if ins.d is d else None
+                if r is None:
+                    st.pop(d, None)
+                else:
+                    st[d] = r
+        return st
+    for _round in range(32):
+        changed = False
+        for b in order:
+            if b is not order[0] and not any(p in out for p in b.preds):
+                continue
+            st = walk(b, entry(b))
+            if out.get(b) != st:
+                out[b] = st
+                changed = True
+        if not changed:
+            break
+    else:
+        return              # (not settled: nothing more known)
+    for b in order:
+        if b in out:
+            walk(b, entry(b), mark=True)
+
+
 # ---------------------------------------------------------------------- driver
 def optimise(f, level=2):
     cleanup_cfg(f)
@@ -796,6 +970,7 @@ def optimise(f, level=2):
         if not (c1 or c2 or c3):
             break
     if level >= 2:
+        index_bounds(f)
         preds(f)
         iv_unsigned(f)
         sr = strength_reduce(f)
@@ -815,3 +990,4 @@ def optimise(f, level=2):
             if not (c1 or c2):
                 break
     set_depths(f)
+    index_bounds(f)

@@ -68,6 +68,10 @@ def header(host):
                        f'return ({ct})(a / b); }}')
             out.append(f'static {ct} mod_{t}({ct} a, {ct} b) {{ if (b == 0{" || b == -1" if signed else ""}) b = 7; '
                        f'return ({ct})(a % b); }}')
+    # (p[WIX(u)]: an unsigned index meant as a negative one: wraps through a near pointer;
+    # the host's and the far data model's pointers do not wrap)
+    out.append('#define WIX(u) ((int16_t)(u))' if host else
+               '#ifdef __CC816_FAR_DATA__\n#define WIX(u) ((int16_t)(u))\n#else\n#define WIX(u) (u)\n#endif')
     out.append('static uint32_t H;')
     out.append('static void mix(uint32_t v) { H = (uint32_t)(H * 31u + v); H ^= H >> 7; }')
     return '\n'.join(out)
