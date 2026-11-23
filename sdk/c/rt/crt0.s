@@ -179,12 +179,19 @@ __start:
 	bra	@ct
 @ctd:	CALL	___hz_mkargs	; lib/args.c: A = argc, ___hz_argv = argv
 	tax
+.if FARDATA
+	lda	___hz_argv+2	; (far data: argv is a far pointer, its bank first)
+	pha
+.endif
 	lda	___hz_argv	; main(int argc, char **argv) (or main(void): the same call)
 	pha
 	phx
 	CALL	_main
 	ply
 	ply
+.if FARDATA
+	ply
+.endif
 	jmp	exitA
 
 ; void exit(int code)

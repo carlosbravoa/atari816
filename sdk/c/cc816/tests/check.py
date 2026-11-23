@@ -2,11 +2,13 @@
 """check.py - cc816's regression set, run in emu816 under Horizon (make -C sdk/c/cc816 check).
 
     check.py [--cts DIR] [--fuzz N] [--seeds S1,S2,...] [--features LIST] [--quick]
-             [--code small|large]
+             [--code small|large|large-far]
 
 --code large: every program built with hcc's large code model (--code large), every
 function that can move placed in another bank, in turn in three banks (--main-room 0
---spread 3: the same programs, results in build/cc816-large).
+--spread 3: the same programs, results in build/cc816-large). --code large-far: the same
+with far data (hcc --data far: every data pointer 32 bits, string literals and constants
+in far data; results in build/cc816-largefar).
 
   diag      tests/diag/*.c: the compiler's error and warning messages (tests/diag.py: each
             file says the messages it must give; no emulator)
@@ -97,9 +99,17 @@ def main():
             code = a[i + 1]; i += 2
         else:
             sys.exit(__doc__)
-    if code not in ('small', 'large'):
-        sys.exit('check.py: --code is small or large')
-    if code == 'large':
+    if code not in ('small', 'large', 'large-far'):
+        sys.exit('check.py: --code is small, large or large-far')
+    if code == 'large-far':
+        # the far data model (hcc --code large --data far): every data pointer far, string
+        # literals and constants in far data; the functions spread as in the large model
+        os.environ.update(HZ_CODE='large', HZ_DATA='far', HZ_MAIN_ROOM='0', HZ_SPREAD='3')
+        prog.CODE = prog.hzc816.CODE = 'large'
+        prog.hzc816.DATA = 'far'
+        prog.BUILD = os.path.join(prog.SDKC, 'build', 'cc816-largefar')
+        print('(the far data model: hcc --code large --data far --main-room 0 --spread 3)')
+    elif code == 'large':
         # every program in the large code model, every function that can move in another
         # bank, in turn in three banks: calls, pointers, helpers, switch tables and setjmp
         # cross banks even in small programs (each one file: its other banks after the o65)

@@ -372,7 +372,7 @@ def build(o):
             libs.insert(0, hgbuild.lib_for(code))
         out = o["out"] or os.path.basename(os.path.splitext(o["srcs"][0])[0]).upper() + ".PRG"
         mapfile = os.path.splitext(out)[0] + ".map" if o["want_map"] else None
-        if o["sizes"] and not mapfile:
+        if o["sizes"]:
             o["keep"] = o["keep"] or os.path.join(tmp, "link")
         ui = o["ui"]
         while True:

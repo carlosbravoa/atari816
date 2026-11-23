@@ -459,6 +459,10 @@ def link(objs, out, sstack, debug=False, mapfile=None, libs=(), keep=None, heap=
         s["inmain"] = sum(sz for n, sz in moved if where[n] == "MAIN")
         s["thunks"] = len(thunks)
         s["xrelocs"] = sum(len(v) for v in relocs.values())
+        # (hcc --sizes: the map and the labels of link A, while tmp is kept)
+        s["mapfile"], s["lblfile"] = mp, os.path.join(tmp, "linkA.lbl")
+        s["ncode"] = nb
+        s["far_model"] = lib.endswith("-far")
         if mapfile:
             # (the map, and every label: the main bank's at bank 0, code bank k's at bank
             # k: prof816.py reads them)

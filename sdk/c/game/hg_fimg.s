@@ -33,16 +33,42 @@
 .define r30 __rg+36
 .define r31 __rg+38
 
+; the image (a near pointer in r4, or with far data a far one in r4/r5) and the offset of
+; the argument after it
+.macro	IMGY op
+.if FARDATA
+	op	[r4],y
+.else
+	op	(r4),y
+.endif
+.endmacro
+.macro	IMG op
+.if FARDATA
+	op	[r4]
+.else
+	op	(r4)
+.endif
+.endmacro
+
 	.segment "CODE"
 
 ; ------------------------------------------------------------------ void hg_draw
 ; (const hg_image *img, unsigned frame, int x, int y): 3,s img (near), 5,s frame, 7,s x,
-; 9,s y. The sheet path here; anything else (no sheet, 16 colours, a bad argument) goes
-; on in C (hg__draw_c, the same arguments, still on the stack).
+; 9,s y (with far data img is 4 bytes: the rest 2 further). The sheet path here; anything
+; else (no sheet, 16 colours, a bad argument) goes on in C (hg__draw_c, the same
+; arguments, still on the stack).
 ; hg_image: w 0, h 2, n 4, stride 6, addr 8, key 12, sheet 14, bpp 15
 _hg_draw:
 	lda	ARGS,s			; (r4): the image
+.if FARDATA
+	ora	ARGS+2,s
 	beq	@slow
+	lda	ARGS+2,s			; (r5: its bank)
+	sta	r5
+	lda	ARGS,s
+.else
+	beq	@slow
+.endif
 	sta	r4
 	sep	#$20
 	.a8
@@ -53,31 +79,31 @@ _hg_draw:
 	lda	_hg__four
 	bne	@slow
 	ldy	#14			; sheet | bpp << 8
-	lda	(r4),y
+	IMGY	lda
 	cmp	#$0801			; bpp 8 and a sheet (1-32)
 	bcc	@slow
 	cmp	#$0821
 	bcs	@slow
 	and	#$00FF
 	sta	r29			; the sheet
-	lda	ARGS+2,s			; frame < n?
+	lda	ARGS+PTRSZ,s			; frame < n?
 	sta	r15
 	ldy	#4
-	cmp	(r4),y
+	IMGY	cmp
 	bcs	@slow
-	lda	ARGS+4,s
+	lda	ARGS+PTRSZ+2,s
 	sta	r9
-	lda	ARGS+6,s
+	lda	ARGS+PTRSZ+4,s
 	sta	r10
-	lda	(r4)			; w
+	IMG	lda			; w
 	sta	r11
 	ldy	#2
-	lda	(r4),y			; h
+	IMGY	lda			; h
 	sta	r12
 	sta	r30			; sy = frame * h
 	jsr	fmul
 	ldy	#12
-	lda	(r4),y			; key: SH_KEY, or HG_NONE: SH_COPY
+	IMGY	lda			; key: SH_KEY, or HG_NONE: SH_COPY
 	sta	r28
 	ldx	#1			; SH_COPY
 	cmp	#$FFFF
@@ -100,7 +126,15 @@ _hg_draw:
 dp_slow:	TAILJ	_hg__draw_part_c	; (here: in reach of the branches)
 _hg_draw_part:
 	lda	ARGS,s
+.if FARDATA
+	ora	ARGS+2,s
 	beq	dp_slow
+	lda	ARGS+2,s
+	sta	r5
+	lda	ARGS,s
+.else
+	beq	dp_slow
+.endif
 	sta	r4
 	sep	#$20
 	.a8
@@ -111,7 +145,7 @@ _hg_draw_part:
 	lda	_hg__four
 	bne	dp_slow
 	ldy	#14
-	lda	(r4),y
+	IMGY	lda
 	cmp	#$0801
 	bcc	dp_slow
 	cmp	#$0821
@@ -119,42 +153,42 @@ _hg_draw_part:
 	and	#$00FF
 	sta	r29
 	ldy	#4			; rows of the whole image: h * n
-	lda	(r4),y
+	IMGY	lda
 	sta	r15
 	ldy	#2
-	lda	(r4),y
+	IMGY	lda
 	sta	r30
 	jsr	fmul
 	lda	r30
 	sta	r2			; r2: rows
-	lda	ARGS+2,s			; sx < w?
+	lda	ARGS+PTRSZ,s			; sx < w?
 	sta	r1
-	cmp	(r4)
+	IMG	cmp
 	bcs	@out
-	lda	ARGS+4,s			; sy < rows?
+	lda	ARGS+PTRSZ+2,s			; sy < rows?
 	sta	r30
 	cmp	r2
 	bcs	@out
-	lda	(r4)			; w = min(w, img.w - sx)
+	IMG	lda			; w = min(w, img.w - sx)
 	sec
 	sbc	r1
-	cmp	ARGS+6,s
+	cmp	ARGS+PTRSZ+4,s
 	bcc	@w
-	lda	ARGS+6,s
+	lda	ARGS+PTRSZ+4,s
 @w:	sta	r11
 	lda	r2			; h = min(h, rows - sy)
 	sec
 	sbc	r30
-	cmp	ARGS+8,s
+	cmp	ARGS+PTRSZ+6,s
 	bcc	@h
-	lda	ARGS+8,s
+	lda	ARGS+PTRSZ+6,s
 @h:	sta	r12
-	lda	ARGS+10,s
+	lda	ARGS+PTRSZ+8,s
 	sta	r9
-	lda	ARGS+12,s
+	lda	ARGS+PTRSZ+10,s
 	sta	r10
 	ldy	#12
-	lda	(r4),y
+	IMGY	lda
 	sta	r28
 	ldx	#1			; SH_COPY
 	cmp	#$FFFF

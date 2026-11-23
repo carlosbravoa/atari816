@@ -1,14 +1,17 @@
 #!/usr/bin/env python3
 """run.py - the C SDK's tests: build each test with hcc, run it in emu816, check it.
 
-    python3 sdk/c/tests/run.py [--horizon DIR] [--code small|large] [--only NAME ...]
+    python3 sdk/c/tests/run.py [--horizon DIR] [--code small|large|largefar] [--only NAME ...]
 
 Every test runs in both code models: small (hcc's default) and large (hcc --code large,
 with --main-room 0 --bank-room 8192: every function that can move goes to another bank,
 a bank holds at most 8 KB of code, so calls, pointers, callbacks, helpers and setjmp all
-cross banks); --code chooses one. Prints one line per test and code model (PASS / FAIL
-and a detail) and a summary; exit code 1 when anything failed. Build output and the
-emulator's runs: sdk/c/build/tests/<small|large>/.
+cross banks), and in the far data model (largefar: the same with hcc --data far; not the
+controls library's tests); --code chooses one. Prints one line per test and code model
+(PASS / FAIL and a detail) and a summary; exit code 1 when anything failed. Build output
+and the emulator's runs: sdk/c/build/tests/<small|large|largefar>/.
+  far      (largefar) tests/far/farprog.c: far data banks, the placement, the heap over
+           banks, hcc --sizes; a near-data object refused in a far-data program
 Tests (in tests/):
   libc     the C library: printf formats, string.h, stdlib, malloc, files (create, write,
            seek, read back, append, delete, the 5th handle), folders, time, far memory,
@@ -76,9 +79,42 @@ def report(name, model, ok, detail=""):
     print(f"{'PASS' if ok else 'FAIL'}  {name:<8} {model:<6} {detail}", flush=True)
 
 
+def farprog(only, horizon):
+    """the far data model on its own (tests/far/farprog.c): a far-data program's banks of
+    far data, the objects placed, the heap over several banks, hcc --sizes; objects of the
+    two data models mixed are refused"""
+    if only and "far" not in only:
+        return
+    b = os.path.join(SDKC, "build", "tests", "far")
+    os.makedirs(b, exist_ok=True)
+    src = os.path.join(HERE, "far", "farprog.c")
+    prg = os.path.join(b, "FARPROG.PRG")
+    rc, out = hcc(prg, [src], "largefar", ["--map", "--sizes"])
+    if rc:
+        report("far", "largefar", False, "build: " + out.strip()[-300:])
+        return
+    sizes = "--sizes" in out or re.search(r"far data bank \d", out) is not None
+    rc, con, _ = emu(prg, os.path.join(b, "run-far"), horizon, seconds=20)
+    ok = "FARPROG PASS" in con and "[kill]" not in con and sizes
+    report("far", "largefar", ok, grab(con, r"farprog: \d+ checks, \d+ failures") +
+           "; " + grab(out, r"far data: [^\n]*") +
+           ("" if ok else " | " + " | ".join(l for l in con.splitlines() if "FAIL" in l)[:300]
+            + ("" if sizes else " (no --sizes report)")))
+    # a near-data object in a far-data program: refused, in words
+    near_o = os.path.join(b, "near.o")
+    rc1, out1 = sh([sys.executable, HCC] + LARGE_CODE[:2] + ["-c", "-o", near_o, src])
+    rc2, out2 = hcc(os.path.join(b, "MIX.PRG"), [near_o], "largefar")
+    ok = rc1 == 0 and rc2 != 0 and "far data" in out2 and "--data" in out2
+    report("far", "mixed", ok, "a near-data object refused in a far-data program" if ok
+           else (out1 + out2).strip()[-300:])
+
+
 # the configurations, the code models: (name, hcc's options)
 LARGE_CODE = ["--code", "large", "--main-room", "0", "--bank-room", "8192"]
-CONFIGS = {"small": [], "large": LARGE_CODE}
+# largefar: the large code model with far data (hcc --data far: every data pointer 32
+# bits, string literals and constants in far data, malloc in other banks)
+CONFIGS = {"small": [], "large": LARGE_CODE, "largefar": LARGE_CODE + ["--data", "far"]}
+LIBNAME = {"small": "small", "large": "large", "largefar": "large-far"}
 
 
 def sh(cmd, cwd=None):
@@ -1012,15 +1048,18 @@ def main():
     hcc_messages(only, models)
     # the code models side by side (each has its own build folder; the libraries are
     # built first, one after another, so no two of them build the same one)
-    sh([sys.executable, HCC, "--build-lib"] + models)
+    sh([sys.executable, HCC, "--build-lib"] + [LIBNAME[m] for m in models])
     if "large" in models:
         bigprog(only, horizon)
+    if "largefar" in models:
+        farprog(only, horizon)
     import concurrent.futures as cf
     with cf.ThreadPoolExecutor(len(models)) as ex:
         list(ex.map(lambda m: run_model(m, horizon, only), models))
     for m in models:
-        run_ui(horizon, only, m)
-    run_apps(horizon, only, models)
+        if m != "largefar":         # (the controls library has no far data build)
+            run_ui(horizon, only, m)
+    run_apps(horizon, only, [m for m in models if m != "largefar"])
     bad = [r for r in results if not r[2]]
     print(f"\nC SDK tests: {len(results) - len(bad)} passed, {len(bad)} failed "
           f"({time.time() - t0:.0f} s)")

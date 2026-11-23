@@ -432,6 +432,7 @@ def link(objs, out, sstack=SSTACK, debug=False, mapfile=None, extra_libs=(), kee
         sizes["sstack"] = sstack
         sizes["heap"] = max(0, SSTOP - sstack - (0x100 + sizes["code"]))
         sizes["relocs"] = o65_relocs(out)
+        sizes["mapfile"], sizes["lblfile"], sizes["ncode"] = mp, lbl, 0
         if mapfile:
             shutil.copy(mp, mapfile)
             shutil.copy(lbl, os.path.splitext(mapfile)[0] + ".lbl")
@@ -584,6 +585,81 @@ def o65_relocs(path):
     return count
 
 
+def object_sizes(out, s, top=None):
+    """hcc --sizes: every object and function of the link, its size and where it went
+    (the main bank, code bank k, far data bank k), biggest first, from the link's map
+    (its segments) and labels (each label's size: to the next label of its segment). The
+    compiler's internal labels (branches, ...) are left out; a static's name has its
+    file's tag (S......_)."""
+    mp, lbl = s.get("mapfile"), s.get("lblfile")
+    if not mp or not lbl or not os.path.exists(mp) or not os.path.exists(lbl):
+        return f"{out}: no map for --sizes"
+    segs = []
+    on = False
+    for ln in open(mp, encoding="latin-1"):
+        if ln.startswith("Segment list:"):
+            on = True
+            continue
+        if on:
+            m = re.match(r"^(\w+)\s+([0-9A-F]{6})\s+([0-9A-F]{6})\s+([0-9A-F]{6})", ln)
+            if m:
+                if int(m.group(4), 16):
+                    segs.append((int(m.group(2), 16), int(m.group(3), 16) + 1, m.group(1)))
+            elif ln.startswith("Exports list") or ln.startswith("Imports list"):
+                break
+    labels = {}
+    for ln in open(lbl, encoding="latin-1"):
+        p = ln.split()
+        if len(p) >= 3 and p[0] == "al":
+            labels.setdefault(int(p[1], 16), p[2].lstrip("."))
+    addrs = sorted(labels)
+    nb = s.get("ncode", 0)
+    rows = []
+    import bisect
+    for lo, hi, seg in segs:
+        if seg in ("ZEROPAGE", "ZPEND", "XREL", "HEAPSTART"):
+            continue
+        i = bisect.bisect_left(addrs, lo)
+        inside = []
+        while i < len(addrs) and addrs[i] < hi:
+            inside.append(addrs[i])
+            i += 1
+        bank = lo >> 16
+        if seg.startswith("FD"):
+            kind, where = "far data", f"far data bank {bank - nb}" if bank else "main bank"
+        elif seg in ("RODATA",):
+            kind, where = "constants", "main bank"
+        elif seg == "DATA":
+            kind, where = "data", "main bank"
+        elif seg == "BSS":
+            kind, where = "bss", "main bank"
+        else:
+            kind, where = "code", f"code bank {bank}" if bank else "main bank"
+        keep = []
+        for a in inside:
+            n = labels[a]
+            if re.match(r"^(_\w|L_S\d|L_lit\d|S[0-9a-f]{6}_)", n) and not n.startswith("__T") \
+                    and not re.match(r"^S[0-9a-f]{6}_L\w*_(b|x|asm)?\d+$", n):
+                keep.append(a)
+        for k, a in enumerate(keep):
+            end = keep[k + 1] if k + 1 < len(keep) else hi
+            n = labels[a]
+            n = re.sub(r"^S[0-9a-f]{6}_", "", n)
+            n = n[1:] if n.startswith("_") else n
+            rows.append((end - a, n, kind, where))
+    rows.sort(key=lambda r: (-r[0], r[1]))
+    tot = {}
+    for size, _, kind, where in rows:
+        key = "main bank" if where == "main bank" else where.rsplit(" ", 1)[0]
+        tot[(key, kind)] = tot.get((key, kind), 0) + size
+    lines = [f"{out}: every object and function, its size and where it went (hcc --sizes)",
+             f"{'bytes':>9}  {'what':<10} {'where':<18} name"]
+    for size, n, kind, where in rows[:top] if top else rows:
+        lines.append(f"{size:>9,}  {kind:<10} {where:<18} {n}")
+    lines.append("totals: " + ", ".join(f"{k[0]} {k[1]} {v:,}" for k, v in sorted(tot.items())))
+    return "\n".join(lines)
+
+
 def size_report(out, s):
     return "\n".join([
         f"{out}: {s['file']:,} bytes on the card, {s['relocs']} relocations",
@@ -601,7 +677,10 @@ def size_report(out, s):
         if s["banks"] or s.get("fardata") else
         "  one file: everything is in the main bank, no other banks to load"]
         + ([f"  far data: {sum(s['fardata']):,} bytes of __far objects in "
-            f"{len(s['fardata'])} bank(s) of their own"] if s.get("fardata") else [])
+            f"{len(s['fardata'])} bank(s) of their own"
+            + (f" ({', '.join(f'{b:,}' for b in s['fardata'])}): string literals, "
+               f"constants and __far objects (hcc --data far)" if s.get("far_model") else "")]
+           if s.get("fardata") else [])
         + ([f"  the main bank without its movable code: {s['code'] - s['inmain']:,} bytes "
             f"(code that must stay {s['text'] - s['inmain'] - s.get('rodata', 0):,}, "
             f"constants {s.get('rodata', 0):,}, data {s['data']:,}, bss {s['bss']:,})"]
