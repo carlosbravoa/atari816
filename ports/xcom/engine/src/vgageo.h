@@ -13,6 +13,12 @@ extern char g_pakv;             /* the packs' video letter: E, C or V (gfx.c) */
 
 void vgx_init(unsigned vseg);   /* from vga_init (vgainit.c), once */
 
+#if defined(XCOM_PORT)          /* plat/vga.c */
+#define vgx_world   vga_vx_world
+#define vgx_xor     vga_vx_xor
+#define vgx_battle  vga_vx_battle
+#define vgx_slide   vga_vx_slide
+#else
 typedef void (__far __cdecl *VgxWorld)(const unsigned char __far *map, unsigned vx, unsigned vy,
                                        unsigned zoom);
 typedef void (__far __cdecl *VgxXor)(int x0, int y0, int x1, int y1, int colour);
@@ -23,5 +29,6 @@ typedef void (__far __cdecl *VgxXor)(int x0, int y0, int x1, int y1, int colour)
 /* The end slides (cut.c): the DAC from 768 bytes (NULL: black), the
    caption's palette index as EGA colour 14. */
 #define vgx_slide   ((void (__far __cdecl *)(const char __far *dac, int caption))MK_FP(g_vgx, 24))
+#endif
 
 #endif

@@ -560,6 +560,12 @@ int cut_end(int won)
         }
         log_printf("END slide %d", i - first + 1);
         hgc_flush(0);
+#if defined(XCOM_PORT)
+        {   /* a test run's picture of the slide (a scripted wait polls nothing) */
+            void xd_shot_point(unsigned gap_ms, const char *why);
+            xd_shot_point(0, "slide");
+        }
+#endif
         t0 = timer_read();
         for (;;) {
             unsigned k = poll_skip();

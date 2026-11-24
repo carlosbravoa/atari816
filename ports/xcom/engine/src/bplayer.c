@@ -78,8 +78,13 @@ again:
                     sy = TILE_SY(u->x, u->y, u->z);
                     render_rect(sx - 16, sy - 8, sx + 48, sy + 56);
                 }
+#if defined(XCOM_PORT)
+        if (g_vga && (r = vga_pics_next()) != NULL)
+            render_rect(r[0], r[1], r[2], r[3]);
+#else
         if ((sx = g_vga) != 0 && FP_SEG(r = ((const int far *(__cdecl far *)(void))MK_FP(sx, VGA_PICS))()))
             render_rect(r[0], r[1], r[2], r[3]);    /* DOS's smoke and fire pictures move on */
+#endif
         if (g_cv)
             cv_idle();          /* the canvas draws ahead (canvas.h) */
     }

@@ -20,6 +20,7 @@
 #include "items.h"
 #include "qlist.h"
 #include "uik.h"
+#include "sound.h"
 #include "unit.h"
 
 #define TABS(s)     ((const unsigned char *)(s))
@@ -48,6 +49,7 @@ static int okcancel(int x, const char *l1, const char *l2)
     uk_center(x, 152, 85, UK_SMALL, 9, l2);
     uk_button(x + 16, 115, 44, 16, "OK", 0);
     uk_button(x + 92, 115, 44, 16, "CANCEL", 0);
+    snd_window();
     for (;;) {
         unsigned key = input_key();
         if (key == KEY_LCLICK && g_mouse_y >= 115 && g_mouse_y < 131) {
@@ -55,6 +57,8 @@ static int okcancel(int x, const char *l1, const char *l2)
                 key = 13;
             else if (g_mouse_x >= x + 92 && g_mouse_x < x + 136)
                 key = 27;
+            if (key != KEY_LCLICK)
+                snd_button();
         }
         if ((key & 0xFF) == 13) {
             ok = 1;
@@ -195,10 +199,12 @@ static int soldier_info(int k)
         if (key == KEY_LCLICK) {
             int mx = g_mouse_x, my = g_mouse_y;
             key = 0;
-            if (my >= 33 && my < 47)
+            if (my >= 33 && my < 47) {
                 key = mx < 28 ? 0x4B00 : mx >= 30 && mx < 78 ? 27 : mx >= 80 && mx < 108 ? 0x4D00
                     : mx >= 130 && mx < 240 ? 'a' : mx >= 260 ? 's' : 0;
-            else if (my >= 9 && my < 25 && mx >= 40 && mx < 250)
+                if (key)
+                    snd_button();
+            } else if (my >= 9 && my < 25 && mx >= 40 && mx < 250)
                 key = 'n';
             ch = key & 0xFF;
         } else if (key == KEY_RCLICK)
@@ -389,6 +395,8 @@ void costs_screen(void)
     uk_button(10, 170, 300, 20, "OK", 0);
     for (;;) {
         unsigned key = input_key();
+        if (key == KEY_LCLICK && g_mouse_y >= 170 && g_mouse_y < 190)
+            snd_button();
         if (key == KEY_RCLICK || (key & 0xFF) == 27 || (key & 0xFF) == 13
             || (key == KEY_LCLICK && g_mouse_y >= 170 && g_mouse_y < 190))
             break;

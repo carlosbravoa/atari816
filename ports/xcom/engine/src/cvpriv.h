@@ -55,16 +55,22 @@ typedef struct {
     unsigned seg, mode, handle, frame, slots, hbits, hand, used, page, save_pg;
     int check, idle_x, idle_y, idle_t, synced;
     unsigned gen, idle_gen;
-    unsigned char far *fob, far *seenp;
+    unsigned char far *fob;     /* (port: one far declarator a line, cc816) */
+    unsigned char far *seenp;
     unsigned nfx;
     unsigned long n_read, n_hit, n_part, n_miss, n_store, n_evict, n_fill, n_bad;
     unsigned long t_sync, t_get;
-    unsigned short far *hash, far *key;
-    unsigned char far *mask, far *ref;      /* 3 bytes a slot: 2 cell rows each */
+    unsigned short far *hash;
+    unsigned short far *key;
+    unsigned char far *mask;    /* 3 bytes a slot: 2 cell rows each */
+    unsigned char far *ref;
     USh far *us;
-    TSh far *fl, far *dv, far *fx;
+    TSh far *fl;
+    TSh far *dv;
+    TSh far *fx;
     unsigned far *keys;
-    unsigned char far *seen, far *bounce;
+    unsigned char far *seen;
+    unsigned char far *bounce;
     unsigned long xbase;            /* XMS: the blocks' place in the handle (a loan: xmemlend.h) */
     unsigned lent, lent_kb;         /* the loan's xl_lend answer and size, 0 none */
     /* the back buffer's format: EGA 0, 40, 3, 1536, 10; VGA CV_8BPP, 320, 0, 3072, 5

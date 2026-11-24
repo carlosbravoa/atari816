@@ -13,6 +13,7 @@
 #include "menu.h"
 #include "pedia.h"
 #include "geo.h"
+#include "sound.h"
 
 #define MAX_LIST    24
 
@@ -337,8 +338,10 @@ static void show_page(unsigned k)
         if (key == KEY_LCLICK) {
             if (g_mouse_y < BTN_Y || g_mouse_y >= BTN_Y + 14 || g_mouse_x < 5 || g_mouse_x >= 105)
                 key = g_mouse_y > BTN_Y + 14 ? 0x5100 : 0;
-            else
+            else {
                 key = g_mouse_x < 38 ? 0x011B : g_mouse_x < 73 ? 0x4B00 : 0x4D00;
+                snd_button();
+            }
         }
         if ((key & 0xFF) == 27 || (key & 0xFF) == 13)
             return;
@@ -392,6 +395,16 @@ static void show_section(unsigned s, char (*lines)[41])
         if (sel < 0)
             return;
         show_page(map[sel]);
+#if defined(XCOM_PORT)
+        /* VGA: the screen under the list again (the clean screen the list saved:
+           the list over the geoscape), not the article's picture in the list's
+           palette (plat/vga.c keeps a real copy of the clean screen) */
+        {
+            extern int g_vga;
+            if (g_vga)
+                uk_restore(0, 0, 320, 200);
+        }
+#endif
     }
 }
 

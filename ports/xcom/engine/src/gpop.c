@@ -17,6 +17,7 @@
 #include "uik.h"
 #include "unit.h"
 #include "gpop.h"
+#include "sound.h"
 
 #define YELLOW      14
 #define WHITE       15
@@ -38,6 +39,7 @@ static void win(unsigned bg, int x, int y, int w, int h)
     else
         uk_fill(x, y, w, h, 0);
     uk_window(x, y, w, h);
+    snd_window();
 }
 
 static void btn(Hit *b, int x, int y, int w, int h, int key, int key2, const char *s)
@@ -64,6 +66,7 @@ static int wait2(const Hit *b, void (*scroll)(int))
             for (i = 0; i < 2; i++)
                 if (g_mouse_x >= b[i].x && g_mouse_x < b[i].x + b[i].w && g_mouse_y >= b[i].y
                     && g_mouse_y < b[i].y + b[i].h) {
+                    snd_button();
                     uk_button(b[i].x, b[i].y, b[i].w, b[i].h, "", 1);
                     return i;
                 }
@@ -457,6 +460,8 @@ void gpop_debrief(int mission, int res, int craft_lost, const void *stats)
     uk_text(uk_text(64, 182, UK_SMALL, g_uk->text, "RATING> "), 182, UK_SMALL, WHITE, rating);
     log_printf("DEBRIEF TOTAL %d RATING %s", total, rating);
     uk_button(16, 180, 40, 12, "OK", 0);
-    input_key();
+    if (input_key() == KEY_LCLICK && g_mouse_x >= 16 && g_mouse_x < 56 && g_mouse_y >= 180
+        && g_mouse_y < 192)
+        snd_button();                   /* (any key or click goes on; on OK: the click) */
     uk_close();
 }

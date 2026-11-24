@@ -20,6 +20,7 @@
 #include "input.h"
 #include "map.h"
 #include "uik.h"
+#include "sound.h"
 #include "uitext.h"
 
 static long funding_total(void)
@@ -247,6 +248,8 @@ int alien_month_report(int months, long funds, long costs, int month, int year)
     /* Like the OK button of the DOS report: other keys do nothing. */
     for (;;) {
         unsigned k = input_key();
+        if (k == KEY_LCLICK && g_mouse_y >= 180 && g_mouse_y < 192)
+            snd_button();
         if ((k & 0xFF) == 13 || (k & 0xFF) == 27 || (k & 0xFF) == ' '
             || (k == KEY_LCLICK && g_mouse_y >= 180 && g_mouse_y < 192))
             break;

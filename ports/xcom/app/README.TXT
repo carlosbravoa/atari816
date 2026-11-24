@@ -13,9 +13,8 @@ nothing of the game is in this app.
 You need X-COM: UFO Defense (the DOS version 1.4, or the GOG edition) and a PC
 with Python 3 and PyYAML.
 
-  1. Get the port's source (ports/xcom of the Atari816 repository) and run,
-     on the PC:
-         sh tools/getsrc.sh
+  1. Get the port's source (ports/xcom of the Atari816 repository: the
+     engine and its converter are in it) and run, on the PC:
          make data GAME="/path/to/your/X-COM folder"
      This runs XCOMCONV, the engine's converter, and writes data/packs/.
   2. Copy onto the card, into this app's folder /APPS/XCOM/:
@@ -28,6 +27,9 @@ with Python 3 and PyYAML.
 
 Without the data the program says so and ends. Updating the app keeps the
 data and your saves (the Installer keeps files that are not in the archive).
+When a new version needs new packs (PACKS.VER names their format: 5 since
+the buttons' and windows' sounds came in), the program says so on its
+screen: make them again (make data) and copy them over the old ones.
 
 
 2. PLAYING
@@ -62,12 +64,14 @@ a battle). The game's options: XCOMXT.CFG there too.
 
 Sound: the music on the OPL2 (the AdLib music, played by a small helper
 program, MUSD.PRG, so that it keeps its tempo while the game is busy); the
-effects (the Sound Blaster's samples) on the sample player. The effects
-are few outside a battle: none in the menus or for buttons; on the
-geoscape a chime when a UFO is detected; in an interception the craft's
-and the UFO's shots, hits, the crash; at a base's defence its guns. In a
-battle: every footstep, the shots (by weapon), hits, deaths, doors,
-explosions, a throw. S in a battle turns the sound off and on.
+effects (the Sound Blaster's samples) on the sample player. Outside a
+battle, as in DOS: a click when a button is pressed with the mouse and one
+of the three pop-up sounds when a window opens (the start menu, the
+options, the saves, the geoscape's and the bases' windows); a chime when a
+UFO is detected; in an interception the craft's and the UFO's shots, hits,
+the crash; at a base's defence its guns. In a battle: every footstep, the
+shots (by weapon), hits, deaths, doors, explosions, a throw (its menus are
+silent). S in a battle turns the sound off and on.
 
 
 3. DIFFERENCES FROM DOS

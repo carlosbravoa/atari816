@@ -15,6 +15,7 @@ enum {
     SFX_DIE_ETHEREAL, SFX_DIE_MALE, SFX_DIE_FEMALE, SFX_DOOR, SFX_STEP,
     SFX_THROW, SFX_GEO_POPUP, SFX_CRAFT_CANNON, SFX_CRAFT_MISSILE,
     SFX_UFO_FIRE, SFX_UFO_HIT, SFX_UFO_CRASH, SFX_CRAFT_EXPLODE,
+    SFX_BUTTON, SFX_WINDOW1, SFX_WINDOW2,       /* the interface (snd_button, snd_window) */
     N_SFX
 };
 
@@ -54,6 +55,15 @@ void snd_death(void);
 void snd_explode(void);
 void snd_door(void);
 void snd_step(void);
+
+/* The interface, as OpenXcom's TextButton and Window (GEO.CAT 0 and 1-3):
+   snd_button when a left click presses a button (once a click, at the
+   place that takes it, not where the button is drawn), snd_window when a
+   window or dialog opens over a screen (one of the three pop-up sounds).
+   Digital effects only (no FM or speaker stand-in), and none in a battle
+   (DOS's battlescape has its own sound set, SOUND1.CAT). */
+void snd_button(void);
+void snd_window(void);
 void snd_off(void);             /* PC speaker off */
 
 /* Counters for the LOG option. */

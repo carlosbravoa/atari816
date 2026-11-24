@@ -16,6 +16,10 @@
 
 int g_sound_on = 1;
 
+#if defined(XCOM_PORT)
+unsigned xd_sound_umb(unsigned *paras);     /* plat/sb.c */
+#endif
+
 #define PIT_HZ 1193182UL
 
 static int quiet;
@@ -100,7 +104,7 @@ static void speaker(int sfx)
         wait_us(3000);
         snd_off();
         break;
-    case SFX_DOOR: case SFX_THROW:
+    case SFX_DOOR: case SFX_THROW: case SFX_BUTTON: case SFX_WINDOW1: case SFX_WINDOW2:
         break;
     default:                    /* deaths */
         sweep(500, 90, 25, 8000);
@@ -113,7 +117,11 @@ static void speaker(int sfx)
 unsigned g_sb_port, g_sb_irq, g_sb_dma = 1, g_sb_dsp;
 volatile unsigned g_sb_irqs, g_sb_started;
 
+#if defined(XCOM_PORT)          /* no far function pointers in cc816 (xdos.h xd_isr) */
+static xd_isr old_sb_vec;
+#else
 static void (__interrupt __far *old_sb_vec)(void);
+#endif
 static unsigned char old_mask;
 static volatile unsigned char sb_busy, sb_cmd, sb_prio;
 static volatile unsigned long sb_phys, sb_end;
@@ -379,7 +387,9 @@ unsigned g_hma_lo;
 static const unsigned char prio[N_SFX] = {
     2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2,  /* shots, hits, explosion, deaths */
     1, 0, 1,                                /* door, step, throw */
-    2, 2, 2, 2, 2, 2, 2                     /* geoscape */
+    2, 2, 2, 2, 2, 2, 2,                    /* geoscape */
+    1, 1, 1                                 /* the interface: never over an alert or a
+                                               battle's effect; a click cuts a pop-up's tail */
 };
 
 void __cdecl xms_call(unsigned __far *r);
@@ -563,8 +573,31 @@ static void store_init(void)
         log_printf("sound: no digital effects (SOUNDS.PAK missing)");
         return;
     }
+#if defined(XCOM_PORT)
+    /* the port: an upper memory block of the sound's alone (plat/sb.c), so
+       the effects and the tracks stay out of the game's memory, as on a PC
+       with a 64 KB UMB that umb_plan left to the sound */
+    if (!umb_seg)
+        umb_seg = xd_sound_umb(&umb_paras);
+#endif
     if (umb_seg && umb_paras >= need && load_all() == 0) {
         log_printf("sound: all %u effects in the UMB (%u bytes)", N_SFX, fixed_end);
+#if defined(XCOM_PORT)
+        {
+            /* the platform prepares each effect now (the Atari816 decodes them for its
+               sample player once, here, instead of at their first sound): the block the
+               DSP will be given, at the rate its time constant gives */
+            void plat_sfx_preload(const unsigned char far *src, unsigned bytes, unsigned rate,
+                                  int kind, unsigned long lin);
+            int k;
+            for (k = 0; k < N_SFX; k++)
+                if (sfx_len[k])
+                    plat_sfx_preload((const unsigned char far *)MK_FP(umb_seg, 0) + (unsigned)sfx_pos[k],
+                                     sfx_len[k], (unsigned)(1000000UL / (256u - (unsigned char)(256 -
+                                     (unsigned)(1000000UL / sfx_file[k].rate)))),
+                                     sfx_file[k].fmt ? 1 : 0, phys(umb_seg) + sfx_pos[k]);
+        }
+#endif
         return;
     }
     bounce_len = (sfx_max + 1) & ~1u;
@@ -789,8 +822,8 @@ static int geo_track;            /* the geoscape's track: MUS_GEO1 or MUS_INTER 
 static void geo_load(int track)
 {
     static const unsigned char list[] = {
-        SFX_GEO_POPUP, SFX_CRAFT_CANNON, SFX_UFO_HIT, SFX_UFO_CRASH,
-        SFX_CRAFT_MISSILE, SFX_UFO_FIRE, SFX_CRAFT_EXPLODE
+        SFX_GEO_POPUP, SFX_BUTTON, SFX_CRAFT_CANNON, SFX_UFO_HIT, SFX_UFO_CRASH,
+        SFX_CRAFT_MISSILE, SFX_UFO_FIRE, SFX_CRAFT_EXPLODE, SFX_WINDOW1, SFX_WINDOW2
     };
 
     snd_free();
@@ -871,7 +904,8 @@ void snd_shutdown(void)
     snd_off();
 }
 
-void snd_play(int sfx)
+/* An effect at priority pr (an effect of a lower one does not stop it). */
+static void play(int sfx, int pr)
 {
     unsigned long now;
 
@@ -891,7 +925,7 @@ void snd_play(int sfx)
     _disable();
     if (sb_busy && now > sb_end)
         sb_busy = 0;            /* lost interrupt */
-    if (sb_busy && prio[sfx] < sb_prio) {
+    if (sb_busy && pr < sb_prio) {
         _enable();
         return;
     }
@@ -926,13 +960,19 @@ void snd_play(int sfx)
     dsp_write((unsigned char)(256 - (unsigned)(1000000UL / sfx_file[sfx].rate)));
     sb_left = sfx_len[sfx];
     sb_cmd = sfx_file[sfx].fmt ? 0x75 : 0x14;
-    sb_prio = prio[sfx];
+    sb_prio = (unsigned char)pr;
     sb_end = now + (unsigned long)sfx_len[sfx] * (sfx_file[sfx].fmt ? 2 : 1) *
                    (PIT_HZ / sfx_file[sfx].rate) + PIT_HZ / 10;
     sb_busy = 1;
     g_sb_started++;
     sb_next();
     _enable();
+}
+
+void snd_play(int sfx)
+{
+    if (sfx >= 0 && sfx < N_SFX)
+        play(sfx, prio[sfx]);
 }
 
 /* ------------------------------------------------------------------ */
@@ -988,4 +1028,31 @@ void snd_door(void)
 void snd_step(void)
 {
     snd_play(SFX_STEP);
+}
+
+/* The interface's sounds (sound.h): only the loaded samples (a stand-in
+   on the FM or the speaker would block or crackle at every click) and not
+   in a battle; at the interface's priority (the third pop-up is the
+   alert's sample, whose own priority is an alert's). */
+static void ui_sound(int sfx)
+{
+    if (ctx != 2 && sfx_len[sfx])
+        play(sfx, prio[SFX_BUTTON]);
+}
+
+void snd_button(void)
+{
+    ui_sound(SFX_BUTTON);
+}
+
+/* Window::popup: one of the three, at random (numbers of its own: the
+   game's rnd() sequence stays as it is; the high bits, the low ones of
+   this generator are poor). */
+void snd_window(void)
+{
+    static const unsigned char pop[3] = { SFX_WINDOW1, SFX_WINDOW2, SFX_GEO_POPUP };
+    static unsigned seed = 1;
+
+    seed = seed * 25173u + 13849u;
+    ui_sound(pop[(seed >> 8) % 3]);
 }

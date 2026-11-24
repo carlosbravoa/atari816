@@ -252,6 +252,12 @@ set_up:
 #endif
     }
 #endif
+#if defined(XCOM_PORT)
+    {
+        void plat_bb_prepare(void);     /* (plat.h) the pictures for the blitter now */
+        plat_bb_prepare();
+    }
+#endif
     if (g_bench) {
         g_seen = NULL;
         g_cursor_on = 1;

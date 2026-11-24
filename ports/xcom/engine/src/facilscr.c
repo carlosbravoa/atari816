@@ -256,6 +256,7 @@ static int okcancel(const char *l1, const char *l2)
     uk_center(20, 152, 85, UK_SMALL, 9, l2);
     uk_button(36, 115, 44, 16, "OK", 0);
     uk_button(112, 115, 44, 16, "CANCEL", 0);
+    snd_window();
     for (;;) {
         unsigned key = input_key();
         if (key == KEY_LCLICK && g_mouse_y >= 115 && g_mouse_y < 131) {
@@ -263,6 +264,8 @@ static int okcancel(const char *l1, const char *l2)
                 key = 13;
             else if (g_mouse_x >= 112 && g_mouse_x < 156)
                 key = 27;
+            if (key != KEY_LCLICK)
+                snd_button();
         }
         if ((key & 0xFF) == 13) {
             ok = 1;
@@ -469,8 +472,10 @@ static void place_screen(int type)
                 y = (g_mouse_y - VIEW_Y) / 32;
                 ch = 13;
                 scan = 0;
-            } else if (g_mouse_x >= 200 && g_mouse_x < 312 && g_mouse_y >= 176 && g_mouse_y < 192)
+            } else if (g_mouse_x >= 200 && g_mouse_x < 312 && g_mouse_y >= 176 && g_mouse_y < 192) {
+                snd_button();
                 return;
+            }
             else
                 continue;
         }

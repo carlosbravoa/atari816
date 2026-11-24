@@ -648,7 +648,24 @@ const char *pak_load(const char *path)
     if (!read_into(f, g_pak.fill, h.n_fill)
         || !read_into(f, g_pak.landing, h.n_landing)
         || !read_into(f, g_pak.big, h.n_big)
-        || !read_into(f, g_pak.unit_base, h.n_unit_sets * 2u)) {
+#if defined(XCOM_PORT)          /* u16 in the file, `unsigned` in Pack (32 bits on the host) */
+        ) {
+        err = "pack truncated (tables)";
+        goto out;
+    }
+    for (i = 0; i < h.n_unit_sets && i < MAX_UNIT_SETS; i++) {
+        unsigned short u;
+        if (!read_into(f, &u, 2)) {
+            err = "pack truncated (tables)";
+            goto out;
+        }
+        g_pak.unit_base[i] = u;
+    }
+    if (0
+#else
+        || !read_into(f, g_pak.unit_base, h.n_unit_sets * 2u)
+#endif
+        ) {
         err = "pack truncated (tables)";
         goto out;
     }

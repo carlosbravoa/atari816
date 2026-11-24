@@ -18,6 +18,12 @@
 #          (seconds of computation), the music over the whole run as the host's and on
 #          the beat within 30 ms. (The engine's turn itself is not compared: make test's
 #          LOGs are; the host's runs on, -t 600, so that its ticks cover the emulator's)
+#   sndui  the interface (tests/sndui.keys): the start menu, a new game by clicks, the
+#          geoscape's INTERCEPT and its CANCEL, OPTIONS, Save Game and the list's CANCEL, a
+#          time button, OPTIONS by Esc: every Sound Blaster block the host's and a Lau start,
+#          and the effects that start are the 14 expected, in order: a pop-up (W: one of the
+#          three) when each window opens, a click (B) for each button pressed by the mouse
+#          (none for the keys); their loudest 50 ms under the battle's (the shots)
 #
 # Pictures and LOGs are make test's (the runs here only listen). Output: build/sound.
 HZ=${1:-../../horizon}
@@ -57,9 +63,11 @@ run sndbat "VGA NOINTRO BATTLE SEED 1 MISSION FA1V.PAK RACE RSV.PAK LOG SNDBAT.T
 p2=$!
 HOSTIDLE=600 SECONDS816=300 run sndai "VGA NOINTRO BATTLE SEED 1 MISSION FA1V.PAK RACE RSV.PAK LOG SNDAI.TXT" 10 &
 p3=$!
-wait $p1 $p2 $p3
+run sndui "VGA NOINTRO LOG SNDUI.TXT" 10 --log-lau &
+p4=$!
+wait $p1 $p2 $p3 $p4
 
-for n in geo sndbat sndai; do
+for n in geo sndbat sndai sndui; do
   grep -aq '\[kill\]' $O/$n/816/console.txt && { echo "FAIL  $n: $(grep -a '\[kill\]' $O/$n/816/console.txt)"; fail=1; }
   grep -aq 'music task' $O/$n/816/console.txt && { echo "FAIL  $n: $(grep -a 'music task' $O/$n/816/console.txt)"; fail=1; }
 done
@@ -68,6 +76,10 @@ $PY tests/soundcheck.py opl "battle music (load, redraws)" $O/sndbat/opl.txt \
   $O/sndbat/816/emu.err 1456 30 || fail=1
 $PY tests/soundcheck.py sfx "battle effects" $O/sndbat/sb.txt $O/sndbat/816/console.txt \
   $O/sndbat/816/emu.err 3 || fail=1
+$PY tests/soundcheck.py sfx "the interface's effects" $O/sndui/sb.txt $O/sndui/816/console.txt \
+  $O/sndui/816/emu.err 0 WBWBBWBBWBWBBW || fail=1
+$PY tests/soundcheck.py quieter "the interface under the shots" $O/sndui/816.wav 0 30 \
+  $O/sndbat/816.wav 0 60 || fail=1
 $PY tests/soundcheck.py wav "geo recording" $O/geo/816.wav 20 40 150 || fail=1
 $PY tests/soundcheck.py wav "battle recording" $O/sndbat/816.wav 20 40 150 || fail=1
 

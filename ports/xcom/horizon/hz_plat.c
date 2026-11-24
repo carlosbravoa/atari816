@@ -27,6 +27,7 @@
 #include <hgame.h>
 #include <horizon.h>
 #include "plat.h"
+#include "packver.h"
 
 int xcom_main(int argc, char **argv);
 void hz_bb_screen(int on);
@@ -1126,6 +1127,39 @@ int main(int argc, char **argv)
             l[8] = "";
             l[9] = "Press a key.";
             message_screen(l, 10);
+            exit(1);
+        }
+    }
+    {
+        /* packs of another format (made by an older converter, e.g. before the interface's
+           sounds came into SOUNDS.PAK): the engine's own check (startup.c check_packs)
+           prints one line and ends, which a player who started the app from the Desktop
+           would not see; so the same check here, on the screen */
+        static char got[32], want[40];
+        char b[32];
+        int n = 0, len = (int)sizeof(PACK_MARKER_TEXT) - 1;
+        FILE *f = fopen(PACK_MARKER_FILE, "rb");
+        if (f) {
+            n = (int)fread(b, 1, sizeof b - 1, f);
+            fclose(f);
+        }
+        b[n > 0 ? n : 0] = 0;
+        if (n <= len || memcmp(b, PACK_MARKER_TEXT, len) || atoi(b + len) != PACK_FORMAT_VERSION) {
+            static const char *l[11];
+            sprintf(got, "%s says format %d;", PACK_MARKER_FILE, n > len ? atoi(b + len) : 0);
+            sprintf(want, "this version of the program needs %d.", PACK_FORMAT_VERSION);
+            l[0] = "X-COM: the game's data is out of date";
+            l[1] = "";
+            l[2] = "The packs in this program's folder were";
+            l[3] = "made by another version of XCOMCONV:";
+            l[4] = got;
+            l[5] = want;
+            l[6] = "Make them again from your copy of the";
+            l[7] = "game (make data) and copy them over.";
+            l[8] = "See README.TXT there.";
+            l[9] = "";
+            l[10] = "Press a key.";
+            message_screen(l, 11);
             exit(1);
         }
     }

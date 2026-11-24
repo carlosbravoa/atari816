@@ -4,8 +4,10 @@ Stage 1 (assessment and foundation) to stage 5 (a playable app: section 4d), 23 
 the board (4e) and the alien turn (4f), 24 November 2026.
 
 Upstream: <https://github.com/fmikowski/xcom-xt> at commit `a53918220c90` (18 November
-2026, alpha 0.5.1), GPL-3. Fetched by `tools/getsrc.sh` into `upstream/` (not in git);
-built from `build/src` = upstream's `src/` + `patches/src-*.patch`. The public repository
+2026, alpha 0.5.1), GPL-3. Since 24 November 2026 it is **our fork, in `engine/`**
+(`engine/FORK.md`; section 4g): the port's changes, once `patches/src-*.patch` applied to a
+fetched copy, are made there directly. (The sections below name the patch that brought
+each change; FORK.md lists them all by topic.) The public repository
 has no `docs/` and no `tests/` (BUILDING.md's links to `docs/design.md` and
 `tests/README.md` lead nowhere): the design notes are the code's comments, which are
 unusually thorough.
@@ -233,12 +235,10 @@ int is an advantage; the host's 32-bit int is the exception, see "The host build
 
 | Path | What |
 | --- | --- |
-| `tools/getsrc.sh` | upstream at the pinned commit into `upstream/` |
-| `tools/getdata.sh` | XCOMCONV (with `patches/tools-*.patch`) on your copy into `data/packs/` |
-| `tools/mkpatch.sh` | the patch from a pristine and an edited copy of `src/` |
+| `engine/` | the engine, our fork of XCOM-XT (`engine/FORK.md`; until section 4g: `tools/getsrc.sh` fetched upstream into `upstream/` and the Makefile applied `patches/`) |
+| `tools/getdata.sh` | the fork's XCOMCONV (`engine/tools/xcomconv.py`) on your copy into `data/packs/` |
 | `tools/mkfont8.py` | `plat/font8x8.h` (the BIOS font) from a Linux console font |
-| `patches/src-0001-port.patch` | the changes to upstream (13 files, about 180 lines added, all `#if defined(XCOM_PORT)`): the VGA hooks (uk_*, hud_*, ms_*, gfx_night, gfx_dot, pics_next, vgageo.h's entries), `zoom_bytes` in C, one far declarator a line, no far function pointers, vbench's VGA block reads left out, `pak.c`'s unit_base read as u16 |
-| `patches/tools-0001-he-type.patch` | the converter takes the GOG copy (below) |
+| (`patches/src-0001-port.patch`, `patches/tools-0001-he-type.patch`) | the first changes to upstream (13 files, about 180 lines, all `#if defined(XCOM_PORT)`) and the converter's for the GOG copy: now in `engine/` |
 | `compat/` | `xcompat.h` (given to every file: keywords, `long` 32 bits on the host), `xdos.h` (the DOS machine), `xport.h` (the hooks), Watcom's headers (`i86.h`, `dos.h`, `conio.h`, `bios.h`, `malloc.h`, `io.h`) |
 | `plat/` | `xdos.c` (the DOS model), `timer.c` (upstream's timer.c's interface on the platform's clock), `vga.c` (vgainit + the VGA interface + vgxasm in C), `vgabat.c` (vgaasm's battle view), `rend.c` (rendasm), `losfan.c` (losasm), `voxrun.c` (voxasm), `way.c` (wayasm), `asm.c` (every other assembly routine: C or a stub that says so once), `plat.h` (the back ends' interface) |
 | `host/host.c` | the Linux back end: headless, virtual clock, pictures (PPM) whenever the screen changed at a wait, the end after 30 s of no input |
@@ -314,7 +314,7 @@ logged: `-opl FILE`). BENCH on the host gives the counts but no times (virtual c
 full redraw of one level at the map's middle draws 51 masked + 37 OR sprites; all four
 levels about 2-3 times that.
 
-`upstream/tools/voxcheck.py` reads `vcol` at the wrong offset for pack format 4 (a fixed copy
+`engine/tools/voxcheck.py` (upstream's) reads `vcol` at the wrong offset for pack format 4 (a fixed copy
 in the agent's scratch): to report upstream.
 
 ### The Atari816 build
@@ -995,7 +995,7 @@ timing was fine all along (at most 26 ms between its wake-ups, no tick lost).
   s, in assembly: 3.7 s in C), and a start checksums 1 byte in 61 (`sb_sum`, both builds):
   0.9 ms. Lau's volume 255 (Prince's and Xargon's; was 160). The Lau setup is theirs
   (`hg_sound_from` of signed 8-bit samples in far banks, `hg_play`), nothing the hardware
-  would refuse. What a player hears: no effect in the menus or on buttons; a chime when a
+  would refuse. What a player hears: no effect in the menus or on buttons (since section 4g: their clicks and the windows' pop-ups); a chime when a
   UFO is detected; an interception's shots and hits; in a battle every step, shot, hit,
   death, door, explosion.
 - **The alien turn**: 44 s without a poll in the scripted battle (FA1V, seed 6), the board
@@ -1199,16 +1199,87 @@ The main bank without movable code: 51,687 bytes (code that must stay 9,440, con
 hz_vox.s (about 2 KB) and the rest of the new code are movable (code banks). XCOM.PRG
 about 950 KB.
 
+## 4g. The fork in the tree; the interface's sounds (24 November 2026)
+
+### The fork
+
+The engine is now our fork, kept in `engine/` (upstream's tree at `a53918220c90` came in
+unchanged in commit `cca0456`; `engine/FORK.md`: what it is, our changes by topic, the
+diff, how to take a newer upstream, the two targets). The eight patches were applied there;
+`patches/`, `tools/getsrc.sh`, `tools/mkpatch.sh` and the Makefile's fetch-and-patch step
+are gone (`upstream/`, if a tree still has it, is ignored and unused). The Makefile compiles
+`engine/src` in place (`ENGINE=DIR` for another copy); the three files `plat/` replaces
+(`timer.c`, `vgainit.c`, `vgageo.c`) stay in `engine/src` for upstream's DOS build and are
+left out of the port's file lists, as before: no copy to `build/src`, no `#ifdef` moved.
+`tools/getdata.sh` runs `engine/tools/xcomconv.py` directly (`python3 -I -B`).
+
+Proof that the fork is the patches: from a clean tree on the fast machine, before
+(`cca0456`, `upstream/` = `engine/`) and after: `engine/src` equal to the old `build/src`
+(`diff -r`, but the patch tool's `.orig` files); MUSD.PRG and XCOM.PRG equal byte for byte
+but ld65's creation date and hzlarge's build stamp (an md5 of the linked objects, whose
+ca65 file tables hold the sources' times: two builds of one tree differ there too); the
+host build byte for byte with the sources at their old path (`make ENGINE=build`, the
+engine copied to `build/src`), and at `engine/src` equal but the file names in its debug
+information (and so its build-id).
+
+Then, for every build (the DOS one too, as the 286 project will use it): four upstream
+fixes no longer behind `XCOM_PORT` (`path_search_c`'s `4u * TILES`, the `HURT` order,
+the morale in `long`, an instrument ending at its track's end); the host and the Atari816
+compile the same code as before.
+
+### The interface's sounds
+
+DOS (and OpenXcom) click when a button is pressed and play one of three pop-up sounds when
+a window opens; the engine had none (only `geo popup`, the UFO alert). OpenXcom's
+`Mod.cpp` (`resetGlobalStatics`, `loadExtraResources`): `BUTTON_PRESS = 0`,
+`WINDOW_POPUP = {1, 2, 3}` of GEO.CAT, which `loadVanillaResources` reads from DOS's
+SOUND2.CAT (Windows: SAMPLE.CAT); `Window::popup` picks one at random when the window
+starts to open; `TextButton::mousePress` plays the click (keys do not; ImageButton,
+ArrowButton and the globe's buttons have no sound).
+
+Checked on the user's GOG copy (`SOUND/SOUND2.CAT`, 14 entries; never in git): entry 0
+1,488 samples, 186 ms at 8,000 Hz, peak -12 dBFS (a soft click); 1: 6,206, 776 ms
+(audible 616); 2: 4,474, 559 ms (497, a hiss); 3: 1,882, 235 ms (upstream's `geo popup`).
+The rate: SAMPLE.CAT's entry 0 (the Windows edition's WAV, 11,025 Hz) is 2,028 samples, 184
+ms, and correlates best with the DOS entry at 8,000 Hz (OpenXcom converts DOS samples from
+8 kHz); the Windows edition's other geoscape samples are other recordings. Levels, the
+loudest 100 ms: rifle -6 dBFS, button -16, window 1 -7, window 2 -10, geo popup -17; the
+Sound Blaster has no volume per effect, so `tools/sound.py` scales them when it converts
+(button 0.5, window 1 0.47, window 2 0.6: -22, -14, -15 dBFS). ADPCM: 23.2, 32.4, 13.8 dB
+(window 2 is noise: 8.6 dB at full level).
+
+The engine (`engine/FORK.md` "The interface's sounds" names every hook): SOUNDS.PAK has 26
+effects (the three new at the end: the old ones' bytes and UMB places unchanged);
+`snd_button` at each place that takes a click on a button, `snd_window` when a window
+opens over a screen; digital samples only, not in a battle, at priority 1 (under alerts
+and the battle's effects; a click cuts a pop-up's tail). Pack format 5: an older pack
+stops the DOS build ("Packs are from another version"), the Atari816 shows "the game's
+data is out of date" with both formats on its screen (`horizon/hz_plat.c`), and the
+Makefile's targets that use the packs say "data/packs are ... PACKS 4, the engine needs
+format 5: make data GAME=... again" (`make data` without GAME checks them).
+
+Memory: all 26 effects in the sound's 64 KB UMB, 46,154 bytes (40,966 before); the
+geoscape's track after them (14,058 bytes: 19,382 left); on the Atari816 the decoded
+samples about 92 KB in the cache's 3 far banks (26 of its 32 entries).
+
+Tested (`tests/sound.sh`, run `sndui`, `tests/sndui.keys`): the start menu, a new game by
+clicks, INTERCEPT and its CANCEL, OPTIONS, Save Game and the list's CANCEL, a time button,
+OPTIONS by Esc: 14 Sound Blaster blocks equal on both builds, each a Lau start, in the order
+W B W B B W B B W B W B B W (W a pop-up, B a click); their loudest 50 ms on the recording
+6.3 dB under the battle's. (The test found that the alert's sample, used as the third
+pop-up, kept its alert priority and silenced the clicks after it: the interface's sounds
+now play at their own priority.) `soundcheck.py` names the effects again (its checksum
+had not followed `sb_sum`: the battle's blocks showed as "?").
+
 ## 5. The plan
 
 Principle: **upstream's code runs unchanged** on a model of the machine it was written for;
-the port is `compat/` + `plat/` + back ends + one small patch of `#if defined(XCOM_PORT)`
-hooks. Every assembly routine becomes C with upstream's name and arguments (the asm's
-comments are the specification; OpenXcom's C++ for the voxel line). To follow upstream (an
-alpha that changes weekly): change `COMMIT` in `tools/getsrc.sh`, `make src`, fix the hunks
-that do not apply (12 files, small hunks at function heads), re-check the assembly files
-that changed (`git diff OLD NEW -- src/*.asm`: each has its C twin in `plat/`, named alike).
-A fork would be faster today and unmergeable in a month.
+the port is `compat/` + `plat/` + back ends + small `#if defined(XCOM_PORT)` hooks in the
+engine. Every assembly routine becomes C with upstream's name and arguments (the asm's
+comments are the specification; OpenXcom's C++ for the voxel line). (Since section 4g the
+engine is our fork in `engine/`; following upstream is a merge from a branch at upstream's
+tree, `engine/FORK.md` "Taking a newer upstream"; the assembly files that changed each have
+their C twin in `plat/`, named alike.)
 
 | Stage | Delivers | Tested by | Size (new lines) |
 | --- | --- | --- | --- |
@@ -1235,7 +1306,7 @@ Risks:
 - **Memory decisions**: the engine sizes its battle lists and picture plans by DOS's free
   memory; the model reports 638 KB free and no UMB/XMS: with EMS/XMS modelled in far banks
   (stage 3) the engine takes its "plenty of memory" paths (every picture, no disk paging).
-- **Upstream moves fast**: 0.5.1 is the first public alpha; pin, and merge by stages.
+- **Upstream moves fast**: 0.5.1 is the first public alpha; our fork merges it by stages.
 - **The GOG data** is not exactly DOS 1.4 (fonts, texts, HE types): behaviour around the
   patched HE records differs from DOS (those parts do not explode).
 

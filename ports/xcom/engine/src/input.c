@@ -124,8 +124,18 @@ static unsigned read_key(void)
             volatile unsigned long far *ticks = (unsigned long far *)MK_FP(0x40, 0x6C);
             unsigned long t0 = *ticks;
             next_token(tok, sizeof tok);
+#if defined(XCOM_PORT)
+            /* (the platform sleeps to the next frame between the looks: a scripted run
+               on the real clock idles as a player's does; the virtual clock: nothing) */
+            void plat_script_wait(void);
+            while (*ticks - t0 < (unsigned long)atoi(tok) * 182 / 100) {
+                mouse_poll();
+                plat_script_wait();
+            }
+#else
             while (*ticks - t0 < (unsigned long)atoi(tok) * 182 / 100)
                 mouse_poll();
+#endif
             continue;
         }
         if (!strcmp(tok, "HOLD")) {

@@ -6,18 +6,20 @@ Watcom C (16-bit large model, about 49,000 lines) plus NASM assembly (about 12,9
 GPL-3, alpha 0.5.1. You bring your own copy of the game; its converter (XCOMCONV, Python)
 makes the engine's packs from it.
 
-This folder is the port to the Atari816 (Horizon 0.30). **State: a complete, playable
+This folder is the port to the Atari816 (Horizon 0.30), with **our fork of the engine in
+[engine/](engine/FORK.md)** (upstream at `a53918220c90`, our changes made there directly;
+the fork also serves a 286 DOS machine: upstream's DOS build stays). **State: a complete, playable
 app** (`make app`: XCOM.HZA, no game data in it): the intro, menus, geoscape, base screens,
 UFOpaedia, interceptions, battles, debriefings, the end slides; the AdLib music on the
 OPL2 (a helper task keeps its tempo while the game computes) and the Sound Blaster effects
-on Lau; saves (also inside a battle) in the app's folder. Every screen is checked against
+on Lau (also the buttons' clicks and the windows' pop-up sounds, as DOS); saves (also inside a battle) in the app's folder. Every screen is checked against
 the PC build by `make test`. Battles are still slow in places (PORTING-NOTES.md, "What is
 next").
 
 | | State |
 | --- | --- |
-| Upstream | fetched at a pinned commit (`tools/getsrc.sh`), built through patches (`patches/src-000N-*.patch`, all in `#if defined(XCOM_PORT)`: the port's hooks, sound, screens and three upstream bugs, the speed hooks, fixes) |
-| Data | `tools/getdata.sh` runs upstream's XCOMCONV on your copy (GOG works with `--skip-check` and one converter patch); the VGA mode uses 18.3 MB of it |
+| Engine | our fork in `engine/` (`engine/FORK.md`: what it is, our changes by topic, `git diff cca0456 -- ports/xcom/engine`, how to take a newer upstream); the port's hooks are `#if defined(XCOM_PORT)`, fixes and the interface's sounds are for every build; `plat/` replaces three of its files on the Atari816 (the Makefile leaves them out) |
+| Data | `tools/getdata.sh` runs the fork's XCOMCONV (`engine/tools`) on your copy (GOG works with `--skip-check`); the VGA mode uses 18.3 MB of it; pack format 5 (`PACKS.VER`: older packs are refused, `make` says so, the app on its screen) |
 | Host build (Linux) | the whole engine headless on a model of the DOS machine (`plat/xdos.c`), with DOS's 16-bit `int` (`tools/host16.py`): the reference |
 | Atari816 build | `hcc --code large --data far`: XCOM.PRG and MUSD.PRG (the music task) |
 | Tests | `make test`: 14 KEYS-script runs of every screen on both builds (same LOG, same pictures pixel for pixel, same saves, open files counted), the real mouse and keyboard three times (the clock as after the start, after 5 minutes, wrapping), a full card, the sound (OPL2 stream and Sound Blaster blocks against the host's, the beat, the volume); `make test-long`: longer runs (a big battle saved and loaded, the defeat slides, the campaign soak); `make test-app`: the app installed and started from the Desktop |
@@ -30,7 +32,6 @@ what is next. The player's guide is [app/README.TXT](app/README.TXT) (it goes in
 ## Build
 
 ```sh
-sh tools/getsrc.sh                          # upstream/ at the pinned commit (or: make src)
 make data GAME="/path/to/X-COM UFO Defense" # data/packs/ from your copy (never in git)
 make builds                                 # MUSD.PRG, XCOM.PRG, build/host/xcomhost
 make test                                   # host vs Atari816 in the emulator (about 2 min)
@@ -45,7 +46,7 @@ make host-run ARGS="VGA NOINTRO KEYS $PWD/tests/geo.keys LOG LOG.TXT"
 
 On the Atari816 the options `/V` (virtual clock, test pictures), `/T n` (end after n idle
 seconds), `/S` (wait for the blitter at once) and `/U n` (n microseconds added to the
-clock: a machine on for long) come before the engine's (upstream's `release/MANUAL.TXT`
+clock: a machine on for long) come before the engine's (`engine/release/MANUAL.TXT`
 section 10: `NOINTRO`, `BATTLE`, `MISSION FA1V.PAK`, `SEED n`, `KEYS file`, `LOG file`,
 `BENCH`, ...). Without options the game starts in VGA mode with its intro.
 
@@ -61,5 +62,6 @@ Dependencies of the converter: Python 3 and PyYAML.
 
 ## Licence
 
-Upstream is GPL-3 (`upstream/COPYING`); the port's own files are GPL-3 too. The game's data
-is not part of this repository.
+XCOM-XT is GPL-3 (`engine/COPYING`); the port's own files are GPL-3 too; `engine/data` holds
+OpenXcom's rule and soldier-name files (GPL-3), used by the converter. The game's data is not
+part of this repository.

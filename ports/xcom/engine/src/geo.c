@@ -217,6 +217,27 @@ static void free_world(void)
    pair each) bytes at dst through the table (XLAT). */
 static void zoom_bytes(unsigned char far *dst, const unsigned char far *src, unsigned n,
                        unsigned tab, unsigned z);
+#if defined(XCOM_PORT)
+static void zoom_bytes(unsigned char far *dst, const unsigned char far *src, unsigned n,
+                       unsigned tab, unsigned z)
+{
+    const unsigned char far *t = (const unsigned char far *)MK_FP(FP_SEG(src), tab);
+    unsigned b;
+
+    while (n--) {
+        b = *src++;
+        if (z == 1) {
+            *dst++ = t[b >> 4];
+            *dst++ = t[b & 15];
+        } else {
+            *dst++ = t[b >> 6 & 3];
+            *dst++ = t[b >> 4 & 3];
+            *dst++ = t[b >> 2 & 3];
+            *dst++ = t[b & 3];
+        }
+    }
+}
+#else
 #pragma aux zoom_bytes = \
     "push ds" \
     "mov ds, dx" \
@@ -240,6 +261,7 @@ static void zoom_bytes(unsigned char far *dst, const unsigned char far *src, uns
 "zx: pop ds" \
     parm [es di] [dx si] [cx] [bx] [ax] \
     modify [ax cx si di];
+#endif
 
 static void draw_detail(void);
 static void centre_on(int x, int y);
@@ -2875,6 +2897,7 @@ static unsigned geo_click(unsigned key)
         return 0;
     if (mx >= PANEL_X) {
         if (my < 6 * BTN_H) {
+            snd_button();
             if (my < BTN_H) {
                 intercept_window(-1, NULL);
                 return 0;
@@ -2882,6 +2905,7 @@ static unsigned geo_click(unsigned key)
             return panel_buttons[my / BTN_H].key;
         }
         if (my >= SPEED_Y && my < SPEED_Y + 3 * 14) {
+            snd_button();
             speed = (my - SPEED_Y) / 14 * 2 + (mx >= PANEL_X + 32);
             paused = 0;
         }

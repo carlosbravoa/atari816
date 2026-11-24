@@ -29,7 +29,14 @@ import os
 import struct
 
 # Effects in the order of the SFX_* enum in src/sound.h:
-# (name, cat, index, longest ms or None, rate)
+# (name, cat, index, longest ms or None, rate[, gain])
+# The interface's three at the end (OpenXcom's Mod::BUTTON_PRESS = 0 and
+# WINDOW_POPUP = 1, 2, 3 of GEO.CAT, which is SOUND2.CAT in DOS; the third
+# pop-up is "geo popup"): a gain below 1 sets them under the shots (the
+# Sound Blaster has no volume per effect). Measured on the DOS samples, the
+# loudest 100 ms: rifle -6 dBFS, button -16, window 1 -7, window 2 -10,
+# geo popup -17; with the gains: button -22, the windows -14 and -15
+# (window 2 is a hiss: 4-bit ADPCM keeps 14 dB of it at 0.6, 9 dB at 1).
 EFFECTS = [
     ("rifle",        1, 4,  450, 8000),
     ("cannon",       1, 12, 450, 8000),
@@ -54,6 +61,9 @@ EFFECTS = [
     ("ufo hit",      2, 12, 500, 6000),
     ("ufo crash",    2, 10, 900, 6000),
     ("craft explode", 2, 13, 900, 6000),
+    ("button",       2, 0,  200, 8000, 0.5),
+    ("window 1",     2, 1,  650, 8000, 0.47),
+    ("window 2",     2, 2,  550, 8000, 0.6),
 ]
 
 # MUSIC.PAK tracks in the order of the MUS_* enum (ADLIB.CAT entries, as in
@@ -198,9 +208,11 @@ def build_sounds(root, pcm=False):
             2: cat_entries(find_file(root, "SOUND2.CAT"))}
     entries = []
     report = []
-    for name, cat, idx, max_ms, rate in EFFECTS:
+    for name, cat, idx, max_ms, rate, *gain in EFFECTS:
         s = resample(dos_samples(cats[cat][idx]), 8000, rate)
         s = trim(s, rate, max_ms)
+        if gain:
+            s = [128 + int(round((v - 128) * gain[0])) for v in s]
         if pcm:
             data, fmt, q = bytes(s), 0, 99.0
         else:

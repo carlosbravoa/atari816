@@ -25,6 +25,7 @@
 #include "hwp.h"
 #include "input.h"
 #include "qlist.h"
+#include "sound.h"
 #include "uik.h"
 
 #define TABS(s)     ((const unsigned char *)(s))
@@ -237,6 +238,7 @@ static int craft_info(int k)
             }
             if (key == KEY_LCLICK) {
                 if (hit(128, 168, 64, 24)) {
+                    snd_button();
                     uk_close();
                     return 0;
                 }
@@ -246,6 +248,8 @@ static int craft_info(int k)
                 for (s = 0; s < 3 && t->soldiers; s++)
                     if (hit(BTN_X, btn_y(s), BTN_W, BTN_H))
                         want = 10 + s;
+                if (want >= 0)
+                    snd_button();
             } else if (ch == '1' || ch == '2')
                 want = ch - '1' < t->weapons ? ch - '1' : -1;
             else if (ch == 'x' && g_debug) {

@@ -1,8 +1,10 @@
-upstream/
-upstream.tmp/
-build/
-data/
-scratch/
+# (upstream/: the copy tools/getsrc.sh used to fetch, before the engine was kept in engine/)
+/upstream/
+/upstream.tmp/
+/build/
+/data/
+/scratch/
+__pycache__/
 *.PRG
 *.map
 *.lbl

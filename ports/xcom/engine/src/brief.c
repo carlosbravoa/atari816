@@ -11,6 +11,7 @@
 #include "gfx.h"
 #include "input.h"
 #include "pedia.h"
+#include "sound.h"
 #include "uik.h"
 
 int g_brief_crashed, g_brief_site;
@@ -87,6 +88,8 @@ void brief_show(const char *pak, const char *craft)
         if (key == KEY_LCLICK && (g_mouse_x < 100 || g_mouse_x >= 220 || g_mouse_y < 164
                                   || g_mouse_y >= 182))
             continue;
+        if (key == KEY_LCLICK)
+            snd_button();
         break;
     }
     free(buf);

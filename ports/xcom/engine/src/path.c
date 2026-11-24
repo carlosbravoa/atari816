@@ -521,9 +521,16 @@ static unsigned search(int unit, int max_tu, int gx, int gy, int gz, int slack)
         p.h0 = heur(u->x, u->y, gx, gy, p.hs);
         p.kmax = slack < MAX_BUCKET ? slack : MAX_BUCKET - 1;
     }
+#if defined(XCOM_PORT) && defined(__CC816__)
+    if (g_path_asm) {
+        void hz_path_search(struct PathParams *p);  /* (plat/way.c: in assembly) */
+        hz_path_search(&p);
+    } else
+#else
     if (g_path_asm)
         path_search_asm(&p);
     else
+#endif
         path_search_c(&p);              /* (BENCH, vbench.c) */
     mark_units(unit, 0);
     return p.best;

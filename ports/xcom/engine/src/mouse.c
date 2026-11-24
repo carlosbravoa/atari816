@@ -229,6 +229,12 @@ void __near ms_draw_cga(int x, int y)
 {
     int sh = (x & 3) * 2, r, i, nb = 80 - (x >> 2);
 
+#if defined(XCOM_PORT)
+    if (g_vga) {
+        vga_ms_draw(x, y);
+        return;
+    }
+#endif
     if (nb > 3)
         nb = 3;
     for (r = 0; r < CUR_H && y + r < 200; r++) {
@@ -247,6 +253,12 @@ void __near ms_erase_cga(int x, int y)
 {
     int r, i, nb = 80 - (x >> 2);
 
+#if defined(XCOM_PORT)
+    if (g_vga) {
+        vga_ms_erase(x, y);
+        return;
+    }
+#endif
     if (nb > 3)
         nb = 3;
     for (r = 0; r < CUR_H && y + r < 200; r++) {

@@ -9,7 +9,8 @@
 #ifndef PACKVER_H
 #define PACKVER_H
 
-#define PACK_FORMAT_VERSION 4
+/* 5: SOUNDS.PAK has the interface's three effects (the fork, engine/FORK.md) */
+#define PACK_FORMAT_VERSION 5
 
 /* PACKS.VER holds PACK_MARKER_TEXT, the number and a line end. */
 #define PACK_MARKER_FILE "PACKS.VER"

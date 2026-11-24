@@ -658,7 +658,8 @@ static void held_load(unsigned id)
     unsigned short hd[5];
     int ega = g_video == VIDEO_EGA, ch = ega ? 5 : 2, nb, r, k, c;
     unsigned pix, raw, save, need;
-    unsigned char far *p, far *s;
+    unsigned char far *p;       /* (port: one far declarator a line, cc816) */
+    unsigned char far *s;
 
     hp = NULL;
     if (!uk_read(id, 0, hd, sizeof hd) || !(hd[4] & UIF_MASKED) || hd[2] > 32 || hd[3] > 48)
@@ -807,7 +808,11 @@ static void xor_fill(int x, int y, int w, int h)
         return;
     }
     if (g_vga) {                        /* black to yellow (gfx.h VGA_VMAP) */
+#if defined(XCOM_PORT)
+        unsigned char v = g_vmap[14];
+#else
         unsigned char v = ((const unsigned char far *)MK_FP(g_vga, VGA_VMAP))[14];
+#endif
         mouse_hide_rect(x, y, x + w, y + h);
         for (r = y; r < y + h; r++) {
             unsigned char far *d = (unsigned char far *)MK_FP(0xA000, r * 320 + x);

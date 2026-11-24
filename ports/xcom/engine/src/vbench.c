@@ -43,7 +43,10 @@ void path_search_c(struct PathParams *p)
     unsigned char *wf = MK_FP(p->walkseg + TILES / 16, 0);
     unsigned char *cost = MK_FP(p->searchseg, 0), *from = cost + TILES;
     unsigned short *next = (unsigned short *)(cost + 2 * TILES);
-    unsigned short *bucket = (unsigned short *)(cost + 4 * TILES);
+    /* (the fork, every build: 4 * TILES is 40,000: an int of 16 bits overflows to
+       -25,536, which DOS's far pointers added to the offset alone, wrapping back to
+       40,000; a 24-bit far pointer goes 25,536 bytes back, into the walk tables) */
+    unsigned short *bucket = (unsigned short *)(cost + 4u * TILES);
     int c, max_tu = p->max_tu;
 
     _fmemset(cost, COST_NONE, p->n);
@@ -1097,6 +1100,7 @@ void bench_run(unsigned char *seen)
             for (k = 0; k < 4; k++)
                 d += (v[(k >> 1) * 320 + (k & 1)] != was[k]) * 16;
             fprintf(f, "VGA dot check: %u of 4 pixels changed, %u not back\n", d & 15, d >> 4);
+#if !defined(XCOM_PORT)         /* (port: vgaasm.asm's block is not there) */
             if (*(void far * far *)MK_FP(g_vga, 0x9D8)) {
                 /* DOS's smoke and fire pictures' step (vgaasm.asm pics_next):
                    one pass of bplayer.c's idle loop over fx_bench's smoke
@@ -1145,6 +1149,54 @@ void bench_run(unsigned char *seen)
                 const unsigned far *nl = (const unsigned far *)MK_FP(g_vga, 48);
                 fprintf(f, "VGA lights: %u relights in %u night presents\n", nl[0], nl[1]);
             }
+#endif
+#if defined(XCOM_PORT)
+            {
+                /* the same check of DOS's smoke and fire pictures' step with
+                   the port's (plat/vgabat.c vga_pics_next, entry 26) */
+                int vga_pics_loaded(void);
+                void vga_pics_start(void);
+                int vga_pics_over(void);
+                const int far *vga_pics_next(void);
+                const int far *r;
+                unsigned long t0, t1, all = 0, most = 0;
+                int n = 0, x, y;
+                if (vga_pics_loaded()) {
+                    fx_reset();
+                    fx_smoke_cloud(20, 20, 0);
+                    for (y = 22; y < 26; y++)
+                        for (x = 16; x < 20; x++)
+                            fx_fire_set(x, y, 0, 3, 5);
+                    g_view_z = 0;
+                    vga_pics_start();
+                    render_center(20, 20, 0);
+                    render_full();
+                    for (;;) {
+                        t0 = timer_read();
+                        if ((r = vga_pics_next()) == NULL)
+                            break;
+                        render_rect(r[0], r[1], r[2], r[3]);
+                        t1 = timer_read() - t0;
+                        all += t1;
+                        if (t1 > most)
+                            most = t1;
+                        if (++n == 12)
+                            check_redraw(f, "pictures halfway through their step");
+                        if (vga_pics_over())
+                            break;
+                    }
+                    fprintf(f, "VGA pictures: picture %08lx\n", buf_sum());
+                    fprintf(f, "VGA pictures' step: %d redraws for %d smoke + %d fire tiles, %lu ms, longest %lu ms\n",
+                            n, n_smoke, n_fire, timer_ms(all), timer_ms(most));
+                    for (x = 0; x < n_smoke; x++)
+                        g_los_flags[TIDX(smoke[x].x, smoke[x].y, 0)] &= ~LF_FX;
+                    for (x = 0; x < n_fire; x++)
+                        g_los_flags[TIDX(fire[x].x, fire[x].y, 0)] &= ~LF_FX;
+                    fx_reset();
+                    render_full();
+                }
+            }
+#endif
         }
         fclose(f);
     }

@@ -18,6 +18,7 @@
 #include "geo.h"
 #include "gfx.h"
 #include "input.h"
+#include "sound.h"
 #include "uik.h"
 
 #define LAB_LINES   N_TOPICS    /* the longest list: new research topics */
@@ -121,6 +122,7 @@ static void popup(unsigned bg, int theme, int x, int y, int w, int h)
     else
         uk_fill(x, y, w, h, 0);
     uk_window(x, y, w, h);
+    snd_window();
 }
 
 /* ------------------------------------------------------------------ */
@@ -191,6 +193,8 @@ static void research_alloc(int i, int isnew)
                 key = 0x1C0D;
             else
                 continue;
+            if (key == 'c' || key == 0x1C0D || (key == 0x011B && !all))
+                snd_button();
         }
         ch = key & 0xFF;
         scan = key >> 8;
@@ -447,6 +451,8 @@ static void production_alloc(int i, int isnew)
                 key = 'l';
             else if (inside(168, 155, 136, 16))
                 key = 0x1C0D;
+            if (key == 's' || key == 'l' || key == 0x1C0D)
+                snd_button();
             else
                 continue;
         }

@@ -393,8 +393,11 @@ void kill_unit(int victim, int shooter, int zombify)
             if (!c->alive)
                 continue;
             if (born_faction(c) == v->faction)
-                morale_change(c, -(rank_mod * 200 * ((110 - c->bravery) / 10)
-                                   / (v->faction == FACTION_ALIEN ? 100 : leader) / 100));
+                /* (the fork, every build: in long, 100 x 200 x 7 is past a 16-bit int,
+                   which wrapped on DOS and on the Atari816, so that a comrade's death
+                   cost no morale or gave some; OpenXcom loses it as here) */
+                morale_change(c, -(int)((long)rank_mod * 200 * ((110 - c->bravery) / 10)
+                                        / (v->faction == FACTION_ALIEN ? 100 : leader) / 100));
             else
                 morale_change(c, 10 * (v->faction == FACTION_ALIEN ? leader : 100) / 100);
         }
@@ -654,6 +657,12 @@ static int line_of_fire(int s, int t)
     return vox_target_unit(o, t, v);
 }
 
+/* (the fork, every build) The side before the roll: both call rnd, and C
+   leaves the order of a call's arguments open; DOS (Watcom) evaluates them
+   right to left, as gcc does on the host; cc816 left to right, which changed
+   the damage roll. Watcom's order made explicit. */
+#define HURT(v, s, pw, dt, side, hc) do { int side_ = (side); hurt(v, s, roll_damage(pw, dt), dt, side_, hc); } while (0)
+
 /* A unit hit at voxel h (TileEngine::hit): the side and height hit from
    where the voxel is against the unit's middle (BattleUnit::damage). */
 static void hit_unit_at(int victim, int s, const int *h, int power, int dtype)
@@ -666,7 +675,7 @@ static void hit_unit_at(int victim, int s, const int *h, int power, int dtype)
         rz -= 24;           /* the head in the tile above (verticaloffset) */
     if (RL_WOUNDABLE(&g_units[s]) && ALIEN_BORN(v))
         g_units[s].hits++;  /* firing experience */
-    hurt(victim, s, roll_damage(power, dtype), dtype,
+    HURT(victim, s, power, dtype,
          rl_side(v, h[0] - v->x * 16 - c, h[1] - v->y * 16 - c),
          rz >= body_height(v) ? 2 : rz > 4 ? 1 : 0);
 }
@@ -844,7 +853,7 @@ int shoot(int s, int tx, int ty, int tz, int mode)
         turn_unit(s, &u->dir, dir_towards(u->x, u->y, tx, ty));
         if ((int)rnd(100) < unit_shot_acc(u, mode)) {
             Unit *v = &g_units[occ - 1];
-            hurt(occ - 1, s, roll_damage(w->power, DT_STUN), DT_STUN,
+            HURT(occ - 1, s, w->power, DT_STUN,
                  rl_side(v, u->x - v->x, u->y - v->y), 1);
         } else
             msg(COL_INFO, "Missed");
@@ -966,7 +975,7 @@ void explode(int cx, int cy, int cz, int power, int dtype, int radius, int throw
                 }
                 if (th && th->faction != v->faction && RL_WOUNDABLE(th))
                     g_units[thrower].hits++;    /* firing experience */
-                hurt(i, thrower, roll_damage(p, dtype), dtype,
+                HURT(i, thrower, p, dtype,
                      dx > -2 && dx < 2 && dy > -2 && dy < 2 ? SIDE_UNDER : rl_side(v, -dx, -dy), 1);
             }
     }
@@ -1430,7 +1439,7 @@ static int melee_attack(int a, int t)
     } else
         log_msg(COL_BAD, text);
     if ((int)rnd(100) < unit_xstat(al)->melee * unit_acc_mod(al, NO_ITEM) / 100)
-        hurt(t, a, roll_damage(al->melee, DT_MELEE), DT_MELEE,
+        HURT(t, a, al->melee, DT_MELEE,
              rl_side(v, al->x - v->x, al->y - v->y), 1);
     else if (unit_visible(al) || unit_visible(v))
         msg(COL_INFO, "Missed");
@@ -1473,6 +1482,12 @@ int battle_run(void)
         if (g_roster)
             inv_screen(-1);     /* DOS's inventory before the battle (invscr.c) */
     }
+#if defined(XCOM_PORT)
+    {
+        void plat_bb_prepare(void);     /* (plat.h) the pictures for the blitter now */
+        plat_bb_prepare();              /* (a saved battle comes here too) */
+    }
+#endif
     battle_view();              /* (reads g_bs_resume) */
     g_bs_resume = 0;
 

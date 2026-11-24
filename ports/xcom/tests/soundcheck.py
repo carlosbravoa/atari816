@@ -10,13 +10,17 @@
       after the first track's start; and the time of each tick's writes on the Atari816
       (the host's tick numbers): at most LATE_MS after the 13.731 ms beat (the beat's phase:
       the earliest tick). Prints the spacing figures.
-  sfx NAME HOSTSB CONSOLE EMUERR [MIN]
+  sfx NAME HOSTSB CONSOLE EMUERR [MIN [EXPECT]]
       (MIN: the Atari816's run may end first: its lines, at least MIN, as the host's
       first ones) The Sound Blaster's blocks: the host's -sb lines (time, kind, bytes, address, rate,
       checksum, samples) and the Atari816's "xcom: sfx" lines the same, in the same order;
       SOUNDS.PAK's effect named for each (by its checksum); each block a Lau start
       (run816 --log-lau: a write to AU_KEYON) with that many samples at that rate
-      (pitch = rate * 16384 / 48000).
+      (pitch = rate * 16384 / 48000). EXPECT: the effects that must start, in order, as
+      letters: B the button's click, W a window's pop-up (window 1, window 2 or geo popup).
+  quieter NAME WAV1 FROM1 TO1 WAV2 FROM2 TO2
+      The loudest 50 ms of WAV1's part under WAV2's (the interface's sounds under a
+      battle's shots).
   wav NAME WAV FROM TO MINRMS
       The recording (run816 --wav: Lau and the OPL2 as the board mixes them) from FROM to
       TO seconds: RMS above MINRMS, under 0.05 % of the samples clipped; the loudest
@@ -132,20 +136,22 @@ def sfx_names():
     names = ['rifle', 'cannon', 'laser', 'plasma', 'hit bullet', 'hit beam', 'explosion',
              'die sectoid', 'die snakeman', 'die muton', 'die ethereal', 'die male',
              'die female', 'door', 'step', 'throw', 'geo popup', 'craft cannon',
-             'craft missile', 'ufo fire', 'ufo hit', 'ufo crash', 'craft explode']
+             'craft missile', 'ufo fire', 'ufo hit', 'ufo crash', 'craft explode',
+             'button', 'window 1', 'window 2']
     n = struct.unpack('<H', d[4:6])[0]
     out = {}
     for i in range(n):
         off, ln = struct.unpack('<IH', d[6 + 10 * i:12 + 10 * i])
-        s = 0
-        for b in d[off:off + ln]:
+        # plat/sb.c sb_sum: the length, every 61st byte, the last 16
+        blk, s = d[off:off + ln], ln
+        for b in list(blk[::61]) + list(blk[max(0, ln - 16):]):
             s = (((s << 1) | (s >> 15)) + b) & 0xFFFF
         nm = names[i] if i < len(names) else str(i)
         out[(ln, s)] = out[(ln, s)] + '/' + nm if (ln, s) in out else nm
     return out
 
 
-def sfx(name, hostsb, console, emuerr, minimum=0):
+def sfx(name, hostsb, console, emuerr, minimum=0, expect=None):
     host = [ln.strip() for ln in open(hostsb) if ln.strip()]
     rx = re.compile(r'xcom: sfx (\d+ (?:halt|sfx .*?samples \d+))(?: voice (-?\d+))?\s*$')
     emu, voices = [], []
@@ -191,8 +197,33 @@ def sfx(name, hostsb, console, emuerr, minimum=0):
         return fail(f'{name}: Lau starts {lau[:6]}... are not the effects\' (samples, pitch) {want[:6]}...')
     if any(v < 0 for v in voices):
         return fail(f'{name}: an effect found no Lau voice')
+    if expect is not None:
+        got = ''.join('B' if s[0] == 'button' else 'W' if s[0] in ('window 1', 'window 2', 'geo popup')
+                      else '?' for s in starts)
+        if got != expect:
+            return fail(f'{name}: the effects started {got} ({", ".join(s[0] for s in starts)}), '
+                        f'not {expect} (B button, W window)')
     ok(f'{name}: {len(starts)} Sound Blaster blocks as the host\'s, each a Lau start of its '
        f'samples at its rate ({", ".join(sorted(set("%s %d Hz" % (s[0], s[2]) for s in starts)))})')
+
+
+def loudest(path, lo, hi):
+    """the loudest 50 ms window's RMS of the recording from lo to hi seconds"""
+    w = wave.open(path)
+    rate, ch = w.getframerate(), w.getnchannels()
+    a = array.array('h', w.readframes(w.getnframes()))
+    seg = a[int(lo * rate) * ch:int(hi * rate) * ch]
+    win = rate * ch // 20
+    return max(math.sqrt(sum(x * x for x in seg[i:i + win]) / win) for i in range(0, len(seg) - win, win))
+
+
+def quieter(name, w1, lo1, hi1, w2, lo2, hi2):
+    a, b = loudest(w1, lo1, hi1), loudest(w2, lo2, hi2)
+    msg = (f'{name}: the loudest 50 ms {a:.0f} against {b:.0f} '
+           f'({20 * math.log10(a / b):+.1f} dB)')
+    if a > b:
+        return fail(msg)
+    ok(msg)
 
 
 def wav(name, path, lo, hi, minrms):
@@ -219,7 +250,9 @@ def main():
     if a[0] == 'opl':
         opl(a[1], a[2], a[3], int(a[4]), float(a[5]))
     elif a[0] == 'sfx':
-        sfx(a[1], a[2], a[3], a[4], int(a[5]) if len(a) > 5 else 0)
+        sfx(a[1], a[2], a[3], a[4], int(a[5]) if len(a) > 5 else 0, a[6] if len(a) > 6 else None)
+    elif a[0] == 'quieter':
+        quieter(a[1], a[2], float(a[3]), float(a[4]), a[5], float(a[6]), float(a[7]))
     elif a[0] == 'wav':
         wav(a[1], a[2], float(a[3]), float(a[4]), float(a[5]))
     sys.exit(1 if bad else 0)

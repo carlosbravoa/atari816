@@ -24,6 +24,14 @@ unsigned g_mus_max;
 #endif
 #define OPL     0x388
 
+#if defined(XCOM_PORT)
+/* The port (patches/src-0002-sound.patch): the platform's music task plays
+   what this driver plays (plat/plat.h "music") */
+void plat_mus_play(int track, int loop, unsigned char *buf, unsigned len);
+void plat_mus_stop(void);
+void plat_mus_fx(int sfx);
+#endif
+
 /* Note frequencies (F-number) and octaves: the first 12 notes use their own
    row, every later octave repeats the second. */
 static const unsigned freq_lo[12] = {
@@ -333,6 +341,14 @@ static int decode(int i, int *another)
     int delay, c;
 
     do {
+        /* (the fork, every build) an instrument whose events run past the track's
+           end (GMTACTIC's instrument 10) would read whatever memory follows: it ends
+           there, so that every build plays the same (DOS, the host, the Atari816's
+           music task) */
+        if (p >= trk_len) {
+            in->cur = 0;
+            return 0x7FFF;
+        }
         op = trk[p++];
         if (op == 0xFE) {               /* call subtrack */
             a1 = trk[p++];
@@ -678,6 +694,10 @@ void mus_fx(int sfx)
 {
     if (g_opl && sfx >= 0 && sfx < N_SFX)
         fx_req = (unsigned char)(sfx + 1);
+#if defined(XCOM_PORT)
+    if (g_opl && sfx >= 0 && sfx < N_SFX)
+        plat_mus_fx(sfx);
+#endif
 }
 
 /* Timer hook: one driver tick at TIMER_HOOK_HZ. */
@@ -770,6 +790,9 @@ void mus_stop(void)
     playing = 0;
     if (!trk)
         return;
+#if defined(XCOM_PORT)
+    plat_mus_stop();
+#endif
     opl_lock = 1;
     reset_voices();
     opl_lock = 0;
@@ -871,6 +894,9 @@ int mus_play_at(int track, int loop, unsigned char *buf)
         return -1;
     }
     fclose(f);
+#if defined(XCOM_PORT)
+    plat_mus_play(track, loop, trk, len);
+#endif
     trk_len = len;
     memset(ins, 0, sizeof ins);
     parse_track();
@@ -890,3 +916,33 @@ int mus_play_at(int track, int loop, unsigned char *buf)
     playing = 1;
     return 0;
 }
+
+#if defined(XCOM_MUSD)
+/* The port's music task (mus/musd.c): a track already in memory (the
+   game's copy of it), started as mus_play_at starts one. */
+int mus_play_mem(unsigned char *buf, unsigned len, int loop)
+{
+    int k;
+
+    mus_stop();
+    trk = buf;
+    trk_len = len;
+    memset(ins, 0, sizeof ins);
+    parse_track();
+    now_tick = next_due = 0;
+    n_act = 0;
+    for (k = 0; k < 16; k++)
+        if (ins[instr_order[k]].start)
+            act[n_act++] = instr_order[k];
+    rewind_track();
+    opl_lock = 1;
+    reset_voices();
+    opl_lock = 0;
+    tempo = tempo * 2 / 5;
+    tempo_run = tempo;
+    looping = (unsigned char)loop;
+    muted = 0;
+    playing = 1;
+    return 0;
+}
+#endif

@@ -1,7 +1,8 @@
 # XCOM-XT (ports/xcom): X-COM: UFO Defense on an XT engine (GPL-3), on Horizon.
 # README.md, PORTING-NOTES.md.
 #
-#   make src        upstream/ (tools/getsrc.sh, pinned commit) + patches/src-*.patch -> build/src
+# The engine is our fork of XCOM-XT in engine/ (engine/FORK.md); its src/ is compiled as it
+# is, the files plat/ replaces left out (REPLACED).
 #   make data GAME=DIR   your X-COM (DOS 1.4 / GOG) -> data/packs (upstream's XCOMCONV)
 #   make host       build/host/xcomhost: the engine on Linux (headless, the reference)
 #   make host-run ARGS="NOINTRO ..."   run it on data/packs: pictures in build/host/shots
@@ -27,10 +28,14 @@ CARD     := $(HORIZON)/build/sd/SYSTEM/HORIZON.SYS
 CC_HOST  ?= cc
 GAME     ?=
 
-# upstream files replaced by the port (plat/): timer.c (PIT, INT 08h), vgainit.c and
-# vgageo.c (self-modifying hooks into vgaasm.asm / vgxasm.asm copied to the heap)
+# the engine (ENGINE=DIR: another copy of the fork's tree, e.g. for a comparison)
+ENGINE   ?= engine
+SRC      := $(ENGINE)/src
+# engine files replaced by the port (plat/): timer.c (PIT, INT 08h), vgainit.c and
+# vgageo.c (self-modifying hooks into vgaasm.asm / vgxasm.asm copied to the heap); the
+# DOS build keeps them
 REPLACED := timer vgainit vgageo
-UPSRC     = $(filter-out $(REPLACED:%=build/src/%.c),$(wildcard build/src/*.c))
+UPSRC     = $(filter-out $(REPLACED:%=$(SRC)/%.c),$(wildcard $(SRC)/*.c))
 # plat/ files of the battle view and the game's assembly in C (plat/asm.c keeps a stub
 # of each until its file is on: PLAT_ON="vgabat rend losfan voxrun way")
 PLAT_ON  ?= vgabat rend losfan voxrun way
@@ -38,7 +43,7 @@ PLAT_ALL := vgabat rend losfan voxrun way
 PLAT_MAC := vgabat=VGABAT rend=REND losfan=LOS voxrun=VOX way=WAY
 PLATSRC  := $(filter-out $(addprefix plat/,$(addsuffix .c,$(filter-out $(PLAT_ON),$(PLAT_ALL)))),$(wildcard plat/*.c))
 PLATDEFS := $(foreach f,$(PLAT_ON),$(foreach m,$(PLAT_MAC),$(if $(filter $f=%,$m),-DXD_HAVE_$(patsubst $f=%,%,$m))))
-HEADERS   = $(wildcard build/src/*.h compat/*.h plat/*.h horizon/*.h)
+HEADERS   = $(wildcard $(SRC)/*.h compat/*.h plat/*.h horizon/*.h)
 # the SDK's compiler, C library and game library: a change rebuilds the Atari816's objects
 TOOLSRC  := $(wildcard $(SDK)/c/bin/hcc $(SDK)/c/cc816/cc816/*.py $(SDK)/c/tools/*.py \
             $(SDK)/c/lib/*.[chs] $(SDK)/c/rt/*.[chs] $(SDK)/c/include/*.h $(SDK)/c/include/*/*.h \
@@ -50,52 +55,44 @@ all: XCOM.PRG
 build/sum/%.sum: % FORCE
 	@mkdir -p $(dir $@)
 	@md5sum $< > $@.new; if cmp -s $@.new $@; then rm $@.new; else mv $@.new $@; fi
-build/sum/headers.sum: FORCE build/src/.stamp
+build/sum/headers.sum: FORCE
 	@mkdir -p build/sum
 	@md5sum $(HEADERS) > $@.new; if cmp -s $@.new $@; then rm $@.new; else mv $@.new $@; fi
 build/sum/sdk.sum: FORCE
 	@mkdir -p build/sum
 	@md5sum $(TOOLSRC) > $@.new; if cmp -s $@.new $@; then rm $@.new; else mv $@.new $@; fi
-build/sum/patches.sum: FORCE
-	@mkdir -p build/sum
-	@cat upstream/COMMIT $(sort $(wildcard patches/src-*.patch)) 2>/dev/null | md5sum > $@.new; \
-	  if cmp -s $@.new $@; then rm $@.new; else mv $@.new $@; fi
-
-# ---------------------------------------------------------------- upstream + patches
-src: build/src/.stamp
-build/src/.stamp: build/sum/patches.sum
-	@test -f upstream/COMMIT || sh tools/getsrc.sh
-	rm -rf build/src && mkdir -p build && cp -r upstream/src build/src
-	for p in $(sort $(wildcard patches/src-*.patch)); do patch -s -p1 -d build < $$p || exit 1; done
-	touch $@
-
 # ---------------------------------------------------------------- the data
-data: data/packs/PACKS.VER
-data/packs/PACKS.VER:
-	@test -n "$(GAME)" || { echo "make data GAME=/path/to/your/X-COM (see README.md)"; exit 1; }
-	sh tools/getdata.sh "$(GAME)" --skip-check
+data:
+	@if [ -z "$(GAME)" ]; then $(PACKS_OK) && echo "data/packs: format $(PACKVER), as the engine's (make data GAME=DIR makes them again)"; \
+	  else sh tools/getdata.sh "$(GAME)" --skip-check; fi
+# the packs' format (engine/src/packver.h; PACKS.VER says which one data/packs are): packs
+# of an older converter stop the program at its start, so the targets that use them
+# check first
+PACKVER := $(shell sed -n 's/^\#define PACK_FORMAT_VERSION \([0-9]*\).*/\1/p' $(SRC)/packver.h)
+PACKS_OK = { test -f data/packs/PACKS.VER || { echo "no packs in data/packs: make data GAME=/path/to/your/X-COM (README.md)"; exit 1; }; \
+  grep -q "PACKS $(PACKVER)\b" data/packs/PACKS.VER || { echo "data/packs are \"$$(head -c 20 data/packs/PACKS.VER | tr -d '\r\n')\", the engine needs format $(PACKVER): make data GAME=/path/to/your/X-COM again"; exit 1; }; }
 
 # ---------------------------------------------------------------- host
 # The host compiles copies of the engine's files with DOS's 16-bit int (tools/host16.py:
 # int -> short, unsigned -> unsigned short; long is 32 bits by xcompat.h; structures
 # packed as cc816 packs them), so that its arithmetic, LOGs and files are the DOS
-# program's: build/host/s16/{src,plat,compat,host} mirror build/src, plat, compat, host.
+# program's: build/host/s16/{src,plat,compat,host} mirror engine/src, plat, compat, host.
 S16       := build/host/s16
 HOST16    := $(PYTHON) tools/host16.py
 HOSTWARN  ?= -w
 HOSTFLAGS := -std=gnu99 -O1 -g -fno-strict-aliasing -funsigned-char $(HOSTWARN) -I$(S16)/compat -I$(S16)/plat \
              -I$(S16)/src -include xcompat.h $(PLATDEFS)
-HOSTHDRS   = $(wildcard build/src/*.h compat/*.h plat/*.h)
+HOSTHDRS   = $(wildcard $(SRC)/*.h compat/*.h plat/*.h)
 host: build/host/xcomhost
 # every header, rewritten (a copy that came out the same keeps its time); a source is
 # rewritten when its content changed (its checksum, build/sum)
 $(S16)/.headers: build/sum/headers.sum build/sum/tools/host16.py.sum
 	@mkdir -p $(S16)/src $(S16)/plat $(S16)/compat $(S16)/host
-	@for f in $(HOSTHDRS); do $(HOST16) $$f $(S16)/$${f#build/} $$f || exit 1; done
+	@for f in $(HOSTHDRS); do $(HOST16) $$f $(S16)/$${f#$(ENGINE)/} $$f || exit 1; done
 	touch $@
-$(S16)/src/%.c: build/sum/build/src/%.c.sum build/sum/tools/host16.py.sum
+$(S16)/src/%.c: build/sum/$(SRC)/%.c.sum build/sum/tools/host16.py.sum
 	@mkdir -p $(S16)/src
-	$(HOST16) build/src/$*.c $@ build/src/$*.c && touch $@
+	$(HOST16) $(SRC)/$*.c $@ $(SRC)/$*.c && touch $@
 $(S16)/plat/%.c: build/sum/plat/%.c.sum build/sum/tools/host16.py.sum
 	@mkdir -p $(S16)/plat
 	$(HOST16) plat/$*.c $@ plat/$*.c && touch $@
@@ -111,10 +108,10 @@ build/host/p/%.o: $(S16)/plat/%.c $(S16)/.headers
 build/host/h/%.o: $(S16)/host/%.c $(S16)/.headers
 	@mkdir -p build/host/h
 	$(CC_HOST) $(HOSTFLAGS) -c -o $@ $<
-build/host/xcomhost: build/src/.stamp FORCE
+build/host/xcomhost: FORCE
 	$(MAKE) build/host/xcomhost.real
 	cp build/host/xcomhost.real $@
-build/host/xcomhost.real: $(patsubst build/src/%.c,build/host/o/%.o,$(UPSRC)) \
+build/host/xcomhost.real: $(patsubst $(SRC)/%.c,build/host/o/%.o,$(UPSRC)) \
                           $(patsubst plat/%.c,build/host/p/%.o,$(PLATSRC)) \
                           $(patsubst host/%.c,build/host/h/%.o,$(wildcard host/*.c))
 	$(CC_HOST) -o $@ $^
@@ -129,7 +126,7 @@ host-run: build/host/xcomhost
 # ---------------------------------------------------------------- Atari816
 # the far data model (hcc --data far): the engine's plain pointers are DOS far pointers,
 # its strings and constant tables in far data (sdk/docs/c/reference.md)
-CFLAGS816 := --code large --data far -Icompat -Iplat -Ibuild/src -include compat/xcompat.h -w $(PLATDEFS)
+CFLAGS816 := --code large --data far -Icompat -Iplat -I$(SRC) -include compat/xcompat.h -w $(PLATDEFS)
 # what XCOM.PRG checks before it starts (hcc --needs; APP.INF gets it from the program):
 # Horizon 0.30, Marga's scrolling and split (sprites, REV $0B), the blitter; the memory:
 # NEEDS_MEM (PORTING-NOTES.md "The app": the banks a big battle holds, MUSD.PRG's)
@@ -137,7 +134,7 @@ NEEDS_MEM ?= 2304K
 NEEDS    := horizon=0.30,sprites,blitter,mem=$(NEEDS_MEM)
 LFLAGS816 := --code large --data far --game --map --sizes --stack 8192 --heap 2048 --needs $(NEEDS)
 DEPS816   := build/sum/headers.sum build/sum/sdk.sum
-build/816/o/%.o: build/src/%.c build/src/.stamp $(DEPS816)
+build/816/o/%.o: $(SRC)/%.c build/sum/$(SRC)/%.c.sum $(DEPS816)
 	@mkdir -p build/816/o
 	$(HCC) $(CFLAGS816) $(if $(filter main,$*),-Dmain=xcom_main) -c -o $@ $<
 build/816/p/%.o: plat/%.c build/sum/plat/%.c.sum $(DEPS816)
@@ -152,11 +149,11 @@ build/816/h/%.o: horizon/%.c build/sum/horizon/%.c.sum $(DEPS816)
 build/816/h/%.o: horizon/%.s build/sum/horizon/%.s.sum $(DEPS816)
 	@mkdir -p build/816/h
 	$(HCC) $(CFLAGS816) -c -o $@ $<
-OBJS816 = $(patsubst build/src/%.c,build/816/o/%.o,$(UPSRC)) \
+OBJS816 = $(patsubst $(SRC)/%.c,build/816/o/%.o,$(UPSRC)) \
           $(patsubst plat/%.c,build/816/p/%.o,$(PLATSRC)) \
           $(patsubst horizon/%.c,build/816/h/%.o,$(wildcard horizon/*.c)) \
           $(patsubst horizon/%.s,build/816/h/%.o,$(wildcard horizon/*.s))
-XCOM.PRG: build/src/.stamp FORCE
+XCOM.PRG: FORCE
 	$(MAKE) build/816/XCOM.PRG
 	cp build/816/XCOM.PRG $@
 build/sum/lflags.sum: FORCE
@@ -170,17 +167,16 @@ build/816/XCOM.PRG: $(OBJS816) build/sum/sdk.sum build/sum/lflags.sum
 $(CARD):
 	$(MAKE) -C $(HORIZON)
 
-# (the two builds one after the other: each runs make src, which must not race)
 builds:
 	$(MAKE) XCOM.PRG
 	$(MAKE) build/host/xcomhost
 test: builds $(CARD)
-	@test -f data/packs/PACKS.VER || { echo "make test needs the packs: make data GAME=..."; exit 1; }
+	@$(PACKS_OK)
 	sh tests/check.sh $(HORIZON); a=$$?; sh tests/sound.sh $(HORIZON); b=$$?; \
 	  if [ $$a = 0 ] && [ $$b = 0 ]; then echo "make test: all passed"; else echo "make test: FAILED"; exit 1; fi
 # the longer runs (tests/runs-long): the screens walked through, the campaign soak
 test-long: builds $(CARD)
-	@test -f data/packs/PACKS.VER || { echo "make test-long needs the packs: make data GAME=..."; exit 1; }
+	@$(PACKS_OK)
 	RUNS=tests/runs-long O=build/test-long sh tests/check.sh $(HORIZON)
 
 # ---- speed (the speed helper's block): the felt figures with the real clock (tests/speed.sh)
@@ -202,17 +198,17 @@ run: XCOM.PRG $(CARD)
 	  $(RUNFILES) --out build/run $(RUNFLAGS)
 
 # ---------------------------------------------------------------- the music task (sound)
-# MUSD.PRG (mus/musd.c + upstream's music.c, hcc's small model): XCOM.PRG spawns it from
+# MUSD.PRG (mus/musd.c + the engine's music.c, hcc's small model): XCOM.PRG spawns it from
 # its own folder at the start; it owns the music timer and the OPL2 (horizon/hz_snd.c).
 # It goes next to XCOM.PRG (the app folder, the tests' card).
 MUSDSRC := mus/musd.c $(wildcard mus/inc/*.h)
 all: MUSD.PRG
-MUSD.PRG: build/src/.stamp FORCE
+MUSD.PRG: FORCE
 	$(MAKE) build/mus/MUSD.PRG
 	cp build/mus/MUSD.PRG $@
-build/mus/MUSD.PRG: $(foreach f,$(MUSDSRC),build/sum/$(f).sum) build/src/.stamp build/sum/sdk.sum
+build/mus/MUSD.PRG: $(foreach f,$(MUSDSRC) $(SRC)/music.c,build/sum/$(f).sum) build/sum/headers.sum build/sum/sdk.sum
 	@mkdir -p build/mus
-	$(HCC) -Imus/inc -Ibuild/src -DXCOM_MUSD -w -o $@ mus/musd.c build/src/music.c > build/mus/link.txt || { cat build/mus/link.txt; exit 1; }
+	$(HCC) -Imus/inc -I$(SRC) -DXCOM_MUSD -w -o $@ mus/musd.c $(SRC)/music.c > build/mus/link.txt || { cat build/mus/link.txt; exit 1; }
 RUNFILES += --file MUSD.PRG:/GAMES/XCOM/MUSD.PRG
 run: MUSD.PRG
 builds: MUSD.PRG
@@ -241,14 +237,14 @@ build/app/XCOM/APP.INF: $(APPFILES) $(SDK)/tools/hzapp.py FORCE
 app: builds build/app/XCOM/APP.INF
 	$(PYTHON) $(SDK)/tools/hzapp.py pack build/app/XCOM -o XCOM.HZA --mtime 0
 	@if [ "$(DATA)" = 1 ]; then \
-	  test -f data/packs/PACKS.VER || { echo "make app DATA=1 needs the packs: make data GAME=..."; exit 1; }; \
+	  $(PACKS_OK); \
 	  rm -rf build/appdata && mkdir -p build/appdata && cp -r build/app/XCOM build/appdata/ && \
 	  cp $(PACKFILES) build/appdata/XCOM/ && mkdir -p build/appdata/XCOM/VGA && \
 	  cp data/packs/VGA/* build/appdata/XCOM/VGA/ && \
 	  $(PYTHON) $(SDK)/tools/hzapp.py pack build/appdata/XCOM -o build/XCOM-DATA.HZA --mtime 0 && \
 	  echo "build/XCOM-DATA.HZA: the app with YOUR game data: for your own card only"; fi
 card: builds build/app/XCOM/APP.INF
-	@test -f data/packs/PACKS.VER || { echo "make card needs the packs: make data GAME=..."; exit 1; }
+	@$(PACKS_OK)
 	rm -rf build/card && mkdir -p build/card/APPS
 	cp -r build/app/XCOM build/card/APPS/ && cp $(PACKFILES) build/card/APPS/XCOM/
 	mkdir -p build/card/APPS/XCOM/VGA && cp data/packs/VGA/* build/card/APPS/XCOM/VGA/
@@ -277,5 +273,5 @@ kit: builds
 	@ls build/kit/APPS/XCOM build/kit/ARGS
 
 .SECONDARY:
-.PHONY: kit all src data host host-run check-host refs-host builds test test-long refs refs-long run app card test-app speed clean FORCE
+.PHONY: kit all data host host-run check-host refs-host builds test test-long refs refs-long run app card test-app speed clean FORCE
 FORCE:

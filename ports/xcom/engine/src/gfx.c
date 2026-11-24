@@ -122,6 +122,12 @@ void gfx_dot(int x, int y, int colour)
 {
     int r;
 
+#if defined(XCOM_PORT)
+    if (g_vga) {
+        vga_gfx_dot(x, y, colour);
+        return;
+    }
+#endif
     x &= ~1;
     if (x < 0 || x > 318 || y < 0 || y > VIEW_H - 2 || g_view_off)
         return;
@@ -274,6 +280,12 @@ void gfx_night(int night)
     union REGS r;
     int i;
 
+#if defined(XCOM_PORT)
+    if (g_vga) {
+        vga_gfx_night(night);
+        return;
+    }
+#endif
     if (g_video != VIDEO_EGA)
         return;
     for (i = 0; i < 16; i++) {

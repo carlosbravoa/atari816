@@ -16,6 +16,7 @@
 #include "gfx.h"
 #include "input.h"
 #include "uik.h"
+#include "sound.h"
 #include "uitext.h"
 
 typedef struct { int x, y, w, h; unsigned key, key2; } Hit;
@@ -37,6 +38,7 @@ static void win_open(unsigned bg, int x, int y, int w, int h)
     else
         uk_fill(x, y, w, h, 0);
     uk_window(x, y, w, h);
+    snd_window();
 }
 
 static void btn(Hit *b, int x, int y, int w, int h, unsigned key, unsigned key2, const char *s)
@@ -72,6 +74,7 @@ static int wait_btn(const Hit *b, int n)
             for (i = 0; i < n; i++)
                 if (g_mouse_x >= b[i].x && g_mouse_x < b[i].x + b[i].w && g_mouse_y >= b[i].y
                     && g_mouse_y < b[i].y + b[i].h) {
+                    snd_button();
                     uk_button(b[i].x, b[i].y, b[i].w, b[i].h, "", 1);
                     return i;
                 }
@@ -253,6 +256,8 @@ int gw_intercept(int base, int *craft)
                 if (g_mouse_x >= b[i].x && g_mouse_x < b[i].x + b[i].w && g_mouse_y >= b[i].y
                     && g_mouse_y < b[i].y + 16)
                     break;
+            if (i < nb)
+                snd_button();
             if (i == 0)
                 break;
             if (i == 1) {
@@ -498,9 +503,14 @@ void gw_select_bar(int cydonia)
 
 int gw_select_click(void)
 {
+    int b;
+
     if (g_mouse_y < 174 || g_mouse_y >= 186)
         return 0;
-    return g_mouse_x >= 124 && g_mouse_x < 184 ? 1 : g_mouse_x >= 194 && g_mouse_x < 254 ? 2 : 0;
+    b = g_mouse_x >= 124 && g_mouse_x < 184 ? 1 : g_mouse_x >= 194 && g_mouse_x < 254 ? 2 : 0;
+    if (b)
+        snd_button();
+    return b;
 }
 
 static void lines(int x, int w, int y, int dy, int font, int c, const char *s);

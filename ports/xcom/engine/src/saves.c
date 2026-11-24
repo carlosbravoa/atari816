@@ -30,6 +30,7 @@
 #include "input.h"
 #include "menu.h"
 #include "saves.h"
+#include "sound.h"
 #include "uik.h"
 
 #define ROWS        N_SLOTS
@@ -122,6 +123,7 @@ static void draw_screen(int saving)
     uk_text(TIME_X, 24, UK_SMALL, g_uk->text, "Time");
     uk_text(DATE_X, 24, UK_SMALL, g_uk->text, "Date");
     uk_button(BTN_X, BTN_Y, 80, 16, "CANCEL", 0);
+    snd_window();                       /* (ListGamesState's window pops up) */
     if (g_video == VIDEO_CGA) {
         /* Four colours: the picture under the rows at half strength, or
            the text would not stand out (as uk_menu's lists). */
@@ -167,8 +169,10 @@ int sv_list(int saving, char *name)
         r = -1;
         if (key == KEY_LCLICK) {
             if (g_mouse_x >= BTN_X && g_mouse_x < BTN_X + 80 && g_mouse_y >= BTN_Y
-                && g_mouse_y < BTN_Y + 16)
+                && g_mouse_y < BTN_Y + 16) {
+                snd_button();
                 break;                          /* CANCEL */
+            }
             r = row_at(g_mouse_x, g_mouse_y);
             if (r < 0)
                 continue;

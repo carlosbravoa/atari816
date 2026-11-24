@@ -13,6 +13,7 @@
 #include "gfx.h"
 #include "hud.h"
 #include "input.h"
+#include "sound.h"
 #include "uik.h"
 
 enum { GP_UFO_AREA, GP_UFO_COUNTRY, GP_XCOM_AREA, GP_XCOM_COUNTRY, GP_INCOME, GP_FINANCE };
@@ -255,6 +256,7 @@ void graphs_screen(int month, int year, int score)
             int r = my / BTN_H, n = page == GP_FINANCE ? 5 : rows + 1;
             if (r >= n)
                 continue;
+            snd_button();
             if (page == GP_FINANCE)
                 g_bb->gr.ftog ^= (unsigned char)(1 << r);
             else

@@ -41,6 +41,12 @@ void __near hud_text_cga(int col, int row, int colour, const char *s, int len)
     unsigned char expand[16];
     int c = cga_colour(colour), i, k, b;
 
+#if defined(XCOM_PORT)
+    if (g_vga) {
+        vga_hud_text(col, row, colour, s, len);
+        return;
+    }
+#endif
     for (i = 0; i < 16; i++) {
         unsigned char v = 0;
         for (b = 0; b < 4; b++)
@@ -90,6 +96,12 @@ void hud_text(int col, int row, int colour, const char *s)
 
 void hud_clear_rows(int row, int count)
 {
+#if defined(XCOM_PORT)
+    if (g_vga) {
+        vga_hud_clear(row, count);
+        return;
+    }
+#endif
     mouse_hide_rect(0, row * 8, 320, (row + count) * 8);
     if (g_video == VIDEO_CGA) {
         unsigned y;

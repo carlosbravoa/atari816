@@ -486,7 +486,14 @@ def explosives(records, n_common):
     explosive): record and strength."""
     ex = [(i, r["he_strength"]) for i, r in enumerate(records[:n_common])
           if i and r and r["he_strength"]]
-    if len(ex) > MAX_EXPL or any(records[i]["he_type"] for i, _ in ex):
+    # (Atari816 port) the GOG copy has records whose HE_Type is 1 (smoke in
+    # OpenXcom's terms: UFO parts, a URBAN record); the engine knows only high
+    # explosive, so they are left out (they break without a blast).
+    odd = [(i, records[i]["he_type"]) for i, _ in ex if records[i]["he_type"]]
+    if odd:
+        print("convert: records with HE_Type other than 0 left out of XEX1: %s" % odd)
+        ex = [e for e in ex if not records[e[0]]["he_type"]]
+    if len(ex) > MAX_EXPL:
         raise ValueError("explosive MCD records: %s" % ex)
     out = b"XEX1" + struct.pack("<H", len(ex))
     for i, s in ex:

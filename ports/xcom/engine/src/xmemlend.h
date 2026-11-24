@@ -80,7 +80,9 @@ static unsigned xl_lend(unsigned kb, unsigned *handle)
 {
     XmemHdr __far *h = xl_hdr();
     unsigned n, k = (kb + 3) / 4, ns, i, b;
-    unsigned __far *heads, __far *blk, __far *next;
+    unsigned __far *heads;      /* (port: one far declarator a line, cc816) */
+    unsigned __far *blk;
+    unsigned __far *next;
     unsigned char __far *file;
 
     if (!h)

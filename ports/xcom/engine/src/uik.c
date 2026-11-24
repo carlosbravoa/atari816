@@ -12,6 +12,7 @@
 #include "gfx.h"
 #include "hud.h"
 #include "input.h"
+#include "sound.h"
 #include "uik.h"
 
 #define SAVE_OFF    0x2000u     /* EGA: the clean screen (page 1) */
@@ -227,6 +228,12 @@ void uk_resume(void)
 
 void uk_theme(int t)            /* (VGA) */
 {
+#if defined(XCOM_PORT)
+    if (g_vga) {
+        vga_uk_theme(t);
+        return;
+    }
+#endif
     g_uk = g_video == VIDEO_EGA ? &ega_themes[t] : &g_cga_themes[t];
 }
 
@@ -234,6 +241,10 @@ void uk_cga_palette(int p)      /* (VGA) */
 {
     union REGS r;
 
+#if defined(XCOM_PORT)
+    if (g_vga)
+        return;
+#endif
     if (g_video != VIDEO_CGA || p == cga_pal)
         return;
     cga_pal = p;
@@ -391,6 +402,12 @@ void __near uk_pic_cga(const PicHead *h, int x, int y, int to_save)       /* (VG
     unsigned nb = h->w >> 2, r, k, j, rows, rb;
     int masked = h->flags & UIF_MASKED;
 
+#if defined(XCOM_PORT)
+    if (g_vga) {
+        vga_uk_pic(h, x, y, to_save);
+        return;
+    }
+#endif
     rb = masked ? nb * 2 : nb;
     for (r = 0; r < h->h; r += rows) {
         rows = bsize / rb;
@@ -476,6 +493,10 @@ int uk_recall(unsigned key, unsigned check, int x, int y)
 
 int uk_pic_clean(unsigned id)   /* (VGA) */
 {
+#if defined(XCOM_PORT)
+    if (g_vga)
+        return vga_uk_pic_clean(id);
+#endif
     return pic(id, -1, 0, 1);
 }
 
@@ -529,6 +550,10 @@ static const unsigned char cga_map[2][16] = {
    colours given by screens is mapped. */
 int __near uk_cga_c(int c)      /* (VGA) */
 {
+#if defined(XCOM_PORT)
+    if (g_vga)
+        return vga_uk_cga_c(c);
+#endif
     return c < 4 ? c : cga_map[cga_pal >> 1][c & 15];
 }
 
@@ -536,6 +561,12 @@ void uk_fill(int x, int y, int w, int h, int c)        /* (VGA) */
 {
     int r;
 
+#if defined(XCOM_PORT)
+    if (g_vga) {
+        vga_uk_fill(x, y, w, h, c);
+        return;
+    }
+#endif
     if (w <= 0 || h <= 0)
         return;
     mouse_hide_rect(x, y, x + w, y + h);
@@ -672,6 +703,12 @@ void __near uk_glyph_cga(int x, int y, const unsigned char far *g, int h, int bp
     unsigned char pat = (unsigned char)(c * 0x55);
     int s = (x & 3) * 2, r, k;
 
+#if defined(XCOM_PORT)
+    if (g_vga) {
+        vga_uk_glyph(x, y, g, h, bpr, c);
+        return;
+    }
+#endif
     for (r = 0; r < h; r++, g += bpr) {
         unsigned bits = bpr == 2 ? (g[0] << 8) | g[1] : g[0] << 8;
         unsigned char mb[5];
@@ -830,6 +867,12 @@ void uk_copy(int sx, int sy, int dx, int dy, int w, int h)     /* (VGA) */
 {
     int r;
 
+#if defined(XCOM_PORT)
+    if (g_vga) {
+        vga_uk_copy(sx, sy, dx, dy, w, h);
+        return;
+    }
+#endif
     mouse_hide_rect(dx, dy, dx + w, dy + h);
     if (g_video == VIDEO_EGA) {
         latch_copy(dy * 40 + (dx >> 3), sy * 40 + (sx >> 3), w >> 3, h);
@@ -843,6 +886,12 @@ void uk_save(int y0, int y1)    /* (VGA) */
 {
     int y;
 
+#if defined(XCOM_PORT)
+    if (g_vga) {
+        vga_uk_save(y0, y1);
+        return;
+    }
+#endif
     mouse_hide();
     save_y0 = y0;
     save_y1 = y1;
@@ -861,6 +910,12 @@ void uk_restore(int x, int y, int w, int h)    /* (VGA) */
 {
     int r;
 
+#if defined(XCOM_PORT)
+    if (g_vga) {
+        vga_uk_restore(x, y, w, h);
+        return;
+    }
+#endif
     if (y < save_y0) {
         h -= save_y0 - y;
         y = save_y0;
@@ -908,6 +963,8 @@ unsigned uk_page_wait(void)
 
     uk_buttons("Enter=OK", 112, 96, 178);
     key = input_key();
+    if (key == KEY_LCLICK)
+        uk_buttons_key("Enter=OK", 112, 96, 178);  /* (any key or click goes on; on OK: the click) */
     uk_close();
     return key;
 }
@@ -970,16 +1027,18 @@ static int box(const char *s, const char *spec, int *bx, int *bw, int *top, int 
     *height = h;
     if (spec)
         uk_buttons(spec, *bx, *bw, y + h - 22);
+    snd_window();
     return y + h - 22;
 }
 
 void uk_notice(const char *s)
 {
-    int bx, bw, top, h;
+    int bx, bw, top, h, by;
 
     uk_open();
-    box(s, "Enter=OK", &bx, &bw, &top, &h);
-    input_key();
+    by = box(s, "Enter=OK", &bx, &bw, &top, &h);
+    if (input_key() == KEY_LCLICK)
+        uk_buttons_key("Enter=OK", bx, bw, by);     /* (any key or click closes it; on OK: the click) */
     uk_restore(BOX_X, top, BOX_W, h);
     uk_close();
 }
@@ -1111,6 +1170,7 @@ unsigned uk_buttons_key(const char *spec, int x, int w, int y)
             int klen, llen;
             const char *label;
             const char *k = spec_item(spec, i, &klen, &label, &llen);
+            snd_button();               /* (every bottom button's click comes here once) */
             return uk_key_named(k, klen);
         }
     return 0;
@@ -1250,6 +1310,8 @@ int uk_menu(const UkMenu *m, const char *info, char lines[][41], int n, int sel,
         uk_save(0, 200);
         shown = m;
         shown_info[0] = 0;
+        if (m->style & (UKS_CLEAR | UKS_POPUP))
+            snd_window();               /* a window over the screen (Window::popup) */
     } else
         uk_theme(m->theme);
     for (;;) {
@@ -1301,6 +1363,8 @@ int uk_menu(const UkMenu *m, const char *info, char lines[][41], int n, int sel,
             if (g_mouse_y >= m->ly && r < m->rows && g_mouse_x >= hx0
                 && g_mouse_x < hx1 && top + r < n) {
                 g_uk_row = top + r;
+                if (m->style & UKS_BUTTONS)
+                    snd_button();       /* a column of buttons (text rows: none) */
                 if (on_key == NULL || top + r == sel || (m->style & UKS_CLICK))
                     act = 1;
                 sel = top + r;
