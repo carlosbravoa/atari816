@@ -5,3 +5,6 @@ build/
 *.lbl
 *.HZA
 tests/out/
+# SDLPoP replays hold the level's map (game data): only their .p1x (tools/p1rstrip.py)
+*.p1r
+*.P1R

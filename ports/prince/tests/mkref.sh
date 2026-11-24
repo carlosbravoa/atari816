@@ -6,7 +6,8 @@ set -e
 cd "$(dirname "$0")/.."
 test -x data/sdlpop/prince-ref || { echo "mkref: no data/sdlpop/prince-ref (make host)"; exit 1; }
 mkdir -p tests/ref
-for r in tests/replays/*.p1r; do
+sh tests/replays.sh > /dev/null || exit 1
+for r in build/replays/*.p1r; do
   n=$(basename $r .p1r)
   (cd data/sdlpop && SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy POP_REF_EVERY=10 \
      ./prince-ref validate ../../$r 2>&1) |

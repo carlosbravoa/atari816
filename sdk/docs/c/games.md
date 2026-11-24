@@ -302,9 +302,9 @@ Every function is described in `hgame.h`. In short:
 
 | Input | |
 | --- | --- |
-| `hg_key(k)`, `hg_key_pressed(k)`, `hg_key_released(k)`, `hg_mods` | the key table (HID usages: `HG_KEY_ESC`, `HG_KEY_A` + n, arrows, ...) |
+| `hg_key(k)`, `hg_key_pressed(k)`, `hg_key_released(k)`, `hg_mods` | the key table (HID usages: `HG_KEY_ESC`, `HG_KEY_A` + n, arrows, ...); `hg_mods`: the modifiers (`HG_MOD_CTRL`, `_SHIFT`, `_ALT`) held now, as at the last event read |
 | `hg_getchar()` | typed characters (ASCII, `KEY_*` for arrows) |
-| `hg_key_next()` | the keys pressed, in order (SDL_KEYDOWN's events): the HID usage in bits 0-7, the character in bits 8-15 |
+| `hg_key_next()`, `hg_key_mods` | the keys pressed, in order (SDL_KEYDOWN's events): the HID usage in bits 0-7, the character in bits 8-15; each call sets `hg_key_mods` to the modifiers held when that key went down (SDL's `event.key.keysym.mod`). Read shortcuts from it: when Ctrl and G go up in the same frame (typed quickly, or a keyboard adapter that reports both at once), `hg_mods` already says Ctrl is up |
 | `hg_joy(port)`, `hg_p1()`, `hg_p1_pressed()` | the joysticks; player 1: arrows + W A S D + joystick 1, fire Space / Enter / trigger |
 | `hg_mouse_x`, `hg_mouse_y`, `hg_mouse_b`, `hg_mouse_clicked()` | the mouse in screen pixels (halved in 320 x 180), updated by `hg_frame` / `hg_poll` whenever it moves, a button held or not (full screen and window). Absolute only: there is no relative motion (the pointer stops at the screen's edges and a program cannot move it), so a mouse-look game gets no deltas past an edge |
 | `hg_mouse_wheel()` | the wheel's steps since the last call (positive: up / away from you), then 0; full screen and window, collected by `hg_frame` / `hg_poll` |
@@ -522,7 +522,7 @@ differences:
 | the main loop: `SDL_PollEvent` ... `SDL_RenderPresent` | `while (hg_frame()) { ... }`: events are read by `hg_frame`; the frame is shown at its end |
 | `SDL_QUIT` | `hg_frame()` returns 0 |
 | `SDL_GetKeyboardState`, `SDL_SCANCODE_*` | `hg_key(HG_KEY_*)` (the same HID usages as SDL's scancodes: `SDL_SCANCODE_A` = 4 = `HG_KEY_A`) |
-| `SDL_KEYDOWN` events | `hg_key_next()` (in order: usage and character), `hg_key_pressed(k)`, `hg_getchar()` |
+| `SDL_KEYDOWN` events | `hg_key_next()` (in order: usage and character; its `keysym.mod`: `hg_key_mods`), `hg_key_pressed(k)`, `hg_getchar()` |
 | `SDL_GetMouseState` | `hg_mouse_x`, `hg_mouse_y`, `hg_mouse_b`, `hg_mouse_clicked()` |
 | `SDL_JoystickGetAxis` / buttons | `hg_joy(1)`, `hg_p1()` (digital) |
 | `SDL_RenderClear` | `hg_clear(c)` (with `HG_DOUBLE`) |

@@ -98,7 +98,9 @@ The data: SDLPoP's repository ships the DOS game's data (`data/`: the graphics e
 PNG, levels, sounds) without any licence statement for it; it is the original game's
 (Broderbund / Jordan Mechner). So the port keeps all of it out of git: `tools/getdata.sh`
 fetches SDLPoP itself, `make data` converts it on the user's machine, test pictures are kept
-as checksums only, and the app archive is built locally.
+as checksums only, the test replays without their level (a replay's savestate begins with
+the level's map: `tests/replays/*.p1x`, `tools/p1rstrip.py`; make test rebuilds the `.p1r`
+from your data, byte for byte), and the app archive is built locally.
 
 ## Tests
 
@@ -106,7 +108,8 @@ as checksums only, and the app archive is built locally.
 default; the scripts wait for the program's console lines, never for fixed times):
 
 1. four replays recorded with upstream SDLPoP on a PC (`tests/replays`: level 1 from its
-   start to the sword and on through ten rooms; a loose floor; a sword fight on level 2),
+   start to the sword and on through ten rooms; a loose floor; a sword fight on level 2;
+   rebuilt first from the `.p1x` and the game's levels into `build/replays`, MD5-checked),
    in upstream's `validate` mode: the game's state every 10 ticks and upstream's own end
    lines must equal the PC's (`tests/ref/*.ref`, 246 states, 2,478 ticks in all);
 2. one of them at the game's speed on a machine 30 ms a frame slower: the same states;

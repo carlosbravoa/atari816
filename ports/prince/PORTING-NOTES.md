@@ -46,6 +46,16 @@ upstream's validate mode runs): played with sound, a replay's "end of the level-
 can come before the music, and the kid stays crouched (upstream behaves so too); `nosound`
 plays them at the game's speed.
 
+A replay's savestate begins with the level structure (2,305 bytes: the level's map, its
+links, its guards), the publisher's data: git holds each replay without it
+(`tests/replays/*.p1x`, `tools/p1rstrip.py strip`), and `tests/replays.sh` rebuilds the
+`.p1r` into `build/replays` from the user's `data/sdlpop/data/LEVELS` at every `make test`:
+the resource as the game's `load_level` leaves it (`alter_mods_allrm`,
+`reset_level_unused_fields`, ported in the tool), then the few bytes the run had changed
+before its tick 0 (torch flames, a gate on its way down, a button's timer, guard places:
+8 or 13 bytes, kept as their XOR with the loaded level), byte for byte the recorded file
+(its MD5 is in the `.p1x` and is checked).
+
 ## Faults found, and fixes
 
 | # | What | Where | Fix | Time |
@@ -65,7 +75,7 @@ plays them at the game's speed.
 
 | 13 | **35 s of black screen at the start on the board** (the user's first play: 25 s and more): the data (2.1 MB) was read through a 512-byte buffer, 4,320 reads, each a card request of a few ms plus its bytes; nothing was on the screen until it was all in. The emulator's card answered at once then, so it never showed | port | one open per file, reads of up to 32,767 bytes straight into far memory (a read must not cross a bank: three a bank), the sizes of POP.MSK and POP.SND in POP.DAT (no STAT); the full screen and a loading screen with a bar first (hgame's font: the game's is in the data); the atlas packed as a skyline (735 rows, was 840: 210 KB less). 35.1 s -> 9.6 s in the emulator's card model (220 KB/s), about 29 -> 4.0 s at the board's 580 KB/s; requests 4,250 reads -> 88 | 1 h |
 | 14 | **Shift+L quit the game** (allowed on levels 1-3 in the original): the SDL shim's `SDL_AddTimer` was a macro giving 0, and upstream quits when the timer cannot be made | port | a one-timer `SDL_AddTimer` run by the frame's input poll (upstream's only timer: Shift held again after 250 ms). Found by `make test-long`'s walk through the levels | 15 min |
-| 15 | Ctrl+G typed quickly did nothing (`make test`'s save, now with the board's card timing): hgame's key queue has presses only, and `hg_mods` is the modifiers at the last event read; Ctrl and G released together (as a keyboard adapter that sends both in one report does) came as a plain G | port, SDK wish 5 | a modifier pressed earlier in the same batch of events counts | 20 min |
+| 15 | Ctrl+G typed quickly did nothing (`make test`'s save, now with the board's card timing): hgame's key queue has presses only, and `hg_mods` is the modifiers at the last event read; Ctrl and G released together (as a keyboard adapter that sends both in one report does) came as a plain G | port, SDK wish 5 (done) | first: a modifier pressed earlier in the same batch of events counted; now hgame keeps each press's modifiers (`hg_key_mods`, set by `hg_key_next`) and `hz_events` reads them | 20 min |
 | 16 | The shadow's colours differed from the PC's (the user's note): the port xored the low 4 bits of the palette indices (the outline in the kid's red and white); SDLPoP xors 24-bit RGB (blue, green, yellow: colours of no palette). 114 pixels of the shadow standing differed | port | each (screen colour, image colour) pair gets an entry of colour rgb ^ rgb: an existing one, else one of rows 4 and 15 (never used by the game), else the nearest; remembered until the palette changes. 0 pixels differ (`make test-long`: a replay moved next to level 6's shadow, `tests/patchp1r.py`) | 1 h |
 | 17 | The music against the effects: measured (`sndtest`, run816 `--wav`, the board's mix) the songs were 4.5 dB louder than the effects (median rms -23.1 against -27.6 dBFS) even with their carriers 9 dB down; the effects cannot be louder (their samples are full scale at Lau's full volume) | data | carriers 13.5 dB down (`OPL_ATT` 18): -28.2 against -27.6 dBFS, the loudest peak -9 dBFS; `make test` checks it (`tests/sndlevel.py`) | 30 min |
 
@@ -143,7 +153,7 @@ first frame and one through the ten rooms, the title and the demo.
 | `sdk/c/cc816/cc816/front.py` | fault 2: `&` through a far pointer is a far pointer (`far_lvalue`) | `sdk/c/cc816/tests/diag/w_far_member.c` |
 | `sdk/tools/run816.py` | `--log-opl`, `--log-opl-us` passed to emu816 (Xargon's open tool gap 13) | used by this port's `make test` (tests/oplcheck.py) |
 
-## SDK wishes (not changed)
+## SDK wishes (not changed unless marked done)
 
 | # | What | Case |
 | --- | --- | --- |
@@ -151,7 +161,7 @@ first frame and one through the ten rooms, the title and the demo.
 | 2 | hgame takes 7.1 KB of the main bank for its draw queues even when a game draws with its own records (both Xargon and this port) | `hg_draw.c`: `hg__dq`, `hg__sq` (used at fixed addresses by `hg_fast.s`), the arena |
 | 3 | `int`-typed `switch` on key codes with bit 15 set warns `-Woverflow` for every case (SDLPoP's `WITH_SHIFT` = 0x8000): correct code, 16 lines of noise | a `case` whose value fits `unsigned int` of the same width could be quiet |
 | 4 | `sheet_draw` refuses the whole call for one bad record: a game sees its whole frame vanish; it would help if the kernel drew the valid ones and said which was refused (or hgame checked records in a debug build) | fault 7 |
-| 5 | `hg_key_next`'s events have no modifier state (`hg_mods` is the state at the last event read): a game cannot tell Ctrl+G from G when Ctrl went up in the same frame (fault 15). The free bits of the event, or a `hg_key_next_mods` | `sdk/c/game/hg_core.c` `events()`: `kq[]` could keep `ev.b & 0xFF` |
+| 5 | (done) `hg_key_next`'s events had no modifier state (`hg_mods` is the state at the last event read): a game could not tell Ctrl+G from G when Ctrl went up in the same frame (fault 15). hgame now sets `hg_key_mods` with each press (`sdk/c/game/tests/gt_keymods.c`) | `sdk/c/game/hg_core.c` `events()` |
 | 6 | cc816 calls `__mul16` for a multiply by a constant (an index into an array of 14-, 30- or 44-byte structures; `44 * row`) and `__udiv16` for a division by one (`x / 7`): about 10 % of a room's drawing in this port. Shifts and adds for small constants, a multiply-shift for division | room changes above |
 | 7 | One read moves at most 32,767 bytes and must not cross a bank: three reads a bank (32,767 + 32,767 + 2), each a card request. 32,768 (or anything to the bank's end) would make it two | fault 13 |
 | 8 | No hourglass or busy pointer for a full-screen program: a loading screen draws its own | fault 13 |

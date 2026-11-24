@@ -276,9 +276,9 @@ windows (Gem Run in C does it).
 | Call | |
 | --- | --- |
 | `hg_key(k)`, `hg_key_pressed(k)`, `hg_key_released(k)` | held now / since last frame; `k` = HID usage: `HG_KEY_A` + n, `HG_KEY_1`..`HG_KEY_0`, `HG_KEY_ENTER`, `ESC`, `BKSP`, `TAB`, `SPACE`, `F1` (+ n to F11), `UP`, `DOWN`, `LEFT`, `RIGHT`, `W`, `S`, `D`, `P` |
-| `hg_mods` | `HG_MOD_CTRL`, `HG_MOD_SHIFT`, `HG_MOD_ALT` held |
+| `hg_mods` | `HG_MOD_CTRL`, `HG_MOD_SHIFT`, `HG_MOD_ALT` held now (as at the last event read) |
 | `hg_getchar()` | next typed character (ASCII), 0 if none |
-| `hg_key_next()` | next key press in order: usage in bits 0-7, character in 8-15 (16 kept) |
+| `hg_key_next()`, `hg_key_mods` | next key press in order: usage in bits 0-7, character in 8-15 (16 kept); it sets `hg_key_mods` to the modifiers held at that press (0 when none left). Shortcuts (Ctrl+G) read `hg_key_mods`: `hg_mods` may already have Ctrl up when Ctrl and G went up in the same frame |
 | `hg_p1()`, `hg_p1_pressed()` | player 1: arrows + W A S D + joystick 1 as `HG_UP` `HG_DOWN` `HG_LEFT` `HG_RIGHT` `HG_FIRE` (Space, Enter, trigger) |
 | `hg_joy(1 or 2)` | joystick port; reads 0 in the emulator (no joystick) |
 | `hg_mouse_x`, `hg_mouse_y`, `hg_mouse_b` (1 left, 2 right, 4 middle), `hg_mouse_clicked()` | screen pixels (window: its content; 320 x 180: halved), updated by `hg_frame` / `hg_poll` whenever the mouse moves, a button held or not. Absolute only: no relative motion (the pointer stops at the screen's edges; a program cannot move it) |

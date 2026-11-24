@@ -96,6 +96,9 @@ TESTS = [
      ["gt_map: 0 failed"], []),
     ("input", ["gt_input.c"], ["--script", "gt_input.script"],
      ["gt_input: 0 failed"], []),
+    # each key event's modifiers: a modifier and a key changed in one batch of events
+    ("keymods", ["gt_keymods.c"], ["--script", "gt_keymods.script", "--seconds", "8"],
+     ["gt_keymods: 0 failed"], []),
     # the mouse's motion without a button in full screen; a program without frames: its
     # view by hg_poll and hg_view_send (the X-COM port's needs)
     ("poll", ["gt_poll.c"], ["--script", "gt_poll.script", "--seconds", "5"],

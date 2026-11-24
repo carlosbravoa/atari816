@@ -1,7 +1,10 @@
 #!/bin/sh
 # tests/check.sh [HORIZON] [--refs] - Prince of Persia's tests (make test), in the emulator:
 #
-#   1. the replays (tests/replays/*.p1r, recorded with upstream SDLPoP on a PC: level 1 from
+#   0. the replays rebuilt from the game's levels (tests/replays/*.p1x: the replays without
+#      their level, tools/p1rstrip.py) into build/replays/*.p1r: byte for byte the recorded
+#      ones (their MD5s)
+#   1. the replays (build/replays/*.p1r, recorded with upstream SDLPoP on a PC: level 1 from
 #      its start to the sword and on through ten rooms, a loose floor, a sword fight on
 #      level 2) in upstream's own "validate" mode: the game's state every 10 ticks and
 #      upstream's end lines must be the PC's (tests/ref/*.ref, from tests/mkref.sh)
@@ -49,6 +52,10 @@ shell() {
 rm -rf build/test
 mkdir -p build/test/frames
 
+# ---------------------------------------------------------------- 0. the replays, rebuilt
+# (a replay holds a savestate, and so the level's map: game data, kept out of git)
+if l=$(sh tests/replays.sh); then ok "$l"; else bad "$l"; fi
+
 # ---------------------------------------------------------------- 1. the replays, validated
 # (and 3. their pictures: SHOTS ticks of each)
 shots_of() {
@@ -60,7 +67,7 @@ shots_of() {
   esac
 }
 pids=
-for r in tests/replays/*.p1r; do
+for r in build/replays/*.p1r; do
   n=$(basename "$r" .p1r)
   U=$(echo "$n" | tr a-z A-Z)
   shell "validate $U.P1R every=10 shots=$(shots_of $n)" --file "$r:/APPS/PRINCE/$U.P1R" \
@@ -68,7 +75,7 @@ for r in tests/replays/*.p1r; do
   pids="$pids $!"
 done
 wait $pids
-for r in tests/replays/*.p1r; do
+for r in build/replays/*.p1r; do
   n=$(basename "$r" .p1r)
   con=build/test/val-$n/console.txt
   tr -d '\r' < "$con" |
@@ -87,7 +94,7 @@ done
 
 # ---------------------------------------------------------------- 2. at the game's speed, slower
 shell "L1SWORD.P1R nosound every=10 /BUSY:30 stats=1000" \
-  --file tests/replays/l1sword.p1r:/APPS/PRINCE/L1SWORD.P1R --seconds 120 \
+  --file build/replays/l1sword.p1r:/APPS/PRINCE/L1SWORD.P1R --seconds 120 \
   --out build/test/timed > build/test/timed.log 2>&1
 tr -d '\r' < build/test/timed/console.txt | grep '^ref:' | head -96 > build/test/timed.txt
 grep '^ref:' tests/ref/l1sword.ref > build/test/timed.want

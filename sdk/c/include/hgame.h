@@ -342,7 +342,8 @@ int hg_key_released(unsigned k);
 /* the next character typed (ASCII; HG_KEY_ arrows as hz_key_ascii gives them), 0 if none */
 unsigned hg_getchar(void);
 /* the next key pressed, in order (SDL_KEYDOWN's events): its HID usage in bits 0-7 and
- * its character (as hg_getchar gives it, 0 for none) in bits 8-15; 0 if none (16 kept) */
+ * its character (as hg_getchar gives it, 0 for none) in bits 8-15; 0 if none (16 kept).
+ * It also sets hg_key_mods: the modifiers (HG_MOD_*) held when that key went down */
 unsigned hg_key_next(void);
 #define HG_KEY_A      0x04      /* .. HG_KEY_A + 25 = Z */
 #define HG_KEY_1      0x1E      /* .. HG_KEY_1 + 8 = 9, then 0 */
@@ -361,11 +362,16 @@ unsigned hg_key_next(void);
 #define HG_KEY_S      0x16
 #define HG_KEY_D      0x07
 #define HG_KEY_P      0x13
-/* modifier keys: held now (the bits of the last key event) */
+/* modifier keys. hg_mods: held now (the bits of the last key event read). hg_key_mods:
+ * those held when the key hg_key_next last returned was pressed (0 when it returned 0).
+ * A modifier and a key that change in the same frame (Ctrl+G typed quickly: Ctrl up before
+ * the frame ends; a keyboard adapter that reports both in one HID report) leave hg_mods
+ * without the Ctrl the G was typed with: a shortcut reads hg_key_mods */
 #define HG_MOD_CTRL   1
 #define HG_MOD_SHIFT  2
 #define HG_MOD_ALT    4
 extern unsigned hg_mods;
+extern unsigned hg_key_mods;
 
 /* directions and buttons, the joystick's layout */
 #define HG_UP     1

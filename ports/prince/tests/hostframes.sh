@@ -6,7 +6,8 @@ cd "$(dirname "$0")/.." || exit 1
 test -x data/sdlpop/prince-ref || { echo "hostframes: no data/sdlpop/prince-ref (make host)"; exit 1; }
 fail=0
 mkdir -p build/test/host
-for r in tests/replays/*.p1r; do
+sh tests/replays.sh > /dev/null || exit 1
+for r in build/replays/*.p1r; do
   n=$(basename "$r" .p1r)
   con=build/test/val-$n/console.txt
   [ -f "$con" ] || { echo "hostframes: no $con (make test first)"; exit 1; }

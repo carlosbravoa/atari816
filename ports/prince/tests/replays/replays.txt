@@ -1,6 +1,14 @@
 Test replays for the Prince of Persia port, recorded with upstream SDLPoP (prince-ref,
-headless) from the scripted input in the .txt next to each .p1r. 12 ticks a second.
+headless) from the scripted input in the .txt next to each. 12 ticks a second.
 Recorded with:  rec.sh NAME.txt NAME.p1r "LEVEL seed=1"
+A .p1r holds a savestate, and so the level's map (game data): git holds only NAME.p1x, the
+replay without its level (python3 tools/p1rstrip.py strip NAME.p1r tests/replays/NAME.p1x);
+tests/replays.sh (make test) rebuilds build/replays/NAME.p1r from it and the game's levels
+(data/sdlpop/data/LEVELS), byte for byte (the MD5 in the .p1x is checked):
+  fight.p1r   658a7b952fae1d4a57ac9c5b6f709916  3984 bytes
+  l1run.p1r   6ab7023c9a8d019b30b63852cefadbac  5069 bytes
+  l1sword.p1r d9e6e6c998e467c2be00a89d1207f189  4831 bytes
+  loose.p1r   0d8bde16b6d9691458912d6abb90d4f5  4042 bytes
 (seed=1 is passed to prince-ref as "seed=1"; the .p1r stores the seed. It only matters for
 fight: the guard AI uses the random generator. The level-1 runs give the same kid trace
 with any seed.)

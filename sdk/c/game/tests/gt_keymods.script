@@ -1,0 +1,27 @@
+# gt_keymods: after each "ready N" line, a modifier and G pressed and released at one
+# instant (the program reads no events meanwhile: one batch)
+0 wait gt_keymods: ready 1
++100 down lctrl
++0 down g
++0 up lctrl
++0 up g
++0 wait gt_keymods: ready 2
++100 down g
++0 down lctrl
++0 up g
++0 up lctrl
++0 wait gt_keymods: ready 3
++100 down lshift
++0 down g
++0 up lshift
++0 up g
++0 wait gt_keymods: ready 4
++100 down g
++0 down lshift
++0 up g
++0 up lshift
++0 wait gt_keymods: ready 5
++100 down lctrl
++0 down g
++0 up g
++600 up lctrl

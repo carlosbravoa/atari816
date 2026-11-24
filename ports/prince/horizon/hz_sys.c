@@ -303,24 +303,17 @@ static int is_modifier(unsigned k)
 
 void hz_events(void)
 {
-    unsigned e, k, i, d, t, mods = 0;
-    /* presses, in order. hg_mods is the modifiers' state at the last event read, and the
-     * queue holds presses only: Ctrl+G typed quickly (Ctrl and G released together, as a
-     * keyboard adapter that sends both in one report does) came with Ctrl already up, and
-     * was a plain G. So a modifier pressed earlier in the same batch counts too. */
+    unsigned e, k, i, d, t;
+    /* presses, in order, each with the modifiers held when it went down (hg_key_mods):
+     * Ctrl+G typed quickly (Ctrl and G released in the same frame, as a keyboard adapter
+     * that sends both in one report does) is Ctrl+G, though hg_mods says Ctrl is up */
     while ((e = hg_key_next()) != 0) {
         unsigned c = e >> 8;
         k = e & 0xFF;
         key_states[k] |= KEYSTATE_HELD | KEYSTATE_HELD_NEW;
         last_any_key_scancode = (int)k;
-        if (k == SDL_SCANCODE_LCTRL || k == SDL_SCANCODE_RCTRL)
-            mods |= HG_MOD_CTRL;
-        else if (k == SDL_SCANCODE_LSHIFT || k == SDL_SCANCODE_RSHIFT)
-            mods |= HG_MOD_SHIFT;
-        else if (k == SDL_SCANCODE_LALT || k == SDL_SCANCODE_RALT)
-            mods |= HG_MOD_ALT;
         if (!is_modifier(k)) {
-            unsigned m = hg_mods | mods;
+            unsigned m = hg_key_mods;
             last_key_scancode = (int)k;
             if (m & HG_MOD_SHIFT) last_key_scancode |= WITH_SHIFT;
             if (m & HG_MOD_CTRL) last_key_scancode |= WITH_CTRL;

@@ -679,10 +679,12 @@ unsigned long hg_ms(void)
 static unsigned char kdown[32], kpress[32], krel[32];
 static unsigned char chq[16], chn;
 static unsigned kq[16];
+static unsigned char kqm[16];           /* each press's modifiers (hg_key_mods) */
 static unsigned char kqn;
 static unsigned mclick, mlast;
 static int menupick = -1;
 unsigned hg_mods;
+unsigned hg_key_mods;
 int hg_mouse_x, hg_mouse_y;
 unsigned hg_mouse_b;
 static unsigned joyread, joyv, joyt, p1last;
@@ -758,8 +760,10 @@ static void events(void)
                     unsigned c = hz_key_ascii(ev.a, ev.b);
                     if (c && chn < sizeof chq)
                         chq[chn++] = (unsigned char)c;
-                    if (k && kqn < sizeof kq / sizeof kq[0])
+                    if (k && kqn < sizeof kq / sizeof kq[0]) {
+                        kqm[kqn] = (unsigned char)hg_mods;  /* as at this press */
                         kq[kqn++] = k | (c & 0xFF) << 8;
+                    }
                 }
             } else {
                 kdown[k >> 3] &= (unsigned char)~(1 << (k & 7));
@@ -874,11 +878,15 @@ unsigned hg_getchar(void)
 unsigned hg_key_next(void)
 {
     unsigned k;
-    if (!kqn)
+    if (!kqn) {
+        hg_key_mods = 0;
         return 0;
+    }
     k = kq[0];
+    hg_key_mods = kqm[0];
     --kqn;
     memmove(kq, kq + 1, kqn * sizeof kq[0]);
+    memmove(kqm, kqm + 1, kqn);
     return k;
 }
 
