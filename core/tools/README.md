@@ -7,7 +7,9 @@ stays served meanwhile, or straight over the port when it does not.
 
 - **`atari_link.py`**: the developer side (class `AtariLink`), on top of `../../tools/pclink.py`.
 - **`atari.py`**: CLI: `ports` `ping` `log` `send` `run` `eject` `key` `reset`
-  `status` `screen` `peek` `poke` `fwpeek`, and for the 65C816 `run816` `shot816` `peek816`.
+  `status` `screen` `peek` `poke` `fwpeek`, and for the 65C816 `run816` `shot816` `peek816`;
+  `hdmidiag [--watch S]`: the HDMI diagnostic counters (`../KNOWN_ISSUES.md`, "The picture
+  is lost now and then").
 - **`atari_gui.py`**: desktop app (Linux/Windows): send and run files, reset, log, printer output.
 - **`a816_screen.py`**: the screenshot decoder that `shot816` uses.
 - **`dotmatrix_pdf.py`**: turns printer output into a PDF (used by the app's Printer tab).

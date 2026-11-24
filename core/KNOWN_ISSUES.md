@@ -1,5 +1,60 @@
 # Known issues
 
+## OPEN: the picture is lost now and then (the monitor shows "no signal", then its HDMI banner)
+
+Reported 2026-11-24, "it has always happened": while playing, in FreeCell, and once seen with
+the Desktop idle and nobody using the serial link. Right after a loss the board answers the
+ping, `shot816` shows the framebuffer intact and Horizon's uptime runs on: the machine is fine,
+the HDMI output drops for the monitor and comes back.
+
+What the RTL does (read 2026-11-24):
+- The output is a custom raster sent as 720p60 (the AVI infoframe says VIC 4): 1572 x 760 at
+  71.71875 MHz (27 x 17/4 x 25/8 / 5), HFP/HS/HBP 72/80/140, VFP/VS/VBP 10/5/25, +/+ sync,
+  60.03 Hz, 45.62 kHz lines (CEA: 1650 x 750 at 74.25 MHz, 110/40/220, 5/5/20, 60.00 Hz).
+  The HDMI pins are LVDS25 outputs (`constraints/tang_nano_20k.cst`), as on every Tang Nano.
+- No register write changes the raster: hx free-runs; vy is changed only by the genlock
+  (`scandoubler_480p.sv`, `if (sof_pix) vy <= V_LOCK`), which jumps only when the classic
+  machine's frame start comes at another moment (after its freeze is lifted, a reset). The
+  classic machine is frozen while the desktop is shown.
+- `hdmi_rst_n = hw_reset_n && pll_locked` (`tang_top.sv`): the HDMI PLL's raw LOCK resets
+  the clk_pix CLKDIV, the OSER10s and the raster; `hw_reset_n` has only the power-on timer, S1
+  and the *core* PLL's lock. A glitch of the HDMI PLL's LOCK (that PLL is fed by the core
+  PLL's output) drops the picture and nothing else: the leading suspect.
+
+The diagnostic bitstream (`src/hdmi_diag.sv`; sticky counters on sys_clk, cleared only by
+power-on and S1, counting once both PLLs have been locked for 78 ms):
+- LEDs (with `HDMI_DIAG_LEDS`, on in `tang_top.sv`; lit = it happened at least once):
+  LED2 (pin 17) the HDMI PLL lost its lock, LED3 (pin 18) the core PLL lost its lock, LED4
+  (pin 19) a frame of the wrong length was sent, LED5 the heartbeat as before. (The SIO
+  activity, "ROMs loaded" and SIO command LEDs are gone in this build.)
+- `python3 core/tools/atari.py hdmidiag` (FWPEEK of the I/O processor's registers, no 65C816
+  software): HDMI PLL lock drops, core PLL lock drops, hdmi_rst_n low pulses, frames whose
+  length is not 449,777 +- 4 sys_clk cycles (and the last bad length: -592 is one line short),
+  genlock jumps that moved vy, frames measured. `--watch 5` prints a timestamped line at each
+  change: note the time of a loss and compare.
+- Registers (I/O processor, read-only, 32-bit little-endian): $0200_00EC frames measured;
+  $0200_00F0 byte 0 HDMI PLL lock drops, 1 core PLL lock drops, 2 hdmi_rst_n pulses, 3 flags
+  (bit 0 HDMI lock lost, 1 core lock lost, 2 hdmi_rst_n pulse, 3 bad frame, 4 genlock jump,
+  5 armed, 6 HDMI PLL locked now, 7 VS running now); $0200_00F4 bits 0-15 bad frames, 24-31
+  genlock jumps; $0200_00F8 the last bad frame's length, $0200_00FC the last frame's length
+  (sys_clk cycles). 8-bit counts stop at 255, 16-bit at 65535.
+- Test: `core/sim_a816/run_hdmi_diag.sh` (Verilator; forced lock glitches of 5 ns and 100 ns,
+  a frame one line short, a genlock jump, S1, the filter below).
+
+Reading a loss: HDMI PLL lock drops went up -> the PLL (fix candidate 1); nothing went up and
+the frame lengths are all nominal -> the raster and the reset are innocent: signalling (cable,
+monitor, LVDS levels) or the data islands (candidate 2); bad frames or genlock jumps without a
+lock drop -> the genlock.
+
+A/B builds (each one change in `src/tang_top.sv`):
+1. `define FIX_LOCK_FILTER` (commented out next to `HDMI_DIAG_LEDS`): drops of the HDMI PLL's
+   lock up to 100 us no longer reset the HDMI side; a longer loss still does (the serializer
+   and its CLKDIV must be restarted together after a real loss, or the 10-bit words can stay
+   misaligned), released after 1 ms of lock. The counters still count every drop.
+2. The `hdmi_audio_out #(.DVI_OUTPUT(1'b0), .NO_DATA_ISLANDS(1'b0))` instance: `NO_DATA_ISLANDS`
+   1 sends HDMI without packets (no infoframes, no audio over HDMI); `DVI_OUTPUT` 1 plain DVI
+   (no packets, no guard bands; no HDMI audio). If the losses stop, the packets are the cause.
+
 ## OPEN: Horizon without keyboard and mouse after F12 during an ATR load
 
 Reported 2026-11-21 (REV $0C, Horizon 0.27, but older than both): F12 pressed while the classic

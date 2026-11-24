@@ -71,7 +71,9 @@ module scandoubler_480p #(
     output wire [10:0] hx_out,
     output wire [9:0]  vy_out,
     output reg  [7:0]  r_out, g_out, b_out,
-    output reg         hs_out, vs_out, de_out
+    output reg         hs_out, vs_out, de_out,
+    // (diagnostic, hdmi_diag.sv) toggles at every genlock jump that changed vy; never reset
+    output reg         jump_tog_out
 );
 
 // 8-line ring buffer (slot = line mod 8) — read may trail write by up to 7 lines.
@@ -226,6 +228,14 @@ always_ff @(posedge clk_pix or negedge rst_n) begin
         end
     end
 end
+
+// (diagnostic) a genlock jump that moved the raster: in steady state the SOF comes when vy
+// is already V_LOCK (760 lines = one Atari frame), so vy != V_LOCK means the frame was cut
+// or stretched. A toggle, counted on sys_clk by hdmi_diag.sv; not reset (no false edge when
+// hdmi_rst_n pulses).
+initial jump_tog_out = 1'b0;
+always_ff @(posedge clk_pix)
+    if (sof_pix && vy != V_LOCK) jump_tog_out <= ~jump_tog_out;
 
 assign hx_out = hx;
 assign vy_out = vy;

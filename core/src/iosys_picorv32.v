@@ -107,6 +107,9 @@ module iosys_picorv32 #(
     output wire [2:0]  ram_select_out,       // Atari RAM size code (core RAM_SELECT)
     output wire        pbi_en_out,           // the classic machine's PBI disk present (video_opts bit 2)
     input              pbi_req,              // other clock: its request bit (video_opts bit 8, read)
+    // HDMI diagnostic counters (hdmi_diag.sv, sys_clk like this module): read-only at
+    // $0200_00EC (frames), $F0, $F4, $F8, $FC; {FC, F8, F4, F0, EC}
+    input  wire [159:0] hdmi_diag_regs,
 
     // Virtual Keyboard outputs
     output wire [7:0]  virt_kbd_mod_out,
@@ -233,6 +236,14 @@ wire        a816_mbi_sel      = mem_valid && (mem_addr == 32'h0200_00e0);
 //   0x0200_00e8 (R):  {keys go to Horizon, modifiers[7:0]}
 wire        a816_key_sel      = mem_valid && (mem_addr == 32'h0200_00e4);
 wire        a816_kmod_sel     = mem_valid && (mem_addr == 32'h0200_00e8);
+// HDMI diagnostic counters (read-only; writes ignored): $EC frames, $F0 {flags, hrst,
+// core lock, HDMI lock}, $F4 {genlock jumps, 0, bad frames}, $F8 last bad frame length,
+// $FC last frame length (sys_clk cycles). core/src/hdmi_diag.sv.
+wire        hdiag_sel         = mem_valid && (mem_addr[31:5] == 27'h0100_007) && (mem_addr[4:2] >= 3'd3);
+wire [31:0] hdiag_rdata = mem_addr[4:2] == 3'd3 ? hdmi_diag_regs[31:0] :
+                          mem_addr[4:2] == 3'd4 ? hdmi_diag_regs[63:32] :
+                          mem_addr[4:2] == 3'd5 ? hdmi_diag_regs[95:64] :
+                          mem_addr[4:2] == 3'd6 ? hdmi_diag_regs[127:96] : hdmi_diag_regs[159:128];
 reg  [31:0] a816_mbq_s, a816_mbr_s, a816_keys_s;
 reg  [9:0]  a816_keymod_s;
 always @(posedge clk) begin
@@ -355,7 +366,7 @@ assign mem_ready = bram_ready || ram_ready || textdisp_reg_char_sel || simpleuar
             spiflash_reg_ctrl_sel || sio_ready || virt_kbd_reg0_sel || virt_kbd_reg1_sel ||
             cart_reg_sel || sio_cap_idx_sel || sio_cap_data_sel || siocmd_a_sel || siocmd_b_sel ||
             a816_ctrl_sel || a816_dbg_sel || a816_mbq_sel || a816_mbr_sel || a816_mbi_sel ||
-            a816_key_sel || a816_kmod_sel ||
+            a816_key_sel || a816_kmod_sel || hdiag_sel ||
             video_opts_sel || h_offset_sel || ram_select_sel || blrx_sel || blrxd_sel;
 
 assign mem_rdata = bram_ready ? bram_rdata :
@@ -388,6 +399,7 @@ assign mem_rdata = bram_ready ? bram_rdata :
         a816_mbr_sel ? a816_mbr_s :
         a816_mbi_sel ? {14'b0, a816_mb_iop} :
         a816_dbg_sel ? {23'b0, a816_dbg_pending, a816_dbg_data} :
+        hdiag_sel ? hdiag_rdata :
         32'h 0000_0000;
 
 picorv32 #(

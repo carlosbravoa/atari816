@@ -166,8 +166,27 @@ wire hw_reset_n  = timer_done && !btn_n[0] && pll_core_locked;
 wire usb_host_enable;   // iosys register bit; unused since the USB-HID host was removed
 wire joystick_mode;   // OSD-toggled: arrow keys → Joystick 1, Left-Alt = fire, arrows suppressed from kbd
 
+// ── HDMI diagnostics (2026-11-24, the "lost picture" hunt): sticky counters of the PLL
+// locks, hdmi_rst_n pulses, frames of the wrong length and genlock jumps, on sys_clk, cleared
+// only by power-on and S1 (hdmi_diag.sv). Read by the PC with `atari.py hdmidiag` (iosys
+// $0200_00EC-$FC through FWPEEK); with HDMI_DIAG_LEDS three LEDs show the sticky flags.
+`define HDMI_DIAG_LEDS
+// Candidate fix, OFF: hdmi_rst_n ignores HDMI PLL lock drops shorter than 100 us (a lock
+// glitch no longer resets CLKDIV / OSER10 / the raster); a longer loss still resets the HDMI
+// side, released 1 ms after the lock is back (hdmi_diag.sv FILT_CYCLES / RELOCK_CYCLES).
+// `define FIX_LOCK_FILTER
+wire         diag_rst_n = timer_done && !btn_n[0];   // power-on and S1 only
+wire [159:0] hdmi_diag_regs;                          // {FC, F8, F4, F0, EC}
+wire [3:0]   hdiag_sticky;                            // {jump, bad frame, core lock, HDMI lock}
+wire         hdiag_lock_ok;                           // FIX_LOCK_FILTER's filtered lock
+wire         sd_jump_tog;                             // scandoubler: genlock jumps (clk_pix)
+
 // hdmi_rst_n: gate HDMI logic on PLL lock so OSER10 RESET is held until clk_pix is stable.
+`ifdef FIX_LOCK_FILTER
+wire hdmi_rst_n = hw_reset_n && hdiag_lock_ok;
+`else
 wire hdmi_rst_n = hw_reset_n && pll_locked;
+`endif
 
 // 371.25 MHz ÷ 5 = 74.25 MHz HDMI pixel clock.
 // Hold CLKDIV in reset until PLL locks and system reset is released so clk_pix starts cleanly with stable FCLK in sync with OSER10.
@@ -975,7 +994,8 @@ iosys_picorv32 #(
     .kbd_pc_layout_out(kbd_pc_layout),
     .ram_select_out(ram_select_opt),
     .pbi_en_out(pbi_en_opt),
-    .pbi_req(pbi_req_core)
+    .pbi_req(pbi_req_core),
+    .hdmi_diag_regs(hdmi_diag_regs)
 );
 
 // Clock Domain Crossing (CDC) Synchronization for SIO Handler
@@ -1221,7 +1241,8 @@ scandoubler_480p scandoubler (
     .h_offset(h_offset),
     .nv_on(nvc_on), .nv_r(nvc_r), .nv_g(nvc_g), .nv_b(nvc_b), .hx_out(nvc_hx), .vy_out(nvc_vy),
     .r_out(hdmi_r), .g_out(hdmi_g), .b_out(hdmi_b),
-    .hs_out(hdmi_hs), .vs_out(hdmi_vs), .de_out(hdmi_de)
+    .hs_out(hdmi_hs), .vs_out(hdmi_vs), .de_out(hdmi_de),
+    .jump_tog_out(sd_jump_tog)
 );
 
 // (OSD overlay mixer removed, Atari816.) The output register stage is kept so the
@@ -1245,6 +1266,26 @@ always_ff @(posedge clk_pix) begin
     hdmi_vs_reg <= hdmi_vs;
     hdmi_de_reg <= hdmi_de;
 end
+
+// HDMI diagnostics (see diag_rst_n above): everything on sys_clk; from clk_pix only the VS
+// register below and the scandoubler's jump toggle are sampled (2-3 flop synchronisers).
+hdmi_diag hdiag (
+    .sys_clk     (sys_clk),
+    .rst_n       (diag_rst_n),
+    .hlock       (pll_locked),
+    .clock       (pll_core_locked),
+    .hdmi_rst_n  (hdmi_rst_n),
+    .vs_pix      (hdmi_vs_reg),
+    .jump_tog_pix(sd_jump_tog),
+    .hw_reset_n  (hw_reset_n),
+    .reg_frames  (hdmi_diag_regs[31:0]),
+    .reg_a       (hdmi_diag_regs[63:32]),
+    .reg_b       (hdmi_diag_regs[95:64]),
+    .reg_c       (hdmi_diag_regs[127:96]),
+    .reg_d       (hdmi_diag_regs[159:128]),
+    .sticky      (hdiag_sticky),
+    .lock_ok_filt(hdiag_lock_ok)
+);
 
 // `define USE_TEST_PATTERN
 
@@ -1356,7 +1397,16 @@ wire sio_data_act = (sio_tx_stretch != 0) || (sio_rx_stretch != 0);
 assign sio_ind_data = sio_data_act;
 assign sio_ind_cmd  = (sio_cmd_stretch != 0);
 
+`ifdef HDMI_DIAG_LEDS
+// Diagnostic LEDs (lit = it happened at least once since power-on / S1):
+//   LED2 (leds_n[1], pin 17) = the HDMI PLL (rpll_287m) lost its lock
+//   LED3 (leds_n[2], pin 18) = the core PLL (rpll_108m) lost its lock
+//   LED4 (leds_n[3], pin 19) = a frame of the wrong length was sent (genlock jump, reset)
+//   LED5 (leds_n[4], pin 20) = sysblink, as always
+assign leds_n = ~{ sysblink[24], hdiag_sticky[2], hdiag_sticky[1], hdiag_sticky[0] };
+`else
 assign leds_n = ~{ sysblink[24], (sio_cmd_stretch != 0), roms_loaded, sio_data_act };
+`endif
 
 
 endmodule

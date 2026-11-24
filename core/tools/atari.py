@@ -31,6 +31,9 @@ Usage:
   atari.py screen [-p P]             # text dump of the Atari's screen (GR.0)
   atari.py peek ADDR [LEN] [-p P]    # hex dump of Atari memory (e.g. 0x58 16)
   atari.py fwpeek ADDR [LEN] [-p P]  # hex dump of FIRMWARE BSRAM (fw globals, debug)
+  atari.py hdmidiag [--watch S] [-p P] # the HDMI diagnostic counters (PLL lock drops,
+                                     #   HDMI resets, frames of the wrong length, genlock
+                                     #   jumps; core/src/hdmi_diag.sv), once or every S s
   atari.py poke ADDR B [B...] [-p P] # write bytes into Atari memory
 
 Protocol implementation lives in atari_link.py (shared with the desktop app,
@@ -141,6 +144,55 @@ def cmd_fwpeek(args):
         hexs = " ".join(f"{b:02x}" for b in row)
         text = "".join(chr(b) if 32 <= b < 127 else "." for b in row)
         print(f"{addr + off:04x}  {hexs:<48}  {text}")
+
+
+HDIAG_AT = 0x020000EC          # iosys: $EC frames, $F0, $F4, $F8, $FC (hdmi_diag.sv)
+HDIAG_NOM = 449777             # sys_clk cycles a frame (1572 x 760 at 71.71875 MHz)
+
+
+def hdmidiag_read(l):
+    """The HDMI diagnostic counters as a dict (FWPEEK of the I/O processor's registers)."""
+    d = l.fwpeek(HDIAG_AT, 20)
+    w = [int.from_bytes(d[i:i + 4], "little") for i in range(0, 20, 4)]
+    a, b = w[1], w[2]
+    f = a >> 24
+    return dict(frames=w[0], hlock=a & 255, clock=(a >> 8) & 255, hrst=(a >> 16) & 255,
+                bad=b & 0xFFFF, jumps=b >> 24, lastbad=w[3] & 0xFFFFF, last=w[4] & 0xFFFFF,
+                ev_hlock=bool(f & 1), ev_clock=bool(f & 2), ev_hrst=bool(f & 4),
+                ev_bad=bool(f & 8), ev_jump=bool(f & 16), armed=bool(f & 32),
+                hlock_now=bool(f & 64), vs_now=bool(f & 128))
+
+
+def hdmidiag_line(d):
+    lb = (f"{d['lastbad']} ({d['lastbad'] - HDIAG_NOM:+d})" if d["lastbad"] else "-")
+    return (f"HDMI PLL lock drops {d['hlock']}  core PLL lock drops {d['clock']}  "
+            f"hdmi_rst_n pulses {d['hrst']}  bad frames {d['bad']} (last {lb})  "
+            f"genlock jumps {d['jumps']}  | frames {d['frames']}, last {d['last']} "
+            f"(nominal {HDIAG_NOM}), armed {int(d['armed'])}, HDMI PLL locked "
+            f"{int(d['hlock_now'])}, VS running {int(d['vs_now'])}")
+
+
+def cmd_hdmidiag(args):
+    import time
+    with AtariLink(args.port) as l:
+        d = hdmidiag_read(l)
+        if d["frames"] == 0 and not d["armed"] and not d["hlock_now"]:
+            print("(all zero: a bitstream without core/src/hdmi_diag.sv, or not armed yet)")
+        print(time.strftime("%H:%M:%S ") + hdmidiag_line(d))
+        if not args.watch:
+            return
+        keys = ("hlock", "clock", "hrst", "bad", "jumps")
+        try:
+            while True:
+                time.sleep(args.watch)
+                n = hdmidiag_read(l)
+                if any(n[k] != d[k] for k in keys) or n["frames"] < d["frames"]:
+                    print(time.strftime("%H:%M:%S ") + "CHANGED: " + hdmidiag_line(n), flush=True)
+                elif args.verbose:
+                    print(time.strftime("%H:%M:%S ") + hdmidiag_line(n), flush=True)
+                d = n
+        except KeyboardInterrupt:
+            pass
 
 
 def cmd_eject(args):
@@ -285,6 +337,11 @@ def main():
         lambda sp: sp.add_argument("--no-scroll", action="store_true",
                                    help="ignore a full-screen program's scroll registers "
                                         "(the rows from the base, as before 2026-11-22)"))
+    add("hdmidiag", cmd_hdmidiag,
+        lambda sp: sp.add_argument("--watch", type=float, default=0,
+                                   help="read again every S seconds; print a line when a count changes"),
+        lambda sp: sp.add_argument("-v", "--verbose", action="store_true",
+                                   help="with --watch: print every reading"))
     add("peek816", cmd_peek816, lambda sp: sp.add_argument("addr"),
         lambda sp: sp.add_argument("len", nargs="?", default="64"))
     add("reset", cmd_reset,
