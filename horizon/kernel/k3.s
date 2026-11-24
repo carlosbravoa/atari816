@@ -18,16 +18,21 @@
 ;
 ; sheet_draw makes Ali's records in SL_LIST (as draw_list does, k2list.s) and runs them the same
 ; way. The fast path: the target is drawn directly (the window's content on the screen while
-; nothing lies over it and no repaint over it is pending, or the full-screen framebuffer), the
-; record is a copy or a keyed copy of the sheet seen in the record before (the sheet and op are
-; checked when they change), and it lies wholly inside the clip: then its destination is the
-; target's row table (DROW_LO / DROW_HI, made again only when the target moved) + x, and only the
-; changing bytes of Ali's record are written (FLAGS, RFLAGS and 20-23 stay 0: sl_clean). Every
-; other record (fills, LS_VBL, clipping, a bitmap target) goes through sh_one: checked in full,
-; clipped and made by k2list.s's ls_clip and ls_emit.
+; nothing lies over it and no repaint over it is pending, or the full-screen framebuffer), and
+; the record is a copy (keyed, remapped) of the sheet seen last (its sheet checked once, another
+; op of it only the op), a fill, or an SH_TABLE record (its sheet kept beside the copies'): the
+; record is checked by reading it (nothing written until it is made), its destination is the
+; target's row table (DROW_LO / DROW_HI, made again only when the target moved) + x, a copy
+; partly outside the clip is cut here (@clp), and only the changing bytes of Ali's record are
+; written (FLAGS, RFLAGS and 20-23 stay 0: sl_clean). The area of the records beyond 16 x 16 is
+; bounded by their most rows times their widths' sum, and counted exactly from SL_LIST only when
+; that passes LS_AREA (sh_end, sh_walk): no multiplying a record. Every other record (SH_VBL, a
+; WAIT_VBL left pending, fills cut, a bitmap target) goes through sh_one: checked in full, clipped
+; and made by k2list.s's ls_clip and ls_emit.
 ;
 ; (0.31, REV $0D) The colour remap. An SH_TABLE record loads entries of Ali's remap table from a
-; row of a sheet (Ali's OP 5 TABLE, made by sh_tab: no destination, no clipping). SH_COPY and
+; row of a sheet (Ali's OP 5 TABLE, made by the fast path or sh_tab: no destination, no
+; clipping). SH_COPY and
 ; SH_KEY + SH_REMAP draw through it: Ali's OP 6 COPY_REMAP and 7 COPY_KEY_REMAP, a different OP
 ; and nothing else, so the fast path takes them as any copy (only its switch to such a record
 ; is new) and sh_one makes them as copies, its OP changed afterwards (sh_rmop, sh_rpatch); the
@@ -76,30 +81,36 @@ LS_VBL      = 1
 ; while a syscall runs here; ls_clip / ls_emit / mul16 use only kx1, kx2, kt4-kt7
 kps     = $90                   ; -> SROW_LO of the sheet seen last (24 bits)
 kpsh    = $94                   ; -> its SROW_HI
-kpd     = $98                   ; -> DROW_LO
-kpdh    = $9C                   ; -> DROW_HI
+kpd     = $98                   ; -> DROW_LO + 2 * c_oy (byte 3 bit 7: dr_xb, rows across banks)
+kpdh    = $9C                   ; -> DROW_HI + 2 * c_oy
 sc_hop  = $A0                   ; the sheet seen last: its record word 0 (sheet | op << 8)
 sc_op   = $A2                   ;   Ali's OP << 8
 sc_w1   = $A4                   ;   width + 1 (0: no sheet: every record to sh_one)
 sc_h1   = $A6                   ;   height + 1
 sc_ss   = $A8                   ;   stride
-c_ox    = $AA                   ; content -> clip coordinates
-c_oy    = $AC
+c_ox    = $AA                   ; content -> clip coordinates (c_oy also in kpd, kpdh; c_ox in
+c_oy    = $AC                   ;   DROW_LO unless dr_xb)
 c_cw1   = $AE                   ; the clip's width + 1, height + 1
 c_ch1   = $B0
 c_ds    = $B2                   ; the target's stride
-k_w     = $B4                   ; the record: w, h, x (clip coordinates), sx, sy
-k_h     = $B6
-k_x     = $B8
+k_w     = $B4                   ; temporaries (SH_TABLE records)
+sh_sw   = $B6                   ; the fast path's records beyond 16 x 16: their widths' sum,
+sh_mh   = $B8                   ;   the most rows ($8000: the sum overflowed)
 k_sx    = $BA
-k_sy    = $BC
-k_i     = $BE                   ; the record's offset in its bank
+sc_xb   = $BC                   ; the sheet seen last: 0 if it lies in one bank (no carry)
+k_i     = $BE                   ; the record's offset in its bank (Y while it is made)
 k_il    = $C0                   ; the last record's
 k3b     = $C4                   ; the records' bank
 k_rop   = $C6                   ; (0.31) sh_rmop: LS_COPY / LS_KEY of the remapped record
 k_ro    = $C8                   ;   ls_o before it
 kg_e    = $C2                   ; (ws.s) the window
 kx0     = $E0                   ; (k2.s) a temporary
+cl_w    = kt0                   ; the fast path's cut record: w, h, x, y (clip coordinates),
+cl_h    = kt1                   ;   sx, sy
+cl_x    = kt2
+cl_y    = kt3
+cl_sx   = kt4                   ;   (each pair 2 apart: indexed by dimension)
+cl_sy   = kt5
 
         .segment "BSS"
 sr:         .res    16          ; a record (sh_one), sheet_new's block
@@ -120,6 +131,15 @@ sh_ss:      .res    SH_N * 2    ; stride
 sh_row:     .res    SH_N * 2    ; its first row in SROW (* 2)
 sh_b0:      .res    SH_N * 2    ; the banks it lies in (physical, first, last)
 sh_b1:      .res    SH_N * 2
+sh_thop:    .res    2           ; sheet_draw's fast path: the table record seen last (sheet | 3
+sh_tw1:     .res    2           ;   << 8; $FFFF none), its sheet's width + 1 (0: none), height,
+sh_th:      .res    2           ;   first row in SROW (* 2)
+sh_trow:    .res    2
+sh_fhop:    .res    2           ; the fill record seen last (sheet byte | 0; $FFFF none)
+sh_csh:     .res    2           ; the copies' sheet (sc_*, kps, kpsh: its values; $FFFF none)
+dr_w:       .res    2           ; dr_build: the clip's width - 1 its rows were checked for,
+dr_ox:      .res    2           ;   the c_ox in them,
+dr_xb:      .res    2           ;   $8000: a row crosses a bank (c_ox not in them), else 0
 
         .segment "K3CODE"
         .a16
@@ -462,11 +482,14 @@ k3_draw:
         stz     sh_nbig
         stz     sh_big
         stz     sh_big+2
+        stz     sh_sw
+        stz     sh_mh
         jsr     sl_clean
         lda     ls_bmp                  ; a bitmap target: every record by sh_one
         bne     sh_slow
         jsr     dr_build                ; the target's rows (C set: too many, or no clip)
-        bcc     sh_fast
+        bcs     sh_slow
+        jmp     sh_fast
 sh_slow:
         jsr     sh_one
         bcs     sh_err
@@ -478,7 +501,8 @@ sh_slow:
         bra     sh_slow
 
 ; made: the records given less those left out; the area: (made - big ones) * 256 + the big
-; ones' pixels, at most LS_AREA; then they run (k2list.s, ls_finish)
+; ones' pixels (the fast path's: their bound, or exactly from SL_LIST if it passes), at most
+; LS_AREA; then they run (k2list.s, ls_finish)
 sh_end: ldx     cur
         lda     t_a+1,x
         and     #$00FF
@@ -490,13 +514,26 @@ sh_end: ldx     cur
         xba                             ; (at most 128: * 256)
         clc
         adc     sh_big
-        tax
+        sta     kt2
         lda     sh_big+2
         adc     #0
-        cmp     #^LS_AREA
+        sta     kt3
+        lda     sh_mh                   ; + the fast path's big ones: at most rows * widths
+        beq     @cmp                    ; ($8000: the widths' sum overflowed)
+        bmi     :+
+        ldx     sh_sw
+        jsl     f2_mul
+        clc
+        adc     kt2
+        sta     kt2
+        txa
+        adc     kt3
+        sta     kt3
+        bcs     :+
+        jsr     sh_over
         bcc     @ok
-        bne     @big
-        cpx     #.loword(LS_AREA) + 1
+:       jsr     sh_walk                 ; past LS_AREA: counted exactly
+@cmp:   jsr     sh_over
         bcs     @big
 @ok:    jsl     f2_finish
         lda     ls_cnt
@@ -505,18 +542,69 @@ sh_end: ldx     cur
 @big:   lda     #EINVAL
 sh_err: jsl     f_set_err
         rtl
+; kt2, kt3 (the area) above LS_AREA: C set
+sh_over:
+        lda     kt3
+        cmp     #^LS_AREA
+        bne     :+
+        lda     kt2
+        cmp     #.loword(LS_AREA) + 1
+:       rts
+; kt2, kt3 = the area of the ls_n records made, from SL_LIST: as sheet_draw counts it (up to
+; 16 x 16 and SH_TABLE: 256, else w * h)
+sh_walk:
+        stz     kt2
+        stz     kt3
+        lda     ls_n
+        sta     kt0
+        ldx     #0
+@r:     lda     #256
+        sta     kt4
+        stz     kt5
+        lda     f:SL_LIST+17,x          ; OP 5 TABLE
+        and     #$00FF
+        cmp     #5
+        beq     @add
+        lda     f:SL_LIST+10,x
+        ora     f:SL_LIST+12,x
+        cmp     #17
+        bcc     @add
+        phx
+        lda     f:SL_LIST+12,x
+        pha
+        lda     f:SL_LIST+10,x
+        plx
+        jsl     f2_mul
+        sta     kt4
+        stx     kt5
+        plx
+@add:   lda     kt4
+        clc
+        adc     kt2
+        sta     kt2
+        lda     kt5
+        adc     kt3
+        sta     kt3
+        txa
+        clc
+        adc     #24
+        tax
+        dec     kt0
+        bne     @r
+        rts
 
 ; the fast path (see the top). DBR = the records' bank, X = the record's offset in SL_LIST,
 ; Y = the record's in its bank; bank $01 with long addressing.
 sh_fast:
-        lda     ls_ox                   ; content -> clip coordinates, the clip's size
-        sec
-        sbc     ls_cx0
-        sta     c_ox
-        lda     ls_oy
-        sec
+        lda     ls_oy                   ; content -> clip coordinates (c_ox: dr_build), the
+        sec                             ; clip's size
         sbc     ls_cy0
         sta     c_oy
+        beq     :+                      ; (-$4000 .. 0: folded into kpd, kpdh)
+        cmp     #$C000
+        bcs     :+
+        jmp     sh_slow
+:
         lda     ls_cx1
         sec
         sbc     ls_cx0
@@ -529,18 +617,27 @@ sh_fast:
         sta     c_ch1
         lda     ls_str
         sta     c_ds
-        lda     #.loword(DROW_LO)
+        lda     c_oy                    ; DROW + 2 * c_oy (c_oy <= 0): indexed by y * 2
+        asl     a
+        clc
+        adc     #.loword(DROW_LO)
         sta     kpd
-        lda     #.loword(DROW_HI)
+        adc     #.loword(DROW_HI - DROW_LO)
         sta     kpdh
         lda     #^DROW_LO               ; (SROW, DROW: bank $7F)
-        sta     kpd+2
         sta     kpdh+2
         sta     kps+2
         sta     kpsh+2
-        lda     #$FFFF                  ; no sheet seen yet
+        ora     f:dr_xb                 ; (kpd's byte 3, bit 7: dr_xb)
+        sta     kpd+2
+        lda     #$FFFF                  ; no sheet seen yet, no table
         sta     sc_hop
+        sta     f:sh_csh
+        sta     f:sh_thop
+        sta     f:sh_fhop
         stz     sc_w1
+        lda     #0
+        sta     f:sh_tw1
         ldx     ls_o                    ; (0)
         phb
         a8
@@ -553,20 +650,21 @@ sh_fast:
 
 ; (0.31) SH_COPY / SH_KEY + SH_REMAP: Ali's OP 6 COPY_REMAP / 7 COPY_KEY_REMAP (where the
 ; remap is not there: sh_one, ENODEV)
+@swx:   jmp     @swno
 @swrm:  cmp     #SH_REMAP + SH_COPY
-        bcc     @swno
+        bcc     @swx
         cmp     #SH_REMAP + SH_KEY + 1
-        bcs     @swno
+        bcs     @swx
         and     #$0003
         pha
         jsr     sh_rmok
         pla
-        bcs     @swno
+        bcs     @swx
         adc     #5                      ; (C clear)
         bra     @swop
 
-; another sheet or op: checked, its values kept (a fill, WAIT_VBL, one pending, a sheet not
-; the caller's: sh_one)
+; another sheet or op: checked, its values kept (WAIT_VBL, one pending, a sheet not the
+; caller's: sh_one)
 @sw:    sta     sc_hop
         xba
         and     #$00FF
@@ -577,18 +675,14 @@ sh_fast:
         sta     sc_op
         lda     f:ls_vbl
         bne     @swno
-        lda     sc_hop
+        lda     sc_hop                  ; the same sheet, another op: kept as it was
         and     #$00FF
-        dec     a
-        cmp     #SH_N
-        bcs     @swno
-        asl     a
-        phx
-        tax
-        lda     cur
-        inc     a
-        cmp     sh_own,x
-        bne     @swbad
+        cmp     f:sh_csh
+        bne     :+
+        jmp     @go
+:       phx
+        jsr     sh_mine
+        bcs     @swbad
         lda     sh_w,x
         inc     a
         sta     sc_w1
@@ -597,6 +691,10 @@ sh_fast:
         sta     sc_h1
         lda     sh_ss,x
         sta     sc_ss
+        lda     sh_b1,x                 ; (0: in one bank)
+        sec
+        sbc     sh_b0,x
+        sta     sc_xb
         lda     sh_row,x
         clc
         adc     #.loword(SROW_LO)
@@ -604,14 +702,19 @@ sh_fast:
         adc     #.loword(SROW_HI - SROW_LO)
         sta     kpsh
         plx
+        lda     sc_hop
+        and     #$00FF
+        sta     f:sh_csh
         jmp     @go
 @swbad: plx
 @swno:  lda     #$FFFF
         sta     sc_hop
+        sta     f:sh_csh
         stz     sc_w1
 ; the record by sh_one (it sets DBR $01 itself); a WAIT_VBL left pending (that record left
 ; out) sends the next one there too
-@slow:  txa
+@slow:  sty     k_i
+        txa
         sta     f:ls_o
         jsr     sh_one
         bcs     @err
@@ -621,12 +724,17 @@ sh_fast:
         beq     :+
         lda     #$FFFF
         sta     sc_hop
+        sta     f:sh_csh
+        sta     f:sh_thop
+        sta     f:sh_fhop
         stz     sc_w1
-:       lda     k_i
+        lda     #0
+        sta     f:sh_tw1
+:       ldy     k_i
+@nxr:   tya
         cmp     k_il
         bcs     @end
         adc     #16
-        sta     k_i
         tay
         bra     @rec
 @err:   plb
@@ -635,106 +743,385 @@ sh_fast:
         sta     f:ls_o
         plb
         jmp     sh_end
-@sw1:   jmp     @sw
 @sl1:   jmp     @slow
-
+@sw1:   jmp     @sw2
+@cl1:   jmp     @clp
+; a copy (or keyed, remapped) of the sheet seen last: checked by reading the record only;
+; Y = the record, kept in k_i while Y indexes the row tables
 @rec:   lda     a:0,y                   ; sheet | op << 8: as the record before?
         cmp     sc_hop
         bne     @sw1
-@go:    lda     a:2,y                   ; 16 KEY, 17 OP
-        and     #$00FF
-        ora     sc_op
-        sta     f:SL_LIST+16,x
-        lda     a:4,y                   ; sx, sy
-        sta     k_sx
-        lda     a:6,y
-        sta     k_sy
-        lda     a:8,y                   ; w: 1 .. width - sx
+@go:    lda     a:8,y                   ; w: 1 .. width - sx
         beq     @sl1
-        sta     f:SL_LIST+10,x
-        sta     k_w
         clc
-        adc     k_sx
+        adc     a:4,y
         bcs     @sl1
         cmp     sc_w1
         bcs     @sl1
         lda     a:10,y                  ; h: 1 .. height - sy
         beq     @sl1
-        sta     f:SL_LIST+12,x
-        sta     k_h
-        adc     k_sy                    ; (C clear here)
+        adc     a:6,y                   ; (C clear here)
         bcs     @sl1
         cmp     sc_h1
         bcs     @sl1
         lda     a:12,y                  ; x: wholly inside the clip (a carry from the adding
-        adc     c_ox                    ; only makes the right edge's test stricter)
-        bmi     @sl1
-        sta     k_x
-        adc     k_w
+        adc     c_ox                    ; only makes the right edge's test stricter; else cut)
+        bmi     @cl1
+        adc     a:8,y
         cmp     c_cw1
-        bcs     @sl1
+        bcs     @cl1
         lda     a:14,y                  ; y
         adc     c_oy
-        bmi     @sl1
-        tay
-        adc     k_h
+        bmi     @cl1
+        adc     a:10,y
         cmp     c_ch1
-        bcs     @sl1
-        lda     k_w                     ; up to 16 x 16: counted as 256 pixels (sh_end)
-        ora     k_h
+        bcs     @cl1
+        lda     a:2,y                   ; 16 KEY, 17 OP
+        and     #$00FF
+        ora     sc_op
+        sta     f:SL_LIST+16,x
+        lda     a:8,y                   ; 10 WIDTH, 12 HEIGHT
+        sta     f:SL_LIST+10,x
+        lda     a:10,y
+        sta     f:SL_LIST+12,x
+        sty     k_i
+        lda     a:6,y                   ; SRC = row sy of the sheet + sx
+        asl     a
+        tay
+        lda     sc_xb
+        bne     @srcx
+        lda     [kpsh],y                ; (the sheet in one bank)
+        sta     f:SL_LIST+2,x
+        lda     [kps],y
+        ldy     k_i
+        clc
+        adc     a:4,y
+        sta     f:SL_LIST,x
+; (copies and fills) DST = row y of the clip + x (no row of it crosses a bank: dr_build), the
+; strides (after 2 and 7, which write their low bytes), the area
+@dst:   bit     kpd+2
+        bmi     @dstx
+        lda     a:14,y
+        asl     a
+        tay
+        lda     [kpdh],y
+        sta     f:SL_LIST+7,x
+        lda     [kpd],y
+        ldy     k_i
+        clc
+        adc     a:12,y
+        sta     f:SL_LIST+5,x
+@dst2:  lda     sc_ss
+        sta     f:SL_LIST+3,x
+        lda     c_ds
+        sta     f:SL_LIST+8,x
+        lda     a:8,y                   ; up to 16 x 16: counted as 256 pixels (sh_end)
+        ora     a:10,y
         cmp     #17
         bcs     @big
-@addr:  tya                             ; DST = row y of the clip + x
+@nx:    txa                             ; the next record (C clear)
+        adc     #24
+        tax
+        tya
+        cmp     k_il
+        bcs     @end2
+        adc     #16
+        tay
+        jmp     @rec
+@end2:  jmp     @end
+@dstx:  lda     a:12,y                  ; (rows across banks: x in the clip + the row)
+        clc
+        adc     c_ox
+        pha
+        lda     a:14,y
         asl     a
         tay
         lda     [kpd],y
-        adc     k_x
+        clc
+        adc     1,s
         sta     f:SL_LIST+5,x
         lda     [kpdh],y
         adc     #0
         sta     f:SL_LIST+7,x
-        lda     k_sy                    ; SRC = row sy of the sheet + sx
+        pla
+        ldy     k_i
+        jmp     @dst2
+@srcx:  lda     [kpsh],y                ; (the sheet across banks)
+        pha
+        lda     [kps],y
+        ldy     k_i
+        clc
+        adc     a:4,y
+        sta     f:SL_LIST,x
+        pla
+        adc     #0
+        sta     f:SL_LIST+2,x
+        jmp     @dst
+
+; beyond 16 x 16: its pixels are at most the most rows times the widths' sum (sh_end: exact
+; only when that bound passes LS_AREA)
+@big:   lda     a:10,y
+        cmp     sh_mh
+        bcc     :+
+        sta     sh_mh
+:       lda     a:8,y
+        clc
+        adc     sh_sw
+        sta     sh_sw
+        bcc     :+
+        lda     #$8000
+        sta     sh_mh
+:       clc
+        jmp     @nx
+
+; a copy not wholly inside the clip: cut as ls_clip cuts it, the source moved by the cut, made
+; here (x or y $4000 or more from the clip, by sh_one); cut away: left out
+@sl4:   jmp     @slow
+@gone:  lda     f:sh_skip
+        inc     a
+        sta     f:sh_skip
+        jmp     @nxr
+@gn:    plx
+        bra     @gone
+@clp:   lda     a:12,y
+        clc
+        adc     c_ox
+        sta     cl_x
+        adc     #$4000                  ; (C clear: x below $4000)
+        bmi     @sl4
+        lda     a:14,y
+        clc
+        adc     c_oy
+        sta     cl_y
+        adc     #$4000
+        bmi     @sl4
+        lda     a:8,y
+        sta     cl_w
+        lda     a:10,y
+        sta     cl_h
+        lda     a:4,y
+        sta     cl_sx
+        lda     a:6,y
+        sta     cl_sy
+        phx                             ; top and bottom (X = 2), left and right (X = 0)
+        ldx     #2
+@cd:    lda     cl_x,x                  ; before the clip: cut
+        bpl     :+
+        eor     #$FFFF
+        inc     a
+        cmp     cl_w,x
+        bcs     @gn
+        pha
+        adc     cl_sx,x                 ; (C clear)
+        sta     cl_sx,x
+        lda     cl_w,x
+        sec
+        sbc     1,s
+        sta     cl_w,x
+        pla
+        stz     cl_x,x
+:       lda     c_cw1,x                 ; past it: the width (height) - x (y) left
+        clc
+        sbc     cl_x,x
+        bmi     @gn
+        beq     @gn
+        cmp     cl_w,x
+        bcs     :+
+        sta     cl_w,x
+:       dex
+        dex
+        bpl     @cd
+        plx
+        lda     a:2,y                   ; 16 KEY, 17 OP; 10 WIDTH, 12 HEIGHT
+        and     #$00FF
+        ora     sc_op
+        sta     f:SL_LIST+16,x
+        lda     cl_w
+        sta     f:SL_LIST+10,x
+        lda     cl_h
+        sta     f:SL_LIST+12,x
+        sty     k_i
+        lda     cl_sy                   ; SRC
         asl     a
         tay
         lda     [kps],y
-        adc     k_sx
+        clc
+        adc     cl_sx
         sta     f:SL_LIST,x
         lda     [kpsh],y
         adc     #0
         sta     f:SL_LIST+2,x
-        lda     sc_ss                   ; the strides
+        lda     cl_y                    ; DST: the content's row, its x + DROW_LO (+ c_ox)
+        sec
+        sbc     c_oy
+        asl     a
+        tay
+        bit     kpd+2
+        bmi     :+
+        lda     [kpdh],y
+        sta     f:SL_LIST+7,x
+        lda     cl_x
+        sec
+        sbc     c_ox
+        clc
+        adc     [kpd],y
+        sta     f:SL_LIST+5,x
+        bra     :++
+:       lda     [kpd],y                 ; (rows across banks)
+        clc
+        adc     cl_x
+        sta     f:SL_LIST+5,x
+        lda     [kpdh],y
+        adc     #0
+        sta     f:SL_LIST+7,x
+:
+        lda     sc_ss
         sta     f:SL_LIST+3,x
         lda     c_ds
         sta     f:SL_LIST+8,x
-        txa                             ; the next record
-        adc     #24
-        tax
-        lda     k_i
-        cmp     k_il
-        bcs     @end2
-        adc     #16
-        sta     k_i
-        tay
-        jmp     @rec
-@end2:  jmp     @end
-@big:   phx                             ; beyond 16 x 16: its pixels counted
-        phy
-        lda     k_w
-        ldx     k_h
-        jsl     f2_mul
+        ldy     k_i
+        lda     cl_w                    ; the area
+        ora     cl_h
+        cmp     #17
+        bcc     @cdone
+        lda     cl_h
+        cmp     sh_mh
+        bcc     :+
+        sta     sh_mh
+:       lda     cl_w
         clc
-        adc     f:sh_big
-        sta     f:sh_big
-        txa
-        adc     f:sh_big+2
-        sta     f:sh_big+2
-        lda     f:sh_nbig
+        adc     sh_sw
+        sta     sh_sw
+        bcc     @cdone
+        lda     #$8000
+        sta     sh_mh
+@cdone: clc
+        jmp     @nx
+
+; (not the sheet and op seen last) the table or the fill seen last? Another table or fill:
+; kept beside the copies' sheet (a table or a fill between copies leaves it as it was)
+@sw2:   cmp     f:sh_thop
+        beq     @tab
+        cmp     f:sh_fhop
+        bne     :+
+        jmp     @fil
+:       pha
+        and     #$FF00
+        beq     @fsw
+        cmp     #SH_TABLE << 8
+        beq     @tsw
+        pla
+        jmp     @sw
+@fsw:   lda     f:ls_vbl                ; a fill: nothing to check
+        bne     @tno
+        pla
+        sta     f:sh_fhop
+        jmp     @fil
+@tsw:   jsr     sh_rmok                 ; a table: its sheet
+        bcs     @tno
+        lda     f:ls_vbl
+        bne     @tno
+        lda     1,s
+        and     #$00FF
+        phx
+        jsr     sh_mine
+        bcs     @tno2
+        lda     sh_w,x
         inc     a
-        sta     f:sh_nbig
-        ply
+        sta     f:sh_tw1
+        lda     sh_h,x
+        sta     f:sh_th
+        lda     sh_row,x
+        sta     f:sh_trow
         plx
+        pla
+        sta     f:sh_thop
+        bra     @tab
+@tno2:  plx
+@tno:   pla
+@sl2:   jmp     @slow
+; SH_TABLE (as sh_tab): w 1-256, x + w <= 256, h 1, sx + w <= the width, sy < the height
+@tab:   lda     a:8,y
+        beq     @sl2
+        sta     k_w
         clc
-        jmp     @addr
+        adc     a:12,y
+        bcs     @sl2
+        cmp     #257
+        bcs     @sl2
+        lda     a:10,y
+        dec     a
+        bne     @sl2
+        lda     a:4,y                   ; (C clear)
+        adc     k_w
+        bcs     @sl2
+        cmp     f:sh_tw1
+        bcs     @sl2
+        lda     a:6,y
+        cmp     f:sh_th
+        bcs     @sl2
+        lda     a:12,y                  ; DST = x (the first entry), 7-8 0
+        sta     f:SL_LIST+5,x
+        lda     #0
+        sta     f:SL_LIST+7,x
+        lda     k_w                     ; WIDTH w, HEIGHT 1, KEY 0, OP 5 TABLE
+        sta     f:SL_LIST+10,x
+        lda     #1
+        sta     f:SL_LIST+12,x
+        lda     #$0500
+        sta     f:SL_LIST+16,x
+        lda     a:6,y                   ; SRC = row sy of the sheet + sx
+        asl     a
+        adc     f:sh_trow               ; (C clear)
+        phx
+        tax
+        lda     f:SROW_LO,x
+        clc
+        adc     a:4,y
+        sta     k_sx
+        lda     f:SROW_HI,x
+        adc     #0
+        plx
+        sta     f:SL_LIST+2,x
+        lda     k_sx
+        sta     f:SL_LIST,x
+        clc
+        jmp     @nx
+@sl3:   jmp     @slow
+; SH_FILL wholly inside the clip (then at most 4096 x 4096): 14 FG, 15 BG, 16 KEY the colour,
+; 17 OP 0 FILL, as ls_emit makes it
+@fil:   lda     a:8,y
+        beq     @sl3
+        lda     a:10,y
+        beq     @sl3
+        lda     a:12,y
+        clc
+        adc     c_ox
+        bmi     @sl3
+        adc     a:8,y
+        cmp     c_cw1
+        bcs     @sl3
+        lda     a:14,y
+        adc     c_oy
+        bmi     @sl3
+        adc     a:10,y
+        cmp     c_ch1
+        bcs     @sl3
+        a8
+        lda     a:2,y
+        xba
+        lda     a:2,y
+        a16
+        sta     f:SL_LIST+14,x
+        and     #$00FF
+        sta     f:SL_LIST+16,x
+        lda     a:8,y
+        sta     f:SL_LIST+10,x
+        lda     a:10,y
+        sta     f:SL_LIST+12,x
+        sty     k_i
+        jmp     @dst
+
 
 ; (0.31) sh_one's op above SH_KEY (A; DBR $01; on the stack sh_one's saved DBR and its return):
 ; SH_TABLE: sh_tab. SH_COPY / SH_KEY + SH_REMAP: made by sh_one's own path as LS_COPY / LS_KEY;
@@ -1022,8 +1409,11 @@ sl_clean:
         bne     @c
 @out:   rts
 
-; the fast path's rows of the target: DROW_LO / DROW_HI [r] = the address of (ls_cx0, ls_cy0 +
-; r), r < ls_cy1 - ls_cy0; made again only when the clip's corner, the stride or the rows
+; the fast path's rows of the target: DROW_HI [r] = bits 16-23 of the address of (ls_cx0,
+; ls_cy0 + r), DROW_LO [r] = its bits 0-15 + c_ox (x 0 of the content: a record's x is added
+; to the low 16 bits only), r < ls_cy1 - ls_cy0; where a row of the clip crosses a bank (a
+; framebuffer over several banks), without c_ox and dr_xb $8000 (the fast path adds with a
+; carry). Made again only when the clip's corner, the stride, the rows, c_ox or a wider clip
 ; changed. C set: no clip, or more rows than DR_N (sh_one does those)
 dr_build:
         bra     :+
@@ -1034,6 +1424,12 @@ dr_build:
         sbc     ls_cx0
         beq     @no
         bmi     @no
+        dec     a
+        sta     kt1                     ; (the last pixel of a row from its first)
+        lda     ls_ox                   ; content -> clip x (folded into the rows' low words)
+        sec
+        sbc     ls_cx0
+        sta     c_ox
         lda     ls_cy1
         sec
         sbc     ls_cy0
@@ -1065,10 +1461,21 @@ dr_build:
         lda     ls_str
         cmp     dr_s
         bne     @make
+        lda     f:dr_w
+        cmp     kt1
+        bcc     @make
+        lda     f:dr_ox
+        cmp     c_ox
+        bne     @make
         lda     dr_n
         cmp     kt0
         bcs     @ok
-@make:  lda     kt2
+@make:  lda     kt1
+        sta     f:dr_w
+        lda     c_ox
+        sta     f:dr_ox
+        sta     kt4                     ; (the fold)
+        lda     kt2
         sta     dr_b
         lda     kt3
         sta     dr_b+2
@@ -1076,13 +1483,33 @@ dr_build:
         sta     dr_s
         lda     kt0
         sta     dr_n
+        lda     #0
+        sta     f:dr_xb
+@m0:    lda     dr_n
+        sta     kt0
         ldy     kt3
         lda     kt2
         ldx     #0
-@r:     sta     f:DROW_LO,x
-        pha
+@r:     pha
+        clc
+        adc     kt1                     ; its last pixel in the same bank?
         tya
         sta     f:DROW_HI,x
+        pla
+        bcc     @st
+        pha                             ; no: the rows made again without c_ox (dr_xb)
+        lda     f:dr_xb
+        bne     @st1
+        lda     #$8000
+        sta     f:dr_xb
+        stz     kt4
+        pla
+        bra     @m0
+@st1:   pla
+@st:    pha
+        clc
+        adc     kt4
+        sta     f:DROW_LO,x
         pla
         clc
         adc     ls_str

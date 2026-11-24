@@ -84,8 +84,10 @@ exactly (Horizon 0.19, `gtest m`: 500 calls of 100 records, and 2,000 calls of o
 by a loop measured alone): a `draw_list` call of 100 records takes 9.1 ms of CPU (10.0 ms in
 0.18), one of a single record 272 us; a `sheet_draw` call of 100 records 2.46 ms, one of a single
 record 265 us. So about 90 us (1,300 cycles) a draw_list record and 22 us (320 cycles) a sheet
-record, plus about 0.27 ms a call. A sheet record that is cut at an edge, a fill, or one into
-a covered window takes the full path: about 1,100 cycles.
+record, plus about 0.27 ms a call. Since then fills, SH_TABLE records and records cut at an
+edge take the fast path too; with the board's timing (emu816's default, `gtest t`) a sheet
+record costs about 31 us, 35 beyond 16 x 16, 51 cut at an edge, and one into a covered window
+(the full path) about 150 us (ABI.md, "Sheets").
 
 While the call returns, Ali's own blitting (about 2.3 ms for the 100 blits) runs concurrently
 with the CPU: the program computes the next frame meanwhile, and `vsync` (or `list_wait`)

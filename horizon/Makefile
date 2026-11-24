@@ -563,6 +563,14 @@ test: all $(EMU)
 	else echo "FAIL  GTEST ($(B)/gtest.out)"; exit 1; fi
 	@if diff -u tests/pictures/gtest.md5 $(B)/gtest.md5; then echo "PASS  0.18 draw lists, (0.19) sheets: the same pictures by Ali's list, its single blits and the CPU"; \
 	else echo "FAIL  GTEST pictures (look at $(B)/gtest1.ppm, gtest2.ppm)"; exit 1; fi
+	@# sheet_draw's cost a record by kind (gtest t), with emu816's board timing (no
+	@# --ideal-timing: what is measured is the time), each kind under its limit in full screen
+	@rm -rf build/run-sd; cp -r $(SD) build/run-sd; rm -rf build/run-sd/Music; touch build/run-sd/SYSTEM/NODESK
+	@$(EMU) $(EMUFLAGS) --card-date 2026-11-01T12:00 --headless --sd build/run-sd --max-seconds 30 \
+	    --stop-on 'gtest t: done' --keys "$$(python3 tests/keyscript.py tests/gtestt.keys)" \
+	    $(SD)/SYSTEM/HORIZON.SYS > $(B)/gtestt.out 2> $(B)/gtestt.err || true
+	@if grep -aq 'gtest t: the limits: \(kept\|not checked\)' $(B)/gtestt.out; then echo "PASS  sheet_draw's cost a record (copies, keyed, fills, cut, tables, remapped), each kind under its limit in full screen ($$(grep -a 'gtest t: the limits' $(B)/gtestt.out | cut -d: -f3 | cut -c2-))"; \
+	else echo "FAIL  sheet_draw's cost a record ($(B)/gtestt.out)"; exit 1; fi
 	@rm -rf build/run-sd; cp -r $(SD) build/run-sd; rm -rf build/run-sd/Music; touch build/run-sd/SYSTEM/NODESK
 	@$(EMU) $(EMUFLAGS) $(CARDDATE) --headless --sd build/run-sd --max-seconds 25 \
 	    --keys "$$(python3 tests/keyscript.py tests/rtest.keys)" \
@@ -582,7 +590,7 @@ test: all $(EMU)
 	  else echo "FAIL  full screen and kill (look at $(B)/gtestk*.ppm)"; exit 1; fi; \
 	else echo "SKIP  0.18 sprite and full-screen pictures (REV \$$0B only)"; fi
 	@$(MAKE) --no-print-directory test-games
-	@if grep -l 'emu816: blitter:' $(B)/selftest-*.err $(B)/shell-*.err $(B)/screen.err $(B)/browse.err $(B)/wdemo.err $(B)/wcopy.err $(B)/wdraw.err $(B)/desk.err $(B)/edit.err $(B)/editw.err $(B)/editp.err $(B)/paint.err $(B)/settings.err $(B)/files.err $(B)/basic-t.err $(B)/basic.err $(B)/sheet-t.err $(B)/sheet.err $(B)/sheetp.err $(B)/classic.err $(B)/system.err $(B)/wins.err $(B)/desk14.err $(B)/kmenu.err $(B)/leak.err $(B)/ktest.err $(B)/desk15.err $(B)/desk18.err $(B)/stest.err $(B)/gtest.err $(B)/rtest.err $(B)/gtests.err $(B)/gtestf.err $(B)/gtestk.err; \
+	@if grep -l 'emu816: blitter:' $(B)/selftest-*.err $(B)/shell-*.err $(B)/screen.err $(B)/browse.err $(B)/wdemo.err $(B)/wcopy.err $(B)/wdraw.err $(B)/desk.err $(B)/edit.err $(B)/editw.err $(B)/editp.err $(B)/paint.err $(B)/settings.err $(B)/files.err $(B)/basic-t.err $(B)/basic.err $(B)/sheet-t.err $(B)/sheet.err $(B)/sheetp.err $(B)/classic.err $(B)/system.err $(B)/wins.err $(B)/desk14.err $(B)/kmenu.err $(B)/leak.err $(B)/ktest.err $(B)/desk15.err $(B)/desk18.err $(B)/stest.err $(B)/gtest.err $(B)/gtestt.err $(B)/rtest.err $(B)/gtests.err $(B)/gtestf.err $(B)/gtestk.err; \
 	then echo "FAIL  blitter rules (START or a register write while BUSY, or a read without CACHE_FLUSH)"; exit 1; \
 	else echo "PASS  blitter rules: no violations"; fi
 	@echo "TEST PASSED"

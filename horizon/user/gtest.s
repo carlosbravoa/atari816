@@ -22,6 +22,8 @@
 ;      (tests/gtest.keys takes it: gtest2, the same at every revision)
 ; "gtest m": the measurement of 100 16x16 keyed blits a frame, per call, as one list and (0.19)
 ; as one sheet_draw (and of one record, for the cost of a record).
+; "gtest t": sheet_draw's cost a record by kind, in a window and in full screen, each kind
+; against a limit there, and the area limit on fast records (tests/gtestt.keys, make test).
 ; "gtest s": sprites over a window, for the pictures (tests/gtests.keys).
 ; "gtest v": (0.25) draw lists with LS_VBL while a child draws (the REV $08 one-by-one path).
 ; "gtest f": a full-screen picture: scrolling with a split, sprites, a raster table; it waits
@@ -46,6 +48,8 @@ start:  sta     z:alen
         jeq     fspic
         cmp     #'v'
         jeq     vbltest
+        cmp     #'t'
+        jeq     tcost
         jmp     child
 
 main:   sys     SYS_WSSTART
@@ -1501,6 +1505,395 @@ put_us60:
         print   " ms in 60 frames\n"
         rts
 
+
+; ---------------------------------------------------------------- gtest t: sheet_draw's cost
+; The kernel's time a record, by kind (uptime_us around a call of 128 records and one of 1,
+; Ali idle before each: (t128 - t1) / 127, the fastest of 8 each), in a window and in full
+; screen. Small
+; records (1 x 1) are the kernel's cost alone (Ali starts at the call's end); bigger ones show
+; that Ali's time is not in it. In full screen each kind has a limit (tc_tab; emu816's board
+; timing, not --ideal-timing), checked from REV $09 (Ali's lists: before, the call draws):
+; "the limits: kept" or "N over" (make test: tests/gtestt.keys).
+tcost:  sys     SYS_WSSTART
+        jcs     fail
+        ptr     wm
+        sys     SYS_WOPEN
+        sta     z:wina
+        lda     #0
+        ldx     #0
+        sys     SYS_WSCONFIG
+        stx     z:rev
+        sys     SYS_BALLOC              ; the art: 256 x 64 at bank:0, tables 256 x 16 at $4000
+        jcs     fail
+        sta     z:bank
+        sta     z:p+2
+        stz     z:p
+        ldy     #0
+:       tya
+        sta     [p],y
+        iny
+        iny
+        cpy     #256 * 80
+        bcc     :-
+        stz     tshn
+        lda     z:bank
+        and     #$00FF
+        sta     tshn+2
+        lda     #256
+        sta     tshn+4
+        sta     tshn+6
+        lda     #64
+        sta     tshn+8
+        ptr     tshn
+        sys     SYS_SHEETNEW
+        jcs     fail
+        sta     z:sh1
+        lda     #$4000
+        sta     tshn
+        lda     #16
+        sta     tshn+8
+        ptr     tshn
+        sys     SYS_SHEETNEW
+        jcs     fail
+        sta     z:sh2
+        print   "gtest t: sheet_draw, us a record (in a window)\n"
+        stz     z:t4
+        stz     z:tov
+        jsr     tc_all
+        sys     SYS_BALLOC              ; full screen: 320 x 204 in a bank of its own
+        jcs     fail
+        sep     #$20
+        .a8
+        sta     fsp+8
+        rep     #$20
+        .a16
+        lda     z:wina
+        ptr     fsp
+        sys     SYS_FSENTER
+        jcs     fail
+        print   "gtest t: in full screen (us a record, the limit)\n"
+        lda     z:rev
+        cmp     #$09
+        rol     z:t4                    ; (1: check)
+        jsr     tc_all
+        jsr     tc_area
+        lda     z:wina
+        sys     SYS_FSLEAVE
+        lda     z:t4
+        bne     :+
+        print   "gtest t: the limits: not checked (REV below $09)\n"
+        bra     @e
+:       lda     z:tov
+        bne     :+
+        print   "gtest t: the limits: kept\n"
+        bra     @e
+:       print   "gtest t: the limits: "
+        lda     z:tov
+        jsr     put_dec
+        print   " over\n"
+@e:     print   "gtest t: done\n"
+        sys     SYS_WSSTOP
+        exit    0
+; every kind (tc_tab); z:t4 set: each against its limit (z:tov + 1 for every one over)
+tc_all: ldx     #0
+@k:     stx     z:t3
+        lda     tc_tab+14,x             ; REV needed
+        cmp     z:rev
+        beq     :+
+        bcs     @n
+:       lda     tc_tab,x                ; the name
+        tax
+        ldy     #^tc_tab
+        jsr     out_str
+        ldx     z:t3
+        jsr     tc_mk
+        jsr     tc_run
+        ldx     z:t3
+        ldy     z:t4
+        beq     @nl
+        cmp     tc_tab+16,x
+        beq     :+
+        bcc     :+
+        inc     z:tov
+        print   " over"
+:       print   " ("
+        ldx     z:t3
+        lda     tc_tab+16,x
+        jsr     put_tenth
+        lda     #')'
+        jsr     out_char
+@nl:    jsr     put_nl
+@n:     lda     z:t3
+        clc
+        adc     #18
+        tax
+        lda     tc_tab,x
+        bne     @k
+        print   "  a call of 1 copy:  "
+        lda     z:tcall
+        jsr     put_dec
+        print   " us\n"
+        rts
+; the area limit (460,800 pixels a call) on fast records beyond 16 x 16: 112 copies of 64 x 64
+; (458,752) drawn, 113 (462,848) EINVAL (z:tov + 1 if not)
+tc_area:
+        ldy     #0
+:       lda     z:sh1
+        ora     #SH_COPY << 8
+        sta     tlst+SD_SHEET,y
+        lda     #0
+        sta     tlst+SD_C,y
+        sta     tlst+SD_SX,y
+        sta     tlst+SD_SY,y
+        sta     tlst+SD_X,y
+        sta     tlst+SD_Y,y
+        lda     #64
+        sta     tlst+SD_W,y
+        sta     tlst+SD_H,y
+        tya
+        clc
+        adc     #16
+        tay
+        cpy     #128 * 16
+        bcc     :-
+        print   "  112 copies of 64x64: "
+        lda     #112
+        jsr     tc_ar
+        bcc     :+
+        inc     z:tov
+:       print   "  113 copies of 64x64: "
+        lda     #113
+        jsr     tc_ar
+        bcs     :+
+        inc     z:tov
+:       lda     #0
+        sys     SYS_LISTWAIT
+        rts
+; A records of tlst -> printed: the result; C as sheet_draw's
+tc_ar:  xba
+        ora     z:wina
+        pha
+        lda     #0
+        sys     SYS_LISTWAIT
+        pla
+        ptr     tlst
+        sys     SYS_SHEETDRAW
+        php
+        jsr     resv
+        plp
+        rts
+; A = tenths: "N.N"
+put_tenth:
+        ldx     #0
+:       cmp     #10
+        bcc     :+
+        sbc     #10
+        inx
+        bra     :-
+:       pha
+        txa
+        jsr     put_dec
+        lda     #'.'
+        jsr     out_char
+        pla
+        jmp     put_dec
+; tlst: 128 records of the kind at tc_tab + X: {name, op A, op B, period (op A every period
+; records, else op B), w, h, x0, x step, REV}
+tc_mk:  lda     tc_tab+2,x
+        sta     z:t0                    ; op A << 8
+        lda     tc_tab+4,x
+        sta     z:t1                    ; op B << 8
+        ldy     #0                      ; record offset
+        stz     z:t2                    ; i
+@r:     lda     z:t2
+        ldx     z:t3
+@m:     cmp     tc_tab+6,x
+        bcc     :+
+        sbc     tc_tab+6,x
+        bra     @m
+:       tax
+        lda     z:t1
+        cpx     #0
+        bne     :+
+        lda     z:t0
+:       pha
+        and     #$3F00
+        cmp     #SH_TABLE << 8
+        beq     @tab
+        pla
+        ora     z:sh1
+        sta     tlst+SD_SHEET,y
+        lda     #0
+        sta     tlst+SD_C,y
+        sta     tlst+SD_SX,y
+        sta     tlst+SD_SY,y
+        ldx     z:t3
+        lda     tc_tab+8,x
+        sta     tlst+SD_W,y
+        lda     tc_tab+10,x
+        sta     tlst+SD_H,y
+        lda     tc_tab+12,x             ; x = x0 + (i & 7) * step, y = (i / 8) * 11
+        and     #$00FF                  ; (x0: a signed byte)
+        cmp     #$80
+        bcc     :+
+        ora     #$FF00
+:       sta     z:t5
+        lda     tc_tab+13,x
+        and     #$00FF
+        sta     z:t6
+        lda     z:t2
+        and     #7
+        tax
+        lda     z:t5
+:       dex
+        bmi     :+
+        clc
+        adc     z:t6
+        bra     :-
+:       sta     tlst+SD_X,y
+        lda     z:t2
+        lsr     a
+        lsr     a
+        lsr     a
+        sta     z:t5
+        asl     a
+        asl     a
+        adc     z:t5
+        asl     a
+        adc     z:t5
+        sta     tlst+SD_Y,y
+        bra     @nx
+@tab:   pla                             ; a table: 16 entries from row i & 15 of sheet 2
+        ora     z:sh2
+        sta     tlst+SD_SHEET,y
+        lda     #0
+        sta     tlst+SD_C,y
+        sta     tlst+SD_SX,y
+        sta     tlst+SD_Y,y
+        lda     #16
+        sta     tlst+SD_W,y
+        lda     #1
+        sta     tlst+SD_H,y
+        lda     z:t2
+        and     #15
+        sta     tlst+SD_SY,y
+        asl     a
+        asl     a
+        asl     a
+        asl     a
+        sta     tlst+SD_X,y
+@nx:    tya
+        clc
+        adc     #16
+        tay
+        inc     z:t2
+        lda     z:t2
+        cmp     #128
+        jcc     @r
+        rts
+; 8 times: a call of 1 record and one of 128, the fastest of each (an interrupt may fall in a
+; call) -> prints "N.N", A = tenths of us a record
+tc_run: lda     #$FFFF
+        sta     z:busy                  ; the fastest of 128
+        sta     z:t6                    ; of 1
+        lda     #8
+        sta     z:t2
+@c:     lda     #1
+        jsr     tc_one
+        cmp     z:t6
+        bcs     :+
+        sta     z:t6
+:       lda     #128
+        jsr     tc_one
+        cmp     z:busy
+        bcs     :+
+        sta     z:busy
+:       dec     z:t2
+        bne     @c
+        lda     z:t3                    ; (the first kind: its call of 1 record kept)
+        bne     :+
+        lda     z:t6
+        sta     z:tcall
+:       lda     z:busy
+        sec
+        sbc     z:t6
+        sta     z:busy
+        lda     z:busy                  ; / 127: us and tenths
+        ldx     #0
+:       cmp     #127
+        bcc     :+
+        sbc     #127
+        inx
+        bra     :-
+:       sta     z:t5                    ; remainder * 10 / 127
+        asl     a
+        asl     a
+        adc     z:t5
+        asl     a
+        ldy     #0
+:       cmp     #127
+        bcc     :+
+        sbc     #127
+        iny
+        bra     :-
+:       sty     z:t5
+        txa
+        asl     a
+        sta     z:t0
+        asl     a
+        asl     a
+        adc     z:t0
+        adc     z:t5
+        sta     z:t0                    ; tenths
+        jsr     put_tenth
+        lda     z:t0
+        rts
+; A records of tlst in one call (Ali idle first) -> A = its us
+tc_one: xba
+        ora     z:wina
+        pha
+        lda     #0
+        sys     SYS_LISTWAIT
+        sys     SYS_UPTIMEUS
+        sta     z:t0
+        pla
+        ptr     tlst
+        sys     SYS_SHEETDRAW
+        bcc     :+
+        pha
+        print   " (error) "
+        pla
+        jsr     put_dec
+:       sys     SYS_UPTIMEUS
+        sec
+        sbc     z:t0
+        rts
+
+        .segment "RODATA"
+        .macro  tck name, opa, opb, per, w, h, x0, xs, rv, lim
+        .local  n
+        .pushseg
+        .segment "DATA"
+n:      .byte   name, 0
+        .popseg
+        .word   .loword(n), (opa) << 8, (opb) << 8, per, w, h
+        .byte   x0, xs
+        .word   rv, lim
+        .endmacro
+tc_tab: tck     "  copy 1x1:          ", SH_COPY, SH_COPY, 1, 1, 1, 0, 20, 0, 320
+        tck     "  keyed copy 1x1:    ", SH_KEY, SH_KEY, 1, 1, 1, 0, 20, 0, 320
+        tck     "  fill 1x1:          ", SH_FILL, SH_FILL, 1, 1, 1, 0, 20, 0, 280
+        tck     "  copy 16x16:        ", SH_COPY, SH_COPY, 1, 16, 16, 0, 20, 0, 330
+        tck     "  copy 32x10:        ", SH_COPY, SH_COPY, 1, 32, 10, 0, 20, 0, 380
+        tck     "  copy, clipped:     ", SH_COPY, SH_COPY, 1, 8, 8, $FC, 0, 0, 560
+        tck     "  copy/key alt.:     ", SH_COPY, SH_KEY, 2, 1, 1, 0, 20, 0, 420
+        tck     "  remap copy 1x1:    ", SH_COPY | SH_REMAP, SH_COPY | SH_REMAP, 1, 1, 1, 0, 20, $0D, 320
+        tck     "  table 16:          ", SH_TABLE, SH_TABLE, 1, 16, 1, 0, 0, $0D, 270
+        tck     "  table + 7 remap:   ", SH_TABLE, SH_COPY | SH_REMAP, 8, 16, 10, 0, 20, $0D, 370
+        tck     "  table + 7 copies:  ", SH_TABLE, SH_COPY, 8, 16, 10, 0, 20, $0D, 370
+        .word   0
+
+        .segment "CODE"
 ; ---------------------------------------------------------------- gtest s: sprites pictures
 sprpic: sys     SYS_WSSTART
         jcs     fail
@@ -1852,6 +2245,8 @@ ev:     .res    8
 lst:    .res    100 * 20
 lst1:   .res    20 * 13
 slst:   .res    100 * 16                ; (0.19) sheet_draw records
+tlst:   .res    128 * 16                ; gtest t's
+tshn:   .res    10
 
         .segment "ZEROPAGE"
 alen:   .res    2
@@ -1870,3 +2265,7 @@ p:      .res    4
 sh1:    .res    2                       ; (0.19) sheets
 sh2:    .res    2
 bank2:  .res    2
+t5:     .res    2
+t6:     .res    2
+tov:    .res    2
+tcall:  .res    2

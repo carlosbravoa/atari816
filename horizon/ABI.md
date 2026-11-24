@@ -688,11 +688,30 @@ once), or the kernel starts them one by one (REV $08), or the CPU draws them (RE
 picture. **While the list runs its sources are being read and its target written** (`list_wait`,
 `vsync` or the next call wait for it).
 
-**The fast path.** A record costs about 300 CPU cycles (emulated: 21 us) when the window is drawn
-on the screen directly or is in full-screen mode, the record is a copy or a keyed copy from the
-same sheet and op as the record before it, and it lies wholly inside the content; others (fills,
-SH_VBL, clipped records, a covered window's bitmap) take the full path, about 1,100 cycles, still
-less than draw_list's. A call itself costs about 3,800 cycles (265 us), as draw_list's.
+**The fast path.** When the window is drawn on the screen directly or is in full-screen mode,
+the kernel makes each record by comparing its numbers only: copies, keyed and remapped copies of
+the sheet seen last (another op of that sheet costs a little more, another sheet one check of
+it), fills, and SH_TABLE records (their sheet kept beside the copies'), wholly inside the
+content or cut at its edges; the area of records beyond 16 x 16 is bounded by their rows and
+widths, and counted exactly only when the bound passes 460,800. The kernel's time a record,
+measured with `gtest t` (calls of 128 records less calls of 1, full screen; emu816's board
+timing, its `--ideal-timing` in brackets):
+
+| record | us |
+| --- | --- |
+| copy, keyed or remapped copy, any size up to 16 x 16 | 31 (22) |
+| the same beyond 16 x 16 (32 x 10) | 35 (25) |
+| fill | 27 (19) |
+| copy cut at an edge | 51 (35) |
+| SH_TABLE | 25 (16) |
+| a night shade: a table, then 7 remapped copies of 16 x 10 (a record) | 35 (24) |
+| a copy and a keyed copy of one sheet in turn | 39 (29) |
+
+In a window on the screen about 2 us more. The rest take the full path, about 150 us (90):
+SH_VBL and the records after one left out, records 16,384 pixels or more outside, fills cut at
+an edge, a covered window's bitmap. A call itself costs about 565 us (281). (Before: records
+beyond 16 x 16 about 70 us (41), tables, fills and cut records the full path.) A frame of a
+game is still the call plus a record's cost each, and Ali's time runs beside the program's.
 
 **Rules.** A sheet is the program's that made it: another program's handle is EINVAL. 32 sheets
 for all programs together, at most 1024 rows each and 4096 rows in all (EAGAIN). The kernel

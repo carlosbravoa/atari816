@@ -149,8 +149,9 @@ Every `win_draw` costs about 0.35 ms whatever its size: **a few dozen a frame at
 SDK/docs/reference/performance.md (Horizon's own `gtest m`, 100 keyed 16 x 16 blits a frame):
 100 `win_draw` calls 26.6 ms (more than a frame); one `draw_list` of 100 records 9.1 ms
 (about 1,300 cycles a record); one `sheet_draw` of 100 records 2.46 ms (about 320 cycles a
-record); about 0.27 ms a call. A sheet record cut at an edge, a fill, or one into a covered
-window takes the full path (about 1,100 cycles).
+record); about 0.27 ms a call. With the board's timing (emu816's default, `gtest t`): about 31
+us a sheet record (fills 27, beyond 16 x 16 35, cut at an edge 51, SH_TABLE 25), 150 us one
+into a covered window (the full path), 565 us a call.
 
 Many short horizontal runs (Horizon 0.30, `sdk/c/game/tests/gt_runbench.c`, 2,000 runs of
 23 pixels, CPU cycles a run): a C loop 1,700; hgame's assembly CPU path 610; a tight unrolled

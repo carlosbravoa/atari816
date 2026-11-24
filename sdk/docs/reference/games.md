@@ -603,11 +603,11 @@ the targets, clipping, LS_VBL (here SH_VBL), the revisions, the waiting (`list_w
 `vsync`), the 460,800-pixel limit. What a sheet record cannot do (moves inside the target,
 1 bpp expands, a stride per record) stays `draw_list`'s; send one or the other each frame.
 
-Cost (emulator, `gtest m`): about **300 CPU cycles a record** (21 us) when the window is on the
-screen uncovered (or in full-screen mode), the record is a copy or keyed copy from the same
-sheet as the record before and lies wholly inside the target; other records (fills, SH_VBL,
-records cut at an edge, a covered window) about 1,100 cycles; a call about 265 us, as a
-draw_list call.
+Cost (emulator, `gtest t`, its board timing; `--ideal-timing` in brackets): about **31 us a
+record** (22 us: 300 CPU cycles) when the window is on the screen uncovered (or in full-screen
+mode): copies, keyed and remapped copies, fills (27), SH_TABLE (25), records beyond 16 x 16
+(35), records cut at an edge (51); SH_VBL and a covered window about 150 us (90); a call about
+565 us (281). ABI.md, "Sheets".
 
 ### $A1 sheet_new (SYS_SHEETNEW)
 In: X, Y = a 10-byte block {u24 address, u8 0, u16 stride, u16 width, u16 height}. Out: A =
