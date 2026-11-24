@@ -156,6 +156,14 @@ while read -r name args; do
     if grep -aq "xcom: night shade: .*$w" $O/$name/816/console.txt; then ok "$name: the night's shade $h"
     else bad "$name: the night's shade not $h: $(grep -a 'night shade' $O/$name/816/console.txt)"; fi ;;
   esac
+  case "$keys" in nlight)
+    # the night lights' run did what it is for: a fire, a flare, aliens seen and lost
+    L=$O/$name/host/card/$log
+    if grep -aq "incendiary at" $L && grep -aq "device 3 placed" $L && grep -aq ": night: alien .* seen by" $L \
+       && grep -aq ": night: alien .* out of sight" $L; then
+      ok "$name: a fire, a flare, aliens seen and lost in the dark ($(grep -ac ': night: alien' $L) LOG lines)"
+    else bad "$name: the script no longer makes its fire, flare or sightings"; fi ;;
+  esac
 done < $RUNS
 
 if [ -n "$ipids" ]; then

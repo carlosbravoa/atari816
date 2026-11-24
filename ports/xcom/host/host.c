@@ -175,10 +175,14 @@ int plat_bb_present(unsigned off, unsigned w, unsigned rows)
     (void)off; (void)w; (void)rows;
     return 0;
 }
-int plat_bb_present_shade(unsigned off, unsigned w, unsigned rows, unsigned lev,
-                          const unsigned char *tab)
+int plat_bb_lit_ready(const unsigned char *tabs)
 {
-    (void)off; (void)w; (void)rows; (void)lev; (void)tab;
+    (void)tabs;
+    return 0;
+}
+int plat_bb_present_lit(const PlatRec *r, unsigned n)
+{
+    (void)r; (void)n;
     return 0;
 }
 int plat_bb_shift(long dx)

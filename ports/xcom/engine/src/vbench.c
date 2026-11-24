@@ -21,6 +21,9 @@
 #include "timer.h"
 #include "unit.h"
 #include "vox.h"
+#if defined(XCOM_PORT)
+#include "vlit.h"
+#endif
 #include <conio.h>
 #include <dos.h>
 #include <i86.h>
@@ -291,13 +294,25 @@ static unsigned screen_diff(void)
         /* At night each 16 x 8 cell through its level (vgaasm.asm "Night
            lights": the shown levels, AUX; StandardShade). */
         const volatile unsigned char far *v = (const volatile unsigned char far *)MK_FP(0xA000, 0);
+#if defined(XCOM_PORT)
+        /* (the port's: plat/vgabat.c, the levels shown, 0 by day; a cell not shown yet
+           as 0) */
+        int vga_lit_shown(unsigned cell);
+        int night = 1;
+#else
         const unsigned char far *aux = (const unsigned char far *)MK_FP(g_vga,
             VGA_AUX);
         int night = *(const int far *)MK_FP(g_vga, VGA_NIGHT) != 0;
+#endif
         for (i = r = 0; r < VIEW_H; r++) {
             unsigned x;
             for (x = 0; x < 320; x++, i++) {
+#if defined(XCOM_PORT)
+                int sl = vga_lit_shown((r >> 3) * 20 + (x >> 4));
+                unsigned e = b[i], l = sl < 0 ? 0 : (unsigned)sl;
+#else
                 unsigned e = b[i], l = aux[(r >> 3) * 20 + (x >> 4)] & 15;
+#endif
                 if (night && e)
                     e = (e & 15) + l > 15 ? e | 15 : e + l;
                 d += v[i] != (unsigned char)e;
@@ -1151,6 +1166,11 @@ void bench_run(unsigned char *seen)
             }
 #endif
 #if defined(XCOM_PORT)
+            if (g_night) {      /* the port's night lights (src/vlit.c, plat/vgabat.c) */
+                extern unsigned long g_lit_recs, g_lit_presents;
+                fprintf(f, "VGA lights: %lu light maps, %lu cell level maps, %lu records in "
+                        "%lu night presents\n", g_vl_maps, g_vl_levels, g_lit_recs, g_lit_presents);
+            }
             {
                 /* the same check of DOS's smoke and fire pictures' step with
                    the port's (plat/vgabat.c vga_pics_next, entry 26) */

@@ -571,15 +571,16 @@ int plat_bb_fill(unsigned off, unsigned w, unsigned rows, int colour)
     return 1;
 }
 
-/* ---------------------------------------------------------------- the night's shade
+/* ---------------------------------------------------------------- the night lights
    Ali's colour remap (REV $0D, Horizon 0.31: ABI.md "Colour remap"): the night's present is
-   a copy through vgabat.c's shade table instead of the CPU's 115 ms. The tables are a sheet
-   of 256 x 16 (row k: level k's), in the pictures' bank past PLEN; a row is written the
-   first time its level is shown, after a wait (a table is a source: never written while a
-   list may read it). Each call that remaps starts with its SH_TABLE record (Ali's table is
-   shared). One probe (a call of one SH_TABLE record) says whether the remap is there:
-   ENODEV (an older board, the blitter off) or EINVAL (Horizon before 0.31): the CPU shades
-   (vgabat.c: hz_shade_rect), as before. */
+   copies of the view's cells through their levels' tables (plat/vgabat.c night_present,
+   engine/src/vlit.c) instead of the CPU's. The tables are a sheet of 256 x 16 (row k: level
+   k's), in the pictures' bank past PLEN; a row is written the first time its level is
+   shown, after a wait (a table is a source: never written while a list may read it). The
+   rectangles come grouped by level: a SH_TABLE record wherever the level changes, and at
+   the start of every call (Ali's table is shared); level 0 is a plain copy. One probe (a
+   call of one SH_TABLE record) says whether the remap is there: ENODEV (an older board, the
+   blitter off) or EINVAL (Horizon before 0.31): the CPU shades (vgabat.c: hz_shade_rect). */
 #define SHADE_OFF   49152u              /* the tables: pics + 49152 .. + 53247 */
 
 static int shade_ready(unsigned lev, const unsigned char *tab)
@@ -634,8 +635,7 @@ static int shade_ready(unsigned lev, const unsigned char *tab)
     return 1;
 }
 
-static int present(unsigned off, unsigned w, unsigned rows, unsigned lev,
-                   const unsigned char *tab)
+static int present(unsigned off, unsigned w, unsigned rows)
 {
     int x, y;
     hz_sheetrec *r;
@@ -648,24 +648,10 @@ static int present(unsigned off, unsigned w, unsigned rows, unsigned lev,
         plat_bb_sync();
         return 0;
     }
-    if (tab && !shade_ready(lev, tab))
-        return 0;
     if (w && rows) {
-        if (tab) {
-            /* the table's record and the copy in one call */
-            if (qn > 126 || qpx + 256u + (unsigned long)w * rows > 460800UL)
-                send();
-            r = rec(256, 1);
-            memset(r, 0, sizeof *r);
-            r->sheet = (unsigned char)shade_sheet;
-            r->op = SH_TABLE;
-            r->sy = (unsigned short)lev;
-            r->w = 256;
-            r->h = 1;
-        }
         r = rec(w, rows);
         r->sheet = (unsigned char)bb_sheet;
-        r->op = tab ? SH_COPY | SH_REMAP : SH_COPY;
+        r->op = SH_COPY;
         r->c = 0;
         r->zero = 0;
         r->sx = (unsigned short)x;
@@ -686,13 +672,51 @@ static int present(unsigned off, unsigned w, unsigned rows, unsigned lev,
 
 int plat_bb_present(unsigned off, unsigned w, unsigned rows)
 {
-    return present(off, w, rows, 0, NULL);
+    return present(off, w, rows);
 }
 
-int plat_bb_present_shade(unsigned off, unsigned w, unsigned rows, unsigned lev,
-                          const unsigned char *tab)
+int plat_bb_lit_ready(const unsigned char *tabs)
 {
-    return present(off, w, rows, lev, tab);
+    unsigned l;
+
+    if (!ready || shade_sheet < 0)
+        return 0;
+    if (shade_rows != 0xFFFEu)
+        for (l = 1; l < 16; l++)
+            if (!shade_ready(l, tabs + l * 256u))
+                return 0;
+    g_lit_sheet[0] = (unsigned char)bb_sheet;
+    g_lit_sheet[1] = (unsigned char)shade_sheet;
+    return 1;
+}
+
+/* the records (plat/vgabat.c lit_recs: in Horizon's form, the sheets ours, a table at the
+   start of every 128), in calls of 128 */
+int plat_bb_present_lit(const PlatRec *r, unsigned n)
+{
+    unsigned i, k;
+    PERF_T0(pt0);
+
+    if (!ready)
+        return 0;
+    wait_done();
+    for (i = 0; i < n; i += k) {
+        k = n - i < 128 ? n - i : 128;
+        if (hz_sheet_draw(hg_win, k, (const hz_sheetrec *)(r + i)) < 0) {
+            note("sheet_draw refused the night's records");
+            hz_list_wait(0);
+            return 0;
+        }
+        g_bb_flushes++;
+        pending = 1;
+    }
+    wait_done();
+    PERF_ADD(PF_PRES, pt0);
+    if (t_view && n) {
+        printf("xcom: battle: the view shown at %lu ms\n", hz_uptime_us() / 1000);
+        t_view = 0;
+    }
+    return 1;
 }
 
 int plat_bb_shift(long dx)

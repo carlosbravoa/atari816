@@ -1443,7 +1443,7 @@ a 256-entry table (ABI.md "Colour remap"). Now:
 - `plat/vgabat.c` `bufc_present_rect`: at night that first, `hz_shade_rect` the fallback
   (and the host's C the reference). The CPU path now also logs its present for /M (its
   frames and frame rates were not counted before).
-- The night is one level for the whole view (NIGHT_SHADE 10), as before: upstream's VGA
+- (Done in section 4k: the night lights, per cell.) The night is one level for the whole view (NIGHT_SHADE 10), as before: upstream's VGA
   night lights (vgaasm.asm `lit_present`: 20 x 18 cells of 16 x 8 pixels, each at its
   tile's level from the sky, the soldiers' own light, fires, flares and the terrain's
   lights, with vshift on a scroll) are still not ported, on the host neither. With the
@@ -1487,6 +1487,129 @@ note of the track are now compared by their key bit only; every other write as b
 | smooth at night: walking | a step's present 70-90 ms after the one before | the same (paced by the animation) | |
 
 By day nothing changed (BENCH and smooth's day battle the same within a few ms).
+
+## 4k. The night lights (24 November 2026)
+
+A night battle was one darkness level for the whole view (section 4j). Now each area is lit
+as in the original: the soldiers' own light, fires, electro-flares on the ground and the
+terrain's lamps light their surroundings, the rest is at the night sky's level.
+
+### The original, upstream's model, the choice
+
+| | OpenXcom (the DOS game's rules) | upstream's VGA (`vgaasm.asm` `lit_present`, never ported before) | now |
+| --- | --- | --- | --- |
+| a tile's light | the most of: the sun's 15 - global shade (`calculateSunShading`), each light's power - round(distance) within power tiles each way, on every level (`addLight`); shade = 15 - light (`Tile::getShade`) | the same, the night sky 15 - 10, lights within 9 tiles each way (more adds nothing over the sky's 5) | the same (`engine/src/vlit.c`) |
+| sources | X-COM units not out (15, `_personalLighting`), burning units (15), fires (15), BT_FLARE items on a tile (items.rul `power` 15; carried ones do not light), floors and objects with an MCD light source | the same; at most 48 sources that reach the view, 24 of the terrain, 8 kinds of terrain lights, a tile's first light part | the same, every source, floor and object both |
+| when made again | a unit's move (`calculateUnitLighting`), a hit or explosion and a dropped flare (`calculateTerrainLighting`) | at a present, when a signature of the sources, the camera or the level changed | the same: the cells' levels only when a light came, went or moved, or the camera or level moved; a walk's step only the moved light's squares |
+| the picture | per tile: every part of the tile (floor, walls, object, items, the unit; doors by their side's discovery) drawn through `StandardShade` at the tile's shade; fire and smoke on a burning tile, the cursor, the path, projectiles at 0 (bright); undiscovered 16 (black); a walking unit's shade blended between its tiles | per cell of 16 x 8 pixels (20 x 18), the tile under the cell's centre at the view's level: a cell holds parts of several tiles, so at a light's edge the picture is up to 1.5 tiles off, a level below or above takes the cell's tile; the cursor and the arrow are shaded with their cell | upstream's cells (below why) |
+| night | the global shade from the globe's sun position, 0-15 (deep night 15: no sky light) | NIGHT_SHADE 10 for a night mission, 0 by day | upstream's |
+| the personal light toggle | an OpenXcom extra (key L, "purely cosmetic"; on by default) | none (the DOS game has none) | none |
+| terrain light above 15 (the X-COM base's lamps: 16) | light 16, shade 0 | level -1 (shown as 15: black) | 15, shade 0 (OpenXcom) |
+
+**Per tile or per cell, decided by measurement.** Shading each tile's pictures (the
+original) means drawing every sprite record through its tile's table: the back buffer then
+holds the lit picture, so any light that moves needs every tile in its 19-tile disc drawn
+again (a soldier's step: practically a full redraw, 157 ms by day); a night full redraw
+would add a table record and a full-path record wherever the level changes in the drawing
+order: measured on the host over BENCH's and a battle's views, 200-490 parts drawn and
+17-164 level changes in the floor pass's order alone (more with the late pass), at about
+85 us a record (below) 3-28 ms more per redraw, and the CPU fallback (REV $0C) would have
+to draw every sprite by the CPU through a table. Upstream's cells keep the day picture in the
+back buffer: a light that moves needs only the cells whose level changed shown again (a
+step: ~25 ms of levels, a part of the view's records), a scroll moves the levels with the
+view, and the fallback is the same records drawn by the CPU. So the cells: the same model as
+upstream's DOS VGA build (the 286 machine shows the same picture).
+
+### What was in the engine, what was added
+
+- **Rules: already there.** Sight at night is OpenXcom's (`los.c` `los_unit_sees`: X-COM
+  sees past 9 tiles only units on a tile with light 6 or more, `effects.c` `fx_lit`:
+  `MAX_DARKNESS_TO_SEE_UNITS` 9, `distance > 9` as d^2 > 81; aliens see in the dark; 20
+  tiles at most), flares are thrown and dropped as lit devices on the ground (`fx_throw`,
+  `fx_drop`: "Electro-flare lights the area", picked up they no longer light), fires and
+  burning units light, the terrain's light map is made again when a lamp breaks
+  (`pak_light_map`, `g_pak.relight`). Only the picture was missing. Added for the tests: a
+  LOG line each time an alien comes into or goes out of X-COM's sight at night (`battle.c`
+  `update_vision`: `T1: night: alien 14 at 48,38,0 seen by Novak, 81 tiles squared, near`,
+  then `... at 48,39,0 out of sight` one step further, in the dark).
+- **The levels in portable C**: `engine/src/vlit.c` (`#if defined(XCOM_PORT)`; the DOS VGA
+  build keeps `vgaasm.asm`): the sources, a light map of the map's columns (9 more round
+  it), the 20 x 18 cells' levels (`g_vl_lev`) for the platform, `vl_update` telling whether
+  a level changed or the camera moved. The terrain's sources are looked for only in the
+  columns `g_pak.lit` lights.
+- **The picture**: `plat/vgabat.c` `night_present` (vgaasm.asm's mark and draw): when the
+  levels changed every cell whose level is not the one shown is shown whole, else the
+  rectangle's cells; `lit_recs` makes the records: a row's runs of one level, grouped by
+  level, a run under its level's last record at its column with its width joined to it,
+  level 0 a plain copy, the others remapped copies after a table record where the level
+  changes and at the start of every 128 records (a call: the table is the call's). The
+  whole view's records are kept while the levels stay (BENCH's "present view"). The
+  records are Horizon's `sheet_draw` form (`PlatRec`), so `horizon/hz_bb.c` sends them as
+  they are (`plat_bb_present_lit`, the 16 tables loaded once: `plat_bb_lit_ready`), and the
+  CPU fallback (REV $0C, the host) draws the same records through the same tables
+  (`hz_shade_rect` on the Atari816, the C on the host): the same pixels by construction.
+- **On the Atari816 in assembly** (`horizon/hz_lit.s`; the C is the host's reference):
+  `hz_lit_recs` (the records; with `-DLITCHECK` both run on every present and the console
+  says where they differ: none in BENCH's night run), `hz_lit_cells` (the cells' levels,
+  incremental along a row), `hz_lit_stamp` and `hz_lit_rows` (a disc into the light map, a
+  square of rows). cc816's C took 20-80 ms for what these do in 1-10.
+
+### Tests
+
+- `make test`: `nlight` (a terror site at night, GEAR: a soldier walking out with his light,
+  an incendiary shot's 13 fires, three more soldiers out, Silva's electro-flare thrown at
+  39,40,0, the end of the turn with the aliens seen and lost in the dark, Tanaka under alien
+  control (his light goes), a scroll into the dark, the level up and down) and `nlight12`
+  (the same at REV $0C: the CPU draws the records): 50 pictures each, equal to the host's
+  pixel for pixel at both revisions, the LOG equal (the `night:` lines among them), and a
+  check that the script still makes its fire, flare and sightings. `night` / `night12`:
+  their pictures are new (3 of 4: the soldiers' light around the craft).
+- BENCH at night: its screen checks now read the levels shown (`vga_lit_shown`): `0 screen
+  bytes differ` in every check (was some 45,000: the checks did not know the shade), and
+  `VGA lights: N light maps, N cell level maps, N records in N night presents`.
+- `make smooth` and `make speed` as before (the night battle within the limits).
+
+### Speed (the emulator, real clock)
+
+`make speed` (BENCH, 200 presents at night) and `make smooth` (the scripted battle, the
+pointer circling), the same machine, before (section 4j: one level, one remapped copy) and
+after; by day nothing changed (BENCH 153 ms full redraw, present 10, scroll 93; smooth's
+day battle 22 scrolls a second, the longest pointer stop 102 ms):
+
+| (the emulator, real clock) | One night level (4j) | The night lights |
+| --- | --- | --- |
+| BENCH night: average full redraw | 157 ms | 182 ms |
+| BENCH night: present view (the whole view, 120-180 records kept) | 11 ms | 22 ms |
+| BENCH night: scroll by one tile | 93 ms | 115 ms |
+| BENCH night: cursor step / unit step, one rectangle | 19 / 23 ms | 27 / 30 ms |
+| BENCH night: VGA lights | | 3 light maps, 32 cell level maps, 9,329 records in 200 presents |
+| smooth at night: the longest pointer stop (limit 120) | 102 ms | 102 ms |
+| smooth at night: the player's frames over 100 ms / the longest (limit 250) | 12 / 179 ms | 26 / 213 ms |
+| smooth at night: scrolling | 19.2 a second (median 52 ms) | 12.3 a second (median 81 ms) |
+| smooth at night: walking (a step's present) | 11.1 a second (median 90 ms) | 8.8 a second (median 114 ms; by day 6.0, paced by the animation) |
+
+Where a night present's time goes (temporary timers, the smooth battle): the levels 0.7
+ms when nothing moved, 20-25 ms when a soldier stepped (his squares of the light map, the
+360 cells), 3-8 ms after a scroll (the levels moved, two strips read); the records 1-3 ms
+(the whole view: each row's runs at once, `hz_lit_recs`' own path); `sheet_draw` about 85
+us a record (100-160 for the whole view: 8-14 ms) and Ali's copy 7 ms. The first night
+present loads the 15 tables (40 ms) and makes the terrain's map (80 ms), behind the
+battle's start. The CPU fallback (REV $0C) draws the same records through `hz_shade_rect`
+(about the whole view's 115 ms of section 4j, the records' C on top).
+
+### What is left
+
+- The scroll at night: the view's records are made again (the levels move with the
+  view; 100-160 records), and `sheet_draw` costs about 85 us a record here (measured: the
+  same for plain copies, `-DLITEXP` experiment; ABI.md says 21 us on its fast path): about
+  half of the night's extra time on a scroll. The records of the kept view could be moved
+  with the scroll and only the new strip's made; the kernel's per-record cost is the
+  kernel owner's to look at.
+- The cells are upstream's approximation: a wall or a unit straddling two cells shows two
+  levels, the cursor and the selected unit's arrow are shaded (the original draws them
+  bright), a level below the view's takes the view level's tile's light.
+- The night sky is upstream's fixed 10 (dusk and deep night as the globe's sun would give
+  them: not modelled, `geo.c` `site_dark` says night or day).
 
 ## 5. The plan
 
@@ -1538,7 +1661,8 @@ Risks:
 | the sight fan's rays and levels (`plat/losfan.c`) in assembly (its walk is: section 4h) | 20-40 ms a fan left | 0.5 day |
 | the start-up's CPU part (3 s: the palette and picture loaders read through stdio byte by byte) | the start menu sooner | 0.5 day |
 | the main bank: `hgame`'s queues (the `.s` code moved: done, section 4) | room for the next changes | with the SDK |
-| per-cell night lights (upstream's VGA `lit_present`: OpenXcom's lighting; on the Atari816 a remapped copy per run of cells at one level: section 4j) | flares and fires lighting their area | 1-2 days |
+| ~~per-cell night lights~~ | done (section 4k): flares, fires, the soldiers' own light and the terrain's lamps light their area | |
+| the night's scroll (section 4k, "What is left"): the records of the view kept and moved with a scroll, the kernel's cost of a sheet record (about 85 us measured, the fast path's 21 us expected) | 12 scrolls a second at night against 21 by day | 1 day (+ the kernel's owner) |
 | the FLI's runs in assembly | the intro's explosion scene (1.1 s behind at worst) | 0.5 day |
 | report upstream: faults 1, 2, 3, 5, 6, 8 above, the GOG data, voxcheck.py | | |
 | the rest of the differences from DOS (walk frames, explosions, UFO doors, the 5-second speed, the battle's unit stats, terror units' abilities, the missing samples) | `engine/FORK.md` "Differences from the original game", with estimates | 0.5-5 days each |

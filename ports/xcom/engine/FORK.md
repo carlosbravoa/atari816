@@ -56,7 +56,13 @@ code there):
 - `pak.c` reads the unit sets' table as 16-bit values (`unsigned` is 32 bits on the host).
 - Test hooks: `cut.c` a test picture of each end slide, `input.c` a KEYS script's `WAIT`
   sleeps on the platform, `vbench.c` BENCH's VGA block checks left out and a check of the
-  port's smoke and fire pictures instead.
+  port's smoke and fire pictures instead; at night its screen checks read the port's levels
+  shown (`plat/vgabat.c` `vga_lit_shown`) and it prints the night lights' counts.
+- The VGA night lights' levels in portable C: `src/vlit.c`, `src/vlit.h` (new files, all of
+  `vlit.c` inside `#if defined(XCOM_PORT)`: the DOS VGA build keeps `vgaasm.asm`'s
+  `lit_present`, the same model, and gets an empty object). The light map, the sources, the
+  20 x 18 cells' levels for the platform (`ports/xcom/plat/vgabat.c` shows them;
+  `ports/xcom/PORTING-NOTES.md` section 4k).
 - `mouse.c` `busy_tick`: the platform's clock and pointer (`plat_busy_poll`) in the
   engine's busy loops (the turn's end, the AI).
 - `pedia.c`: after an article, the screen under the list again (VGA; the port keeps a
@@ -92,6 +98,13 @@ code there):
   port's virtual clock) keep 0.
 - `panel.c` `number`: the digits without sprintf, one fill a run of a row's set pixels (the
   same pixels).
+
+**Night sight in the LOG** (every build; `battle.c` `update_vision`): at night (the 9-tile
+dark range on) each alien that comes into or goes out of X-COM's sight is a LOG line
+(`T1: night: alien 14 at 48,38,0 seen by Novak, 81 tiles squared, near` / `... out of
+sight`; "on a lit tile" past 9 tiles): what the darkness rule decided, for the tests. No
+rule changed: the engine already had OpenXcom's (`los.c` `los_unit_sees`, `effects.c`
+`fx_lit`).
 
 **The converter** (`tools/convert.py`): the GOG edition's MCD records with HE_Type 1 (smoke)
 are left out of the explosives list instead of stopping the conversion.
@@ -273,7 +286,7 @@ what is missing is said.
 | Shots are a dotted line, a thrown grenade is not drawn in flight (its landing sounds 0.3 s after the throw) | `battle.c` | 2 days |
 | An explosion is one picture for 0.4 s, not DOS's animated fireballs (ExplosionBState: power / 5 explosions spreading) | `bview.c` `bv_blast` | 1-2 days |
 | UFO doors open at once (DOS animates them; SLIDING_DOOR_CLOSE, SOUND1.CAT 21, at the turn's end, is not in the packs) | `bdoor.c` | 1 day, 1.2 KB of samples |
-| Night: fewer light levels than DOS's 16 | `nlit.c` | (memory) |
+| Night: on EGA two light levels instead of DOS's 16 (VGA: the 16, per cell of 16 x 8 pixels, upstream's `vgaasm.asm` `lit_present` and the port's `vlit.c`; DOS shades each tile's pictures by the tile's level, so a cell is up to 1.5 tiles off at a light's edge) | `nlit.c` | (memory) |
 | The selected soldier's arrow and the cursor do not bob or blink | `rcursor.c` | 0.5 day |
 | The pointer's colour is the same everywhere (OpenXcom: 252 on the geoscape, bases, UFOpaedia and graphs, 144 in a battle) | `mouse.c`, `ports/xcom/plat/vga.c` | 0.5 day |
 | Units' own move sounds are not in the packs: tanks (SOUND1.CAT 14), hovertanks and cyberdiscs (40), snakemen (0), silacoids (47), celatids (16); the walkers play footsteps, the fliers the flying warble | `sound.c`, `battle.c` `walk_flies` | 2 h, about 8 KB of samples (the sound's 64 KB UMB has 1.3 KB left in a battle) |

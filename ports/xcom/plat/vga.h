@@ -17,6 +17,8 @@ void vga_dac(const unsigned char far *pal, int first, int n);  /* 6-bit values t
 /* plat/vgabat.c */
 void vga_pal(void);                     /* entry 8: g_vpal to the DAC */
 void vga_gfx_night(int night);          /* entry 24 (gfx.c gfx_night's VGA hook) */
+int vga_lit_shown(unsigned cell);       /* the night lights: the level a cell (of 20 x 18) is
+                                           shown at, -1 not shown yet; 0 by day */
 void vga_gfx_dot(int x, int y, int colour);     /* entry 25 */
 const int far *vga_pics_next(void);     /* entry 26: the rectangle to redraw, or NULL */
 void vga_smoke_load(void);              /* SMOKEV.PAK: DOS's smoke and fire pictures */

@@ -14,12 +14,15 @@
    registers do (unsigned short), so a box hanging off the top writes only
    its visible rows, exactly as upstream.
 
-   Not ported (remain): the night lights (vgaasm.asm "Night lights",
-   lit_present / vshift: light sources, per-cell levels): here a night
-   battle is shown at the sky's one shade (NIGHT_SHADE) everywhere.
-   DOS's smoke and fire pictures (fxpic, SMOKEV.PAK, loaded by
-   vga_smoke_load) and their animation step (pics_next) are entry 23's
-   and 26's, below.
+   The night lights (vgaasm.asm "Night lights", lit_present): each 16 x 8
+   cell of the view through its level's table, the levels from
+   engine/src/vlit.c (the light sources' model in portable C), shown here
+   (night_present). Not ported: vshift (on a scroll by whole cells
+   upstream moves the screen and the levels with it; here the caller's
+   full present after a scroll shows the view, and the levels are 360
+   look-ups of vlit.c's light map). DOS's smoke and fire pictures (fxpic,
+   SMOKEV.PAK, loaded by vga_smoke_load) and their animation step
+   (pics_next) are entry 23's and 26's, below.
 
    A platform with a blitter draws the buffer itself (plat.h "the battle
    view": the Atari816, horizon/hz_bb.c); every entry asks it first and
@@ -32,11 +35,12 @@
 #include "vga.h"
 #include "fx_in.h"
 #include "map.h"
+#include "vlit.h"
 #include <stdio.h>
 
 #define ROW     320u
 #define BYTES   (ROW * VIEW_H)          /* 46080 */
-#define NIGHT_SHADE 10
+
 
 typedef unsigned short u16;
 
@@ -45,8 +49,6 @@ typedef unsigned short u16;
 
 static u16 lx, rx, vtop, vbot;          /* V_LX, V_RX, V_TOP, V_BOT */
 static unsigned char save_box[32 * 40]; /* SAVE: the cursor's box */
-static unsigned char shade_tab[256];    /* SHADE at the night's level */
-static unsigned shade_lev = 0xFFFF;
 
 /* clip_vars: wmask's visible 8-pixel columns (contiguous) to [lx, rx). */
 static void clip_vars(unsigned top, unsigned bottom, unsigned wmask)
@@ -245,15 +247,316 @@ void __cdecl bufc_clear_rect(unsigned bufseg, unsigned col, unsigned row, unsign
             buf[(u16)(d + i)] = 0;
 }
 
-static void mktab(unsigned lev)
-{
-    unsigned b, i;
+/* ---- the night lights: the cells (vlit.h) through their levels' tables
+   (vgaasm.asm mktab: OpenXcom's StandardShade, index + level in its block of
+   16, at most the block's last; 0 stays 0; level 0 the identity) */
+static unsigned char far tabs[16 * 256];
+static unsigned char tabs_ok;
+static unsigned char far shown[VL_CELLS];       /* the level each cell is shown at, 0xFF:
+                                                   not shown (vgaasm.asm AUX's low nibble) */
+#define NREC    (VL_CELLS + 16 + 8)             /* copies, tables, tables again in a new call */
+static PlatRec far recs[NREC];                  /* one present's records */
+static unsigned short far work[4 * VL_CELLS + 80];  /* the runs, their order by level, the joins */
+unsigned char g_lit_sheet[2];                   /* the platform's sheets (plat.h) */
+unsigned long g_lit_recs, g_lit_presents;       /* (BENCH: records, night presents) */
 
-    shade_lev = lev;
-    for (b = 0; b < 256; b += 16)
-        for (i = 0; i < 16; i++)
-            shade_tab[b + i] = (unsigned char)(i + lev < 16 ? b + i + lev : b + 15);
-    shade_tab[0] = 0;
+static void mktabs(void)
+{
+    unsigned l, b, i;
+
+    for (l = 0; l < 16; l++)
+        for (b = 0; b < 256; b += 16)
+            for (i = 0; i < 16; i++)
+                tabs[l * 256 + b + i] = (unsigned char)(i + l < 16 ? b + i + l : b + 15);
+    for (l = 0; l < 16; l++)
+        tabs[l * 256] = 0;
+    tabs_ok = 1;
+}
+
+int vga_lit_shown(unsigned cell)
+{
+    if (!g_vshade)
+        return 0;
+    return cell < VL_CELLS && shown[cell] < 16 ? shown[cell] : -1;
+}
+
+/* The records of a night present (vgaasm.asm lit_present's mark and draw):
+   the rectangle x0..x1, y0..y1 (pixels) of the view; all: every cell (the
+   levels changed). A cell whose level is not the one shown is shown whole,
+   at its level; the rectangle's other cells in the rectangle. A row's
+   neighbours of one level and height make a run (wk: 3 words a run, x, w,
+   y | h << 8 | level << 12); the runs by level (row by row within one: wk
+   from 3 * VL_CELLS, their places); a run right under the last record of
+   its level that starts at its column (wk from 4 * VL_CELLS, by x / 4)
+   with its width joins it, else it is a record: level 0 a plain copy, the
+   others remapped copies after a table record (PR_TABLE, sy the level)
+   where the level changes and at the start of every 128 records (a call
+   of the platform's: its table is the call's). *fl: 1 cells shown outside
+   the rectangle, 2 among them in columns 18-19 (the panel's markers). The
+   Atari816 does it in assembly (horizon/hz_lit.s hz_lit_recs, the same
+   records; this C is the host's, the reference). */
+#define WK_RUNS 0
+#define WK_SORT (3 * VL_CELLS)
+#define WK_JX   (4 * VL_CELLS)                  /* this level's last record at x / 4 */
+#define WK_N    (4 * VL_CELLS + 80)
+
+unsigned lit_recs(PlatRec far *o, const unsigned char far *lev, unsigned char far *sh,
+                  unsigned short far *wk, unsigned x0, unsigned y0, unsigned x1, unsigned y1,
+                  unsigned all, unsigned sheets, unsigned far *fl)
+{
+    unsigned c0, c1, r0, r1, r, c, i, k, n = 0, cnt[16], f = 0, cur, gl, open;
+
+    if (all) {
+        c0 = r0 = 0;
+        c1 = VL_COLS;
+        r1 = VL_ROWS;
+    } else {
+        c0 = x0 >> 4;
+        c1 = (x1 + 15) >> 4;
+        r0 = y0 >> 3;
+        r1 = (y1 + 7) >> 3;
+    }
+    for (i = 0; i < 16; i++)
+        cnt[i] = 0;
+    for (r = r0; r < r1; r++)
+        for (c = c0, open = 0; c < c1; c++) {
+            unsigned cell = r * VL_COLS + c, l = lev[cell], ax = c * 16, ay = r * 8, aw = 16,
+                ah = 8, whole, yhl;
+            whole = l != sh[cell];
+            if (!whole && !(ax < x1 && ax + 16 > x0 && ay < y1 && ay + 8 > y0)) {
+                open = 0;
+                continue;
+            }
+            if (!whole) {
+                if (ax < x0) {
+                    aw -= x0 - ax;
+                    ax = x0;
+                }
+                if (ax + aw > x1)
+                    aw = x1 - ax;
+                if (ay < y0) {
+                    ah -= y0 - ay;
+                    ay = y0;
+                }
+                if (ay + ah > y1)
+                    ah = y1 - ay;
+            } else if (ax < x0 || ax + 16 > x1 || ay < y0 || ay + 8 > y1) {
+                f |= 1;
+                if (c >= 18)
+                    f |= 2;
+            }
+            sh[cell] = (unsigned char)l;
+            yhl = ay | ah << 8 | l << 12;
+            if (open && wk[WK_RUNS + 3 * n - 1] == yhl
+                && wk[WK_RUNS + 3 * n - 3] + wk[WK_RUNS + 3 * n - 2] == ax) {
+                wk[WK_RUNS + 3 * n - 2] += (unsigned short)aw;
+                continue;
+            }
+            wk[WK_RUNS + 3 * n] = (unsigned short)ax;
+            wk[WK_RUNS + 3 * n + 1] = (unsigned short)aw;
+            wk[WK_RUNS + 3 * n + 2] = (unsigned short)yhl;
+            n++;
+            cnt[l]++;
+            open = 1;
+        }
+    for (i = k = 0; i < 16; i++) {
+        unsigned m = cnt[i];
+        cnt[i] = k;
+        k += m;
+    }
+    for (i = 0; i < n; i++)
+        wk[WK_SORT + cnt[wk[WK_RUNS + 3 * i + 2] >> 12]++] = (unsigned short)(3 * i);
+    k = 0;
+    cur = gl = 0xFFFF;
+    for (i = 0; i < n; i++) {
+        unsigned e = wk[WK_SORT + i], ax = wk[WK_RUNS + e], aw = wk[WK_RUNS + e + 1],
+            yhl = wk[WK_RUNS + e + 2], ay = yhl & 255, ah = yhl >> 8 & 15, l = yhl >> 12, j;
+        PlatRec far *p;
+        if (l != gl) {
+            gl = l;
+            for (j = 0; j < 80; j++)
+                wk[WK_JX + j] = 0xFFFF;
+        } else if ((j = wk[WK_JX + (ax >> 2)]) != 0xFFFF) {
+            /* under this level's last record at these columns: joined */
+            p = &o[j];
+            if (p->w == aw && p->y + p->h == ay) {
+                p->h += ah;
+                continue;
+            }
+        }
+        if (!(k & 127))
+            cur = 0xFFFF;
+        if (l && cur != l) {
+            for (;;) {
+                p = &o[k++];
+                p->sheet = (unsigned char)(sheets >> 8);
+                p->op = PR_TABLE;
+                p->c = p->zero = 0;
+                p->sx = 0;
+                p->sy = (unsigned short)l;
+                p->w = 256;
+                p->h = 1;
+                p->x = p->y = 0;
+                if (k & 127)
+                    break;
+                /* (it ended a call: again at the next one's start) */
+            }
+            cur = l;
+        }
+        p = &o[k++];
+        p->sheet = (unsigned char)sheets;
+        p->op = (unsigned char)(l ? PR_COPY | PR_REMAP : PR_COPY);
+        p->c = p->zero = 0;
+        p->sx = (unsigned short)ax;
+        p->sy = (unsigned short)ay;
+        p->w = (unsigned short)aw;
+        p->h = (unsigned short)ah;
+        p->x = (short)ax;
+        p->y = (short)ay;
+        wk[WK_JX + (ax >> 2)] = (unsigned short)(k - 1);
+    }
+    *fl = f;
+    return k;
+}
+
+#if defined(__CC816__)
+unsigned hz_lit_recs(PlatRec far *o, const unsigned char far *lev, unsigned char far *sh,
+                     unsigned short far *wk, unsigned x0, unsigned y0, unsigned x1, unsigned y1,
+                     unsigned all, unsigned sheets, unsigned far *fl);
+#if defined(LITCHECK)
+/* -DLITCHECK: the assembly against the C on every present (the console says where
+   they differ) */
+static PlatRec far recs2[NREC];
+static unsigned char far shown2[VL_CELLS];
+static unsigned recs_check(PlatRec far *o, unsigned x0, unsigned y0, unsigned x1, unsigned y1,
+                           unsigned all, unsigned sheets, unsigned far *fl)
+{
+    static unsigned bad;
+    unsigned n, n2, fl2;
+
+    memcpy(shown2, shown, VL_CELLS);
+    n = hz_lit_recs(o, g_vl_lev, shown, work, x0, y0, x1, y1, all, sheets, fl);
+    n2 = lit_recs(recs2, g_vl_lev, shown2, work, x0, y0, x1, y1, all, sheets, &fl2);
+    if ((n != n2 || fl2 != *fl || memcmp(o, recs2, n * sizeof(PlatRec))
+         || memcmp(shown, shown2, VL_CELLS)) && bad++ < 20)
+        printf("xcom: LITCHECK: %u,%u-%u,%u all %u: asm %u records fl %u, C %u fl %u\n", x0, y0,
+               x1, y1, all, n, *fl, n2, fl2);
+    return n;
+}
+#define LIT_RECS(o, x0, y0, x1, y1, all, sheets, fl) recs_check(o, x0, y0, x1, y1, all, sheets, fl)
+#else
+#define LIT_RECS(o, x0, y0, x1, y1, all, sheets, fl) \
+    hz_lit_recs(o, g_vl_lev, shown, work, x0, y0, x1, y1, all, sheets, fl)
+#endif
+#else
+#define LIT_RECS(o, x0, y0, x1, y1, all, sheets, fl) \
+    lit_recs(o, g_vl_lev, shown, work, x0, y0, x1, y1, all, sheets, fl)
+#endif
+
+/* the whole view's records, kept while the levels and the sheets stay (a present of the
+   whole view needs only the levels: then every cell is shown whole) */
+static PlatRec far frecs[NREC];
+static unsigned fn, fsheets;
+static unsigned char fvalid;
+
+/* A night present of the rectangle x0..x0 + w, y0..y0 + rows (pixels; x0
+   and w multiples of 4), as vgaasm.asm lit_present: the levels brought up
+   to date (vlit.c: when a light came, went or moved, or the camera or the
+   view's level moved, every cell is looked at), the records (lit_recs), to
+   the screen by the platform's blitter (plat_bb_present_lit) or here. */
+static void night_present(unsigned x0, unsigned y0, unsigned w, unsigned rows)
+{
+    const unsigned char far *buf = BUF(g_bufseg);
+    unsigned char far *scr = (unsigned char far *)MK_FP(0xA000, 0);
+    const unsigned char far *t = tabs;
+    unsigned i, n, r, k, fl, sheets;
+    int st, remap, full, hook = 0;
+    PlatRec far *p;
+    PlatRec far *rc = frecs;
+
+    if (!tabs_ok)
+        mktabs();
+    plat_busy_tick();                   /* (the pointer: a light that moved costs a little) */
+    st = vl_update();
+    full = !x0 && !y0 && w == 320 && rows == VIEW_H;
+    if (st & VL_MOVED) {
+        /* every cell is shown whole: the whole view (its records may be kept), the panel's
+           markers again where the rectangle did not reach them */
+        memset(shown, 0xFF, VL_CELLS);
+        if (!full)
+            hook = x0 > 288 || x0 + w < 320 || y0 || rows < VIEW_H;
+        full = 1;
+        plat_busy_tick();
+    }
+    remap = plat_bb_lit_ready(tabs);
+    sheets = g_lit_sheet[0] | g_lit_sheet[1] << 8;
+    if (st || sheets != fsheets)
+        fvalid = 0;
+    fl = 0;
+    if (!full)
+        n = LIT_RECS(rc = recs, x0, y0, x0 + w, y0 + rows, st != 0, sheets, &fl);
+    else if (fvalid)
+        n = fn;                         /* (every cell shown at its level already) */
+    else {
+        n = fn = LIT_RECS(rc, 0, 0, 320, VIEW_H, st != 0, sheets, &fl);
+        fsheets = sheets;
+        fvalid = 1;
+    }
+    if (hook)
+        fl |= 2;
+    plat_busy_tick();
+    if (!n)
+        return;
+    g_lit_recs += n;
+    g_lit_presents++;
+    if (st)
+        mouse_hide_rect(0, 0, 320, VIEW_H);     /* (cells outside the rectangle may change) */
+    if (!remap || !plat_bb_present_lit(rc, n)) {
+        PERF_T0(pt0);
+        plat_bb_sync();
+        for (i = 0; i < n; i++) {
+            p = &rc[i];
+            if (p->op == PR_TABLE) {
+                t = tabs + p->sy * 256u;
+                continue;
+            }
+#if defined(__CC816__)
+            {
+                /* horizon/hz_vga.s: the remap in assembly (the C took about a second
+                   for the whole view); the pointer every 32 rows */
+                void hz_shade_rect(unsigned char far *d, const unsigned char far *s, unsigned w,
+                                   unsigned rows, const unsigned char far *tab);
+                for (r = 0; r < p->h; r += k) {
+                    u16 d = (u16)((p->y + r) * ROW + (unsigned)p->x);
+                    k = p->h - r < 32 ? p->h - r : 32;
+                    hz_shade_rect(scr + d, buf + d, p->w, k, p->op == PR_COPY ? tabs : t);
+                    if (k == 32 || p->w * k >= 2048u)
+                        plat_busy_tick();
+                }
+            }
+#else
+            for (r = 0; r < p->h; r++) {
+                u16 d = (u16)((p->y + r) * ROW + (unsigned)p->x);
+                const unsigned char far *u = p->op == PR_COPY ? tabs : t;
+                for (k = 0; k < p->w; k++)
+                    scr[(u16)(d + k)] = u[buf[(u16)(d + k)]];
+            }
+#endif
+        }
+        PERF_ADD(PF_SHADE, pt0);
+        {
+            /* (a present for /M too: its frames and frame rates) */
+            PERF_T0(pt1);
+            PERF_ADD(PF_PRES, pt1);
+        }
+    }
+    if ((fl & 2) && g_present_hook)
+        g_present_hook(0, VIEW_H);
+    plat_view(1);
+    if (st || full)
+        plat_present(0, 0, 320, VIEW_H);
+    else
+        plat_present((int)x0, (int)y0, (int)(x0 + w), (int)(y0 + rows));
 }
 
 /* ---- 5: present cells (the buffer's rows are the screen's) */
@@ -268,47 +571,15 @@ void __cdecl bufc_present_rect(unsigned bufseg, unsigned col, unsigned row, unsi
     if (!rows || !cols)
         return;
     if (g_vshade) {
-        /* (night: upstream's lit_present shows each cell at its light
-           level; here every cell at the sky's) */
-        if (shade_lev != g_vshade)
-            mktab(g_vshade);
-        /* the blitter's colour remap where there is one (the Atari816 from REV $0D) */
-        if (plat_bb_present_shade(d, w, rows, g_vshade, shade_tab))
-            goto shown;
-        plat_bb_sync();
-    } else if (plat_bb_present(d, w, rows))
-        goto shown;
-    if (g_vshade) {
-#if defined(__CC816__)
-        {
-            /* horizon/hz_vga.s: the same remap in assembly (the C took about
-               a second for the whole view) */
-            void hz_shade_rect(unsigned char far *d, const unsigned char far *s, unsigned w,
-                               unsigned rows, const unsigned char far *tab);
-            PERF_T0(pt0);
-            /* (in blocks of 32 rows: the pointer between them) */
-            for (; n; n -= i, d = (u16)(d + i * ROW)) {
-                i = n < 32 ? n : 32;
-                hz_shade_rect(scr + d, buf + d, w, i, shade_tab);
-                plat_busy_tick();
-            }
-            PERF_ADD(PF_SHADE, pt0);
-            {
-                /* (a present for /M too: its frames and frame rates) */
-                PERF_T0(pt1);
-                PERF_ADD(PF_PRES, pt1);
-            }
-        }
-#else
-        for (; n; n--, d = (u16)(d + ROW))
-            for (i = 0; i < w; i++)
-                scr[(u16)(d + i)] = shade_tab[buf[(u16)(d + i)]];
-#endif
-    } else {
-        for (; n; n--, d = (u16)(d + ROW))
-            for (i = 0; i < w; i++)
-                scr[(u16)(d + i)] = buf[(u16)(d + i)];
+        /* (bufseg is g_bufseg) */
+        night_present(col * 4, row, w, rows);
+        return;
     }
+    if (plat_bb_present(d, w, rows))
+        goto shown;
+    for (; n; n--, d = (u16)(d + ROW))
+        for (i = 0; i < w; i++)
+            scr[(u16)(d + i)] = buf[(u16)(d + i)];
 shown:
     plat_view(1);
     plat_present((int)(col * 4), (int)row, (int)((col + cols) * 4), (int)(row + rows));
@@ -588,7 +859,10 @@ void __cdecl fxtile_cga(unsigned seg, unsigned off, const unsigned char *shape, 
 /* ---- 24: gfx_night: the view's shade at the present (0 by day). */
 void vga_gfx_night(int night)
 {
-    g_vshade = night ? NIGHT_SHADE : 0;
+    g_vshade = night ? VL_NIGHT_SHADE : 0;
+    /* (vgaasm.asm ui_night: no cell shown yet, the levels made anew) */
+    memset(shown, 0xFF, VL_CELLS);
+    vl_night();
 }
 
 /* ---- 25: gfx_dot: 2 x 2 pixels XORed on the screen in the EGA colour's

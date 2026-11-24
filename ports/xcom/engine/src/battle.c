@@ -239,7 +239,7 @@ int next_soldier(int from)
    walker's own units spotted). */
 void update_vision(int u, int reveal)
 {
-    int i;
+    int i, seer;
 
     if (reveal && g_units[u].faction == FACTION_XCOM && los_reveal(u))
         fog_dirty = 1;
@@ -253,6 +253,7 @@ void update_vision(int u, int reveal)
             continue;
         was = a->seen;
         a->seen = (unsigned char)g_see_all;
+        seer = -1;
         {
             /* The one who acted first: a walker's own sight (walk). */
             int k, s;
@@ -261,6 +262,7 @@ void update_vision(int u, int reveal)
                 if (k != u && g_units[s].faction == FACTION_XCOM && LOS_NEAR(&g_units[s], a)
                     && los_unit_sees(s, i)) {
                     a->seen = 1;
+                    seer = s;
                     if (s == walk_u) {
                         unsigned char *p = &walk_saw[i >> 3], m = (unsigned char)(1 << (i & 7));
                         if (!(*p & m)) {
@@ -281,8 +283,23 @@ void update_vision(int u, int reveal)
                 for (k = 0; k <= a->big; k++)
                     g_seen[TIDX(a->x + j, a->y + k, a->z)] |= SEEN_BIT;
         }
-        if (a->seen != was)
+        if (a->seen != was) {
             redraw_unit(i);
+            /* At night (the darkness rule, los.c los_unit_sees): who is seen and why, for
+               the tests */
+            if (g_xcom_range < VIEW_RANGE && a->faction == FACTION_ALIEN && !g_see_all) {
+                if (seer >= 0) {
+                    const Unit *v = &g_units[seer];
+                    int dx = a->x - v->x, dy = a->y - v->y;
+                    log_printf("T%d: night: alien %d at %d,%d,%d seen by %s, %d tiles squared, %s",
+                               bt_turn, i, a->x, a->y, a->z, v->name, dx * dx + dy * dy,
+                               dx * dx + dy * dy <= g_xcom_range * g_xcom_range ? "near"
+                               : "on a lit tile");
+                } else
+                    log_printf("T%d: night: alien %d at %d,%d,%d out of sight", bt_turn, i, a->x,
+                               a->y, a->z);
+            }
+        }
     }
 }
 

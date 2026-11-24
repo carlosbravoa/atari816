@@ -19,3 +19,9 @@ bfire      VGA NOINTRO BATTLE SEED 6 MISSION FA1V.PAK RACE RSV.PAK LOG BFIRE.TXT
 night      VGA NOINTRO BATTLE SEED 1 MISSION FA1V.PAK RACE RSV.PAK NIGHT LOG NIGHT.TXT
 # the same on a board without the colour remap (REV $0C): the CPU shades, the same pictures
 night12    k=night r=12 VGA NOINTRO BATTLE SEED 1 MISSION FA1V.PAK RACE RSV.PAK NIGHT LOG NIGHT.TXT
+# the night lights (engine/src/vlit.c, PORTING-NOTES.md 4k): a terror site at night, a soldier's
+# light walking, an incendiary shot's fires, a flare thrown, the street lamps, the aliens seen
+# and lost in the dark (the LOG's "night:" lines), a scroll and the levels; and the same on a
+# board without the colour remap (REV $0C: the CPU shades each cell)
+nlight     s=800 VGA NOINTRO BATTLE SEED 1 MISSION UR0V.PAK RACE RSV.PAK NIGHT GEAR LOG NLIGHT.TXT
+nlight12   s=800 k=nlight r=12 VGA NOINTRO BATTLE SEED 1 MISSION UR0V.PAK RACE RSV.PAK NIGHT GEAR LOG NLIGHT.TXT

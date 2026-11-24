@@ -81,10 +81,26 @@ int plat_bb_sprite(const unsigned char far *spr, int kind, unsigned dest, unsign
 int plat_bb_fill(unsigned off, unsigned w, unsigned rows, int colour);
 /* the rectangle at off to the screen (A000, the same offset); done when it returns */
 int plat_bb_present(unsigned off, unsigned w, unsigned rows);
-/* the same through tab (256 colours: the night's shade at level lev, 0-15: a level always
-   has the same table); 0 when the platform cannot remap colours (vgabat.c's C shades) */
-int plat_bb_present_shade(unsigned off, unsigned w, unsigned rows, unsigned lev,
-                          const unsigned char *tab);
+/* the night lights (plat/vgabat.c night_present, engine/src/vlit.h): records of the
+   view's rectangles to the screen, in the blitter's own form (Horizon's sheet_draw:
+   hz_sheetrec): PR_COPY, PR_COPY | PR_REMAP through the table PR_TABLE loaded last (its
+   level in sy; the 16 levels' tables at tabs + lev * 256, 0 the identity; a level always
+   has the same table), a table record at the start of every 128; sheet: g_lit_sheet[0]
+   for the copies, [1] for the tables, the platform's numbers (0 on the host).
+   plat_bb_lit_ready: 1 when the platform remaps colours (its tables loaded, g_lit_sheet
+   set), else vgabat.c's C draws the records (the same pixels); plat_bb_present_lit: done
+   when it returns, 0 when it could not */
+typedef struct {
+    unsigned char sheet, op, c, zero;
+    unsigned short sx, sy, w, h;
+    short x, y;
+} PlatRec;
+#define PR_COPY     1
+#define PR_TABLE    3
+#define PR_REMAP    0x40
+extern unsigned char g_lit_sheet[2];
+int plat_bb_lit_ready(const unsigned char *tabs);
+int plat_bb_present_lit(const PlatRec *r, unsigned n);
 /* the view moved by dx bytes (rows * 320 + columns): the 2-D move (the strips
    the move exposes are cleared and redrawn by the engine: render_scroll) */
 int plat_bb_shift(long dx);
