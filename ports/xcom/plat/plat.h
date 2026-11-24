@@ -81,6 +81,10 @@ int plat_bb_sprite(const unsigned char far *spr, int kind, unsigned dest, unsign
 int plat_bb_fill(unsigned off, unsigned w, unsigned rows, int colour);
 /* the rectangle at off to the screen (A000, the same offset); done when it returns */
 int plat_bb_present(unsigned off, unsigned w, unsigned rows);
+/* the same through tab (256 colours: the night's shade at level lev, 0-15: a level always
+   has the same table); 0 when the platform cannot remap colours (vgabat.c's C shades) */
+int plat_bb_present_shade(unsigned off, unsigned w, unsigned rows, unsigned lev,
+                          const unsigned char *tab);
 /* the view moved by dx bytes (rows * 320 + columns): the 2-D move (the strips
    the move exposes are cleared and redrawn by the engine: render_scroll) */
 int plat_bb_shift(long dx);

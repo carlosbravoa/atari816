@@ -267,15 +267,18 @@ void __cdecl bufc_present_rect(unsigned bufseg, unsigned col, unsigned row, unsi
 
     if (!rows || !cols)
         return;
-    if (g_vshade)
-        plat_bb_sync();
-    else if (plat_bb_present(d, w, rows))
-        goto shown;
     if (g_vshade) {
         /* (night: upstream's lit_present shows each cell at its light
            level; here every cell at the sky's) */
         if (shade_lev != g_vshade)
             mktab(g_vshade);
+        /* the blitter's colour remap where there is one (the Atari816 from REV $0D) */
+        if (plat_bb_present_shade(d, w, rows, g_vshade, shade_tab))
+            goto shown;
+        plat_bb_sync();
+    } else if (plat_bb_present(d, w, rows))
+        goto shown;
+    if (g_vshade) {
 #if defined(__CC816__)
         {
             /* horizon/hz_vga.s: the same remap in assembly (the C took about
@@ -290,6 +293,11 @@ void __cdecl bufc_present_rect(unsigned bufseg, unsigned col, unsigned row, unsi
                 plat_busy_tick();
             }
             PERF_ADD(PF_SHADE, pt0);
+            {
+                /* (a present for /M too: its frames and frame rates) */
+                PERF_T0(pt1);
+                PERF_ADD(PF_PRES, pt1);
+            }
         }
 #else
         for (; n; n--, d = (u16)(d + ROW))

@@ -54,6 +54,21 @@ def detect_at(seq):
     return -1
 
 
+def fresh(ws):
+    """ws (writes from a track's start) with the key-off writes ($B0-$B8, key bit clear)
+    before each channel's first key-on reduced to their key bit (0)"""
+    on, out = set(), []
+    for w in ws:
+        r, v = w[0], w[1]
+        if 0xB0 <= r <= 0xB8:
+            if v & 0x20:
+                on.add(r)
+            elif r not in on:
+                w = (r, 0) + tuple(w[2:])
+        out.append(w)
+    return out
+
+
 def opl(name, hostlog, emuerr, ticks, late_ms, last=False):
     host, play = [], None
     for ln in open(hostlog):
@@ -79,12 +94,17 @@ def opl(name, hostlog, emuerr, ticks, late_ms, last=False):
         return fail(f'{name}: no OPL2 detection in the {"host" if h0 < 0 else "Atari816"} log')
     if last:
         # the track's first 64 writes found in the Atari816's log
+        # (a channel's key-off before its first note of the track keeps the frequency
+        # bits of the previous track's last note on it: where the player left that
+        # track, a moment of each build's own clock; those bits are not compared)
+        host[host_play_at:] = fresh(host[host_play_at:])
         want = [w[:2] for w in host[host_play_at:host_play_at + 64]]
         at = next((i for i in range(e0, len(emu) - len(want))
-                   if [w[:2] for w in emu[i:i + len(want)]] == want), None)
+                   if [w[:2] for w in fresh(emu[i:i + len(want)])] == want), None)
         if at is None:
             return fail(f'{name}: the last track\'s start is not in the Atari816\'s writes')
         h0, e0 = host_play_at, at
+        emu[at:] = fresh(emu[at:])
     if ticks:
         end = next((i for i, w in enumerate(host) if w[2] > play + ticks), None)
         if end is None:

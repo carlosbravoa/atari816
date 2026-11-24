@@ -1361,7 +1361,7 @@ kit has it as `ARGS/6SMOOTH.ARG` (PSMOOTH.KEY) for the board.
   ms frames by day. Their time: the floor pass (`hz_rend.s`) 21 %, the sprites' records
   17 %, `sheet_draw` 12 % (about 850 cycles a record in the kernel), gfx_sprite, the
   late tiles' C, floor.c's scan of every item for each tile with items. Smaller steps each.
-- The night: the shade at each present is the CPU's (115 ms for the whole view: a full
+- (done in 4j, by the colour remap of REV $0D) The night: the shade at each present was the CPU's (115 ms for the whole view: a full
   redraw 157 ms by day, 267 at night). **Hardware**: a blitter copy through a colour table
   (a remap mode of COPY: 256 bytes of table, each source byte through it) would make a
   night present cost a day's (10 ms): about 105 ms saved on every full present at night,
@@ -1425,6 +1425,69 @@ sndbat must have the footsteps; soundcheck.py knows the new effects' names. The
 Makefile's `make -j app` race fixed (XCOM.HZA's folder after `builds`: two sub-makes wrote
 the same `build/sum/` files).
 
+## 4j. The night by the blitter's colour remap (24 November 2026)
+
+The night battle's view was shaded by the CPU at every present (`hz_shade_rect`, 115 ms for
+the whole view). Hardware revision $0D (Horizon 0.31) gave Ali a colour remap: a copy through
+a 256-entry table (ABI.md "Colour remap"). Now:
+
+- `horizon/hz_bb.c`: a sheet of 256 x 16 tables (row k: level k's), 4 KB in the pictures'
+  bank (offset 49,152, past PLEN); a row written from vgabat.c's `shade_tab` the first
+  time its level is shown, after a wait (a table is a source). The first night present
+  probes once with a call of one SH_TABLE record: refused (ENODEV before REV $0D or with the
+  blitter off, EINVAL before Horizon 0.31) the CPU shades as before, and the console says
+  which (`xcom: night shade: by the blitter's colour remap` / `no colour remap (error 9,
+  REV $0C): by the CPU`). `plat_bb_present_shade` is `plat_bb_present` with the table's
+  SH_TABLE record first and the copy `SH_COPY | SH_REMAP`, both in one `sheet_draw` call
+  (the queue sent first when it has no room for both), waited for as before.
+- `plat/vgabat.c` `bufc_present_rect`: at night that first, `hz_shade_rect` the fallback
+  (and the host's C the reference). The CPU path now also logs its present for /M (its
+  frames and frame rates were not counted before).
+- The night is one level for the whole view (NIGHT_SHADE 10), as before: upstream's VGA
+  night lights (vgaasm.asm `lit_present`: 20 x 18 cells of 16 x 8 pixels, each at its
+  tile's level from the sky, the soldiers' own light, fires, flares and the terrain's
+  lights, with vshift on a scroll) are still not ported, on the host neither. With the
+  remap they would cost little to show: per cell row one record per run of cells at one
+  level, a SH_TABLE record when the level changes (at most 11 tables, 360 cells: a few
+  hundred records, about 3-4 ms of the kernel's time and the copy's 8 ms of Ali's), the
+  CPU's part only the cells' levels when a light moved. That is the "per-cell night lights"
+  of "What is next": flares and fires lighting their area (1-2 days, the host's C first).
+
+Other colour remaps looked for: none left on the CPU in the VGA game. The interface's
+colour map (`g_uk_cmap`, `uk_remap_vram`) is EGA's only; palette fades (the intro, the
+slides) are the DAC's; the geoscape has no day / night shading (FORK.md "Differences":
+a remapped copy of the map's night columns would make it cheap, 2-3 days of the engine's
+work); the original does not darken the screen behind a pop-up window (OpenXcom's
+Game::run draws the states under a window unchanged; Window has no dim), so nothing was
+added; units' armour colours are their own pictures, and there is no hit flash in the
+engine.
+
+Tests: `make test` has a second night run, `night12` (`r=12` in tests/runs: run816
+`--rev 12`, the CPU's shade), against the same host pictures; both night runs check the
+console's line. `make smooth` has the smooth battle at night too (the same limits); the
+kit has it as `ARGS/7NSMOOTH.ARG` for the board (the remap is not tried on the board yet: its
+console line says which path ran).
+
+`tests/soundcheck.py` (make test's geo music): the geoscape track's first writes include,
+for each channel, a key-off ($B0-$B8) that keeps the frequency bits of the start menu's
+GMSTORY's last note on it; where GMSTORY is left is a moment of the real clock on the
+Atari816, so one note more or less of it changed those bits (this build left one note
+later than the tree before: $B0 = $19 instead of the host's $1A, and the check failed, as
+any change of the program's timing could make it). Those key-offs before a channel's first
+note of the track are now compared by their key bit only; every other write as before.
+
+| (the emulator, real clock) | Before (the CPU's shade) | After (the remap) | REV $0C (the fallback) |
+| --- | --- | --- | --- |
+| BENCH night: average full redraw | 264 ms | **157 ms** (day 154) | as before |
+| BENCH night: present view / scroll by one tile | 121 / 202 ms | **11 / 93 ms** (day 10 / 92) | |
+| BENCH night: cursor step / unit step, one rectangle | 26 / 32 ms | **19 / 23 ms** | |
+| smooth at night: scrolling | 5.2 a second (median 193 ms) | **20.0 a second** (median 50 ms; by day 20.8) | 5.4 a second |
+| smooth at night: the player's frames over 100 ms / the longest | 32 / 324 ms | **12 / 175 ms** | 32 / 318 ms |
+| smooth at night: the longest pointer stop | 109 ms | 100 ms | 111 ms |
+| smooth at night: walking | a step's present 70-90 ms after the one before | the same (paced by the animation) | |
+
+By day nothing changed (BENCH and smooth's day battle the same within a few ms).
+
 ## 5. The plan
 
 Principle: **upstream's code runs unchanged** on a model of the machine it was written for;
@@ -1470,12 +1533,12 @@ Risks:
 | --- | --- | --- |
 | ~~the A* goal search~~, ~~the voxel line in assembly~~ | done, exact (section 4f): the alien turns 4-5 times faster | |
 | ~~the stutter~~: the pointer alive in all work, the atlas kept, the path search in slices, the fan's walk in assembly | done (section 4h): the player's longest pointer stop 1.4 s → 80 ms | |
-| full redraws (100-160 ms), the night's shade (a blitter remap: hardware), the geoscape's screen changes (300 ms) | section 4h, "What is left" | 1-2 days |
+| full redraws (100-160 ms), ~~the night's shade~~ (done: section 4j), the geoscape's screen changes (300 ms) | section 4h, "What is left" | 1-2 days |
 | the voxel line's tile crossing (about 1,300 cycles) and checked voxels (250-400); a search skipped when the same one was just done (a world version) | a first turn of a small battle 5-7 s (section 4f, "What limits it now"); 1-3 s needs about twice that | 1-2 days |
 | the sight fan's rays and levels (`plat/losfan.c`) in assembly (its walk is: section 4h) | 20-40 ms a fan left | 0.5 day |
 | the start-up's CPU part (3 s: the palette and picture loaders read through stdio byte by byte) | the start menu sooner | 0.5 day |
 | the main bank: `hgame`'s queues (the `.s` code moved: done, section 4) | room for the next changes | with the SDK |
-| per-cell night lights (OpenXcom's lighting, a table per level at the present) | flares and fires lighting their area | 1 day |
+| per-cell night lights (upstream's VGA `lit_present`: OpenXcom's lighting; on the Atari816 a remapped copy per run of cells at one level: section 4j) | flares and fires lighting their area | 1-2 days |
 | the FLI's runs in assembly | the intro's explosion scene (1.1 s behind at worst) | 0.5 day |
 | report upstream: faults 1, 2, 3, 5, 6, 8 above, the GOG data, voxcheck.py | | |
 | the rest of the differences from DOS (walk frames, explosions, UFO doors, the 5-second speed, the battle's unit stats, terror units' abilities, the missing samples) | `engine/FORK.md` "Differences from the original game", with estimates | 0.5-5 days each |

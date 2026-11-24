@@ -72,6 +72,9 @@ static unsigned natl;
 static unsigned shelf_x, shelf_y, shelf_h, cur;  /* the packing: sheet cur's shelf */
 
 static int bb_sheet;                    /* the buffer + box sheet */
+static int shade_sheet;                 /* the night's tables (below): > 0 the sheet; 0 not
+                                           made yet; -1 no colour remap */
+static unsigned shade_rows;             /* bit k: row k holds level k's table */
 static int failed;
 /* the record path's state, shared with horizon/hz_bbs.s (plat_bb_sprite's
    fast path: a kept picture's record, in assembly) */
@@ -124,6 +127,10 @@ void hz_bb_screen(int on)
         if (bb_sheet > 0)
             hz_sheet_free((unsigned)bb_sheet);
         bb_sheet = 0;
+        if (shade_sheet > 0) {
+            hz_sheet_free((unsigned)shade_sheet);
+            shade_sheet = 0;            /* (no remap stays -1: the answer does not change) */
+        }
         return;
     }
     a = ((unsigned long)hg_fb_bank << 16) + (unsigned long)BB_ROW0 * BB_W;
@@ -564,7 +571,71 @@ int plat_bb_fill(unsigned off, unsigned w, unsigned rows, int colour)
     return 1;
 }
 
-int plat_bb_present(unsigned off, unsigned w, unsigned rows)
+/* ---------------------------------------------------------------- the night's shade
+   Ali's colour remap (REV $0D, Horizon 0.31: ABI.md "Colour remap"): the night's present is
+   a copy through vgabat.c's shade table instead of the CPU's 115 ms. The tables are a sheet
+   of 256 x 16 (row k: level k's), in the pictures' bank past PLEN; a row is written the
+   first time its level is shown, after a wait (a table is a source: never written while a
+   list may read it). Each call that remaps starts with its SH_TABLE record (Ali's table is
+   shared). One probe (a call of one SH_TABLE record) says whether the remap is there:
+   ENODEV (an older board, the blitter off) or EINVAL (Horizon before 0.31): the CPU shades
+   (vgabat.c: hz_shade_rect), as before. */
+#define SHADE_OFF   49152u              /* the tables: pics + 49152 .. + 53247 */
+
+static int shade_ready(unsigned lev, const unsigned char *tab)
+{
+    unsigned char far *t;
+
+    if (lev > 15 || shade_sheet < 0)
+        return 0;
+    t = (unsigned char far *)pics + SHADE_OFF;
+    if (!shade_sheet) {
+        hz_sheetnew sn;
+        hz_sheetrec r;
+        unsigned long a = (unsigned long)t;
+        int e;
+        wait_done();
+        hz_far_set(t, 0, 256u * 16u);
+        HZ_U24B(sn.addr, (unsigned)(a >> 16), (unsigned)a);
+        sn.zero = 0;
+        sn.stride = 256;
+        sn.w = 256;
+        sn.h = 16;
+        e = hz_sheet_new(&sn);
+        if (e <= 0 || e > 32) {
+            shade_sheet = -1;
+            printf("xcom: night shade: no sheet for the tables: by the CPU\n");
+            return 0;
+        }
+        memset(&r, 0, sizeof r);
+        r.sheet = (unsigned char)e;
+        r.op = SH_TABLE;
+        r.w = 256;
+        r.h = 1;
+        if (hz_sheet_draw(hg_win, 1, &r) < 0) {
+            unsigned err = hz_errno;
+            hz_sys_info();
+            hz_sheet_free((unsigned)e);
+            shade_sheet = -1;
+            printf("xcom: night shade: no colour remap (error %u, REV $%02X): by the CPU\n",
+                   err, hz_x);
+            return 0;
+        }
+        hz_list_wait(0);
+        shade_sheet = e;
+        shade_rows = 0;
+        printf("xcom: night shade: by the blitter's colour remap\n");
+    }
+    if (!(shade_rows >> lev & 1)) {
+        wait_done();
+        hz_far_copy(t + lev * 256u, (const unsigned char far *)tab, 256);
+        shade_rows |= 1u << lev;
+    }
+    return 1;
+}
+
+static int present(unsigned off, unsigned w, unsigned rows, unsigned lev,
+                   const unsigned char *tab)
 {
     int x, y;
     hz_sheetrec *r;
@@ -577,10 +648,24 @@ int plat_bb_present(unsigned off, unsigned w, unsigned rows)
         plat_bb_sync();
         return 0;
     }
+    if (tab && !shade_ready(lev, tab))
+        return 0;
     if (w && rows) {
+        if (tab) {
+            /* the table's record and the copy in one call */
+            if (qn > 126 || qpx + 256u + (unsigned long)w * rows > 460800UL)
+                send();
+            r = rec(256, 1);
+            memset(r, 0, sizeof *r);
+            r->sheet = (unsigned char)shade_sheet;
+            r->op = SH_TABLE;
+            r->sy = (unsigned short)lev;
+            r->w = 256;
+            r->h = 1;
+        }
         r = rec(w, rows);
         r->sheet = (unsigned char)bb_sheet;
-        r->op = SH_COPY;
+        r->op = tab ? SH_COPY | SH_REMAP : SH_COPY;
         r->c = 0;
         r->zero = 0;
         r->sx = (unsigned short)x;
@@ -597,6 +682,17 @@ int plat_bb_present(unsigned off, unsigned w, unsigned rows)
         t_view = 0;
     }
     return 1;
+}
+
+int plat_bb_present(unsigned off, unsigned w, unsigned rows)
+{
+    return present(off, w, rows, 0, NULL);
+}
+
+int plat_bb_present_shade(unsigned off, unsigned w, unsigned rows, unsigned lev,
+                          const unsigned char *tab)
+{
+    return present(off, w, rows, lev, tab);
 }
 
 int plat_bb_shift(long dx)

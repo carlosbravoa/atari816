@@ -19,6 +19,11 @@
 # XCOM_SECONDS, 400). A run ends 1 s of emulated time after the program's last line
 # ("xcom: files: at most ...", printed at its exit: run816 --stop-on), not at that limit;
 # "xcom: end ... (machine N s)" tells what a run needs.
+# A run's line may also start with k=NAME (tests/NAME.keys instead of tests/RUN.keys) and
+# r=N (the emulator reports hardware revision N: --rev N; r=12 is a board without the
+# blitter's colour remap, so the night's shade is the CPU's: the same pictures). The
+# night's runs check the console's line on how the shade was made (the remap at the
+# emulator's default revision, the CPU at r=12).
 # RUNS=FILE: the runs of FILE instead of tests/runs (make test-long: tests/runs-long; the
 # real input's run only with tests/runs); O=DIR the output folder (build/test).
 HZ=${1:-../../horizon}
@@ -41,13 +46,26 @@ for f in data/packs/*.PAK data/packs/PACKS.VER; do FILES="$FILES --file $f:/GAME
 for f in data/packs/VGA/*; do FILES="$FILES --file $f:/GAMES/XCOM/VGA/$(basename "$f")"; done
 [ -f MUSD.PRG ] && FILES="$FILES --file MUSD.PRG:/GAMES/XCOM/MUSD.PRG"   # the music task (sound)
 
+# a run line's options before the engine's (s=N, k=NAME, r=N): secs, keys, rev, args
+opts() {
+  secs=${XCOM_SECONDS:-400} keys=$name rev=
+  while :; do
+    case "$args" in
+      s=*) secs=${args%% *}; secs=${secs#s=} ;;
+      k=*) keys=${args%% *}; keys=${keys#k=} ;;
+      r=*) rev=${args%% *}; rev=${rev#r=} ;;
+      *) break ;;
+    esac
+    args=${args#* }
+  done
+}
+
 # ---------------------------------------------------------------- 1. the host
 while read -r name args; do
   case "$name" in ''|\#*) continue ;; esac
-  secs=${XCOM_SECONDS:-400}
-  case "$args" in s=*) secs=${args%% *}; secs=${secs#s=}; args=${args#* } ;; esac
+  opts
   mkdir -p $O/$name
-  sh tests/hostrun.sh "$name" $O/$name/host $args > $O/$name/host.txt 2>&1 || true
+  sh tests/hostrun.sh "$keys" $O/$name/host $args > $O/$name/host.txt 2>&1 || true
   [ -d $O/$name/host ] || { bad "$name: the host run"; continue; }
 done < $RUNS
 (cd $O && for n in */host/shot*.ppm; do md5sum "$n"; done | sed 's|/host/|/|') > $O/host.md5
@@ -65,17 +83,17 @@ fi
 pids= running=
 while read -r name args; do
   case "$name" in ''|\#*) continue ;; esac
-  secs=${XCOM_SECONDS:-400}
-  case "$args" in s=*) secs=${args%% *}; secs=${secs#s=}; args=${args#* } ;; esac
+  opts
   U=$(echo "$name" | tr a-z A-Z)
   # (BENCH reads the back buffer behind the blitter's back: /S waits for it at once)
   S=; case " $args " in *" BENCH "*) S=/S ;; esac
-  K=; [ -f tests/$name.keys ] && K="KEYS $U.KEY"
+  K=; [ -f tests/$keys.keys ] && K="KEYS $U.KEY"
+  R=; [ -n "$rev" ] && R="--emu-arg --rev --emu-arg $rev"
   echo "/V /T 5 $S $args $K" > $O/$name/$U.ARG
   printf '0 wait xcom: end\n' > $O/$name/end.script
-  python3 ../../sdk/tools/run816.py XCOM.PRG --horizon "$HZ" --mode shell \
+  python3 ../../sdk/tools/run816.py XCOM.PRG --horizon "$HZ" --mode shell $R \
     --dest /GAMES/XCOM/XCOM.PRG --cd /GAMES/XCOM --args "@$U.ARG" $FILES \
-    $( [ -f tests/$name.keys ] && echo --file tests/$name.keys:/GAMES/XCOM/$U.KEY) --file $O/$name/$U.ARG:/GAMES/XCOM/$U.ARG \
+    $( [ -f tests/$keys.keys ] && echo --file tests/$keys.keys:/GAMES/XCOM/$U.KEY) --file $O/$name/$U.ARG:/GAMES/XCOM/$U.ARG \
     --script $O/$name/end.script --shot-on "xcom: shot" --seconds $secs --stop-on "$STOP_TEXT" --stop-on-delay 1000 \
     --out $O/$name/816 > $O/$name/run816.log 2>&1 &
   pids="$pids $!"
@@ -129,10 +147,15 @@ fi
 
 while read -r name args; do
   case "$name" in ''|\#*) continue ;; esac
-  secs=${XCOM_SECONDS:-400}
-  case "$args" in s=*) secs=${args%% *}; secs=${secs#s=}; args=${args#* } ;; esac
+  opts
   log=$(echo "$args" | sed -n 's/.*LOG \([^ ]*\).*/\1/p')
   python3 tests/compare.py $name $O/$name "$log" || fail=1
+  case " $args " in *" NIGHT "*)
+    if [ -n "$rev" ] && [ "$rev" -lt 13 ]; then w="no colour remap"; h="by the CPU (REV $rev)"
+    else w="by the blitter's colour remap"; h="by the blitter's colour remap"; fi
+    if grep -aq "xcom: night shade: .*$w" $O/$name/816/console.txt; then ok "$name: the night's shade $h"
+    else bad "$name: the night's shade not $h: $(grep -a 'night shade' $O/$name/816/console.txt)"; fi ;;
+  esac
 done < $RUNS
 
 if [ -n "$ipids" ]; then
