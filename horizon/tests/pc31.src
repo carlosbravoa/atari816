@@ -1,0 +1,20 @@
+# (0.31) The PC icon without polling, and Auto connect (DESK=1; tests/mousegen.py makes
+# tests/pc31.keys from this; make test-pc). emu816 --pc-folder on a copy of tests/pc, the
+# link dropped at 1.5 s (after the boot's clock from the PC), back at 41 s. The PC icon is at
+# (595, 160). tests/cardreq.py --count: the requests in each window. Shots (s):
+#   1   6.0  the link down: the PC icon is there all the same
+#   2   9.5  a double click on it (8 s): "The PC link is not connected." (one STAT /PC:)
+#            Enter closes it; 10.5-25 s: no request at all (nothing looks at the link)
+#   3  27.0  a right click on the PC icon: Open, -, Auto connect (not checked)
+#   4  47.0  Auto connect chosen (27.5 s: /SYSTEM/PCAUTO made): STAT /PC: every 5 s while
+#            the link is down (28-41 s); the link back at 41 s: the clock set from the PC
+#            (time_set, /SYSTEM/CLOCK written); then a STAT /PC: every 5 s (48-63 s)
+# tests/pc31b.src: a second start with /SYSTEM/PCAUTO on the card: Auto connect is on.
+8000 move 595 160
+8100 dclick
+10000 key \n
+26000 move 595 160
+26100 rclick
+27500 move 560 197
+27800 click
+28000 move 450 300

@@ -112,7 +112,7 @@ PBR:PC-1.
 | $84 | win_drop | A = window (any program's), X, Y = string (127 characters) | - | Drag and drop: the window gets WE_DROP (a, b = the pointer in its content, c = the sender's task id) and reads the string with win_dropget |
 | $85 | win_dropget | A = own window, X, Y = 128-byte buffer | - | The last string dropped on that window |
 | $86 | ws_palette | A = index, X = red \| green << 8, Y = blue | - | Sets one palette entry. 0-15 (the UI colours): the system palette, for everyone (Settings' desktop colour, entries 2 and 3). (0.18) 16-255: the entry becomes the caller's own (if nobody holds it; EAGAIN if another program does) and shows its colour while one of its windows has the focus; see "Palette entries". In full-screen mode: the program's own palette, all 256 entries |
-| $87 | setting | A = id, X = value ($FFFF: read only) | A = the old value | 0 mouse speed 1-4, 1 alert (beep) volume 0-15 (0 silent), 2 key repeat delay in 10 ms ticks (0 = no repeat; default 40), 3 key repeat interval in ticks (default 5), (0.18) 4 the sound volume 0-15: Lau's master volume, volume x 17 (default 8; 0.17 used setting 1 for it), (0.24) 5 the screen saver's delay in seconds (0 = off, default 300; Settings offers 0, 60, 300, 600; the Desktop reads it), 6 the seconds since the last input (read only in practice; writing it is a test aid): see "Idle time and the screen saver". A held key (not a modifier) repeats as further down events |
+| $87 | setting | A = id, X = value ($FFFF: read only) | A = the old value | 0 mouse speed 1-4, 1 alert (beep) volume 0-15 (0 silent), 2 key repeat delay in 10 ms ticks (0 = no repeat; default 40), 3 key repeat interval in ticks (default 5), (0.18) 4 the sound volume 0-15: Lau's master volume, volume x 17 (default 8; 0.17 used setting 1 for it), (0.24) 5 the screen saver's delay in seconds (0 = off, default 300; Settings offers 0, 60, 300, 600; the Desktop reads it), 6 the seconds since the last input (read only in practice; writing it is a test aid): see "Idle time and the screen saver"; (0.31, read only: a value given is ignored) 7 not 0 while the desktop is not on the screen (a full-screen program's screen, or the classic Atari, is shown), 8 a count moved by every request that may change the card or the PC volume (open in a writing mode, the close of a handle opened so, mkdir, delete, rename; any program; it wraps): see "Background card requests". A held key (not a modifier) repeats as further down events |
 | $88 | win_title | A = own window, X, Y = string | - | A new title (31 characters) |
 | $89 | ws_pointer | A = 0 arrow, 1 drag (a document), 2 crosshair, 3 column resize, 4 row resize (0.13; hot spot at the centre) | - | The pointer's shape (back to the arrow when the task exits or the window system ends) |
 | $8A | ws_mouse | A = window ($FF: none), X, Y = 10-byte buffer | A = buttons, X = the window under the pointer ($FF: none) | The pointer now, without waiting for an event: {i16 x, i16 y on the screen, i16 x, i16 y relative to the content of window A (any program's; with $FF the screen position again), u16 buttons (bit 0 left, 1 right, 2 middle)}. X is the top-most window there as win_at gives it ($FF also for the menu bar, and without the window system). Window A must exist (EINVAL); without the window system only $FF is allowed |
@@ -480,6 +480,51 @@ or the loss of the focus (F12 shows the classic Atari at once; Alt+Tab; another 
 window). Because of the full-screen rule above, it never starts over a full-screen game or the
 classic Atari, and the kernel needs nothing else for it. A program may read setting 6 (a
 program of its own that dims or pauses when nobody is there); it should not write it.
+
+### Background card requests (0.31)
+
+The I/O processor serves one request at a time, so a request of a program in the background
+can make the program in front wait (on the board a card request takes 9-16 ms or more; a
+folder read of a full folder longer). An idle Desktop makes **no request at all**; the system
+programs look only at the kernel's counts (`setting` 7 and 8: no request) on their timers:
+
+- **The card's changes**: `setting` 8 moves at every OPEN in a writing mode, every CLOSE of a
+  handle opened so, MKDIR, DELETE and RENAME, by any program. Once a second the Desktop
+  compares it: when it moved, one STAT of `/PRN:` (a print job is a file written to
+  `/PRN:NAME`, finished at its CLOSE: the notice and the sending to the PC come as before)
+  and one read of /Desktop. Printer does the same STAT in the background (in front, its
+  window asks every second: the user is watching the list); Music looks for `/SYSTEM/OPEN.REQ`
+  (the launcher's write moves the count). Before 0.31: STAT `/PRN:` every second (the
+  Desktop and Printer), STAT `/PC:` and a read of /Desktop every 5 s, Music's OPEN of
+  `/SYSTEM/OPEN.REQ` every second.
+- What the I/O processor writes by itself is not counted: the classic Atari's print jobs
+  (the Desktop and Printer make one STAT of `/PRN:` when the desktop comes back from the
+  classic Atari; Printer's window reads its list at each focus and every second while in
+  front) and the PC link's
+  developer upload into /Desktop (F5).
+- **The PC link** is looked at only when the user opens it: the PC icon is always on the
+  Desktop; opening it (double click, Open) makes one STAT of `/PC:` (the PC's clock taken
+  too, ui_clkpc): connected, Files opens at `/PC:`; not, the alert "The PC link is not
+  connected." Files reads `/PC:` when it is opened there. **Auto connect** (the PC icon's
+  menu, a check mark; off by default; kept as the file `/SYSTEM/PCAUTO`, there = on): the
+  Desktop then makes a STAT of `/PC:` every 5 s, and when the link comes the clock is set
+  from the PC, as every Desktop did before 0.31 (for development sessions). The Desktop's
+  start still asks the PC for the clock once when the clock is not set (ui_clkload).
+- While `setting` 7 is not 0 (a full-screen program's screen or the classic Atari is shown)
+  the Desktop's timer does nothing (also no Auto connect look, no Programs menu read) and
+  Printer and Music look at nothing; when the desktop is back, the Desktop does its 5-s
+  work at once.
+- Files reads a selected entry's date (STAT: a folder listing has no dates) at most once
+  each 0.25 s; while the selection runs, the date comes 0.25 s after it rests.
+- What stays periodic, only while the user has a window for it open: Printer in front
+  (STAT `/PRN:` every second), the Atari panel's folder disk numbers (STAT `/D1:`-`/D4:`, answered
+  by the I/O processor from its memory) every second while that panel is open.
+
+`make test-31` (tests/quiet31.src) counts every task's requests: none in 30 s of an idle
+Desktop, none in 20 s behind a full-screen program, none in 30 s with Files, Music, Printer
+and BASIC open (before 0.31: 42, 68 and 102). `make test-pc` (tests/pc31.src): the PC icon
+with the link down, the alert, no request afterwards, Auto connect's looks every 5 s, kept
+across a start.
 
 ### Full-screen mode
 

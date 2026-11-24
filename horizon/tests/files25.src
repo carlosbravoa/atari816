@@ -5,7 +5,8 @@
 #   1  README.TXT selected in Files; the Terminal (in front) has copied it to /NEW.TXT: Files,
 #      behind, does not show it yet
 #   2  Alt+Tab: Files in front reads / again: NEW.TXT shows, README.TXT still selected
-#   3  Files in /Printouts (empty); the classic Atari's job has arrived (the notice): not shown
+#   3  Files in /Printouts (empty); the classic Atari's job has arrived: not shown ((0.31) no
+#      notice either: the Desktop no longer looks at the print jobs on a timer)
 #   4  F5: the job shows
 #   5  Files in /PC:
 #   6  the link dropped (30 s), View > Reload: "The PC link was lost" on the footer, no entries

@@ -29,10 +29,12 @@
 ; machine; F12 there brings the desktop back exactly as it was.
 ; Icons (pictures from /SYSTEM/ICONS, read into a bank of their own): "SD card" (opens Files
 ; at the root), "Atari" (opens the Atari panel; a green mark when something is loaded),
-; (0.20) "PC" while the PC volume of the PC link is there (STAT /PC: works; looked at every
-; 5 s: it comes and goes with the PC; when it comes, the PC's clock sets the clock: ui_clkpc;
+; (0.20) "PC" while the PC volume of the PC link is there (STAT /PC: works; (0.31) looked at
+; when /Desktop is read: at start, after a change on the card, F5 (before 0.31 every 5 s);
+; when it comes, the PC's clock sets the clock: ui_clkpc;
 ; opens Files at /PC:), then one per entry of /Desktop (sorted ignoring case, names starting with '.' left out;
-; read again every 5 s): a folder, a file (its icon by its type: ui_ficon), or a shortcut
+; (0.31) read again only after a request that may change the card (the kernel's count,
+; setting 8, looked at every second: no request) and on F5; before 0.31 every 5 s): a folder, a file (its icon by its type: ui_ficon), or a shortcut
 ; (NAME.LNK, ui_lnkread: the icon of its target with an arrow, labelled by its title). They
 ; sit on a grid of 8 columns x 5 rows from the top right; where each one is is kept in
 ; /SYSTEM/LAYOUT ("col row name" lines, the fixed icons ":SD", ":ATARI" and ":PC"; the PC's
@@ -62,13 +64,17 @@
 ; (0.18) As on a real machine, attaching or ejecting a cartridge is a power cycle: the
 ; executable is ejected (attaching), then the classic machine is cold booted and stays
 ; hidden (classic_boot CB_STAY). Restart Atari with a cartridge ejects the executable first.
-; (0.23) Printing: every second (the timer) the Desktop asks how many print jobs are finished
-; (one STAT of "/PRN:"); when that count changed, /Printouts is read and the jobs newer than
+; (0.23) Printing: the Desktop asks how many print jobs are finished (one STAT of "/PRN:";
+; (0.31) only when the kernel's count of card changes moved: a job is a file written, done at
+; its CLOSE; and when the desktop comes back from the classic Atari; before 0.31 every
+; second); when that count changed, /Printouts is read and the jobs newer than
 ; the newest seen (names start with the date and time) are new: "Printed: NAME" in the
 ; status for about 6 s instead of the clock (a click on it opens Printer, /BIN/PRINTER.PRG),
 ; the information chime, and, when the PC's gateway makes PDFs (STAT "/PC:": PCS_PRINT),
 ; /SYSTEM/PRINTD.PRG is started for each new job (detached): the notice then says "(to the
-; PC)". The jobs there at start count as seen. Without the Desktop (the text shell): no
+; PC)". The jobs there at start count as seen. (0.31) While a full-screen program's screen
+; or the classic Atari is shown (setting 7) the timer does nothing; back on the desktop the
+; 5-s work comes at once (with a STAT of "/PRN:"). An idle Desktop makes no request. Without the Desktop (the text shell): no
 ; notices, nothing sent at once.
 ; (0.23) "Run in Atari": a /Desktop entry (or a shortcut's target) that is a BASIC program
 ; (.bas .lst) has it in its pop-up menu (ulib atari_run: classic_mount CK_BASRUN, the Atari
@@ -164,6 +170,12 @@ start:  sys     SYS_SINGLE              ; never two Desktops
 :       ptr     p_desk                  ; /Desktop (an error: there already)
         sys     SYS_MKDIR
         jsr     ui_clkload              ; the last time saved: the clock's provisional start
+        ldx     #.loword(p_pcauto)      ; (0.31) Auto connect (the PC link) on?
+        jsr     statx
+        lda     #0
+        rol     a
+        eor     #1
+        sta     pcauto
         jsr     icload                  ; the icons' pictures
         lda     #$FFFF
         sta     z:atwin
@@ -208,8 +220,6 @@ start:  sys     SYS_SINGLE              ; never two Desktops
         lda     #$FFFF                  ; (0.20) the PC icon's cell: not known yet
         sta     z:pccell
         jsr     scan                    ; the icons
-        lda     z:pcon                  ; (the clock was asked already: ui_clkload)
-        sta     z:pcwas
         jsr     namesum
         sta     z:sum
         jsr     load
@@ -1524,15 +1534,12 @@ scan:   lda     #K_SD                   ; the fixed icons
         sta     ic_kind+2
         lda     #NFIX
         sta     z:nfix
-        stz     z:pcon
-        ldx     #.loword(p_pc)          ; (0.20) the PC volume there: its icon
-        jsr     statx
-        bcs     :+
-        lda     #K_PC
-        sta     ic_kind+4
+        lda     #K_PC                   ; (0.20) the PC volume: (0.31) its icon always, the
+        sta     ic_kind+4               ; link looked at only when it is opened (pcopen)
         inc     z:nfix
-        inc     z:pcon
-:       lda     z:nfix
+        lda     #1
+        sta     z:pcon
+        lda     z:nfix
         sta     z:nic
         stz     z:skip
 @call:  lda     #.loword(p_desk)        ; block: path, buffer, length, skip
@@ -1578,20 +1585,83 @@ scan:   lda     #K_SD                   ; the fixed icons
         jmp     @call
 @out:   rts
 
-; the timer (and after a change): read /Desktop again; when it changed, every icon again
-rescan: jsr     scan
-        lda     z:pcon                  ; (0.20) the PC came: its clock
-        cmp     z:pcwas
+; (0.31) the PC icon's menu: Open, -, Auto connect (checked when on: pcauto, kept as the
+; file /SYSTEM/PCAUTO: there = on)
+pcmenu: lda     pcauto
         beq     :+
-        sta     z:pcwas
-        ldx     #$FFFF                  ; (the icons after it move: no selection)
-        stx     z:sel
+        lda     #MS_CHECK
+:       ora     #MS_STATE
+        sep     #$20
+        .a8
+        sta     pu_pcst
+        rep     #$20
+        .a16
+        ldx     #.loword(pu_pc)
+        jsr     popup
         cmp     #0
+        bne     :+
+        lda     z:pui
+        jmp     openicon
+:       cmp     #2
+        bne     @out
+        lda     pcauto
+        eor     #1
+        sta     pcauto
+        stz     pclive                  ; (on: the PC's clock at the first look that finds it)
+        ptr     p_pcauto
+        lda     pcauto
         beq     :+
+        lda     #O_CREATE
+        sys     SYS_OPEN
+        bcs     @out
+        sys     SYS_CLOSE
+        rts
+:       sys     SYS_DELETE
+@out:   rts
+
+; (0.31, the 5-s work) Auto connect on: STAT "/PC:" (as the Desktop did always before 0.31,
+; for development sessions); when the link came: the PC's clock (ui_clkpc). Off: nothing.
+; Never while the desktop is not on the screen (tick's setting 7)
+pcpoll: lda     pcauto
+        beq     @out
+        ldx     #.loword(p_pc)
+        jsr     statx
+        lda     #0
+        rol     a
+        eor     #1                      ; 1: there
+        cmp     pclive
+        beq     @out
+        sta     pclive
+        cmp     #0
+        beq     @out
         jsr     ui_clkpc
-        bcs     :+
-        jsr     clock
-:       jsr     namesum
+        bcs     @out
+        jmp     clock
+@out:   rts
+
+; (0.31) every second, no request unless the card changed: the kernel's count (setting 8:
+; OPEN to write, a CLOSE of a file written, MKDIR, DELETE, RENAME, by any program) moved
+; since the last read of /Desktop: STAT "/PRN:" (a print job is a file written, finished at
+; its CLOSE) and /Desktop read again (with STAT "/PC:": the PC icon). Nothing is polled: the
+; PC volume's icon follows the link at such a read and at F5; what the I/O processor writes
+; by itself (the classic Atari's print jobs, the PC link's developer upload) shows at the
+; next change, F5, or (print jobs) when the desktop comes back from the classic Atari.
+tgen:   lda     #8
+        ldx     #$FFFF
+        sys     SYS_SETTING
+        cmp     dgen
+        beq     :+
+        jsr     prcheck
+        jmp     rescan
+:       rts
+
+; the timer (and after a change): read /Desktop again; when it changed, every icon again
+rescan: lda     #8                      ; (0.31) the card's count of name changes now
+        ldx     #$FFFF                  ; (the start's scan takes none: the first 5-s
+        sys     SYS_SETTING             ; look reads /Desktop again, as before)
+        sta     dgen
+        jsr     scan
+        jsr     namesum
         cmp     z:sum
         beq     @out
         sta     z:sum
@@ -2747,6 +2817,13 @@ openicon:
         jmp     ui_launch
 :       cmp     #K_PC                   ; (0.20) the PC: Files at /PC:
         bne     :+
+        jsr     ui_clkpc                ; (0.31) the check: STAT "/PC:" (and the PC's clock)
+        bcc     @pc
+        ldx     #.loword(al_nopc)       ; not connected: says so
+        jmp     ui_alert
+@pc:    lda     #1
+        sta     pclive
+        jsr     clock
         ldx     #.loword(p_files)
         ldy     #.loword(p_pc)
         lda     #.loword(t_files)
@@ -3143,6 +3220,7 @@ ispc:   ldy     #0
 ;     line per thing loaded, Eject all, -, Restart Atari, Switch to Atari, -, (0.23) Folder
 ;     disk..., Atari settings..., Open panel
 ;   the SD card: Open
+;   (0.31) the PC: Open, -, Auto connect (checked when on)
 ;   a /Desktop entry: Open, ((0.23) a BASIC program: Run in Atari), (a shortcut: Show
 ;     original), -, Rename..., Delete
 ;   the desktop: New folder..., Tidy up, -, Settings...
@@ -3166,11 +3244,11 @@ ctxmenu:
         jsr     kindof
         cmp     #K_ATARI
         jeq     atmenu
-        cmp     #K_PC                   ; (0.20) the PC: as the SD card
-        beq     :+
+        cmp     #K_PC                   ; (0.31) the PC: Open, -, Auto connect
+        jeq     pcmenu
         cmp     #K_SD
         bne     @ent
-:       ldx     #.loword(pu_sd)         ; the SD card: Open
+        ldx     #.loword(pu_sd)         ; the SD card: Open
         jsr     popup
         cmp     #0
         bne     @out
@@ -4590,15 +4668,26 @@ fd_row: asl     a
         rts
 
 ; ---------------------------------------------------------------- printing (0.23)
-; The timer, every second: prcheck (new print jobs), the notice's end, the folder disk's
-; numbers; every 5 s (as before 0.23: at the timer's 5th, 10th, ... second, by the uptime,
-; so a tick lost while a dialog was open does not move them) the status, /Desktop and what
-; the Atari has loaded
-tick:   lda     mdirty                  ; (0.31) the apps changed: the Programs menu
+; The timer, every second: (0.31) tgen (print jobs and /Desktop, only after a change on the
+; card), the notice's end, the folder disk's numbers (while the Atari panel is open); every
+; 5 s (as before 0.23: at the timer's 5th, 10th, ... second, by the uptime, so a tick lost
+; while a dialog was open does not move them) the status and what the Atari has loaded. (0.31) Nothing while the desktop is not on the screen (a full-screen
+; program's screen or the classic Atari is: setting 7): no request of the Desktop's then
+; waits in the I/O processor's queue before the program's own; when the desktop is back, the
+; 5-s work at once (tmiss)
+tick:   jsr     svcheck                 ; (0.24) the screen saver
+        lda     #7
+        ldx     #$FFFF
+        sys     SYS_SETTING
+        bcs     :+                      ; (an older kernel)
+        cmp     #0
+        beq     :+
+        sta     tmiss
+        rts
+:       lda     mdirty                  ; (0.31) the apps changed: the Programs menu
         beq     :+
         jsr     remenu
-:       jsr     svcheck                 ; (0.24) the screen saver
-        sys     SYS_UPTIME              ; the timer's second this tick belongs to (first:
+:       sys     SYS_UPTIME              ; the timer's second this tick belongs to (first:
         sec                             ; the uptime before anything waits for the I/O
         sbc     tm0                     ; processor)
         sta     z:lo
@@ -4609,9 +4698,13 @@ tick:   lda     mdirty                  ; (0.31) the apps changed: the Programs 
         jsr     div32
         lda     z:lo
         sta     tsec
-        jsr     prcheck
+        jsr     tgen                    ; (0.31) print jobs, /Desktop: after a change only
         lda     prtick
         beq     :+
+        lda     tsec                    ; (0.31) one second of the notice per second of the
+        cmp     prsec                   ; uptime: the ticks queued while the classic Atari
+        beq     :+                      ; was shown come at once (tcatch's notice stays)
+        sta     prsec
         dec     prtick
         bne     :+
         jsr     clock                   ; the notice is over: the clock again
@@ -4627,9 +4720,15 @@ tick:   lda     mdirty                  ; (0.31) the apps changed: the Programs 
         lda     z:lo
         sta     tlast
         bra     five
-@out:   rts
-five:   jsr     clock                   ; the 5-s work
-        jsr     rescan
+@out:   lda     tmiss                   ; (0.31) back from a full screen
+        bne     five
+        rts
+five:   lda     tmiss                   ; (0.31) back from the classic Atari or a full
+        beq     :+                      ; screen: the jobs the classic Atari may have
+        stz     tmiss                   ; printed meanwhile (the kernel did not see them)
+        jsr     prcheck
+:       jsr     clock                   ; the 5-s work (no request: the kernel's)
+        jsr     pcpoll                  ; (0.31) the PC link, with Auto connect only
         jsr     atcheck
         bcc     :+
         jmp     atchanged
@@ -4692,7 +4791,8 @@ svcheck:
 ; timer's events queued): when one of the timer's 5-s seconds passed meanwhile, its work now
 ; (as the 5-s timer's queued event did before 0.23; the 1-s events that follow come late and
 ; would miss it)
-tcatch: sys     SYS_UPTIME
+tcatch: jsr     prcheck                 ; (0.31) the jobs the classic Atari printed meanwhile
+        sys     SYS_UPTIME
         sec
         sbc     tm0
         sta     z:lo
@@ -6017,6 +6117,8 @@ t_fqk:  .byte   "Force quit", 0
 t_rst:  .byte   "Restart", 0
 ; (0.15) the pop-up menus' items
 pu_sd:  .byte   "Open", 0, 0
+pu_pc:  .byte   "Open", 0, "-", 0           ; (0.31) the PC icon's menu
+pu_pcst: .byte  MS_STATE, "Auto connect", 0, 0
 pu_ent: .byte   "Open", 0, "-", 0, "Rename...", 0, "Delete", 9, "Del", 0, 0
 pu_lnk: .byte   "Open", 0, "Show original", 0, "-", 0, "Rename...", 0, "Delete", 9, "Del", 0, 0
 pu_entr: .byte  "Open", 0, "Run in Atari", 0, "-", 0, "Rename...", 0, "Delete", 9, "Del", 0, 0
@@ -6116,6 +6218,9 @@ t_mount: .byte  "The file could not be loaded.", 10, "Check that it is a valid A
 t_notat: .byte  "Only Atari disks (.ATR .XFD), programs", 10, "(.XEX .COM .EXE) and cartridges", 10
         .byte   "(.CAR .ROM .BIN) can be loaded.", 0
 t_noboot: .byte "The Atari could not be restarted.", 0
+t_nopc: .byte   "The PC link is not connected.", 10, "Start atari816-link on the PC (see the README,", 10
+        .byte   "PC link) and connect the cable, then open PC again.", 0
+p_pcauto: .byte "/SYSTEM/PCAUTO", 0
 t_nocart: .byte "Not enough free memory for the cartridge:", 10
         .byte   "close a program and try again.", 0
 ; the date and time
@@ -6145,6 +6250,8 @@ al_norest: .word 3
         .addr   t_rtitle, t_norest, b_ok, 0, 0
 al_del: .word   2
         .addr   t_delt, abuf, b_delete, b_cancel, 0
+al_nopc: .word  1                       ; (0.31)
+        .addr   t_pc, t_nopc, b_ok, 0, 0
 al_nodel: .word 3
         .addr   t_delt, t_nodel, b_ok, 0, 0
 al_mount: .word 3
@@ -6369,6 +6476,7 @@ rnblk:  .res    6                       ; rename: {u24 old, u24 new}
 prok:   .res    2                       ; the I/O processor knows "/PRN:"
 prcnt:  .res    2                       ; the count of finished jobs last seen
 prtick: .res    2                       ; a notice's seconds left (0: the clock)
+prsec:  .res    2                       ; (0.31) the timer's second of its last count down
 tm0:    .res    4                       ; the uptime when the timer started (ms)
 tlast:  .res    2                       ; the timer's second of the last 5-s work
 tsec:   .res    2                       ; (tick: this one's)
@@ -6377,6 +6485,10 @@ prpc:   .res    2                       ; prscan: the PC asked (1 no PDFs, 2 PDF
 prsnt:  .res    2                       ; prscan: PRINTD started
 svdone: .res    2                       ; (0.24) the screen saver was started (until the next input)
 svtid:  .res    2                       ; its task id while it may run (0: none)
+tmiss:  .res    2                       ; (0.31) ticks were skipped (a full screen in front)
+pcauto: .res    2                       ; (0.31) Auto connect: the PC link looked at every 5 s
+pclive: .res    2                       ; (0.31) its last look found it
+dgen:   .res    2                       ; (0.31) setting 8 when /Desktop was last read
 prsent: .res    2                       ; the notice: "(to the PC)"
 prmax:  .res    PNAMEL                  ; the greatest job name seen (without ".txt")
 prold:  .res    PNAMEL                  ; (prscan: before it)
@@ -6497,7 +6609,6 @@ dtf:    .res    2
 dtn:    .res    2
 nfix:   .res    2                       ; (0.20) the fixed icons: 2, or 3 with the PC
 pcon:   .res    2                       ; the PC volume is there (its icon shown)
-pcwas:  .res    2                       ; (at the last scan)
 pccell: .res    2                       ; the PC icon's cell ($FFFF: none yet)
 mvcp:   .res    2                       ; moveto: copy, not move
 ap:     .res    4                       ; (0.29) far pointers to app records

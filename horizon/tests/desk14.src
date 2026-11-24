@@ -14,7 +14,8 @@
 #            Settings...; above the pointer: no room below)
 #   9  36.0  Tidy up: every icon back in order
 #  10  38.0  a right click on the README.TXT shortcut: Open, Show original, -, Rename...,
-#            Delete (0.15; left of the pointer: no room at the right)
+#            Delete (0.15; left of the pointer: no room at the right; (0.31) the PC icon is
+#            always there: the shortcut is a row lower, the menu nearer the bottom)
 #  11  39.5  Delete: the confirmation
 #  12  41.0  Enter: the shortcut is gone
 #  13  45.0  Horizon > About Horizon: the date
@@ -57,9 +58,9 @@
 33900 rclick
 35000 move 420 283
 35400 click
-37000 move 596 220
+37000 move 596 280
 37400 rclick
-38500 move 560 286
+38500 move 540 345
 38900 click
 40000 key \n
 42000 move 40 8

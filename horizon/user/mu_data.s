@@ -328,6 +328,7 @@ dirty:  .res    2                       ; the settings changed
 sysv:   .res    2                       ; the sound volume setting
 rng:    .res    2
 reqt:   .res    2
+reqg:   .res    2                       ; (0.31) setting 8 at the last look
 vblon:  .res    2
 nch:    .res    2                       ; the meters: channels, a bar's width, their x
 mbw:    .res    2

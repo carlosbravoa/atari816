@@ -1,4 +1,7 @@
 # (0.23) The Desktop with a PC that makes PDFs (DESK=1; --pc-folder, the classic Atari prints
 # at 6 s): shot 1 at 10.5: "Printed: Atari (to the PC)"; PRINTD made the marked .pdf on the PC.
-# (A Shift press and release: the session needs one event)
+# (0.31) The classic Atari shown from 5 s to 9.5 s (F12): the Desktop looks at the print jobs
+# when the desktop comes back (no timer looks at them).
 100 {dE1}{uE1}
+5000 {F12}
+9500 {F12}

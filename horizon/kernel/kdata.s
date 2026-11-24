@@ -372,5 +372,7 @@ bss_end:
 
 ; ---- past the video-state block ($01:F400): BSS2, cleared at boot ----
         .segment "BSS2"
+card_gen:   .res    2           ; (0.31) requests that may have changed the card's names (mbox.s)
+fh_wr:      .res    NFILE*2     ; (0.31) the handle's open mode (not 0: it writes; mbox.s)
 t_args:     .res    NSLOT*128   ; argument string, copied to the top of the window (slot*128)
 cl_names:   .res    6*128       ; mounted classic items: D1:-D4:, executable, cartridge

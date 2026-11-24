@@ -81,7 +81,7 @@ MAXPL   = 256                           ; songs in the playlist at most (128 byt
 PATHMAX = 128                           ; a path with its 0
 NSMPB   = 31 * 30                       ; the sample headers (MOD, the 31-sample layout)
 TICK    = 10                            ; the timer: 0.1 s
-REQT    = 10                            ; requests looked for every REQT ticks
+REQT    = 10                            ; requests looked for every REQT ticks (when the card changed)
 HELLOT  = 200                           ; the engine's hello: 200 x 10 ms at most
 RDT     = 30                            ; a read not answered: asked again after 30 frames / ticks
 PH_NONE = 0                             ; phase: nothing asked
@@ -274,6 +274,12 @@ ontick: jsr     poll
         cmp     #REQT
         jcc     loop
         stz     reqt
+        lda     #8                      ; (0.31) only when the kernel's count of card
+        ldx     #$FFFF                  ; changes moved (setting 8: the launcher's write of
+        sys     SYS_SETTING             ; the file moves it): no card request while idle
+        cmp     reqg
+        jeq     loop
+        sta     reqg
         jsr     req_check
         jmp     loop
 

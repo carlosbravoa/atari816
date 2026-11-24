@@ -7,7 +7,9 @@ in build/horizon.lbl: python3 tests/cardreq.py --watch build/horizon.lbl prints 
 options). A request is the write of the first byte of a 16-byte slot of the ring; its path
 is what kpath holds then (the kernel resolves every path there before it sends the
 request). FROM, TO (seconds): only the requests between them.
-cardreq.py --menu LBL ERR FROM TO: make test-31's summary (menu() below)."""
+cardreq.py --menu LBL ERR FROM TO: make test-31's summary (menu() below).
+cardreq.py --count LBL ERR FROM TO LABEL: how many requests between FROM and TO, by op and
+path (tests/quiet31.src)."""
 import sys
 
 NM = {1: 'OPEN', 2: 'CLOSE', 3: 'READ', 4: 'WRITE', 5: 'SEEK', 6: 'STAT', 7: 'READDIR',
@@ -64,7 +66,21 @@ def menu(lbl, err, lo, hi):
           % (n('OPEN', '/SYSTEM/PROGRAMS'), n('READDIR', '/APPS'), n('STAT', '/SYSTEM/APPS.NEW')))
 
 
+def count(lbl, err, lo, hi, label):
+    """(0.31, make test-31) the requests of every task between lo and hi, counted by op and path"""
+    win = [r for r in requests(lbl, err) if lo <= r[0] < hi]
+    print('%s, %g-%g s: %d card requests' % (label, lo, hi, len(win)))
+    n = {}
+    for t, op, path in win:
+        n[(op, path)] = n.get((op, path), 0) + 1
+    for (op, path), k in sorted(n.items()):
+        print('  %d %s %s' % (k, op, path))
+
+
 if __name__ == '__main__':
+    if sys.argv[1] == '--count':
+        count(sys.argv[2], sys.argv[3], float(sys.argv[4]), float(sys.argv[5]), sys.argv[6])
+        sys.exit(0)
     if sys.argv[1] == '--menu':
         menu(sys.argv[2], sys.argv[3], float(sys.argv[4]), float(sys.argv[5]))
         sys.exit(0)

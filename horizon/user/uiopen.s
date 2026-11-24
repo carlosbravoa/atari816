@@ -325,7 +325,8 @@ lx_up:  and     #$00FF
 :       rts
 
 ; (0.26) /SYSTEM/OPEN.REQ written: op_prg, LF, op_arg, LF (the running program reads it when
-; its window gets the focus, or within a second, and deletes it: Music)
+; its window gets the focus, or within a second (the write moves setting 8), and deletes
+; it: Music)
 op_request:
         ldx     op_prg
         ldy     #.loword(op_lbuf)

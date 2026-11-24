@@ -503,9 +503,13 @@ card. How to start the gateway on the PC: see the root README, "PC link".
   Open and Save dialogs. In the card's root (`/`) the volume shows as a folder named `PC:` at
   the end of the list (the shell's `ls /`; Files and the dialogs sort it among the folders).
   Files whose names start with `.` on the PC are not shown.
-- **The Desktop** shows a "PC" icon (a monitor) under the Atari icon while the volume is
-  there; it is looked at every 5 s, so the icon comes when the gateway connects and goes when
-  it stops. A double click opens Files at `/PC:`. A file or folder dropped on it (from Files or
+- **The Desktop** shows a "PC" icon (a monitor) under the Atari icon, (0.31) always: the link
+  is looked at only when the icon is opened (a double click, Open): connected, Files opens at
+  `/PC:`; not, the alert "The PC link is not connected." (0.20-0.30: the icon was there only
+  while the volume was, looked at every 5 s.) Its menu's **Auto connect** (off by default,
+  kept as `/SYSTEM/PCAUTO`) brings the 5-s look back, for development sessions: the clock is
+  set from the PC when the link comes; never while a full-screen program or the classic
+  Atari is shown. A file or folder dropped on it (from Files or
   from the desktop) is copied into `/PC:`; a file from the PC dropped on the SD card icon is
   copied to the card's root. The icon's place is kept in /SYSTEM/LAYOUT as `:PC`, also while
   the PC is away.
@@ -1211,6 +1215,27 @@ answers SR_APPS with EINVAL, an older TERM opens a shell).
   files; progok about 260); Files 26,029 -> 23,201 (its 2 KB READDIR buffer); TERM and
   INSTALL have room.
 - `kpath` is exported (`build/horizon.lbl`, the kernel's labels, for `tests/cardreq.py`).
+- **Nothing polled** (ABI.md, "Background card requests"). The I/O processor serves one
+  request at a time; behind a full-screen game the Desktop still asked STAT `/PRN:` every
+  second, STAT `/PC:` and a READDIR of /Desktop every 5 s, Printer STAT `/PRN:` every second
+  and Music opened `/SYSTEM/OPEN.REQ` every second: 68 requests in 20 s with those windows
+  open, each one a possible wait for the game's own. Now an idle Desktop makes none, alone
+  or with those windows open, and none is made behind a full screen. The kernel counts the
+  requests that change the card (`setting` 8: an open to write and its close, mkdir,
+  delete, rename) and says whether the desktop is on the screen (`setting` 7); the Desktop,
+  Printer and Music look at those once a second and ask the card only when the count moved
+  (a print job is a file written: its close moves it).
+  **What the user notices**: the **PC icon is always there**; opening it with the link down
+  says "The PC link is not connected." (Auto connect in its menu, off by default, kept in
+  `/SYSTEM/PCAUTO`, brings the old automatic look back, every 5 s, never behind a full
+  screen); a PC that connects later no longer sets the clock by itself (opening the icon
+  does). A print job of the **classic Atari** is noticed when the desktop comes back from it
+  (Printer's window, while in front, still looks every second), not while the Atari runs
+  hidden behind the desktop. A file the PC
+  link's developer upload puts in /Desktop shows at the next change on the card or F5.
+  Files' footer date waits until the selection rests (0.25 s) when it moves fast. The rest
+  is as before: a file saved to the desktop shows within a second (was: up to 5 s).
+  Kernel bank $01: 488 -> 413 bytes left (BSS2: 4 + 8 bytes); DESK 1,049 -> 664.
 
 ## Version 0.30 (many small fills)
 

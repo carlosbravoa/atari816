@@ -1,0 +1,29 @@
+# (0.31) The card left to a full-screen program (DESK=1; tests/mousegen.py makes
+# tests/quiet31.keys from this; the card's Programs menu: tests/quiet31.programs; make
+# test-31). tests/cardreq.py --count lists the card requests (all tasks) in four windows:
+#   10-40 s   the idle Desktop alone: no request at all (print jobs and /Desktop are looked
+#             at only after a change on the card: the kernel's count, setting 8)
+#   40-56 s   Files, Music, Printer and BASIC opened from the Programs menu (not counted)
+#   60-80 s   BASIC runs a full-screen program (SCREEN 1: GCLS 20, a VSYNC loop), the Desktop,
+#             Files, Music and Printer behind it: no request at all
+#   82 s      Esc: Break, BASIC's window back (the Desktop and Printer: one STAT /PRN: each)
+#   85-115 s  idle again with the four windows open: no request at all
+40000 move 100 8
+40400 click
+40900 move 100 24
+41300 click
+44000 move 100 8
+44400 click
+44900 move 100 38
+45300 click
+48000 move 100 8
+48400 click
+48900 move 100 52
+49300 click
+52000 move 100 8
+52400 click
+52900 move 100 66
+53300 click
+56000 key 10 SCREEN 1:GCLS 20\n20 VSYNC:GOTO 20\nRUN\n
+82000 key {esc}
+84000 move 300 300

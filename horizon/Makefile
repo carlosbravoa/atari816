@@ -706,7 +706,7 @@ test-pc: all $(EMU)
 	else echo "FAIL  without the PC volume ($(B)/pcshell2.out)"; exit 1; fi
 	@rm -rf build/run-pc; cp -r tests/pc build/run-pc
 	@DESK=1 sh tests/shots.sh "$(EMU) $(EMUFLAGS) $(CARDDATE) $(PCFLAGS) --pc-drop-at 27.5 --pc-back-at 35.5" $(SD) pcdesk 54 $(PCSHOTS)
-	@if diff -u tests/pictures/$(call REV10,pcdesk,$(call REV7,pcdesk)) $(B)/pcdesk.md5; then echo "PASS  PC volume, Desktop: the PC icon (it goes and comes with the link), drops on it, Files at /PC:, copy and paste both ways, a move, the file dialog"; \
+	@if diff -u tests/pictures/$(call REV10,pcdesk,$(call REV7,pcdesk)) $(B)/pcdesk.md5; then echo "PASS  PC volume, Desktop: the PC icon (0.31: always there; opened with the link down: the alert), drops on it, Files at /PC:, copy and paste both ways, a move, the file dialog"; \
 	else echo "FAIL  PC volume, Desktop pictures (look at $(B)/pcdesk*.ppm, then make pictures-pc)"; exit 1; fi
 	@if cmp -s build/run-pc/BLUE.XEX $(SD)/BLUE.XEX && cmp -s "build/run-pc/docs/Read me first.txt" "$(SD)/docs/Read me first.txt" \
 	  && cmp -s build/run-pic/Notes.txt tests/pc/Notes.txt && cmp -s build/run-pc/README.TXT $(SD)/README.TXT && cmp -s build/run-pic/README.TXT $(SD)/README.TXT \
@@ -733,6 +733,17 @@ test-pc: all $(EMU)
 	  && [ -z "$$(ls -A build/run-pc/.atari816-partial)" ] && cmp -s build/run-sd/BIG.BIN $(B)/big.ref && ! test -e build/run-sd/big2.bin; \
 	then echo "PASS  0.21 shell: ctrl-C stops cp and mv (cancelled, no partial file on the card or the PC, the source kept), type-ahead kept"; \
 	else echo "FAIL  0.21 shell, ctrl-C during cp / mv ($(B)/cpstop.out, build/run-sd, build/run-pc)"; exit 1; fi
+	@rm -rf build/run-pc; cp -r tests/pc build/run-pc
+	@DESK=1 sh tests/shots.sh "$(EMU) $(EMUFLAGS) $(CARDDATE) $(PCFLAGS) --pc-drop-at 1.5 --pc-back-at 41 $$(python3 tests/cardreq.py --watch $(B)/horizon.lbl)" $(SD) pc31 64 6 9.5 27 47
+	@test -e build/run-pic/SYSTEM/PCAUTO && echo "/SYSTEM/PCAUTO made" > $(B)/pc31.txt || echo "no /SYSTEM/PCAUTO" > $(B)/pc31.txt
+	@for w in "10.5 25 link down, after the alert" "28 41 Auto connect on, link down" "48 63 Auto connect on, link up"; do \
+	  set -- $$w; a=$$1; b=$$2; shift 2; python3 tests/cardreq.py --count $(B)/horizon.lbl $(B)/pc31.err $$a $$b "$$*" >> $(B)/pc31.txt; done
+	@rm -rf build/run-pc; cp -r tests/pc build/run-pc
+	@PREP='touch SYSTEM/PCAUTO' DESK=1 sh tests/shots.sh "$(EMU) $(EMUFLAGS) $(CARDDATE) $(PCFLAGS) --pc-drop-at 1.5 $$(python3 tests/cardreq.py --watch $(B)/horizon.lbl)" $(SD) pc31b 32 31
+	@python3 tests/cardreq.py --count $(B)/horizon.lbl $(B)/pc31b.err 10 30 "a second start with /SYSTEM/PCAUTO, link down" >> $(B)/pc31.txt
+	@cat $(B)/pc31.md5 $(B)/pc31b.md5 > $(B)/pc31all.md5
+	@if python3 tests/compare.py tests/pc31.txt $(B)/pc31.txt && diff -u tests/pictures/$(call REV7IF,pc31) $(B)/pc31all.md5; then echo "PASS  0.31 the PC icon always there, the link looked at only when it is opened (the alert when it is down), Auto connect (STAT /PC: every 5 s, the PC's clock when the link comes, kept in /SYSTEM/PCAUTO)"; \
+	else echo "FAIL  0.31 the PC icon and Auto connect ($(B)/pc31.txt; pictures $(B)/pc31*.ppm, then make pictures-pc)"; exit 1; fi
 	@if grep -l 'emu816: blitter:' $(B)/pcshell.err $(B)/pcshell2.err $(B)/pcdesk.err $(B)/pccopy.err $(B)/cpstop.err; \
 	then echo "FAIL  blitter rules (the PC volume sessions)"; exit 1; \
 	else echo "PASS  blitter rules: the PC volume sessions"; fi
@@ -1127,6 +1138,12 @@ test-31: all $(EMU) $(APP29PRGS)
 	@(grep -a '^apptest: \|^term: ' $(B)/menu31.out; python3 tests/cardreq.py --menu $(B)/horizon.lbl $(B)/menu31.err 7.9 10.4) > $(B)/menu31.txt
 	@if python3 tests/compare.py tests/menu31.txt $(B)/menu31.txt; then echo "PASS  0.31 the Programs menu opened again: no card request; args= and NAME.ARG, console=yes, a .PRG opened in Files with its .ARG"; \
 	else echo "FAIL  0.31 the menu's requests or the programs' arguments ($(B)/menu31.txt, $(B)/menu31.out)"; exit 1; fi
+	@PREP='cp ../../tests/quiet31.programs SYSTEM/PROGRAMS' DESK=1 sh tests/shots.sh "$(EMU) $(EMUFLAGS) $(CARDDATE) $$(python3 tests/cardreq.py --watch $(B)/horizon.lbl)" $(SD) quiet31 116 70
+	@(python3 tests/cardreq.py --count $(B)/horizon.lbl $(B)/quiet31.err 10 40 "idle Desktop"; \
+	  python3 tests/cardreq.py --count $(B)/horizon.lbl $(B)/quiet31.err 60 80 "full screen"; \
+	  python3 tests/cardreq.py --count $(B)/horizon.lbl $(B)/quiet31.err 85 115 "idle, 4 windows") > $(B)/quiet31.txt
+	@if python3 tests/compare.py tests/quiet31.txt $(B)/quiet31.txt; then echo "PASS  0.31 the card left alone: no request of any task behind a full-screen program for 20 s; none of an idle Desktop in 30 s, alone or with Files, Music and Printer open"; \
+	else echo "FAIL  0.31 the card requests of an idle Desktop or behind a full screen ($(B)/quiet31.txt; tests/cardreq.py $(B)/horizon.lbl $(B)/quiet31.err)"; exit 1; fi
 
 pictures-29:
 	cp $(B)/menu31.pic tests/pictures/menu31.md5
@@ -1144,8 +1161,9 @@ pictures-net:
 
 pictures-pc:
 	cp $(B)/pcdesk.md5 tests/pictures/$(call REV10,pcdesk,$(call REV7,pcdesk))
+	cp $(B)/pc31all.md5 tests/pictures/$(call REV7,pc31)
 	cp $(B)/pccopy.md5 tests/pictures/$(call REV7,pccopy)
-	python3 -c "from PIL import Image; import glob; [Image.open(f).save('tests/pictures/' + f.split('/')[-1][:-4] + '.png') for f in sorted(glob.glob('$(B)/pcdesk[0-9]*.ppm') + glob.glob('$(B)/pccopy[0-9]*.ppm'))]"
+	python3 -c "from PIL import Image; import glob; [Image.open(f).save('tests/pictures/' + f.split('/')[-1][:-4] + '.png') for f in sorted(glob.glob('$(B)/pcdesk[0-9]*.ppm') + glob.glob('$(B)/pccopy[0-9]*.ppm') + glob.glob('$(B)/pc31[0-9]*.ppm') + glob.glob('$(B)/pc31b[0-9]*.ppm'))]"
 
 pictures-games:
 	cp $(B)/calc.md5 $(B)/solitair.md5 tests/pictures/

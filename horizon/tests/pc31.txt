@@ -1,0 +1,8 @@
+/SYSTEM/PCAUTO made
+link down, after the alert, 10.5-25 s: 0 card requests
+Auto connect on, link down, 28-41 s: 2 card requests
+  2 STAT /PC:
+Auto connect on, link up, 48-63 s: 3 card requests
+  3 STAT /PC:
+a second start with /SYSTEM/PCAUTO, link down, 10-30 s: 4 card requests
+  4 STAT /PC:

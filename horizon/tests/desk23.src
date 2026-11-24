@@ -1,7 +1,9 @@
 # (0.23) The Desktop: print notices, the folder disk, Run in Atari (DESK=1; tests/mousegen.py
 # makes tests/desk23.keys from this; the card gets tests/mk23.py's additions: a clock, /Atari,
 # /Desktop/PROG.BAS, /HELLO.LST; emu816 --classic-print tests/p23.atascii@6: the classic
-# Atari prints at 6 s, the job is finished 3 s later). Files is at (24, 24); its rows:
+# Atari prints at 6 s, the job is finished 3 s later; (0.31) the classic Atari is shown from
+# 5 s to 9.5 s (F12): the Desktop looks at the print jobs when it comes back, not on a
+# timer; the PC icon is always there: PROG.BAS is a row lower). Files is at (24, 24); its rows:
 # HELLO.LST y 181, README.TXT 205 ((0.25) Files reads / again when it comes to the front: the
 # /Printouts folder the first job made shows, one row above them). Shots (s):
 #   1  10.5  the notice "Printed: Atari" (the job finished at 9 s) instead of the clock
@@ -17,6 +19,8 @@
 #  10  37.5  Print: Files' footer "Printed ...", the notice "Printed: Files"
 #  11  39.5  HELLO.LST's menu: ... Print, Run in Atari (then chosen: kind 4, F12)
 # the notice clicked: Printer (the classic Atari's job selected); Esc closes it
+5000 key {F12}
+9500 key {F12}
 11000 move 600 6
 11400 click
 13500 key {esc}
@@ -32,9 +36,9 @@
 24000 key {esc}
 24500 move 178 77
 24900 click
-25500 move 596 160
+25500 move 596 220
 25600 rclick
-26500 move 544 183
+26500 move 544 243
 26900 click
 29500 key {F12}
 30500 move 596 100

@@ -7,10 +7,12 @@
 #            a double click on the PC icon: Files at /PC:
 #   3  17.0  Notes.txt selected in it: its date on the footer (then ctrl-C)
 #   4  21.0  the first Files window raised, ctrl-V: Notes.txt copied from the PC to the card
-#   5  26.0  README.TXT dragged from the card's window into the PC's: moved (a copy, then
+#   5  26.0  README.TXT dragged from the card's window into the PC's: (0.27) copied (was: a copy, then
 #            the card's file deleted)
-#   6  33.5  the link dropped at 27.5 s: the PC icon is gone
-#   7  41.5  the link back at 35.5 s: the PC icon again (the clock set from the PC again)
+#   6  33.5  the link dropped at 27.5 s: (0.31) the PC icon stays (it is always there); a
+#            double click on it (30 s): the alert "The PC link is not connected."
+#   7  41.5  the link back at 35.5 s: a double click on the PC icon (38 s) opens Files at
+#            /PC: (the check: STAT /PC:, the clock set from the PC again)
 #   8  48.5  Edit from the Programs menu, ctrl-O: the file dialog lists the card's root with
 #            the PC: folder
 #   9  51.5  "pc", Enter: the dialog in /PC:
@@ -92,6 +94,19 @@
 24000 M 0:0:0:0
 24500 M 100:100:0:0
 24550 M 8:0:0:0
+30000 M 100:-100:0:0
+30050 M 45:-40:0:0
+30100 M 0:0:0:1
+30180 M 0:0:0:0
+30300 M 0:0:0:1
+30380 M 0:0:0:0
+34000 \n
+38100 M 0:0:0:1
+38180 M 0:0:0:0
+38300 M 0:0:0:1
+38380 M 0:0:0:0
+40000 M -100:100:0:0
+40050 M -45:40:0:0
 42500 M -100:-100:0:0
 42550 M -100:-100:0:0
 42600 M -100:-94:0:0

@@ -14,7 +14,8 @@
 #            Settings...; above the pointer: no room below)
 #   9  36.0  Tidy up: every icon back in order
 #  10  38.0  a right click on the README.TXT shortcut: Open, Show original, -, Rename...,
-#            Delete (0.15; left of the pointer: no room at the right)
+#            Delete (0.15; left of the pointer: no room at the right; (0.31) the PC icon is
+#            always there: the shortcut is a row lower, the menu nearer the bottom)
 #  11  39.5  Delete: the confirmation
 #  12  41.0  Enter: the shortcut is gone
 #  13  45.0  Horizon > About Horizon: the date
@@ -145,20 +146,19 @@
 35000 M 20:-37:0:0
 35400 M 0:0:0:1
 35480 M 0:0:0:0
-37000 M 100:-63:0:0
+37000 M 100:-3:0:0
 37050 M 76:0:0:0
 37400 M 0:0:0:2
 37480 M 0:0:0:0
-38500 M -36:66:0:0
+38500 M -56:65:0:0
 38900 M 0:0:0:1
 38980 M 0:0:0:0
 40000 \n
 42000 M -100:-100:0:0
 42050 M -100:-100:0:0
-42100 M -100:-78:0:0
-42150 M -100:0:0:0
+42100 M -100:-100:0:0
+42150 M -100:-37:0:0
 42200 M -100:0:0:0
-42250 M -20:0:0:0
 42400 M 0:0:0:1
 42480 M 0:0:0:0
 42800 M 0:16:0:0

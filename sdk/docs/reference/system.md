@@ -491,13 +491,15 @@ In: A = id, X = new value ($FFFF = only read). Out: A = the old value. Ids:
 | 4 | (Horizon 0.18) the sound volume 0-15: Lau's master volume, volume x 17 (default 8; before 0.18 Lau followed setting 1) |
 | 5 | (Horizon 0.24) the screen saver's delay in seconds (0 = off; default 300) |
 | 6 | (Horizon 0.24) the seconds since the last key, mouse or joystick input, to any program (it stays 0 while the classic Atari is shown, a program is in full-screen mode, a mouse button is held or a menu is open; stops at 65535). Read it only (writing it is a test aid) |
+| 7 | (Horizon 0.31, read only) not 0 while the desktop is not on the screen: a full-screen program's screen or the classic Atari is shown. A program that polls the card on a timer (a status, a folder) skips it while this is set: the card is one queue, and the program in front should not wait behind background requests |
+| 8 | (Horizon 0.31, read only) a count the kernel moves at every request that may change the card or the PC volume (open in a writing mode, the close of a handle opened so, mkdir, delete, rename, by any program; it wraps). A program that shows a folder or a status reads it on its timer and asks the card again only when the count moved (the Desktop does so for /Desktop and the print jobs: a job written to `/PRN:NAME` moves it at its close). Files the I/O processor writes by itself (the PC link's developer upload, the classic Atari's print jobs) do not move it |
 
 These are the user's settings (Settings saves them): change them only in a settings
 program. A game reads setting 4 only if it wants to show it; Lau applies it to every voice.
 A program may read setting 6 to notice that nobody is there (pause a demo, dim its own
 display); the Desktop uses 5 and 6 to start the screen saver (`/SYSTEM/SAVER.PRG`, Horizon
 0.24). A full-screen game never sees the screen saver: while it is in full-screen mode the
-count stays 0.
+count stays 0. Ids 7 and 8 only read: a value given for them is ignored.
 ```asm
         lda     #2              ; key repeat delay
         ldx     #$FFFF          ; read only

@@ -1,0 +1,5 @@
+# (0.31) the Programs menu of tests/quiet31.src (tests/shots.sh's PREP puts it on the card)
+Files=/BIN/WFILES.PRG
+Music=/BIN/MUSIC.PRG
+Printer=/BIN/PRINTER.PRG
+BASIC=/BIN/BASIC.PRG

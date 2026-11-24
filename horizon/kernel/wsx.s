@@ -294,13 +294,23 @@ sys_wspal:
 ; 0 mouse speed 1-4, 1 beep volume 0-15, 2 key repeat delay (10 ms ticks, 0 = off),
 ; 3 key repeat interval (ticks), (0.18) 4 the sound volume 0-15 (Lau's master volume),
 ; (0.24) 5 the screen saver's delay in seconds (0 = off; the Desktop reads it), 6 the seconds
-; since the last input (clk_tick; writing it is a test aid) ----
+; since the last input (clk_tick; writing it is a test aid), (0.31) read only: 7 the desktop
+; is not on the screen (a full-screen program's screen or the classic machine is), 8 card_gen
+; (requests that may have changed the card's names: mbox.s) ----
 sys_setting:
         ldx     cur
         lda     t_a,x
         cmp     #7
         bcc     :+
-        jmp     err_inval
+        bne     @gen
+        lda     fs_act
+        ora     cls_on
+        jmp     set_ok
+@gen:   cmp     #8
+        bne     @inv
+        lda     card_gen
+        jmp     set_ok
+@inv:   jmp     err_inval
 :       asl     a
         tay
         lda     set_tab,y

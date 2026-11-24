@@ -1358,7 +1358,12 @@ ondrop: lda     z:win
         jmp     domove
 
 ; the timer after a drag to another window: read the folder again (once)
-ontick: stz     fresh                   ; (0.31)
+ontick: lda     fdpend                  ; (0.31) a date put off (fdcheck): now
+        beq     :+
+        stz     fdpend
+        lda     #$FFFF
+        sta     fdsel
+:       stz     fresh                   ; (0.31)
         lda     z:win                   ; (back to the slow period)
         ldx     #TICKP
         sys     SYS_WTIMER
@@ -1798,7 +1803,10 @@ delete: lda     z:n
 
 ; ---------------------------------------------------------------- the footer's date
 ; (0.19) when the selection changed: STAT the selected entry (not "..") and put
-; "Modified YYYY-MM-DD HH:MM" after what is mounted (cut where the window is narrow)
+; "Modified YYYY-MM-DD HH:MM" after what is mounted (cut where the window is narrow).
+; (0.31) READDIR gives no dates, so a STAT it stays; but at most one each 0.25 s: while the
+; selection runs (a key held, the wheel) the footer shows no date, and the date of the entry
+; it rests on comes with the timer (fdpend: 0.25 s after the last move)
 fdcheck:
         lda     z:sel
         cmp     fdsel
@@ -1816,6 +1824,20 @@ fdcheck:
         jsr     recname
         jsr     fullname                ; (this window's folder: not the task's current one)
         jcs     @draw
+        sys     SYS_UPTIME              ; (0.31) the last STAT under 0.25 s ago: later
+        sec
+        sbc     fdlast
+        cmp     #250
+        bcs     @now
+        inc     fdpend
+        lda     z:rl                    ; (a reload's timer pending: it comes anyway)
+        jne     @draw
+        lda     z:win
+        ldx     #25
+        sys     SYS_WTIMER
+        jmp     @draw
+@now:   sys     SYS_UPTIME
+        sta     fdlast
         lda     #.loword(pth)
         sta     fdblk
         lda     #.loword(fdst)
@@ -3570,6 +3592,8 @@ tbuf:   .res    130
 hbuf:   .res    220
 fbuf:   .res    200
 fdsel:  .res    2                       ; (0.19) the entry the footer's date is of
+fdlast: .res    2                       ; (0.31) the uptime's low word at its last STAT (ms)
+fdpend: .res    2                       ; (0.31) a STAT put off until the timer
 fdcut:  .res    2                       ; where the date starts in fbuf
 fdtxt:  .res    32                      ; (0.19) "Modified YYYY-MM-DD HH:MM"
 fdst:   .res    10                      ; its STAT

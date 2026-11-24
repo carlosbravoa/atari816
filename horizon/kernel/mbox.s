@@ -130,7 +130,20 @@ mb_call:
         asl     a
         asl     a
         tay
-        txa
+        lda     t_msg,y                 ; (0.31) a request that may change the card's names
+        and     #$00FF                  ; (OPEN in a writing mode, MKDIR, DELETE, RENAME):
+        cmp     #MBOP_OPEN              ; card_gen counts on (setting 8: the Desktop reads
+        bne     :+                      ; /Desktop again only when it moved)
+        lda     t_msg+7,y
+        and     #$00FF
+        bne     @chg
+        bra     @tag
+:       cmp     #MBOP_MKDIR
+        bcc     @tag
+        cmp     #MBOP_RENAME + 1
+        bcs     @tag
+@chg:   inc     card_gen
+@tag:   txa
         lsr     a
         inc     a
         a8
@@ -410,6 +423,9 @@ sys_open:
         lda     cur
         inc     a
         sta     fh_owner,x
+        ldy     cur                     ; (0.31) its mode: a handle that writes moves
+        lda     t_a,y                   ; card_gen again at its CLOSE (a print job is
+        sta     fh_wr,x                 ; finished then)
         pla
         jmp     set_ok
 
@@ -438,7 +454,11 @@ fh_close:
         asl     a
         tax
         stz     fh_owner,x
-        jmp     mb_call
+        lda     fh_wr,x                 ; (0.31) a handle that wrote: card_gen
+        beq     :+
+        stz     fh_wr,x
+        inc     card_gen
+:       jmp     mb_call
 
 ; close every handle of the current task (at exit)
 files_close_cur:

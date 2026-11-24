@@ -20,10 +20,14 @@
 ;   runs /SYSTEM/PRINTD.PRG with the job's path, waits for it (the title says "sending")
 ;   and says in an alert what happened (by PRINTD's exit code: 0 "Sent to the PC as
 ;   Printouts/NAME.pdf", 2 no PC or no print service, 1 an error).
-;   Refresh: a timer every second asks STAT "/PRN:" (the number of jobs finished since the
-;   I/O processor started; one STAT a tick) and reads /Printouts again only when it
-;   changed; the window getting the focus reads it again too and asks the PC again. The
-;   selection stays on the same job (when it is gone: the row where it was); the preview
+;   Refresh: STAT "/PRN:" (the number of jobs finished since the I/O processor started)
+;   and /Printouts read again only when it changed. (0.31) The STAT every second only
+;   while the window has the focus (the classic Atari's jobs come from the I/O processor:
+;   the kernel does not see them); in the background only when the kernel's count of card
+;   changes moved (setting 8: a job is a file written, finished at its CLOSE) and once when
+;   the desktop comes back from the classic Atari; nothing while a full-screen program's
+;   screen or the classic Atari is shown (before 0.31: every second, always); the window getting the focus
+;   reads it again too and asks the PC again. The selection stays on the same job (when it is gone: the row where it was); the preview
 ;   is read again only when the selected job changes. At start the newest job is selected,
 ;   or the job named by the argument ("printer PATH": its last part is looked up in
 ;   /Printouts). One instance only (SYS_SINGLE): started again, it raises this one.
@@ -182,7 +186,25 @@ loop:   lda     #0
         jeq     quit
         cmp     #WE_TICK                ; the counter of finished jobs changed: read again
         bne     :+
-        jsr     prnstat
+        lda     #7                      ; (0.31) nothing while a full-screen program's
+        ldx     #$FFFF                  ; screen or the classic Atari is shown (setting 7);
+        sys     SYS_SETTING             ; once when the desktop is back (the classic
+        bcs     @tk                     ; Atari's jobs); else STAT "/PRN:" only when the
+        ldx     pr7                     ; kernel's count of card changes moved (setting 8:
+        sta     pr7                     ; a job is a file written, done at its CLOSE)
+        cmp     #0
+        jne     loop
+        cpx     #0
+        bne     @tk
+        lda     prfoc                   ; (0.31) in front: the user watches the list, the
+        bne     @tk                     ; classic Atari's jobs too (every second, as before)
+        lda     #8
+        ldx     #$FFFF
+        sys     SYS_SETTING
+        cmp     prgen
+        jeq     loop
+        sta     prgen
+@tk:    jsr     prnstat
         jcs     loop
         cmp     prncnt
         jeq     loop
@@ -191,8 +213,13 @@ loop:   lda     #0
         jmp     loop
 :       cmp     #WE_FOCUS
         bne     :+
+        sta     prfoc                   ; (0.31) (not 0)
         jsr     pccheck
         jsr     refresh
+        jmp     loop
+:       cmp     #WE_UNFOCUS             ; (0.31)
+        bne     :+
+        stz     prfoc
         jmp     loop
 :       cmp     #WE_RESIZE
         bne     :+
@@ -1688,6 +1715,9 @@ pvh:    .res    2
 ncols:  .res    2                       ; its text columns and rows
 nrows:  .res    2
 prncnt: .res    2                       ; STAT /PRN: last seen
+pr7:    .res    2                       ; (0.31) setting 7 at the last tick
+prfoc:  .res    2                       ; (0.31) the window has the focus
+prgen:  .res    2                       ; (0.31) setting 8 at the last STAT /PRN:
 pcok:   .res    2                       ; the PC can make PDFs
 want:   .res    2
 err:    .res    2

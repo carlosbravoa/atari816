@@ -16,8 +16,10 @@
 ; Requests: when a program asks for Music with a file while Music runs, the kernel refuses
 ; the second start (ERUNNING) and raises this window; the controls library's ui_launch then
 ; writes /SYSTEM/OPEN.REQ: two lines, the program's path and its argument string. Music
-; looks for it when its window gets the focus and once a second: when the first line is
-; its own path, the file is deleted and the argument opened (added to the playlist, played).
+; looks for it when its window gets the focus and, (0.31) once a second, when the kernel's
+; count of card changes moved (setting 8; before 0.31 every second, a card request each):
+; when the first line is its own path,
+; the file is deleted and the argument opened (added to the playlist, played).
 
         .segment "CODE"
 

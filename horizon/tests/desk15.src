@@ -15,7 +15,8 @@
 #   8  24.0  Esc, Esc; the desktop's menu (above the pointer): New folder..., Tidy up, -,
 #            Settings...
 #   9  27.5  New folder..., Enter: the folder "New folder" in /Desktop (its icon); its menu
-#  10  31.0  Rename...: "Games" typed, Enter: the icon renamed
+#  10  31.0  Rename...: "Games" typed, Enter: the icon renamed ((0.31) the PC icon is always
+#            there: the folder is a row lower)
 #  11  35.0  README.TXT > Open with Edit; a right click in its text: Undo, Redo, -, Cut,
 #            Copy, Paste, Select all
 #  12  38.0  Esc; the menu key in Edit: the same menu at the top left of the text (from the
@@ -50,9 +51,9 @@
 24500 move 330 249
 24600 click
 26000 key \n
-27000 move 596 160
+27000 move 596 220
 27100 rclick
-28500 move 560 199
+28500 move 560 259
 28600 click
 29500 key Games\n
 32000 move 100 182

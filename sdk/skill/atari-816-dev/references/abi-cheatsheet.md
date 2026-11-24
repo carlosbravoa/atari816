@@ -127,7 +127,7 @@ it yourself (`dec5` / `digit` in `sdk/templates/game/main.s`: A -> ASCII digits)
 | $8E | SYS_WGEOM | A win, X,Y {i16 x ($8000 stays), y, u16 w, h} | |
 | $8F | SYS_TNAME | A id (0 me; \| $8000: read into X,Y 16 bytes), X,Y name | |
 | $90 | SYS_WPOPUP | A win, X,Y {u24 items, i16 x ($8000 pointer), y, u8 flags (1 keyboard)} (0.15; blocks) | A item / $FFFF |
-| $79-$7B, $87, $8D | SYS_WSREDRAW, SYS_WSSTATS, SYS_WSCONFIG, SYS_SETTING, SYS_WSCLOSEALL | measurements / system (setting 4 = the sound volume, Lau's master, 0.18; 0.24: 5 the screen saver's delay in s, 6 the seconds without input, read only; ws_config A = 0: X = REV) | |
+| $79-$7B, $87, $8D | SYS_WSREDRAW, SYS_WSSTATS, SYS_WSCONFIG, SYS_SETTING, SYS_WSCLOSEALL | measurements / system (setting 4 = the sound volume, Lau's master, 0.18; 0.24: 5 the screen saver's delay in s, 6 the seconds without input, read only; 0.31, read only: 7 the desktop not on the screen (full screen or classic Atari), 8 the card's name-change count; ws_config A = 0: X = REV) | |
 | $91 | SYS_SPRALLOC | A count 1-16, X own window (0.18, REV $0B) | A first sprite (lower = in front) |
 | $92 | SYS_SPRFREE | A first, X count; A $FFFF all of yours | |
 | $93 | SYS_SPRSET | A count, X,Y entries {u8 sprite, u8 ctrl SPR_*, i16 x, y, u24 image, u8 pal} | all from the next frame |

@@ -1,0 +1,8 @@
+# (0.31) Auto connect kept across a start (tests/pc31.src; the card has /SYSTEM/PCAUTO, the
+# link down from 1.5 s): STAT /PC: every 5 s (10-30 s). Shot 1 (31 s): a right click on
+# the PC icon: its menu, Auto connect checked.
+30000 M 100:-20:0:0
+30050 M 100:0:0:0
+30100 M 75:0:0:0
+30150 M 0:0:0:2
+30230 M 0:0:0:0
