@@ -1,6 +1,7 @@
 /* Ali, the blitter, $00:DA00-$DA13 (REV $08): five rectangle operations on 8 bpp surfaces. The pixels
  * are written at START; BUSY then reads 1 for a modelled time and the IRQ comes at its end.
- * REV $09: command lists ($DA14-$DA18, BL_CTRL bits 2-5). */
+ * REV $09: command lists ($DA14-$DA18, BL_CTRL bits 2-5). REV $0D: the colour remap table (OP 5 TABLE,
+ * 6 COPY_REMAP, 7 COPY_KEY_REMAP). */
 #ifndef BLITTER_H
 #define BLITTER_H
 #include <stdint.h>
@@ -22,6 +23,8 @@ typedef struct Blitter {
     uint64_t list_next;             /* CPU cycle of the list's next step */
     uint8_t  done, aborted;         /* DONE (reported once BUSY is 0), ABORTED */
     uint64_t n_lists, n_records;
+    uint8_t  tab[256];              /* REV $0D: the colour remap table */
+    uint64_t n_tables, n_remaps;
 } Blitter;
 
 void    blitter_reset(void);

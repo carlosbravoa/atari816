@@ -146,7 +146,7 @@ it yourself (`dec5` / `digit` in `sdk/templates/game/main.s`: A -> ASCII digits)
 | $A0 | SYS_WFRONT | A own window: back if minimized, raised, the focus (full screen: shown again) | |
 | $A1 | SYS_SHEETNEW | X,Y {u24 address, u8 0, u16 stride, u16 width 1-4096, u16 height 1-1024} (0.19; own memory, else EFAULT) | A sheet 1-32 (EAGAIN: 32 sheets / 4096 rows in all) |
 | $A2 | SYS_SHEETFREE | A sheet / $FFFF all of yours (stops your running list) | |
-| $A3 | SYS_SHEETDRAW | A win \| count<<8 (1-128), X,Y 16-byte records SD_* {u8 sheet, u8 op SH_FILL/COPY/KEY (+SH_VBL $80), u8 colour/key, 0, sx, sy, w, h, x, y} | A drawn; returns at once; ~300 cycles a record |
+| $A3 | SYS_SHEETDRAW | A win \| count<<8 (1-128), X,Y 16-byte records SD_* {u8 sheet, u8 op SH_FILL/COPY/KEY (+SH_VBL $80; 0.31 REV $0D: SH_TABLE 3 = remap table entries x..x+w-1 from (sx, sy), h 1; SH_COPY/KEY + SH_REMAP $40 = through the table, ENODEV before $0D), u8 colour/key, 0, sx, sy, w, h, x, y} | A drawn; returns at once; ~300 cycles a record |
 | $A4 | SYS_FILLRUNS | (0.30) A count 0-2688, X,Y 10-byte block FRB_* {u24 page (own memory), u8 flags (FR_GROUPS), u16 size (0 = 64K), u24 runs, u8 0}; run FRR_* {u16 offset, u8 colour, u8 width}; group FRG_* {u24 elements, u8 colour, u16 n (0-1024), u8 stride, u8 fields} | A count (groups: those taken); returns at once (list_wait); ~140 cycles a run; EINVAL X = the bad run/group; ENODEV before REV $09: fill by the CPU |
 | $A5 | SYS_UPTIMEUS | (0.30) - | A low, X high: microseconds since reset |
 

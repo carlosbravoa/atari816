@@ -121,6 +121,18 @@ if [ $REVN -ge 9 ]; then
        [ "$c" -ge 3475 ] && [ "$c" -le 3510 ] && printf '%s\n' "$out" | grep -qx "PIXELS OK"; then
         ok "blitruns (lists of one-line fills: $a, $b, $c us; by words written; pixels)"; else bad "blitruns" "$out"; fi
 else skip "blitruns (REV 09)"; fi
+# (REV $0D) the colour remap: TABLE loads (aligned, unaligned, a part), COPY_REMAP and
+# COPY_KEY_REMAP (the key on the source pixel), a plain copy after them, a list of TABLE +
+# COPY_REMAP, a FILL after them; and the times of a 320 x 200 copy (8,068 us), a TABLE
+# (32 us) and a 320 x 200 remapped copy (+12%: 9,036 us), from emu/blitter.c's model
+if [ $REVN -ge 13 ]; then
+    out=$($EMU --max-seconds 10 $T/asm/blitremap.bin 2>/dev/null)
+    us() { printf '%d' "0x$(printf '%s\n' "$out" | grep "^$1" | awk '{print $NF}')"; }
+    a=$(us "COPY 320X200"); b=$(us "TABLE"); c=$(us "COPY_REMAP")
+    if [ "$a" -ge 8040 ] && [ "$a" -le 8090 ] && [ "$b" -ge 25 ] && [ "$b" -le 45 ] && \
+       [ "$c" -ge 9000 ] && [ "$c" -le 9060 ] && printf '%s\n' "$out" | grep -qx "PIXELS OK"; then
+        ok "blitremap (colour remap: tables, key, lists, nothing left behind; copy $a us, table $b us, remapped copy $c us)"; else bad "blitremap" "$out"; fi
+else skip "blitremap (REV 0D)"; fi
 if [ $REVN -ge 10 ]; then
     out=$($EMU --max-seconds 20 $SAMPLER 2>/dev/null)
     printf '%s\n' "$out" | grep -qx "SAMPLER PASS" && ok "SAMPLER.BIN (sample player: rate, end interrupt, loop, mix, AU_LATE 0)" || bad "SAMPLER.BIN" "$out"

@@ -54,6 +54,7 @@ void hg__arena_reset(void);
 /* the framebuffer: the address of (x, y) in it (framebuffer coordinates) */
 unsigned long hg__fbaddr(unsigned x, unsigned y);
 extern unsigned long hg__fbbase;
+extern unsigned hg__fbgen;              /* +1 whenever the framebuffer changes */
 
 /* far memory: n bytes, 256-byte aligned (whole banks for n > 65280) -> address, or 0 */
 unsigned long hg__farmem(unsigned long n);

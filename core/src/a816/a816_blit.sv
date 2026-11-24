@@ -1,11 +1,13 @@
 // SPDX-License-Identifier: CC-BY-NC-SA-4.0 OR GPL-3.0-or-later
 // Copyright (c) 2026 Carlos Bravo
-// Ali, the Atari816 blitter: FILL, COPY, COPY_KEY, EXPAND, EXPAND_KEY on 8 bpp rectangles in main RAM.
+// Ali, the Atari816 blitter: FILL, COPY, COPY_KEY, EXPAND, EXPAND_KEY on 8 bpp rectangles in main RAM,
+// and (REV $0D) TABLE, COPY_REMAP and COPY_KEY_REMAP through the colour remap table.
 //
 // Registers ($00:DA00-$DA13, register spec "Ali (blitter)"):
 //   $DA00-02 BL_SRC   $DA03-04 BL_SRC_STRIDE   $DA05-07 BL_DST   $DA08-09 BL_DST_STRIDE
 //   $DA0A-0B BL_WIDTH $DA0C-0D BL_HEIGHT       $DA0E BL_FG  $DA0F BL_BG  $DA10 BL_KEY
-//   $DA11 BL_OP (0 FILL, 1 COPY, 2 COPY_KEY, 3 EXPAND, 4 EXPAND_KEY)
+//   $DA11 BL_OP (0 FILL, 1 COPY, 2 COPY_KEY, 3 EXPAND, 4 EXPAND_KEY; REV $0D: 5 TABLE, 6 COPY_REMAP,
+//         7 COPY_KEY_REMAP)
 //   $DA12 BL_FLAGS (0 BACKWARDS, 6:4 SRC_BIT)
 //   $DA13 BL_CTRL  write: 0 START, 1 IRQ_EN, 2 LIST, 3 ABORT
 //                  read:  0 BUSY, 1 IRQ_EN, 2 LIST (running), 3 WAITING (for VBLANK), 4 DONE, 5 ABORTED
@@ -16,7 +18,7 @@
 // then the blit runs as after START. BUSY covers the whole list; the interrupt comes once at
 // its end. ABORT stops a list or a blit after the access in flight; no interrupt then.
 // Behaviour where the spec is open follows the emulator (emu/blitter.c):
-//   - WIDTH or HEIGHT 0, or OP above 4, does nothing; WIDTH / HEIGHT above 4096 count as 4096.
+//   - WIDTH or HEIGHT 0, or OP above 7, does nothing; WIDTH / HEIGHT above 4096 count as 4096.
 //     Every START still ends with the BLITTER interrupt when IRQ_EN is set.
 //   - BACKWARDS: lines from the last to the first, pixels right to left; BL_SRC / BL_DST still
 //     name the top-left byte. Copies give the emulator's result whenever the direction suits the
@@ -45,12 +47,26 @@
 // P2 turns the stage into the request registers b_* (data, key / bit mask). The request
 // registers are free again the cycle after the port mux has taken them (b_gnt; only b_req
 // depends on it combinationally), so the next write waits in b_* while the previous one runs.
-// Requests leave in order, and a source read is only placed when no produced word is waiting,
-// so every read follows the writes of the words before it. Source data is read ahead of its
+// Requests leave in order, and a source read is only placed when no produced word is waiting
+// (REV $0D: or one is in the lanes), so every read follows the writes of the words before it
+// (but that one). Source data is read ahead of its
 // use (up to a burst plus the window); in between it can only be overwritten by writes of
 // earlier destination words, which cannot reach source bytes still to be used when the copy
 // direction suits the overlap. The window takes words while a write runs, so a read is
 // placed as soon as the previous write has been taken.
+//
+// Colour remap (REV $0D). A 256 x 8 table in one block RAM. TABLE (OP 5) is a COPY whose
+// destination is the table instead of RAM: destination byte addresses count modulo 256 (the
+// table entry), so SRC = 256 bytes, DST = 0, WIDTH 256, HEIGHT 1 loads a whole table; nothing is
+// written to RAM. COPY_REMAP (6) and COPY_KEY_REMAP (7) are COPY and COPY_KEY writing table[src]
+// for every source pixel; the key is tested on the source pixel, before the table. All three use
+// the "lanes", a
+// small sequencer on the stage (xq): when a produced word needs them (lane), P2 waits for xr
+// while the four bytes go through the table one a cycle (the block RAM's read is registered):
+// lc 0-3 present byte lc (a lookup, or a table write for TABLE), lc 1-4 take the lookup of byte
+// lc - 1 back into xq; at lc 0 the key clears the edge mask bits of the key's pixels (so P2 does
+// not test the remapped values). Five cycles a word, while the word before it is written: the
+// SDRAM's write takes longer, so a remapped copy runs at nearly the speed of a plain one.
 `default_nettype none
 
 module a816_blit #(
@@ -96,9 +112,13 @@ reg        f_done, f_abrt;             // DONE, ABORTED
 
 wire       back    = r_flags[0];
 wire [2:0] sbit    = r_flags[6:4];
-wire       is_fill = (r_op[2:0] == 3'd0);              // r_op < 5 is checked at START
+wire       is_fill = (r_op[2:0] == 3'd0);              // r_op < 8 is checked at START
 wire       is_exp  = (r_op[2:0] == 3'd3) || (r_op[2:0] == 3'd4);
-wire       keyed   = (r_op[2:0] == 3'd2) || (r_op[2:0] == 3'd4);
+wire       keyed   = (r_op[2:0] == 3'd2) || (r_op[2:0] == 3'd4) || (r_op[2:0] == 3'd7);
+wire       is_tbl  = (r_op[2:0] == 3'd5);              // TABLE: a COPY into the remap table
+wire       remap   = (r_op[2:0] == 3'd6) || (r_op[2:0] == 3'd7);   // COPY(_KEY)_REMAP
+wire       lane    = is_tbl || remap;                   // produced words go through the lanes
+wire       kq      = keyed && !remap;                   // P2 tests the key (remap: the lanes did)
 
 typedef enum logic [2:0] { S_IDLE, S_PRE, S_LS0, S_LS1, S_LS2, S_RUN, S_LEND, S_FIN } st_t;
 st_t st;
@@ -157,6 +177,8 @@ reg           rd_wait;                 // a read has been placed and its data is
 reg  [31:0]   xq;                      // stage: COPY bytes, or EXPAND bits in [3:0]
 reg  [3:0]    xm;                      // stage: edge mask
 reg           xv;
+reg           xr;                      // the stage may leave (P2): set with xv, or by the lanes
+reg  [2:0]    lc;                      // the lanes' step, 0-4
 
 // line stepping: forward, and also for the pre-pass that finds the last line of a BACKWARDS blit
 wire          sub   = back && (st != S_PRE);
@@ -197,7 +219,7 @@ wire        p_last = (nwl == 11'd0);
 
 // request stage (P2)
 wire        slot_free = !b_req;
-wire        p2        = xv && slot_free;
+wire        p2        = xr && slot_free;            // (xr implies xv)
 wire        p1_free   = !xv || p2;
 reg  [31:0] d_out;
 reg  [3:0]  m_out;
@@ -211,7 +233,7 @@ always_comb begin
             m_out[i]        = xm[i] && (xq[i] || !keyed);
         end else begin
             d_out[i*8 +: 8] = xq[i*8 +: 8];
-            m_out[i]        = xm[i] && (xq[i*8 +: 8] != r_key || !keyed);
+            m_out[i]        = xm[i] && !is_tbl && (xq[i*8 +: 8] != r_key || !kq);
         end
     end
     if (back) begin
@@ -219,6 +241,19 @@ always_comb begin
         m_out = {m_out[0], m_out[1], m_out[2], m_out[3]};
     end
 end
+
+// the remap table (one block RAM: SDPB 256 x 8, registered read)
+wire        lane_on = xv && !xr;                    // a word in the lanes (only when lane)
+wire [7:0]  lb      = xq[{lc[1:0], 3'b000} +: 8];   // its byte lc: the lookup, or TABLE's data
+wire        tbl_we  = lane_on && is_tbl && !lc[2] && xm[lc[1:0]];
+wire [7:0]  tbl_wa  = {dwa[5:0], lc[1:0] ^ {2{back}}};   // (BACKWARDS: xq's bytes mirrored)
+(* syn_ramstyle = "block_ram" *) reg [7:0] tbl [0:255];
+reg  [7:0]  tbl_q;
+always_ff @(posedge clk) begin
+    if (tbl_we) tbl[tbl_wa] <= lb;
+    tbl_q <= tbl[lb];
+end
+wire [1:0]  lp      = lc[1:0] - 2'd1;               // lc 1-4: the byte whose lookup is in
 
 // CPU register writes are taken one clk later, from registers: the strobe comes from the
 // 65C816's microcode through the I/O decode, and fanning it straight out to every register's
@@ -252,6 +287,7 @@ always_ff @(posedge clk or negedge reset_n) begin
         fmask <= 4'd0; emask <= 4'd0; xs <= '0; swa <= '0; dwa <= '0; o <= 5'd0; n <= 2'd0;
         lo <= 32'd0; hi <= 32'd0; first <= 1'b0; sbuf <= 128'd0; sbv <= 1'b0; sb_long <= 1'b0;
         rd_wait <= 1'b0; infl <= 1'b0; infl_rd <= 1'b0; xq <= 32'd0; xm <= 4'd0; xv <= 1'b0;
+        xr <= 1'b0; lc <= 3'd0;
     end else begin
         irq <= 1'b0;
 
@@ -271,11 +307,23 @@ always_ff @(posedge clk or negedge reset_n) begin
             b_wmask <= m_out;
             dwa     <= back ? dwa - WA'(1) : dwa + WA'(1);
             xv      <= 1'b0;
+            xr      <= 1'b0;
         end else if (b_gnt) b_req <= 1'b0;
+
+        // the lanes (REMAP, TABLE): byte lc looked up / written, the lookup of byte lc - 1 back
+        if (lane_on) begin
+            if (lc == 3'd0) begin
+                for (int i = 0; i < 4; i++)         // the key, on the source pixels
+                    if (keyed && xq[i*8 +: 8] == r_key) xm[i] <= 1'b0;
+            end else if (!is_tbl) xq[{lp, 3'b000} +: 8] <= tbl_q;
+            if (lc == 3'd4) begin lc <= 3'd0; xr <= 1'b1; end
+            else lc <= lc + 3'd1;
+        end
 
         case (st)
             S_IDLE: if (start) begin
-                if (r_w == 16'd0 || r_h == 16'd0 || r_op > 8'd4) st <= S_FIN;
+                lc <= 3'd0;
+                if (r_w == 16'd0 || r_h == 16'd0 || r_op > 8'd7) st <= S_FIN;
                 else begin
                     wm1 <= |r_w[15:12] ? 12'hFFF : r_w[11:0] - 12'd1;
                     hm1 <= |r_h[15:12] ? 12'hFFF : r_h[11:0] - 12'd1;
@@ -320,6 +368,7 @@ always_ff @(posedge clk or negedge reset_n) begin
                         xq    <= is_exp ? {28'd0, x_exp} : x_copy;
                         xm    <= (first ? fmask : 4'hF) & (p_last ? emask : 4'hF);
                         xv    <= 1'b1;
+                        xr    <= !lane;     // (the lanes first: xr when they are done)
                         first <= 1'b0;
                         nwl   <= nwl - 11'd1;
                         if (p_last) st <= S_LEND;
@@ -333,7 +382,10 @@ always_ff @(posedge clk or negedge reset_n) begin
                     n   <= n + 2'd1;
                     swa <= back ? swa - WA'(1) : swa + WA'(1);
                     if (g_end) sbv <= 1'b0;
-                end else if (!rd_wait && !xv && slot_free) begin   // fetch the burst holding swa
+                end else if (!rd_wait && (!xv || !xr) && slot_free) begin   // fetch the burst holding swa
+                    // (also while a word is in the lanes: its write then follows this read,
+                    // which is safe: the words still to be read are never ones the words
+                    // before them write when the direction suits the overlap; P2 waits for xr)
                     b_req   <= 1'b1;
                     b_we    <= 1'b0;
                     b_addr  <= long_ok ? {swa[WA-1:2], 4'b0000} : {swa[WA-1:1], 3'b000};
@@ -404,6 +456,8 @@ always_ff @(posedge clk or negedge reset_n) begin
             lst     <= L_IDLE;
             f_abrt  <= 1'b1;
             xv      <= 1'b0;
+            xr      <= 1'b0;
+            lc      <= 3'd0;
             b_req   <= 1'b0;
             rd_wait <= 1'b0;
             if (st != S_IDLE) st <= S_FIN;
@@ -414,7 +468,8 @@ always_ff @(posedge clk or negedge reset_n) begin
             r_src <= 24'd0; r_dst <= 24'd0; r_sstr <= 16'd0; r_dstr <= 16'd0; r_w <= 16'd0; r_h <= 16'd0;
             r_fg <= 8'd0; r_bg <= 8'd0; r_key <= 8'd0; r_op <= 8'd0; r_flags <= 8'd0; r_irqen <= 1'b0;
             r_list <= 21'd0; r_cnt <= 16'd0; f_done <= 1'b0; f_abrt <= 1'b0;
-            st <= S_IDLE; lst <= L_IDLE; b_req <= 1'b0; xv <= 1'b0; rd_wait <= 1'b0;
+            st <= S_IDLE; lst <= L_IDLE; b_req <= 1'b0; xv <= 1'b0; xr <= 1'b0; lc <= 3'd0;
+            rd_wait <= 1'b0;
         end else begin
             if (rw_en) begin
                 case (rw_a)

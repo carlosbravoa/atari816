@@ -63,7 +63,7 @@ gtest 8: sheets
   sx + w overflowing: error 01
   sheet 0 for a copy: error 01
   sheet 33: error 01
-  op 3: error 01
+  op 4: error 01
   a window not ours: error 01
   count 0: error 01
   records past the window: error 04

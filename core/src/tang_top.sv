@@ -250,10 +250,12 @@ function automatic [15:0] mix_sat(input [15:0] cl, input signed [15:0] nv, input
     mix_sat = (t > 19'sd32767) ? 16'h7FFF : (t < -19'sd32768) ? 16'h8000 : t[15:0];
 endfunction
 // Build switch: the sample player (a816_snd) is in the default build (bring-up log, step 17).
-// Define A816_NO_SAMPLER to leave it out (REV $09, about 1,000 cells less). REV $0C adds OPL2.
+// Define A816_NO_SAMPLER to leave it out (REV $09, about 1,000 cells less). REV $0C adds OPL2,
+// REV $0D the blitter's colour remap (a816_blit.sv: TABLE, COPY_REMAP, COPY_KEY_REMAP; it is in
+// both builds, the NO_SAMPLER one still reports $09).
 // `define A816_NO_SAMPLER
 `ifndef A816_NO_SAMPLER
-localparam logic [7:0] A816_REV = 8'h0C;
+localparam logic [7:0] A816_REV = 8'h0D;
 reg  [15:0] audio_l_out = 16'h0000, audio_r_out = 16'h0000;   // feed HDMI audio
 // The HDMI transmitter samples these 16-bit words in clk_pix. They change only just after it
 // has taken a sample (a few clk_core after hdmi_smp_tgl toggles), so it never catches a word

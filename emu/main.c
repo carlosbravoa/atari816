@@ -594,7 +594,8 @@ static void usage(void)
         "  --rev N              SYS_REV to report: 6 (no sound, no blitter), 7 (sound), 8 (+ blitter),\n"
         "                       9 (+ blitter lists, raster events at the beam, NV_FRAME),\n"
         "                       10 (+ sample player), 11 (+ sprites, fine scrolling),\n"
-        "                       12 (default: + OPL2 at $DB30, POKEY's native bank, no DACs)\n"
+        "                       12 (+ OPL2 at $DB30, POKEY's native bank, no DACs),\n"
+        "                       13 (default: + the blitter's colour remap: OPs 5 TABLE, 6-7 COPY(_KEY)_REMAP)\n"
         "  --wav FILE.wav       write the sound as the board's HDMI mixes it, without the classic machine's\n"
         "                       (POKEY, GTIA): Lau, the sample player, plus the OPL2 (48 kHz, 16-bit stereo)\n"
         "  --log-sound          print every accepted sound write ($DB00-$DB13; REV 12 $DB00-$DB0F) on stderr\n"
@@ -928,9 +929,10 @@ int main(int argc, char **argv)
                 (unsigned long long)M.bl.n_busy_starts, (unsigned long long)M.bl.n_busy_writes,
                 (unsigned long long)M.bl.n_stale_reads, (unsigned long long)M.sys.snd_writes,
                 (unsigned long long)M.sys.snd_ignored);
-        fprintf(stderr, "emu816: %llu blitter lists (%llu records), %llu audio samples, %llu KEYON writes, "
-                "%llu OPL2 data writes\n",
+        fprintf(stderr, "emu816: %llu blitter lists (%llu records), %llu remap tables loaded, %llu remapped "
+                "copies, %llu audio samples, %llu KEYON writes, %llu OPL2 data writes\n",
                 (unsigned long long)M.bl.n_lists, (unsigned long long)M.bl.n_records,
+                (unsigned long long)M.bl.n_tables, (unsigned long long)M.bl.n_remaps,
                 (unsigned long long)M.au.n_samples, (unsigned long long)M.au.n_keyon,
                 (unsigned long long)M.opl.n_writes);
         fprintf(stderr, "emu816: memory timing%s: %llu cache fills, %llu RAM writes, %llu cache sweeps, "

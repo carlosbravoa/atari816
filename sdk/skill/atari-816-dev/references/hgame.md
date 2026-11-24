@@ -229,6 +229,28 @@ img2c.py art/title.png -o TITLE.HGI --own-palette 16       # its own colours fro
 16-colour mode. `--preview OUT.png --scale 8` draws the art magnified. Header arrays live in
 the 64 KB code bank: keep big pictures in `.HGI` files.
 
+## Colour remapping (REV $0D; elsewhere the CPU)
+
+A table of 256 colours: entry c is drawn where the source has c. Night / fog / shadow shades,
+fades and flashes without touching the palette, team colours on one sprite set. REV $0D
+(Horizon 0.31): Ali's table, about a plain copy's speed (a 320 x 180 screen ~9 ms); older
+boards: hgame does it with the CPU in full screen (~140 ms a screen; a window gets the plain
+draw and an `hgame:` message).
+
+| Call | |
+| --- | --- |
+| `hg_remap_new(tables, n)` | n tables from n x 256 bytes (NULL: identity; from bytes n <= 255): an `hg_image` 256 x 1 x n, table k = frame k |
+| `hg_remap_set(t, k, table)` | change table k (waits for the records that may read it) |
+| `hg_draw_remap(img, f, x, y, t, k)`, `hg_draw_part_remap(img, sx, sy, w, h, x, y, t, k)` | draws through table k; the key is tested on the image's pixel |
+| `hg_remap_rect(sx, sy, w, h, x, y, t, k)` | full screen: framebuffer rectangle (any rows, e.g. a scene drawn off screen) through table k to (x, y); same place = in place |
+| `hg_remap_hw(t)` | 1 blitter, 0 CPU |
+
+Draw the records of one table together (a table record each time it changes, ~1,100 kernel
+cycles). Tables are sources: do not change them while a frame's records may read them (use
+`hg_remap_set`, or one table per level). Raw kernel: `sheet_draw` records `SH_TABLE` (load
+entries from a sheet row) and `SH_COPY|SH_REMAP`, `SH_KEY|SH_REMAP` (ABI.md "Colour remap");
+a call starts with the table undefined. `hcc --needs rev=13` if a game requires it.
+
 ## Hardware sprites
 
 16 in all (shared by every program), no CPU or blitter time. Images 16 x 16 or 16 x 32 at

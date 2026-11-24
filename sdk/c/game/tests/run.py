@@ -118,7 +118,16 @@ TESTS = [
      ["gt_runs: 0 failed"], []),
     ("runbench", ["gt_runbench.c"], ["--seconds", "20"],
      ["gt_runbench: 0 failed"], []),
+    # (REV $0D) colour remapping by the blitter's table; and on REV $0C by the CPU: the same
+    # checks and the same picture (remap12 is compared with remap's reference)
+    ("remap", ["gt_remap.c"], ["--shot", "4", "--seconds", "6"],
+     ["gt_remap: 0 failed"], []),
+    ("remap12", ["gt_remap.c"], ["--shot", "4", "--seconds", "6", "--rev", "12"],
+     ["gt_remap: 0 failed"], []),
 ]
+
+# tests whose pictures must be another test's (the same program on another board)
+REFNAME = {"remap12": "remap"}
 
 
 def make_files(name, run):
@@ -210,7 +219,8 @@ def run_tests(cc, horizon, only, update):
             shot = os.path.join(run, f"shot{k}.png")
             if not os.path.exists(shot):
                 break
-            ok, d = compare(name, shot, os.path.join(REF, f"{name}-{k}.png"), update)
+            ok, d = compare(name, shot, os.path.join(REF, f"{REFNAME.get(name, name)}-{k}.png"),
+                            update and name not in REFNAME)
             report(f"{cc}/{name}/shot{k}", ok, d)
 
 

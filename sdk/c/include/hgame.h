@@ -268,6 +268,36 @@ void hg_draw_part(const hg_image *img, unsigned sx, unsigned sy, unsigned w, uns
 void hg_image_draw(hg_image *dst, const hg_image *src, unsigned frame, int x, int y);
 void hg_image_fill(hg_image *dst, int x, int y, unsigned w, unsigned h, unsigned c);
 
+/* ================================================================ colour remapping */
+
+/* A remap table is 256 colours: entry c is drawn where the source has colour c. Shades for
+ * night, fog or a shadow, fades, team colours, a flash, a palette cycle without touching the
+ * palette. Drawn by the blitter (hardware revision $0D and Horizon 0.31: Ali's remap table,
+ * at about the speed of a plain copy); on older boards and Horizons by the CPU, in full
+ * screen, with the same result (a window there gets the plain draw and an hgame message).
+ *
+ * hg_remap_new: n tables (1-1024) in far memory, an image of 256 x 1 pixels and n frames
+ * (table k is frame k: hg_image_pixels(t, k)), from n * 256 bytes (table k at tables + 256 k;
+ * NULL: every table the identity). hg_image_free frees them. */
+hg_image *hg_remap_new(const unsigned char *tables, unsigned n);
+/* table k from 256 bytes. A table is a source: the records drawn with it so far are drawn
+ * (and waited for) first. */
+void hg_remap_set(hg_image *t, unsigned k, const unsigned char *table);
+/* hg_draw / hg_draw_part through table k of t: each pixel drawn as t's entry for it; an
+ * image with a key skips its key colour (tested on the image's own pixel, before the table) */
+void hg_draw_remap(const hg_image *img, unsigned frame, int x, int y, const hg_image *t,
+                   unsigned k);
+void hg_draw_part_remap(const hg_image *img, unsigned sx, unsigned sy, unsigned w, unsigned h,
+                        int x, int y, const hg_image *t, unsigned k);
+/* Full screen, 256 colours: the framebuffer's rectangle at (sx, sy) (screen coordinates, as
+ * hg_move's, any of the framebuffer's rows) through table k to (x, y); the same place:
+ * shaded in place. Other overlaps: undefined. A night or a fade: the scene drawn off the
+ * screen (hg_screen_fb with more rows), shown through a shade each frame. */
+void hg_remap_rect(int sx, int sy, unsigned w, unsigned h, int x, int y, const hg_image *t,
+                   unsigned k);
+/* 1 if the blitter remaps (it asks the kernel once, with table t), 0 if the CPU does */
+int hg_remap_hw(const hg_image *t);
+
 /* ================================================================ hardware sprites */
 
 /* Marga's sprites: 16 in all (shared with other programs), drawn over the screen with no

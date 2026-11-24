@@ -286,6 +286,13 @@ Every function is described in `hgame.h`. In short:
 | `hg_image_draw(dst, src, frame, x, y)`, `hg_image_fill`, `hg_map_image` | the CPU, image to image (composing a background) |
 | `hg_image_palette(img)`, `hg_image_pixels(img, k)`, `hg_image_addr(img, k)` | the image's own colours; its pixels (`unsigned char __far *`: they are in far memory) |
 
+| Colour remapping (hardware revision $0D, Horizon 0.31; elsewhere the CPU) | |
+| --- | --- |
+| `hg_remap_new(tables, n)`, `hg_remap_set(t, k, table)` | n remap tables of 256 colours (entry c: the colour drawn where the source has c), from n x 256 bytes (NULL: the identity), kept as an image of 256 x 1 pixels and n frames (table k: `hg_image_pixels(t, k)`; `hg_image_free` frees them); `hg_remap_set` changes one (the records drawn with it so far are drawn first) |
+| `hg_draw_remap(img, frame, x, y, t, k)`, `hg_draw_part_remap(img, sx, sy, w, h, x, y, t, k)` | `hg_draw` / `hg_draw_part` through table k: shaded, faded, recoloured sprites and tiles; an image's key is tested on its own pixel, before the table |
+| `hg_remap_rect(sx, sy, w, h, x, y, t, k)` | full screen: a rectangle of the framebuffer (any of its rows: a scene drawn off the screen) through table k to (x, y), or in place (the same place): a night, a fade, a shadow, a flash |
+| `hg_remap_hw(t)` | 1 if the blitter does it, 0 if the CPU does |
+
 | Sprites | |
 | --- | --- |
 | `hg_sprites(n)` | take n of Marga's 16 sprites |
@@ -330,6 +337,47 @@ Every function is described in `hgame.h`. In short:
 past 255, drawing before a screen) prints `hgame: function: what` on the console, the first
 16 times, and the call does nothing. The library is always built so (the checks cost little
 beside the calls they guard).
+
+## Colour remapping
+
+A remap table says, for each of the 256 colours, which colour to draw instead: a darker shade
+(night, fog, a shadow, light that fades with distance), a team's colours on a shared sprite,
+a whole palette's fade or flash drawn without touching the palette (so the panel keeps its
+colours), a palette cycle on a few entries. With hardware revision $0D the blitter does it as
+it copies, at about the speed of a plain copy (Ali's table: register spec, "Colour remap";
+Horizon 0.31's `sheet_draw`, ABI.md "Colour remap"). On older boards (or Horizons) hgame
+draws the same pixels with the CPU, in full screen: the game runs everywhere, slower there;
+in a window only the blitter can, and an older board gets the plain draw (and a message).
+
+```c
+static unsigned char shades[16 * 256];      /* 16 levels of a 16-colour-ramp palette */
+hg_image *night;
+unsigned lev, c;
+
+for (lev = 0; lev < 16; lev++)
+    for (c = 0; c < 256; c++)                /* ramps of 16: c's ramp, lev steps darker */
+        shades[lev * 256 + c] = (c & 15) + lev < 16 ? c + lev : (c | 15);
+night = hg_remap_new(shades, 16);
+
+/* each frame: the scene drawn off the screen (rows 200-399 of a 320 x 400 framebuffer,
+ * hg_screen_fb), then shown through the night's level */
+hg_remap_rect(0, 200, 320, 180, 0, 0, night, lev);
+hg_draw_remap(soldier, f, x, y, teams, 2);  /* a sprite in team 2's colours */
+```
+
+- **Tables are sources.** Like an image, a table must stay as it is while a frame's records
+  may read it; `hg_remap_set` waits for them by itself, so change tables between frames (or
+  keep one table per level and choose among them: 16 levels are 4 KB).
+- **Cost.** hgame queues a remapped draw like `hg_draw` (the same kernel cost a record), plus
+  one table record (about 1,100 kernel cycles, Ali about 20 us) at the start of each send and
+  wherever the table changes: draw the records of one table together. A full 320 x 180
+  `hg_remap_rect` takes the blitter about 9 ms in the emulator (a plain copy 7.8 ms); the CPU
+  (older boards) about 140 ms.
+- **Revision.** `hg_remap_hw(t)` says which (it asks the kernel once). `hcc --needs rev=13`
+  makes a game that only makes sense with the blitter's remap refuse older boards.
+- **Overlap.** `hg_remap_rect` shades in place when the source and the destination are the
+  same rectangle; other overlaps are undefined (draw the scene off the screen instead).
+- No remapped fills (choose the colour from the table yourself) or text.
 
 ## Assets
 
@@ -559,7 +607,8 @@ where the game allows.
   `hg_image_free` (which frees the sheet).
 - 16-colour images (`HG_640X360X4`) come only from `.HGI` files (`img2c.py --bpp 4`); text and
   pixels in that mode are drawn by the CPU.
-- No collision report from the hardware (boxes only), no scaling, rotation or blending.
+- No collision report from the hardware (boxes only), no scaling, rotation or blending
+  (colour remapping covers shading and recolouring: "Colour remapping").
 - The emulator has no joystick; `hg_joy` reads 0 there.
 
 ## Tests
@@ -574,9 +623,10 @@ builds eleven test programs (`tests/gt_*.c`: drawing, the screen modes and the p
 a framebuffer taller than the screen with a split view, the key queue and the 16-bit voices,
 a window with bobs and its menu, hardware sprites, scrolling maps, input, sound and music,
 the helpers and `.HGI` files with bad arguments, (0.30) runs and groups by the blitter
-against the CPU's, page flipping with three pages and `hg_us`, and `gt_runbench`, the
-measurement of a run by every way of filling it, its table in console.txt) and runs each in
-the emulator with a script;
+against the CPU's, page flipping with three pages and `hg_us`, `gt_runbench`, the
+measurement of a run by every way of filling it, its table in console.txt, and (REV $0D)
+`gt_remap`, colour remapping: run twice, by the blitter and with `--rev 12` by the CPU, both
+against the same picture) and runs each in the emulator with a script;
 it checks the program's own PASS / FAIL lines (each reads the framebuffer back), the
 screenshots against `tests/ref/` (the same pictures for both code models: every shot is
 taken while nothing moves, or of what the program draws for a given frame), the POKEY and Lau writes

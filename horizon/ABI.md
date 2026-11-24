@@ -63,7 +63,7 @@ PBR:PC-1.
 | $33 | task_info | A = slot 0-15, X, Y = 16-byte record | - | Record: u8 id (0 = free slot), u8 state (1 ready, 2 running, 3 blocked, 4 zombie), u8 priority, u8 banks owned, u8 parent id (0 = none), 8 characters name (space padded), u8 flags (0.13: TI_WINDOWS 1 it has windows, TI_MODAL 2 a WF_MODAL window is open, TI_IDLE 4 it waits in win_event with nothing queued, TI_SINGLE 8 single instance), u8 its number of windows, 1 spare byte (0) |
 | $34 | task_single | - | - | (0.13) One instance of the caller's program (the same absolute path) only. If another live task runs it already, that task's windows are raised (the top one gets the focus) and the call returns C set, A = ERUNNING, X = its id: the caller should exit. Otherwise the caller is marked, and a later spawn of the same path raises its windows instead and returns ERUNNING. The Desktop, About and Settings call it first thing |
 | $35 | task_path | X, Y = buffer, A = its size | A = length | (0.28) The absolute path of the file the caller's program was loaded from, zero-terminated, as the loader opened it: "/GAMES/MINE/GAME.PRG" (the path given to spawn, made absolute with the parent's current directory; upper or lower case as it was given). At most 127 characters: a 128-byte buffer always fits. EINVAL if the buffer is too small (as getcwd), EFAULT a bad buffer. A program finds its own data files next to it this way. Before 0.28 the call does not exist (ENOSYS) |
-| $36 | sys_info | - | A = version, X = the hardware revision | (0.29) Horizon's version as major << 8 \| minor ($001D for 0.29, $001E for 0.30) and SYS_REV (what About shows; $0C: the OPL2, $0B: sprites, $0A: Lau, $08: the blitter). No side effects (unlike ws_config). A program checks what it needs with it: HZ_NEEDS (user/needs.inc) and hcc --needs, see sdk/docs/apps.md. Before 0.29 the call does not exist (ENOSYS): task_path answering (EINVAL for a buffer of size 0) tells 0.28 |
+| $36 | sys_info | - | A = version, X = the hardware revision | (0.29) Horizon's version as major << 8 \| minor ($001D for 0.29, $001E for 0.30) and SYS_REV (what About shows; $0D: the blitter's colour remap, $0C: the OPL2, $0B: sprites, $0A: Lau, $08: the blitter). No side effects (unlike ws_config). A program checks what it needs with it: HZ_NEEDS (user/needs.inc) and hcc --needs, see sdk/docs/apps.md. Before 0.29 the call does not exist (ENOSYS): task_path answering (EINVAL for a buffer of size 0) tells 0.28 |
 | $40 | port_create | - | A = port (0-15) | The caller owns the port. EAGAIN if all 16 are in use |
 | $41 | send | A = port, X, Y = 16-byte message | - | Any task may send. EAGAIN if the port's queue (8 messages) is full, EINVAL if the port is not open |
 | $42 | recv | A = port, X, Y = 16-byte buffer | - | Owner only (else EINVAL). Blocks while the queue is empty. Interruptible by kill. (0.26) A = port \| RV_POLL ($8000): EAGAIN at once when the queue is empty (a window program reads its port at each event without waiting) |
@@ -140,7 +140,7 @@ PBR:PC-1.
 | $A0 | win_front | A = own window | - | (BASIC 2.0) The window comes back if minimized, is raised to the top of its class and gets the keyboard focus (with a WF_MODAL dialog of its program over it, as the Windows menu does). For a program that must show a window again by itself: the sprites of a window show only while it has the focus, and a full-screen window shows its screen only then (BASIC's SCREEN, CONT and the end of INPUT use it). EINVAL: not the caller's window |
 | $A1 | sheet_new | X, Y = {u24 address, u8 0, u16 stride, u16 width, u16 height} | A = the sheet (1-32) | (0.19) Registers a sheet: width x height 8 bpp pixels from the address, rows stride bytes apart, all of it the caller's own memory (its window, its code bank, banks it allocated, across consecutive banks it owns; not the kernel's, another program's or a shared bank: EFAULT). Checked once here; sheet_draw's records then name the sheet and a rectangle in it. EINVAL: width 0 or above 4096, height 0 or above 1024, a stride below the width; EAGAIN: 32 sheets exist (all programs together), or the rows of all sheets would pass 4096. See "Sheets" |
 | $A2 | sheet_free | A = sheet, $FFFF: every sheet of the caller's | - | (0.19) The caller's running list (draw_list's or sheet_draw's) is stopped first (Ali's ABORT). EINVAL: not the caller's sheet. A sheet also goes when the program frees a bank it lies in (bank_free) and when the program ends |
-| $A3 | sheet_draw | A = window \| count << 8 (1-128), X, Y = count records of 16 bytes | A = records drawn | (0.19) Copies and keyed copies from the caller's sheets, and fills, as one of Ali's command lists: the targets, the clipping, the revisions and the waiting of draw_list, at a fraction of its cost (the kernel only compares a record's numbers with the sheet's size). See "Sheets". EINVAL: a bad window, count or op, a sheet not the caller's, sx + w or sy + h past the sheet, more than 460,800 pixels; EFAULT: the records not wholly in the caller's memory; then nothing is drawn |
+| $A3 | sheet_draw | A = window \| count << 8 (1-128), X, Y = count records of 16 bytes | A = records drawn | (0.19) Copies and keyed copies from the caller's sheets, and fills, as one of Ali's command lists: the targets, the clipping, the revisions and the waiting of draw_list, at a fraction of its cost (the kernel only compares a record's numbers with the sheet's size). (0.31) SH_TABLE records load Ali's colour remap table from a sheet, SH_REMAP copies draw through it (REV $0D). See "Sheets" and "Colour remap". EINVAL: a bad window, count or op, a sheet not the caller's, sx + w or sy + h past the sheet, more than 460,800 pixels; EFAULT: the records not wholly in the caller's memory; ENODEV: SH_TABLE or SH_REMAP before REV $0D or with the blitter turned off; then nothing is drawn |
 | $A4 | fill_runs | A = count (0-2688), X, Y = 10-byte block {u24 page, u8 0, u16 size, u24 runs, u8 0} | A = count | (0.30) Many horizontal runs, each of one colour, filled by Ali in one call: run k is 4 bytes {u16 offset, u8 colour, u8 width 0-255} and fills width bytes from page + offset. The page (size bytes, 0 = 65,536) must be the caller's own memory (its full-screen framebuffer, banks it allocated, its window: Ali writes past FREDDIE II), and every run must end inside it (offset + width <= size). The page is checked once, each run with one compare; returns when the last runs are started, while Ali still fills (list_wait, vsync or the next list call wait for it; the runs' memory may be reused at once: the kernel has copied them). See "Fill runs". EINVAL count above 2688, flags not 0, a run past the page (X = its index: the runs before it may be drawn, none after it); EFAULT the page not wholly the caller's own memory, the block or the runs not readable; ENOMEM no bank for the kernel's list (taken at the first call); ENODEV before REV $09 or with the blitter turned off (ws_config bit 0): fill by the CPU then (hgame does). The window system need not run |
 | $A5 | uptime_us | - | A = microseconds since reset, bits 0-15, X = bits 16-31 | (0.30) The system block's free-running microsecond counter (UPTIME, $00:DE18), which tasks cannot read themselves (the I/O page is the kernel's). Wraps after 71.6 minutes. For timing: one call costs about 40 us (the syscall's own entry and return), uptime ($04) steps 10 ms |
 
@@ -669,7 +669,7 @@ sheet's rows that `sheet_new` made.
 | Offset | Field |
 | --- | --- |
 | 0 | u8 the sheet (1-32; a fill: 0, not used) |
-| 1 | u8 op: SH_FILL 0, SH_COPY 1, SH_KEY 2 (pixels of the key colour skipped); + SH_VBL $80: wait for the vertical blank before this record |
+| 1 | u8 op: SH_FILL 0, SH_COPY 1, SH_KEY 2 (pixels of the key colour skipped), (0.31) SH_TABLE 3 (see "Colour remap"); (0.31) + SH_REMAP $40 on SH_COPY and SH_KEY: through the remap table; + SH_VBL $80: wait for the vertical blank before this record |
 | 2 | u8 the fill colour or the key colour |
 | 3 | u8 0 |
 | 4, 6 | u16 sx, sy: the source's top left corner in the sheet |
@@ -714,6 +714,57 @@ tiles:  .faraddr art            ; sheet_new's block: 16 x 16 tiles, one under th
         ...                     ; a record: tile 3 at (40, 20), colour 0 left out
         .byte   1, SH_KEY, 0, 0 ; (the sheet's number in byte 0)
         .word   0, 3 * 16, 16, 16, 40, 20
+```
+
+### Colour remap (0.31, REV $0D)
+
+Ali has a 256-entry colour table (register spec, "Colour remap"): a copy through it draws
+table[c] for every source pixel c, at about the speed of a plain copy. Night and fog shades,
+fades, team colours, shadows, lighting, a flash: without the CPU touching a pixel and without
+changing the palette. `sheet_draw` reaches it with two record forms:
+
+- **SH_TABLE (op 3)** loads w entries of the table, from x to x + w - 1, from the sheet's
+  pixels (sx, sy) .. (sx + w - 1, sy): a table is a row of a sheet (256 pixels wide for a
+  whole one), so a program keeps any number of tables (16 shade levels: a 256 x 16 sheet) and
+  each costs one record to load (Ali: about 20 us). w 1-256, x + w <= 256, h 1, y not used
+  (0); sx + w <= the sheet's width and sy < its height, else EINVAL. No destination: it is
+  never clipped and draws nothing. SH_VBL works on it (the list then starts in the vertical
+  blank with it).
+- **SH_COPY + SH_REMAP ($41), SH_KEY + SH_REMAP ($42)** are SH_COPY and SH_KEY through the
+  table: Ali's COPY_REMAP and COPY_KEY_REMAP. The key (byte 2) is tested on the sheet's pixel,
+  before the table. Everything else is SH_COPY's and SH_KEY's: the clipping, the fast path
+  (the same cost a record), SH_VBL. SH_FILL + SH_REMAP: EINVAL (choose the colour).
+
+**The table belongs to the call.** Ali's table is shared (the compositor, other programs'
+lists run between your calls), so its contents at the start of a call are undefined: put an
+SH_TABLE record before the first SH_REMAP record of every call, and another one wherever the
+table changes; records run in order, so one call can use many tables (TABLE, remapped
+copies, TABLE, remapped copies...). The kernel does not check this (wrong colours, no harm).
+A table is a source like the art: leave its pixels alone while a list may read them.
+
+**Where.** REV $0D and later with the blitter in use (`ws_config` bit 0 clear): else ENODEV
+for any call holding such a record, and nothing is drawn; a program checks once (a call of
+one SH_TABLE record) and draws by the CPU otherwise, which hgame does by itself
+(`hg_draw_remap`, `hg_remap_rect`). Horizon before 0.31 refuses op 3 and $41/$42 with EINVAL.
+`hcc --needs rev=13` (HZ_NEEDS revision $0D) makes a program with no CPU path refuse to start
+on an older board. `draw_list` has no remapped records: a copy of the framebuffer through a
+table is a sheet over the framebuffer (a full-screen program's own memory) and one SH_REMAP
+record (hgame's `hg_remap_rect`).
+
+**Cost.** The kernel: a remapped record costs what a plain one does (the fast path: about 300
+cycles); a SH_TABLE record about 1,100 (the full path). Ali: a remapped copy takes a plain
+copy's time to 12 % more (a 320 x 200 copy about 7 ms on the board, 8-9 ms in emu816; the CPU
+needs 115-140 ms for the same shade), a table about 20 us.
+
+```
+shades: .faraddr tables         ; sheet_new: 16 tables of 256 colours, one under the other
+        .byte   0
+        .word   256, 256, 16    ; stride, width, height
+        ...                     ; records: table 9, then the view (sheet 2, 320 x 184) through it
+        .byte   1, SH_TABLE, 0, 0       ; (byte 0: the shades' sheet)
+        .word   0, 9, 256, 1, 0, 0      ; sx 0, sy 9 (the table), w 256, h 1, x 0 (entry 0), y
+        .byte   2, SH_COPY | SH_REMAP, 0, 0
+        .word   0, 0, 320, 184, 0, 0
 ```
 
 ### Fill runs (0.30)

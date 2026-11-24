@@ -587,7 +587,7 @@ gt8:    print   "gtest 8: sheets\n"
         print   "  sheet 33: "
         ldx     #64
         jsr     sdbad
-        print   "  op 3: "
+        print   "  op 4: "
         ldx     #80
         jsr     sdbad
         print   "  a window not ours: "
@@ -1757,7 +1757,7 @@ sd_bad: srec    1, SH_COPY, 0, 20, 0, 16, 16, 0, 0          ; sx + w past
         srec    1, SH_COPY, 0, $FFF8, 0, 16, 16, 0, 0       ; overflowing
         srec    0, SH_KEY, 0, 0, 0, 16, 16, 0, 0            ; sheet 0
         srec    33, SH_COPY, 0, 0, 0, 16, 16, 0, 0          ; sheet 33
-        srec    1, 3, 0, 0, 0, 16, 16, 0, 0                 ; op 3
+        srec    1, 4, 0, 0, 0, 16, 16, 0, 0                 ; op 4 (3 is SH_TABLE since 0.31)
 sd_good: srec   1, SH_COPY, 0, 0, 0, 16, 16, 0, 0           ; (a good one: the child's)
 sd_out: srec    1, SH_COPY | SH_VBL, 0, 0, 0, 16, 16, 300, 0 ; right of the content
         srec    1, SH_COPY, 0, 0, 0, 16, 0, 0, 0            ; empty

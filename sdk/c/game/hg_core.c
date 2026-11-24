@@ -145,9 +145,12 @@ void hg__farmem_reset(void)
     fm_used = 0;
 }
 
+unsigned hg__fbgen;                     /* +1 whenever the framebuffer changes (hg_remap.c) */
+
 static void free_fb(void)
 {
     unsigned i;
+    ++hg__fbgen;
     for (i = 0; i < nfbbanks; i++)
         hz_bank_free(fbbanks[i]);
     nfbbanks = 0;
@@ -300,6 +303,7 @@ int hg_screen_fb(unsigned mode, const char *title, unsigned fbstride, unsigned f
     hg_fb_stride = stride;
     hg_fb_rows = rows;
     hg__fbbase = (unsigned long)b << 16;
+    ++hg__fbgen;
     hg__page = 0;
     hg__pagey = 0;
     hg__scroll = 0;
@@ -350,6 +354,7 @@ int hg__fb_new(unsigned stride, unsigned rows)
     hg_fb_stride = stride;
     hg_fb_rows = rows;
     hg__fbbase = (unsigned long)b << 16;
+    ++hg__fbgen;
     hg__clip_update();
     return 0;
 }

@@ -26,6 +26,14 @@
 ; other record (fills, LS_VBL, clipping, a bitmap target) goes through sh_one: checked in full,
 ; clipped and made by k2list.s's ls_clip and ls_emit.
 ;
+; (0.31, REV $0D) The colour remap. An SH_TABLE record loads entries of Ali's remap table from a
+; row of a sheet (Ali's OP 5 TABLE, made by sh_tab: no destination, no clipping). SH_COPY and
+; SH_KEY + SH_REMAP draw through it: Ali's OP 6 COPY_REMAP and 7 COPY_KEY_REMAP, a different OP
+; and nothing else, so the fast path takes them as any copy (only its switch to such a record
+; is new) and sh_one makes them as copies, its OP changed afterwards (sh_rmop, sh_rpatch); the
+; records without SH_REMAP cost exactly what they did. ENODEV unless the board is REV $0D or
+; later with the blitter in use (sh_rmok).
+;
 ; Bank $7F, past the console's 60 cell rows ($7F:8400) and below the pointer images ($7F:F000):
 ;   $8400-$8FFF  SL_LIST: Ali's records (128 x 24), draw_list's and sheet_draw's
 ;   $9000-$9FFF  DROW_LO / DROW_HI: the fast path's rows of the target (1024)
@@ -40,7 +48,7 @@
 
         .import f_set_ok: far, f_set_err: far, f_win_arg: far, f_uaccess: far
         .import f_bank_run: far, f_irq_poll: far
-        .import t_a, t_x, t_y, ws_on, k_rev, bl_force, ls_task
+        .import t_a, t_x, t_y, ws_on, k_rev, bl_force, bl_on, ls_task
         .import f2_idle: far, f2_stop: far, f2_setup: far, f2_clip: far, f2_emit: far
         .import f2_finish: far, f2_range: far, f2_mul: far
         .import ls_n, ls_o, ls_cnt, ls_vbl, ls_bmp, ls_base, ls_str, ls_ox, ls_oy
@@ -57,6 +65,8 @@ DROW_HI     = $7F9800
 SH_FILL     = 0                 ; record ops (the same numbers as LS_FILL, LS_COPY, LS_KEY)
 SH_COPY     = 1
 SH_KEY      = 2
+SH_TABLE    = 3                 ; (0.31) load remap table entries from a sheet's row
+SH_REMAP    = $40               ; (0.31) + through the remap table (SH_COPY, SH_KEY)
 SH_VBL      = $80               ; + wait for the vertical blank first
 LS_MAX      = 128
 LS_AREA     = 460800
@@ -86,6 +96,8 @@ k_sy    = $BC
 k_i     = $BE                   ; the record's offset in its bank
 k_il    = $C0                   ; the last record's
 k3b     = $C4                   ; the records' bank
+k_rop   = $C6                   ; (0.31) sh_rmop: LS_COPY / LS_KEY of the remapped record
+k_ro    = $C8                   ;   ls_o before it
 kg_e    = $C2                   ; (ws.s) the window
 kx0     = $E0                   ; (k2.s) a temporary
 
@@ -539,6 +551,20 @@ sh_fast:
         ldy     k_i
         jmp     @rec
 
+; (0.31) SH_COPY / SH_KEY + SH_REMAP: Ali's OP 6 COPY_REMAP / 7 COPY_KEY_REMAP (where the
+; remap is not there: sh_one, ENODEV)
+@swrm:  cmp     #SH_REMAP + SH_COPY
+        bcc     @swno
+        cmp     #SH_REMAP + SH_KEY + 1
+        bcs     @swno
+        and     #$0003
+        pha
+        jsr     sh_rmok
+        pla
+        bcs     @swno
+        adc     #5                      ; (C clear)
+        bra     @swop
+
 ; another sheet or op: checked, its values kept (a fill, WAIT_VBL, one pending, a sheet not
 ; the caller's: sh_one)
 @sw:    sta     sc_hop
@@ -546,8 +572,8 @@ sh_fast:
         and     #$00FF
         beq     @swno
         cmp     #SH_KEY + 1
-        bcs     @swno
-        xba
+        bcs     @swrm
+@swop:  xba
         sta     sc_op
         lda     f:ls_vbl
         bne     @swno
@@ -710,6 +736,37 @@ sh_fast:
         clc
         jmp     @addr
 
+; (0.31) sh_one's op above SH_KEY (A; DBR $01; on the stack sh_one's saved DBR and its return):
+; SH_TABLE: sh_tab. SH_COPY / SH_KEY + SH_REMAP: made by sh_one's own path as LS_COPY / LS_KEY;
+; its end then returns to sh_rpatch (its plb takes the byte pushed here), which makes the OP
+; Ali's 6 / 7 if a record was made.
+sh_rmop:
+        cmp     #SH_TABLE
+        jeq     sh_tab
+        cmp     #SH_REMAP + SH_COPY
+        bcc     sh_rinv
+        cmp     #SH_REMAP + SH_KEY + 1
+        bcs     sh_rinv
+        and     #$0003
+        sta     k_rop
+        jsr     sh_rmok
+        bcs     sh_rnodev
+        lda     ls_o
+        sta     k_ro
+        pea     .loword(sh_rpatch - 1)
+        phb
+        lda     k_rop
+        jmp     sh_op
+sh_rinv:
+        lda     #EINVAL
+        plb
+        sec
+        rts
+sh_rnodev:
+        lda     #ENODEV
+        plb
+        sec
+        rts
 ; record k_i (in bank kp1+2): copied to sr, checked, clipped, made by ls_emit at ls_o, or left
 ; out (sh_skip + 1). C set: A = the error. Keeps DBR (sets $01 inside).
 sh_one: phb
@@ -734,8 +791,8 @@ sh_one: phb
         ldx     #LS_VBL
         stx     ls_vbl
 :       cmp     #SH_KEY + 1
-        bcs     @inv
-        sta     lr                      ; (LS_FILL, LS_COPY, LS_KEY: the same numbers)
+        bcs     sh_rmop                 ; (0.31: SH_TABLE, SH_REMAP; else EINVAL)
+sh_op:  sta     lr                      ; (LS_FILL, LS_COPY, LS_KEY: the same numbers)
         lda     sr+2                    ; c1 = c2 = the colour or the key
         and     #$00FF
         sta     kx0
@@ -825,6 +882,113 @@ sh_one: phb
 :       jsl     f2_emit
         plb
         clc
+        rts
+
+; (0.31) sh_one's end for a remapped record (sh_rmop): its OP made Ali's 6 / 7 if it was made
+sh_rpatch:
+        bcs     @out                    ; (an error: A)
+        lda     ls_o
+        cmp     k_ro
+        beq     @ok                     ; left out (empty, clipped away)
+        tax
+        lda     k_rop
+        clc
+        adc     #5                      ; 6 COPY_REMAP, 7 COPY_KEY_REMAP
+        a8
+        sta     f:SL_LIST + 17 - 24,x
+        a16
+@ok:    clc
+@out:   plb
+        rts
+
+; (0.31) SH_TABLE: w (1-256) colours from (sx, sy) of the sheet into the remap table's entries
+; x .. x + w - 1 (x + w <= 256), h 1: Ali's OP 5 TABLE, made here (no destination, no
+; clipping). As sh_rmop: sh_one's saved DBR on the stack.
+sh_tab: jsr     sh_rmok
+        bcc     @go
+        lda     #ENODEV
+        bra     :+
+@inv:   lda     #EINVAL
+:       plb
+        sec
+        rts
+@go:
+        lda     sr+8                    ; w 1-256, x + w <= 256, h 1
+        beq     @inv
+        clc
+        adc     sr+12
+        bcs     @inv
+        cmp     #257
+        bcs     @inv
+        lda     sr+10
+        dec     a
+        bne     @inv
+        lda     sr                      ; the sheet: the caller's; sx + w <= its width, sy < its
+        and     #$00FF                  ; height
+        jsr     sh_mine
+        bcs     @inv
+        lda     sr+4
+        clc
+        adc     sr+8
+        bcs     @inv
+        dec     a
+        cmp     sh_w,x
+        bcs     @inv
+        lda     sr+6
+        cmp     sh_h,x
+        bcs     @inv
+        asl     a                       ; SRC = row sy of the sheet + sx
+        clc
+        adc     sh_row,x
+        tax
+        lda     f:SROW_LO,x
+        clc
+        adc     sr+4
+        sta     kx0
+        lda     f:SROW_HI,x
+        adc     #0
+        ldx     ls_o
+        sta     f:SL_LIST+2,x           ; (3: SRC_STRIDE, anything for one line)
+        lda     kx0
+        sta     f:SL_LIST,x
+        lda     sr+12                   ; DST = x (the first entry), 7-8 0
+        sta     f:SL_LIST+5,x
+        lda     #0
+        sta     f:SL_LIST+7,x
+        lda     sr+8                    ; WIDTH w, HEIGHT 1
+        sta     f:SL_LIST+10,x
+        lda     #1
+        sta     f:SL_LIST+12,x
+        lda     #$0500                  ; KEY 0, OP 5 TABLE
+        sta     f:SL_LIST+16,x
+        lda     ls_vbl                  ; FLAGS 0, RFLAGS: WAIT_VBL
+        xba
+        sta     f:SL_LIST+18,x
+        txa
+        clc
+        adc     #24
+        sta     ls_o
+        lda     ls_vbl                  ; (RFLAGS set: cleared before the next call's fast path)
+        beq     :+
+        stz     ls_vbl
+        lda     ls_o
+        cmp     sl_dirty
+        bcc     :+
+        sta     sl_dirty
+:       plb
+        clc
+        rts
+
+; (0.31) the remap usable: REV $0D or later, the blitter in use (else ENODEV). Any DBR. C set: no
+sh_rmok:
+        lda     f:k_rev
+        cmp     #$0D
+        bcc     @no
+        lda     f:bl_on
+        beq     @no
+        clc
+        rts
+@no:    sec
         rts
 
 ; The fast path writes only the bytes of Ali's records that change; FLAGS and RFLAGS (18, 19)

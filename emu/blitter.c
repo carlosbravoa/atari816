@@ -23,6 +23,14 @@
  * written, unlike the hardware, which stops it within one memory access), no interrupt.
  * From REV $09 register writes while BUSY are ignored (and counted).
  *
+ * REV $0D: the colour remap table (256 bytes inside Ali). OP 5 TABLE is a COPY whose
+ * destination is the table: entry (DST + y * DST_STRIDE + x) mod 256 = the source byte, no RAM
+ * written. OP 6 COPY_REMAP and OP 7 COPY_KEY_REMAP are COPY and COPY_KEY writing table[source
+ * pixel]; the key is tested on the source pixel. Before REV $0D OPs 5-7 do nothing. Timing (core/sim_a816/tb_blit.sv, +bench): a remapped copy
+ * takes a plain copy's time +12% (the RTL: -10% to +12% by the SDRAM's latency and burst
+ * length); TABLE as a 256-pixel copy (the RTL: 440-560 clk_core, a little less). The table is
+ * the identity after reset here; on the board it is undefined until loaded.
+ *
  * Choices where the spec is open:
  *  - BACKWARDS walks lines from the last to the first and pixels from right to left; the
  *    addresses still name the first (top-left) byte of each rectangle.
@@ -34,7 +42,13 @@
 #include <string.h>
 #include <stdlib.h>
 
-void blitter_reset(void) { memset(&M.bl, 0, sizeof M.bl); }
+void blitter_reset(void)
+{
+    memset(&M.bl, 0, sizeof M.bl);
+    for (int i = 0; i < 256; i++) M.bl.tab[i] = (uint8_t)i;
+}
+
+static int max_op(void) { return M.sys.rev >= 13 ? 7 : 4; }
 
 static uint32_t r24(int i) { return M.bl.r[i] | M.bl.r[i + 1] << 8 | (uint32_t)M.bl.r[i + 2] << 16; }
 static uint32_t r16(int i) { return M.bl.r[i] | M.bl.r[i + 1] << 8; }
@@ -53,9 +67,11 @@ static uint64_t fill_words(uint32_t dst, uint32_t dstr, uint32_t w, uint32_t h)
     return n;
 }
 
-static uint64_t blit_cost(uint32_t w, uint32_t h, uint8_t op, uint32_t dst, uint32_t dstr)
+static uint64_t blit_cost(uint32_t w, uint32_t h, uint8_t op, uint32_t dst, uint32_t dstr, int rm)
 {
     uint64_t px = (uint64_t)w * h;
+    if (rm) px = px * 112 / 100;                        /* (REV $0D) a remapped copy: +12% */
+    if (op >= 5) op = 1;                                /* TABLE, the remapped copies: copies */
     if (M.fr.ideal) {                                   /* the model before Horizon 0.19 */
         uint32_t clk10;                                 /* clk_core x 10 per pixel */
         if (op == 0) clk10 = 20;
@@ -115,6 +131,10 @@ static void blit(uint64_t at)
     uint32_t w = r16(0x0A), h = r16(0x0C);
     uint8_t fg = b->r[0x0E], bg = b->r[0x0F], key = b->r[0x10], op = b->r[0x11];
     int back = b->r[0x12] & 1, sbit = (b->r[0x12] >> 4) & 7;
+    int rm = M.sys.rev >= 13 && (op == 6 || op == 7);
+    if (rm) b->n_remaps++;
+    if (op == 5 && M.sys.rev >= 13) b->n_tables++;
+    if (rm) op -= 5;                                    /* (in the loop: COPY, COPY_KEY) */
     if (w > 4096) w = 4096;
     if (h > 4096) h = 4096;
     b->n_blits++;
@@ -126,8 +146,8 @@ static void blit(uint64_t at)
             uint32_t da = (d + x) & 0xFFFFFF;
             switch (op) {
             case 0: phys_wr(da, fg); stale_mark(da); break;
-            case 1: phys_wr(da, phys_rd((s + x) & 0xFFFFFF)); stale_mark(da); break;
-            case 2: { uint8_t c = phys_rd((s + x) & 0xFFFFFF); if (c != key) { phys_wr(da, c); stale_mark(da); } break; }
+            case 1: { uint8_t c = phys_rd((s + x) & 0xFFFFFF); phys_wr(da, rm ? b->tab[c] : c); stale_mark(da); break; }
+            case 2: { uint8_t c = phys_rd((s + x) & 0xFFFFFF); if (c != key) { phys_wr(da, rm ? b->tab[c] : c); stale_mark(da); } break; }
             case 3: case 4: {
                 uint32_t bitn = (7 - sbit) + x;                  /* bits from the leftmost */
                 uint8_t byte = phys_rd((s + bitn / 8) & 0xFFFFFF);
@@ -136,13 +156,17 @@ static void blit(uint64_t at)
                 else if (op == 3) { phys_wr(da, bg); stale_mark(da); }
                 break;
             }
+            case 5:                                     /* (REV $0D) TABLE */
+                if (M.sys.rev < 13) goto out;
+                b->tab[(d + x) & 0xFF] = phys_rd((s + x) & 0xFFFFFF);
+                break;
             default: goto out;
             }
         }
     }
     b->n_pixels += (uint64_t)w * h;
 out:;
-    uint64_t c = (w && h && op <= 4) ? blit_cost(w, h, op, dst, dstr) : 8;
+    uint64_t c = (w && h && b->r[0x11] <= max_op()) ? blit_cost(w, h, b->r[0x11], dst, dstr, rm) : 8;
     b->busy_cycles += c;
     b->busy_until = at + c;
 }

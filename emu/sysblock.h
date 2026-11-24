@@ -3,7 +3,7 @@
 #define SYSBLOCK_H
 #include <stdint.h>
 
-#define SYS_REV_VAL 0x0C         /* default; --rev N reports an older board */
+#define SYS_REV_VAL 0x0D         /* default; --rev N reports an older board */
 #define WDOG_US     2000000
 
 enum { IRQ_VBLANK = 0x01, IRQ_LINE = 0x02, IRQ_TIMER0 = 0x04, IRQ_TIMER1 = 0x08,

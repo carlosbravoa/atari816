@@ -43,8 +43,9 @@ Options:
   --file SRC[:DEST]  copy a file onto the card too (repeatable); without DEST it goes to
                   the card's root, its name in capitals (data/main.c -> /MAIN.C; the
                   card's names ignore case)
-  --rev N         hardware revision to emulate (default: emu816's, REV $0C: the blitter
-                  with command lists, Lau, sprites, fine scrolling, the OPL2); 11 no OPL2
+  --rev N         hardware revision to emulate (default: emu816's, REV $0D: the blitter
+                  with command lists and the colour remap, Lau, sprites, fine scrolling,
+                  the OPL2); 12 no colour remap, 11 no OPL2
                   (POKEY 2 and the DACs instead), 10 no sprites or scrolling, 9 no Lau,
                   8 no command lists / raster / NV_FRAME, 7 no blitter
   --log-sound     log every write to POKEY 2 / the DACs in emu.err

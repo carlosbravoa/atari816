@@ -100,6 +100,8 @@
 #define SH_FILL          0
 #define SH_COPY          1
 #define SH_KEY           2
+#define SH_TABLE         3
+#define SH_REMAP         0x40
 #define SH_VBL           0x80
 #define SD_SHEET         0
 #define SD_OP            1

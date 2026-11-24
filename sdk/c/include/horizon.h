@@ -246,7 +246,7 @@ HZ_STATIC_ASSERT(sizeof(hz_sheetnew) == 10, sheetnew);
 
 typedef struct {                /* sheet_draw record: 16 bytes */
     unsigned char sheet;        /* 1-32 (a fill: 0) */
-    unsigned char op;           /* SH_FILL, SH_COPY, SH_KEY, + SH_VBL */
+    unsigned char op;           /* SH_FILL, SH_COPY, SH_KEY, SH_TABLE, + SH_REMAP, SH_VBL */
     unsigned char c;            /* fill colour or key colour */
     unsigned char zero;
     unsigned short sx, sy, w, h;

@@ -3,6 +3,10 @@
 // Randomised blitter test: a816_blit behind the real port mux (a816_nvc, video off), a random
 // CPU-like client competing for the port, and a reference model of emu/blitter.c.
 //   ./run_blit.sh [+n=3000] [+seed=1] [+cpu=0..100 (request rate, percent)] [+long=0|1|2 (2 = random)]
+//                 [+lat=N (fixed SDRAM latency; default random 3-12)] [+bench=1 (timings only)]
+// REV $0D: TABLE (OP 5), COPY_REMAP (6), COPY_KEY_REMAP (7) in the random blits, a directed sequence
+// first (a table loaded, copies and keyed copies through it, a reload, a plain copy
+// after them, an ABORTed remapped copy, a 320 x 200 copy with and without REMAP).
 `timescale 1ns/1ps
 module tb_blit;
     localparam AW = 23;
@@ -27,7 +31,7 @@ module tb_blit;
 
     reg [7:0] mem [0:(1<<AW)-1];
     reg [7:0] rf  [0:WIN-1];
-    integer lat = 5, seed = 1, i, cpu_rate = 30, nerr = 0;
+    integer lat = 5, seed = 1, i, cpu_rate = 30, nerr = 0, flat = -1, bench = 0;
 
     // SDRAM model, random latency
     always @(posedge clk) begin
@@ -41,7 +45,7 @@ module tb_blit;
                     if (sd_addr[2:0] != 0 || (sd_long && sd_addr[3:0] != 0)) begin $display("FAIL unaligned burst %h", sd_addr); $finish; end
                     for (i = 0; i < 16; i++) sd_rdata[i*8 +: 8] <= (i < 8 || sd_long) ? mem[sd_addr + i] : 8'hxx;
                 end
-                lat <= 3 + ($urandom % 10);
+                lat <= (flat >= 0) ? flat : 3 + ($urandom % 10);
             end else lat <= lat - 1;
         end
     end
@@ -79,13 +83,15 @@ module tb_blit;
     task automatic wr16(input [7:0] a, input [15:0] d); wr(a, d[7:0]); wr(a + 1, d[15:8]); endtask
     task automatic wr24(input [7:0] a, input [23:0] d); wr(a, d[7:0]); wr(a + 1, d[15:8]); wr(a + 2, d[23:16]); endtask
 
-    // reference: emu/blitter.c on rf (offsets relative to WBASE)
+    // reference: emu/blitter.c on rf (offsets relative to WBASE), rtab the remap table
+    reg [7:0] rtab [0:255];
     function automatic int rofs(input longint a); return int'(a - WBASE); endfunction
     task automatic refblit(input int op, input int fl, input longint src, input int sstr, input longint dst, input int dstr,
                            input int w, input int h, input [7:0] fg, input [7:0] bg, input [7:0] key);
-        int back, sb, y, x, bitn; longint s, d; reg [7:0] c;
-        back = fl & 1; sb = (fl >> 4) & 7;
-        if (op > 4) return;
+        int back, sb, y, x, bitn, rm; longint s, d; reg [7:0] c;
+        back = fl & 1; sb = (fl >> 4) & 7; rm = op >= 6;
+        if (op > 7) return;
+        if (op >= 6) op -= 5;                            // 6, 7: COPY, COPY_KEY through the table
         for (int yy = 0; yy < h; yy++) begin
             y = back ? h - 1 - yy : yy;
             s = src + y * sstr; d = dst + y * dstr;
@@ -93,8 +99,9 @@ module tb_blit;
                 x = back ? w - 1 - xx : xx;
                 case (op)
                     0: rf[rofs(d + x)] = fg;
-                    1: rf[rofs(d + x)] = rf[rofs(s + x)];
-                    2: begin c = rf[rofs(s + x)]; if (c != key) rf[rofs(d + x)] = c; end
+                    1: begin c = rf[rofs(s + x)]; rf[rofs(d + x)] = rm ? rtab[c] : c; end
+                    2: begin c = rf[rofs(s + x)]; if (c != key) rf[rofs(d + x)] = rm ? rtab[c] : c; end
+                    5: rtab[8'(d + x)] = rf[rofs(s + x)];
                     default: begin
                         bitn = (7 - sb) + x;
                         c = rf[rofs(s + bitn / 8)];
@@ -106,7 +113,78 @@ module tb_blit;
         end
     endtask
 
-    integer ntest = 3000, t, op, fl, sstr, dstr, w, h, pm, ov, delta, lmode = 2, irqs, ncyc;
+    integer ntest = 3000, t, op, fl, sstr, dstr, w, h, pm, ov, delta, lmode = 2, irqs, ncyc, ntbl = 0, nrm = 0;
+
+    // one blit from the CPU, waited for -> clk cycles from START to BUSY 0
+    task automatic blit1(input int op, input int fl, input longint src, input int sstr, input longint dst, input int dstr,
+                         input int w, input int h, input [7:0] key, output int cyc);
+        wr24(8'h00, src[23:0]); wr16(8'h03, sstr[15:0]); wr24(8'h05, dst[23:0]); wr16(8'h08, dstr[15:0]);
+        wr16(8'h0A, w[15:0]); wr16(8'h0C, h[15:0]); wr(8'h10, key); wr(8'h11, op[7:0]); wr(8'h12, fl[7:0]);
+        cyc = 0;
+        wr(8'h13, 8'h01);
+        while (dut.busy) begin @(posedge clk); cyc++; end
+        refblit(op, fl, src, sstr, dst, dstr, w, h, 8'h00, 8'h00, key);
+    endtask
+    task automatic check(input string what);
+        for (int k = 0; k < WIN; k++) if (mem[WBASE + k] !== rf[k]) begin
+            nerr++; $display("FAIL %s: at %h got %h want %h", what, WBASE + k, mem[WBASE + k], rf[k]); return;
+        end
+        for (int k = 0; k < 256; k++) if (dut.tbl[k] !== rtab[k]) begin
+            nerr++; $display("FAIL %s: table[%0d] got %h want %h", what, k, dut.tbl[k], rtab[k]); return;
+        end
+        $display("ok   %s", what);
+    endtask
+    // the directed sequence: tables at WBASE+$100 (a shade: c -> c ^ $55) and +$300 (c -> 255 - c,
+    // loaded from an address 3 bytes into an 8-byte group), art at +$1000 (64 x 16, colours 0-15),
+    // targets at +$8000 (stride 100)
+    task automatic directed();
+        int c; longint T1 = WBASE + 'h100, T2 = WBASE + 'h303, A = WBASE + 'h1000, D = WBASE + 'h8000;
+        long_ok = 1;
+        for (int k = 0; k < WIN; k++) begin mem[WBASE + k] = 8'h77; rf[k] = 8'h77; end
+        for (int k = 0; k < 256; k++) begin
+            mem[T1 + k] = 8'(k ^ 'h55); rf[rofs(T1 + k)] = 8'(k ^ 'h55);
+            mem[T2 + k] = 8'(255 - k);  rf[rofs(T2 + k)] = 8'(255 - k);
+        end
+        for (int k = 0; k < 64 * 16; k++) begin mem[A + k] = 8'(k % 13); rf[rofs(A + k)] = 8'(k % 13); end
+        blit1(5, 0, T1, 0, 0, 0, 256, 1, 0, c);                 check($sformatf("TABLE: a whole table (%0d cycles)", c));
+        blit1(6, 0, A, 64, D, 100, 64, 16, 0, c);                check($sformatf("COPY_REMAP 64 x 16 (%0d cycles)", c));
+        blit1(7, 0, A, 64, D + 3, 100, 61, 16, 0, c);            check("COPY_KEY_REMAP: key 0 tested on the source (0 ^ $55 = $55 written elsewhere)");
+        blit1(7, 2, A, 64, D + 1, 100, 33, 5, 8'h0C, c);         check("COPY_KEY_REMAP, key $0C, unaligned (FLAGS bit 1 ignored)");
+        blit1(5, 0, T2, 0, 0, 0, 256, 1, 0, c);                  check("TABLE reloaded from an unaligned address");
+        blit1(6, 0, A, 64, D + 2, 100, 40, 3, 0, c);             check("COPY_REMAP with the new table");
+        blit1(6, 1, A, 64, D + 700, 100, 50, 4, 0, c);           check("COPY_REMAP + BACKWARDS");
+        blit1(1, 0, A, 64, D + 1200, 100, 64, 16, 0, c);         check("COPY after remapped ones (no stale state)");
+        blit1(2, 0, A, 64, D + 2900, 100, 64, 16, 8'h03, c);     check("COPY_KEY after them");
+        blit1(0, 0, A, 64, D + 4400, 100, 30, 3, 0, c);          check("FILL after them");
+        blit1(5, 0, T1 + 16, 0, 16, 0, 16, 1, 0, c);             check("TABLE: entries 16-31 only (DST 16, WIDTH 16)");
+        blit1(6, 0, D + 0, 100, D + 0, 100, 64, 16, 0, c);       check("COPY_REMAP in place (SRC = DST)");
+        blit1(5, 1, T2, 0, 0, 0, 256, 1, 0, c);                  check("TABLE + BACKWARDS");
+        blit1(3, 0, A, 8, D + 6000, 100, 40, 3, 0, c);           check("EXPAND after them");
+        // ABORT in the middle of a remapped copy, then a plain copy must be exact
+        wr24(8'h00, A[23:0]); wr16(8'h03, 64); wr24(8'h05, D[23:0] + 24'd8000); wr16(8'h08, 100);
+        wr16(8'h0A, 64); wr16(8'h0C, 16); wr(8'h11, 6); wr(8'h12, 0); wr(8'h13, 8'h01);
+        repeat (150) @(posedge clk); wr(8'h13, 8'h08);
+        while (dut.busy) @(posedge clk);
+        for (int k = 8000; k < 8000 + 1600; k++) rf[rofs(D + k)] = mem[D + k];   // (what it wrote stays)
+        if (dut.lc !== 0 || dut.xr !== 0 || dut.xv !== 0) begin nerr++; $display("FAIL lanes not idle after ABORT"); end
+        blit1(1, 0, A, 64, D + 8000, 100, 64, 16, 0, c);         check("after an ABORTed remapped copy, a plain copy");
+        blit1(6, 0, A, 64, D + 8000, 100, 64, 16, 0, c);         check("... and a remapped one");
+    endtask
+    // 320 x 200 copies, plain and through the table: clk cycles (+lat=N fixes the SDRAM latency)
+    task automatic bench_run();
+        int c0, c1, c2, c3; longint S = 'h100000, D = 'h200000;
+        cpu_rate = 0;
+        for (int k = 0; k < 64000; k++) mem[S + k] = 8'(k * 7);
+        for (int lo = 0; lo < 2; lo++) begin
+            long_ok = lo;
+            blit1(1, 0, S, 320, D, 320, 320, 200, 0, c0);
+            blit1(6, 0, S, 320, D, 320, 320, 200, 0, c1);
+            blit1(7, 0, S, 320, D, 320, 320, 200, 0, c2);
+            blit1(5, 0, S, 0, 0, 0, 256, 1, 0, c3);
+            $display("BENCH lat %0d long %0d: 320x200 COPY %0d cycles (%.2f/px), COPY_REMAP %0d (%.2f/px, %.1f%%), COPY_KEY_REMAP %0d; TABLE %0d cycles",
+                     flat, lo, c0, real'(c0) / 64000.0, c1, real'(c1) / 64000.0, 100.0 * (c1 - c0) / c0, c2, c3);
+        end
+    endtask
     longint src, dst, npx = 0, tcyc = 0;
     reg [7:0] fg, bg, key, v;
     initial begin
@@ -116,10 +194,14 @@ module tb_blit;
         void'($value$plusargs("long=%d", lmode));
         void'($urandom(seed));                         // seeds this thread; the others keep their own
         for (i = 0; i < 'h10000; i++) begin shadow[i] = 8'hEE; mem['h600000 + i] = 8'hEE; end
+        void'($value$plusargs("lat=%d", flat));
+        void'($value$plusargs("bench=%d", bench));
         repeat (3) @(posedge clk); reset_n = 1; run = 1;
+        directed();
+        if (bench) begin bench_run(); $finish; end
         for (t = 0; t < ntest; t++) begin
             long_ok = (lmode == 2) ? $urandom % 2 : lmode;
-            op = $urandom % 21; op = (op == 20) ? 5 : op % 5;
+            op = $urandom % 33; op = (op == 32) ? 8 + $urandom % 248 : op % 8;
             pm = ($urandom % 3 == 0) ? 3 : 255;
             key = $urandom % 4; fg = $urandom; bg = $urandom;
             case ($urandom % 4)
@@ -129,8 +211,8 @@ module tb_blit;
                 default: w = ($urandom % 30 == 0) ? 0 : 1 + $urandom % 70;
             endcase
             h = ($urandom % 40 == 0) ? 0 : 1 + $urandom % 6;
-            fl = ($urandom % 2) | (($urandom % 8) << 4);
-            ov = (op == 1 || op == 2) && ($urandom % 3 == 0);
+            fl = ($urandom % 2) | (($urandom % 2) << 1) | (($urandom % 8) << 4);   // (bit 1: ignored)
+            ov = (op == 1 || op == 2 || op == 6 || op == 7) && ($urandom % 3 == 0);
             if (ov) begin                  // overlapping copy, same stride, direction to suit
                 sstr = 1 + $urandom % 300; dstr = sstr;
                 delta = int'($urandom % (3 * sstr + 8)) - (3 * sstr + 8) / 2;
@@ -143,6 +225,7 @@ module tb_blit;
                 src = WBASE + $urandom % 'h6000;
                 dst = WBASE + 'h8000 + $urandom % 'h6000;
             end
+            if (op == 5 && $urandom % 2) begin w = 1 + $urandom % 256; h = 1; dst = $urandom % 256; end
             for (i = 0; i < WIN; i++) begin v = $urandom & pm; mem[WBASE + i] = v; rf[i] = v; end
             wr24(8'h00, src[23:0]); wr16(8'h03, sstr[15:0]); wr24(8'h05, dst[23:0]); wr16(8'h08, dstr[15:0]);
             wr16(8'h0A, w[15:0]); wr16(8'h0C, h[15:0]); wr(8'h0E, fg); wr(8'h0F, bg); wr(8'h10, key);
@@ -152,6 +235,13 @@ module tb_blit;
             while (dut.busy) begin @(posedge clk); ncyc++; if (irq) irqs++; end
             repeat (2) @(posedge clk); if (irq) irqs++;
             refblit(op, fl, src, sstr, dst, dstr, w, h, fg, bg, key);
+            if (op == 5) ntbl++; else if (op == 6 || op == 7) nrm++;
+            for (i = 0; i < 256; i++) if (dut.tbl[i] !== rtab[i]) begin
+                nerr++;
+                $display("FAIL test %0d (op %0d fl %02x src %h dst %h dstr %0d w %0d h %0d): table[%0d] got %h want %h",
+                         t, op, fl, src, dst, dstr, w, h, i, dut.tbl[i], rtab[i]);
+                break;
+            end
             npx += w * h; tcyc += ncyc;
             if (irqs != 1) begin nerr++; $display("FAIL test %0d: %0d interrupts", t, irqs); end
             for (i = 0; i < WIN; i++) if (mem[WBASE + i] !== rf[i]) begin
@@ -166,8 +256,8 @@ module tb_blit;
         for (i = 0; i < 'h10000; i++) if (mem['h600000 + i] !== shadow[i]) begin
             nerr++; $display("FAIL CPU write lost at %h", 'h600000 + i); break;
         end
-        $display("%0d blits, %0d pixels, %.2f cycles/pixel; CPU accesses %0d, worst wait %0d cycles, most blitter accesses in one wait %0d",
-                 t, npx, real'(tcyc) / real'(npx), ncpu, cw_max, cwb_max);
+        $display("%0d blits (%0d TABLE, %0d remapped copies), %0d pixels, %.2f cycles/pixel; CPU accesses %0d, worst wait %0d cycles, most blitter accesses in one wait %0d",
+                 t, ntbl, nrm, npx, real'(tcyc) / real'(npx), ncpu, cw_max, cwb_max);
         if (cwb_max > 1) nerr++;
         if (nerr) $display("FAIL"); else $display("PASS");
         $finish;

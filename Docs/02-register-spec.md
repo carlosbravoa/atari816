@@ -297,7 +297,7 @@ The image is 256 bytes at $02:0000, 16 rows of 16 palette indices, 0 transparent
 
 ## Ali (blitter) — $DA00
 
-Ali, the blitter, does five rectangle operations on 8 bpp surfaces anywhere in RAM; clipping is done by the GUI library before it starts a blit, which keeps the hardware small.
+Ali, the blitter, does five rectangle operations on 8 bpp surfaces anywhere in RAM, and from REV $0D copies through a 256-entry colour remap table (see "Colour remap"); clipping is done by the GUI library before it starts a blit, which keeps the hardware small.
 
 | Address | Name | Access | Meaning |
 | --- | --- | --- | --- |
@@ -310,7 +310,7 @@ Ali, the blitter, does five rectangle operations on 8 bpp surfaces anywhere in R
 | $00:DA0E | BL\_FG | RW | Fill colour, or colour for 1 bits in EXPAND |
 | $00:DA0F | BL\_BG | RW | Colour for 0 bits in EXPAND |
 | $00:DA10 | BL\_KEY | RW | Transparent colour for COPY\_KEY |
-| $00:DA11 | BL\_OP | RW | 0 FILL, 1 COPY, 2 COPY\_KEY (skip pixels equal to BL\_KEY), 3 EXPAND (1 bpp source to BL\_FG and BL\_BG), 4 EXPAND\_KEY (0 bits leave the destination alone) |
+| $00:DA11 | BL\_OP | RW | 0 FILL, 1 COPY, 2 COPY\_KEY (skip pixels equal to BL\_KEY), 3 EXPAND (1 bpp source to BL\_FG and BL\_BG), 4 EXPAND\_KEY (0 bits leave the destination alone); REV $0D (see "Colour remap"): 5 TABLE (a COPY into the remap table), 6 COPY\_REMAP (COPY writing table[source pixel]), 7 COPY\_KEY\_REMAP (the same, pixels equal to BL\_KEY skipped) |
 | $00:DA12 | BL\_FLAGS | RW | 0 BACKWARDS (copy from the last pixel, for overlapping moves), bits 4 to 6 SRC\_BIT (first source bit for EXPAND, 7 = leftmost) |
 | $00:DA13 | BL\_CTRL | RW | Write: bit 0 START, bit 1 IRQ\_EN, bit 2 LIST (REV $09), bit 3 ABORT (REV $09). Read: bit 0 BUSY, bit 1 IRQ\_EN, and from REV $09 bit 2 LIST (a list is running), bit 3 WAITING (the list waits for vertical blank), bit 4 DONE, bit 5 ABORTED. IRQ\_EN raises BLITTER in the system block when a blit or a list is done |
 | $00:DA14 to $00:DA16 | BL\_LIST | RW | REV $09: 24-bit address of the next command record, 8-byte aligned (bits 0 to 2 are ignored and read 0) |
@@ -318,7 +318,40 @@ Ali, the blitter, does five rectangle operations on 8 bpp surfaces anywhere in R
 
 EXPAND reads 1 bpp sources with the leftmost pixel in bit 7, which matches Atari font and icon data. The 65C816 may keep running while the blitter works; both share SDRAM through FREDDIE II, with the classic side keeping priority.
 
-**Rules (all revisions).** START and LIST are ignored while BUSY is 1. From REV $09, writes to $DA00 to $DA12 and $DA14 to $DA18 are ignored while BUSY is 1 (before REV $09 they were not allowed). WIDTH or HEIGHT 0, or OP above 4, does nothing; WIDTH and HEIGHT above 4096 count as 4096. The blitter writes behind the 65C816's cache: write CACHE\_FLUSH ($00:D80A) before the CPU reads memory the blitter has written. Addresses wrap at the installed RAM. An overlapping copy in the wrong direction (BACKWARDS clear when the destination starts above the source, or set when it starts below) is undefined.
+**Rules (all revisions).** START and LIST are ignored while BUSY is 1. From REV $09, writes to $DA00 to $DA12 and $DA14 to $DA18 are ignored while BUSY is 1 (before REV $09 they were not allowed). WIDTH or HEIGHT 0, or OP above 4 (from REV $0D: above 7), does nothing; WIDTH and HEIGHT above 4096 count as 4096. The blitter writes behind the 65C816's cache: write CACHE\_FLUSH ($00:D80A) before the CPU reads memory the blitter has written. Addresses wrap at the installed RAM. An overlapping copy in the wrong direction (BACKWARDS clear when the destination starts above the source, or set when it starts below) is undefined.
+
+### Colour remap (REV $0D)
+
+Ali holds a 256-entry table of colours (one block RAM inside the blitter, not in the address map). COPY\_REMAP and COPY\_KEY\_REMAP write, for every source pixel c, the table's entry c instead of c: shades for night or fog, fades, team colours, shadows and lighting without the CPU touching a pixel and without changing the palette. Many tables can live in RAM (16 shade levels are 4 KB); TABLE loads one, or a part of one, in about 20 µs.
+
+| BL\_OP | Name | What it does |
+| --- | --- | --- |
+| 5 | TABLE | A COPY whose destination is the table instead of RAM: every rule of COPY applies (SRC, SRC\_STRIDE, WIDTH, HEIGHT, BACKWARDS, any alignment), and the destination address of a pixel, BL\_DST + y × BL\_DST\_STRIDE + x, is taken modulo 256: it names the table entry. Nothing is written to RAM. When two pixels name the same entry, the later one in the copy's order wins. BL\_KEY, BL\_FG and BL\_BG do not matter |
+| 6 | COPY\_REMAP | COPY, every destination pixel table[source pixel] |
+| 7 | COPY\_KEY\_REMAP | COPY\_KEY through the table: a source pixel equal to BL\_KEY is skipped (the key is tested on the source pixel, before the table; a table entry equal to BL\_KEY is written like any other colour) |
+
+- **Loading.** A whole table: SRC = its 256 bytes, DST 0, WIDTH 256, HEIGHT 1, OP 5. Entries 16 to 31 only (a team's colours): SRC = their 16 bytes, DST 16, WIDTH 16, HEIGHT 1.
+- **The remapped copies** follow every rule of COPY and COPY\_KEY: BACKWARDS, overlaps (the same rule), any alignment, any strides; SRC = DST with the same strides shades a rectangle in place. FILL, EXPAND and EXPAND\_KEY have no remapped forms (their colours are BL\_FG and BL\_BG: choose them through the table yourself).
+- **Command lists.** A record's OP (byte 17) can be any of them, so a list loads a table and uses it: a TABLE record, then COPY\_REMAP records, then another TABLE, and so on; records run in order.
+- **State.** The table keeps its contents until the next TABLE; it is not cleared by a reset or by the 65C816's restart, and after power-up its contents are undefined: load a table before the first remapped copy. Nothing else carries over from one blit to the next: a COPY after a COPY\_REMAP is a plain copy. The table is shared by everything that uses Ali (Horizon loads it in every call that remaps: `sheet_draw`, ABI.md).
+- **Older revisions.** OPs 5 to 7 do nothing before REV $0D (as every OP above 4): check SYS\_REV first (Horizon: `sys_info`; hgame does it by itself).
+
+**Timing.** A word of four pixels goes through the table one pixel a cycle (the block RAM's read is registered: four lookups and a cycle to take the last one back) while the word before it is being written and the next source burst is read, so a remapped copy runs at about the speed of a plain copy. In the RTL simulation (core/sim\_a816/tb\_blit.sv, `+bench=1`), a 320 × 200 COPY\_REMAP took between 10 % less and 12 % more clk\_core cycles than the same COPY, by the SDRAM's latency and burst length: at the latency that matches the board's measured plain copy (2.69 clk\_core a pixel with 16-byte bursts) 3.00 a pixel, +12 %; with 8-byte bursts the remapped copy is the faster one (its source reads may pass a word that waits in the table). That is about 6.9 ms for a 320 × 200 screen at 28.6 MHz, against 115 ms for the same shade by the CPU. TABLE takes about 450 to 600 clk\_core for 256 entries (16 to 21 µs). emu816 models a remapped copy as a plain copy + 12 % and a TABLE as a 256-pixel copy.
+
+```
+        ; table k of 16 shade tables at $05:0000 (256 bytes each), then the back buffer
+        ; ($06:0000, 320 x 200) to the screen ($02:0000) through it
+        rep #$20
+        lda #k*256 : sta f:$00DA00          ; SRC $05:k00 (SRC_STRIDE: anything)
+        lda #$0005 : sta f:$00DA02
+        lda #0 : sta f:$00DA05 : sta f:$00DA07   ; DST 0: entry 0
+        lda #256 : sta f:$00DA0A            ; WIDTH 256
+        lda #1 : sta f:$00DA0C              ; HEIGHT 1
+        lda #$0005 : sta f:$00DA11          ; OP 5 TABLE, FLAGS 0
+        sep #$20 : lda #1 : sta f:$00DA13   ; START
+        ; (BUSY 0) then SRC $06:0000, DST $02:0000, both strides 320, WIDTH 320, HEIGHT 200,
+        ; OP 6 COPY_REMAP, START. (Or both as records of one command list.)
+```
 
 ### Command lists (REV $09)
 
@@ -343,7 +376,7 @@ A command list lets the blitter run many blits without the CPU: the CPU writes t
 
 Three parts share $00:DB00 to $00:DBFF: the classic machine's POKEY, lent to the 65C816 while the classic machine is frozen (REV $07; from REV $0C it is the machine's one POKEY, playing a register bank of its own); Lau, the 8-voice sample player, which plays from main RAM (REV $0A); and the OPL2, a YM3812 FM synthesizer (REV $0C). All are mixed with the classic machine's sound into the HDMI audio.
 
-**Status (2026-11-21):** REV $0C is the default build (bring-up log, step 25). A build with `A816_NO_SAMPLER` defined in `core/src/tang_top.sv` leaves Lau out and reports REV $09; there $DB20 to $DB2F and $DB80 to $DBFF read 0 and ignore writes.
+**Status (2026-11-24):** REV $0D (REV $0C and Ali's colour remap) is the default build (REV $0C: bring-up log, step 25; REV $0D: to be built and checked on the board). A build with `A816_NO_SAMPLER` defined in `core/src/tang_top.sv` leaves Lau out and reports REV $09; there $DB20 to $DB2F and $DB80 to $DBFF read 0 and ignore writes.
 
 ### POKEY (REV $07; native register bank from REV $0C)
 
@@ -431,7 +464,7 @@ The system block identifies the machine, collects every interrupt source into th
 | Address | Name | Access | Meaning |
 | --- | --- | --- | --- |
 | $00:DE00 | SYS\_ID | R | $81 ("8" for Atari816, revision family 1) |
-| $00:DE01 | SYS\_REV | R | Hardware revision |
+| $00:DE01 | SYS\_REV | R | Hardware revision: $08 the blitter, $09 command lists and raster events, $0A Lau, $0B sprites and fine scrolling, $0C the OPL2, $0D the blitter's colour remap |
 | $00:DE02 | SYS\_SPEED | RW | 0 = 14.3 MHz (spec), 1 = turbo; reads back the speed actually in use (turbo is ignored where the build does not support it) |
 
 ### Interrupts

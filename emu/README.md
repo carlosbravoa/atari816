@@ -41,7 +41,7 @@ emu816 [--sd DIR] [--load FILE@ADDR]... [--max-seconds N] [--trace]
 | `--mouse LIST` | Mouse input `t_ms:dx:dy:wheel:buttons,...` at emulated milliseconds: decimal motion in desktop pixels (dy > 0 = down), buttons bit 0 left, 1 right, 2 middle (`0x` allowed). Example: `--mouse 100:5:-3:0:1,200:0:0:0:0` |
 | `--console-us N` | Slow console: after each DBG_OUT byte, DBG_STAT bit 7 reads 1 for N emulated microseconds, and bytes written meanwhile are dropped, as on the hardware. The board takes about 90 us per byte while its log is read and can stall for milliseconds. Default 0: never busy |
 | `--stats` | At exit, print the emulated time, host time, emulated MHz, the cycles the CPU waited in WAI (the kernel's idle loop: the rest is its load) and counters (and the dropped console bytes with `--console-us`; the cache fills, RAM writes, cache sweeps and stall cycles of the memory model) |
-| `--rev N` | SYS_REV to report: 6 (no sound page, no blitter), 7 (sound page), 8 (sound and blitter), 9 (+ blitter command lists, raster events at the beam, NV_FRAME), 10 = $0A (+ Lau, the sample player, the default hardware build of bring-up step 17), 11 = $0B (+ Marga's sprites and fine scrolling, bring-up step 19), 12 = $0C (default: + the OPL2 at $00:DB30-$DB33; POKEY 2 replaced by POKEY 1's native register bank at the same addresses; the four DACs gone). Below 12 $00:DB30-$DB33 belong to Lau's page as before (they read 0); below 11 Marga's registers $D930-$D9FF read 0 and ignore writes; below 10 the sample player reads 0 and ignores writes; below 9 the list registers do, and the raster events come at the fetch trigger; below 8 the blitter registers read 0 and ignore writes; below 7 the sound page ignores writes |
+| `--rev N` | SYS_REV to report: 6 (no sound page, no blitter), 7 (sound page), 8 (sound and blitter), 9 (+ blitter command lists, raster events at the beam, NV_FRAME), 10 = $0A (+ Lau, the sample player, the default hardware build of bring-up step 17), 11 = $0B (+ Marga's sprites and fine scrolling, bring-up step 19), 12 = $0C (+ the OPL2 at $00:DB30-$DB33; POKEY 2 replaced by POKEY 1's native register bank at the same addresses; the four DACs gone), 13 = $0D (default: + Ali's colour remap: BL_OP 5 TABLE, 6 COPY_REMAP, 7 COPY_KEY_REMAP). Below 13 OPs 5-7 do nothing, as every OP above 4. Below 12 $00:DB30-$DB33 belong to Lau's page as before (they read 0); below 11 Marga's registers $D930-$D9FF read 0 and ignore writes; below 10 the sample player reads 0 and ignores writes; below 9 the list registers do, and the raster events come at the fetch trigger; below 8 the blitter registers read 0 and ignore writes; below 7 the sound page ignores writes |
 | `--wav FILE.wav` | Write the sound the board's HDMI output carries, without the classic machine's part: Lau's left and right plus the OPL2's output on both (REV $0C), saturated to 16 bits, 48 kHz stereo, from the start of the run. Not in it: POKEY (the native bank and the classic machine's) and GTIA. See "OPL2", the mix |
 | `--log-sound` | Print every accepted write to the sound page ($00:DB00-$DB13; from REV $0C $DB00-$DB0F) on stderr |
 | `--log-sound-us` | The same as `--log-sound`, each line with the emulated time in microseconds: `sound 1234567 $DB01 = $AA` (ports/digger/tests/sndtime.py measures a game's sound steps from it) |
@@ -159,7 +159,7 @@ This is a line-by-line model of the FREDDIE II part of `a816_sys.sv`:
 
 ### System block (`sysblock.c`)
 
-- SYS_ID reads $81, SYS_REV reads $0C (or `--rev`), and SYS_SPEED reads 0.
+- SYS_ID reads $81, SYS_REV reads $0D (or `--rev`), and SYS_SPEED reads 0.
 - **Sound (REV $07):** writes to $00:DB00-$DB13 (POKEY 2, the four DACs) are kept and
   counted only while SV_CTRL FREEZE_REQ is set, as on the hardware; otherwise they are
   counted as ignored. No audio is produced. `--stats` prints both counts. From REV $0C
@@ -595,6 +595,17 @@ Ali:
   and the bit position carries on into the following bytes.
 - A width or height of 0 draws nothing.
 
+Colour remap (REV $0D, register spec "Colour remap"):
+
+- A 256-byte table inside Ali (`Blitter.tab`), the identity after reset (on the board it is
+  undefined until loaded). OP 5 TABLE is a COPY into it: entry (DST + y x DST_STRIDE + x) mod 256
+  = the source byte, no RAM written. OP 6 COPY_REMAP and 7 COPY_KEY_REMAP write table[source
+  pixel]; the key is tested on the source pixel.
+- Time: a remapped copy costs a plain copy's time + 12 % (the RTL simulation, tb_blit.sv
+  `+bench=1`: -10 % to +12 % by the SDRAM's latency and burst length), a TABLE a 256-pixel
+  copy's (the RTL: 450-600 clk_core, a little less). `--stats` counts tables loaded and
+  remapped copies. `tests/asm/blitremap.s` pins the pixels and these times.
+
 Command lists (REV $09):
 
 - LIST reads the record at BL_LIST 30 CPU cycles after the previous blit has finished
@@ -779,6 +790,7 @@ every 512 CPU cycles here.
 | tests/asm/nettest1-3 | The internet (PC link step 2), from `nettest.s` built three ways. 1: Fetch (`--net-root`, `--pc-kbps 16:16`): STAT then OPEN of the same URL (the OPEN at once), READ to the end, WRITE 7, SEEK $82, a closed handle $80, 404 in ARG1 with $8F, ftp $8D, no host $8C, mode 2 7, a folder's listing (case, query, dot files), MKDIR / RENAME 7, READDIR / LOAD $82, no Net $8A, an unknown scheme $8B, `/PC:` $87, an 8 KB READ put aside (0.5 s) while a card STAT is answered, the 5th stream 18. 2: Net (`--net`, `tests/netserver.py`: an echo server on 127.0.0.1 at a free port): OPEN, WRITE, $E4, READ, STAT / SEEK $82, a refused port $8D, `tls://` $91, no Fetch $8A, no port $8B, the server closing: $90. 3: `--pc-drop-at 1.5` with a connection and a slow Fetch READ open: $E4 at the drop, $88 for the READ put aside and on the handles, CLOSE 0, $87 after. Outputs `tests/expected/nettestN.txt`; 2 and 3 are skipped without python3 |
 | BLITTEST.BIN | `core/sw/a816/blittest.s`: every blitter op against a 65C816 reference (REV $08 and up) |
 | BLITLIST.BIN | `core/sw/a816/blitlist.s`: command lists against single blits, ABORT, WAIT_VBL, raster events, 60 frames = 999,504 us (REV $09 and up) |
+| tests/asm/blitremap | The colour remap (REV $0D and up): TABLE from an aligned and an unaligned address and a part of a table (DST 16, WIDTH 16), COPY_REMAP and COPY_KEY_REMAP (key tested on the source pixel) against the CPU's reading of the table, a plain COPY after them, a list of TABLE + COPY_REMAP, a FILL after them; and the times of a 320 x 200 COPY (8,068 us), a TABLE (32 us) and a 320 x 200 COPY_REMAP (9,036 us) |
 | SAMPLER.BIN | `core/sw/a816/sampler.s`: Lau's rate, end interrupt, loop, mix values, AU_LATE (REV $0A and up) |
 | SPRTEST.BIN | `core/sw/a816/sprtest.s`: Marga's REV $0B registers, NV_SPR_PEEK, COMMIT latching, the line limit (OVERFLOW), the load test (REV $0B and up) |
 | tests/sprsceneN.bin | `core/sw/a816/sprscene.s` with SEED 1-10: a random scene each (9 and 10 crowded, so the line limit drops sprites) (all modes, scrolling, wrap, split, pointer, 16 sprites with every option). The pictures must be identical to the frames the RTL simulation gave (`expected/sprsceneN.ppm.md5`), REV $0B and up |

@@ -172,7 +172,7 @@ The needs:
 | Need | Checked |
 | --- | --- |
 | `horizon=0.29` | Horizon's version is at least this one. |
-| `rev=11` | The hardware revision is at least $0B (11). |
+| `rev=11` | The hardware revision is at least $0B (11). (`rev=13`: $0D, the blitter's colour remap; hgame remaps with the CPU on older boards, so a game needs it only if that is too slow for it.) |
 | `lau` | Lau, the sample player (REV $0A and later). |
 | `opl2` | The OPL2 FM synthesizer (REV $0C). |
 | `sprites` | Marga's sprites and scrolling (REV $0B and later). |
