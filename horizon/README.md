@@ -1156,9 +1156,10 @@ bus time (see emu/README.md, "Memory timing"). Expect the same factor on the CPU
   `user/uidate.s`), shortcuts (ui_lnkread, ui_mklink), program and file icons (ui_prog,
   ui_ficon). See ABI.md and ui.inc.
 
-## Version 0.31 (in progress: the Programs menu kept, arguments and a console from the Desktop)
+## Version 0.30, second part (the Programs menu kept, arguments and a console from the Desktop)
 
-The version number stays 0.30 until the release (sys_info answers $001E); nothing here
+Written as "0.31" in this file and in the test names (`make test-31`), but released as part
+of 0.30: 0.30 had not been released when it was done (sys_info answers $001E). Nothing here
 needs a program to tell (an older Desktop ignores the new APP.INF keys, an older kernel
 answers SR_APPS with EINVAL, an older TERM opens a shell).
 
