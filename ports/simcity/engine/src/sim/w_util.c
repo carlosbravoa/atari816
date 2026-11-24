@@ -64,6 +64,7 @@
 
 /* comefrom: drawTaxesCollected incBoxValue decBoxValue drawCurrentFunds 
 	     drawActualBox UpdateFunds updateCurrentCost */
+void
 makeDollarDecimalStr(char *numStr, char *dollarStr)
 {
   register short leftMostSet;
@@ -121,6 +122,7 @@ makeDollarDecimalStr(char *numStr, char *dollarStr)
 }
 
 
+void
 Pause()
 {
   if (!sim_paused) {
@@ -131,6 +133,7 @@ Pause()
 }
 
 
+void
 Resume()
 {
   if (sim_paused) {
@@ -140,6 +143,7 @@ Resume()
 }
 
 
+void
 setSpeed(short speed)
 {
   if (speed < 0) speed = 0;
@@ -167,6 +171,7 @@ setSpeed(short speed)
 }
 
 
+void
 setSkips(int skips)
 {
   sim_skips = skips;
@@ -174,6 +179,7 @@ setSkips(int skips)
 }
 
 
+void
 SetGameLevelFunds(short level)
 {
   switch (level) {
@@ -194,6 +200,7 @@ SetGameLevelFunds(short level)
 }
 
 
+void
 SetGameLevel(short level)
 {
   GameLevel = level;
@@ -201,6 +208,7 @@ SetGameLevel(short level)
 }
 
 
+void
 UpdateGameLevel()
 {
   char buf[256];
@@ -210,6 +218,7 @@ UpdateGameLevel()
 }
 
 
+void
 setCityName(char *name)
 {
   char *cp = name;
@@ -223,6 +232,7 @@ setCityName(char *name)
 }
 
 
+void
 setAnyCityName(char *name)
 {
   char buf[1024];
@@ -233,6 +243,7 @@ setAnyCityName(char *name)
 }
 
 
+void
 SetYear(int year)
 {
   // Must prevent year from going negative, since it screws up the non-floored modulo arithmetic.
@@ -241,7 +252,7 @@ SetYear(int year)
   }
 
   year = (year - StartingYear) - (CityTime / 48);
-  CityTime += year * 48;
+  CityTime += (QUAD)year * 48;	/* (QUAD: 683 years overflowed an int of 16 bits) */
   doTimeStuff();
 }
 
@@ -253,6 +264,7 @@ CurrentYear()
 }
 
 
+void
 DoSetMapState(SimView *view, short state)
 {
   char buf[256];
@@ -266,24 +278,28 @@ DoSetMapState(SimView *view, short state)
 }
 
 
+void
 DoNewGame()
 {
   Eval("UINewGame");
 }
 
 
+void
 DoGeneratedCityImage(char *name, int time, int pop, char *class, int score)
 {
   /* XXX: TODO: print city */
 }
 
 
+void
 DoStartElmd()
 {
   /* XXX: TODO: start elm daemon */
 }
 
 
+void
 DoPopUpMessage(char *msg)
 {
   char buf[1024];

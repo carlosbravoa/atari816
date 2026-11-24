@@ -68,6 +68,7 @@ unsigned char *History10[HISTORIES];
 unsigned char *History120[HISTORIES];
 int HistoryInitialized = 0;
 short Graph10Max, Graph120Max;
+#if !defined(MICROPOLIS_PORT)
 Tcl_HashTable GraphCmds;
 int GraphUpdateTime = 100;
 
@@ -133,6 +134,7 @@ DestroySimGraph(ClientData clientData)
 }
 
 
+void
 EventuallyRedrawGraph(SimGraph *graph)
 {
   if (!(graph->flags & VIEW_REDRAW_PENDING)) {
@@ -434,6 +436,7 @@ unsigned char HistColor[] = {
 };
 
 
+void
 graph_command_init()
 {
   int new;
@@ -455,8 +458,11 @@ graph_command_init()
 
 
 
+#endif
+
+
 void
-drawMonth(short *hist, unsigned char *s, float scale)
+drawMonth(short MAPFAR *hist, unsigned char *s, float scale)
 {
   register short val;
   register short x;
@@ -537,12 +543,14 @@ graphDoer(void)
     CensusChanged = 0;
   }
 
+#if !defined(MICROPOLIS_PORT)
   if (NewGraph) {
     for (graph = sim->graph; graph != NULL; graph = graph->next) {
       EventuallyRedrawGraph(graph);
     }
     NewGraph = 0;
   }
+#endif
 }
 
 
@@ -568,9 +576,10 @@ initGraphs(void)
 
 
 /* comefrom: InitWillStuff */
+void
 InitGraphMax(void)
 {
-  register x;
+  register int x;
 
   ResHisMax = 0;
   ComHisMax = 0;
@@ -604,6 +613,8 @@ InitGraphMax(void)
 }
 
 
+#if !defined(MICROPOLIS_PORT)
+void
 InitNewGraph(SimGraph *graph)
 {
   int d = 8;
@@ -641,6 +652,7 @@ InitNewGraph(SimGraph *graph)
 }
 
 
+void
 DestroyGraph(SimGraph *graph)
 {
   SimGraph **gp;
@@ -666,6 +678,7 @@ DestroyGraph(SimGraph *graph)
 }
 
 
+void
 DoResizeGraph(SimGraph *graph, int w, int h)
 {
   int resize = 0;
@@ -688,6 +701,7 @@ DoResizeGraph(SimGraph *graph, int w, int h)
 }
 
 
+void
 DoNewGraph(SimGraph *graph)
 {
   sim->graphs++; graph->next = sim->graph; sim->graph = graph;
@@ -698,6 +712,7 @@ DoNewGraph(SimGraph *graph)
 
 #define BORDER 5
 
+void
 DoUpdateGraph(SimGraph *graph)
 {
   Display *dpy;
@@ -890,5 +905,4 @@ DoUpdateGraph(SimGraph *graph)
 	    Tk_WindowId(graph->tkwin), graph->x->gc,
 	    0, 0, graph->w_width, graph->w_height, 0, 0);
 }
-
-
+#endif

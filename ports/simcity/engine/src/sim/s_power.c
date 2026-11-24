@@ -66,11 +66,17 @@
 
 
 int PowerStackNum;
+#if defined(MICROPOLIS_PORT)
+/* far memory, from initMapArrays (s_alloc.c) */
+char MAPFAR *PowerStackX, MAPFAR *PowerStackY;
+#else
 char PowerStackX[PWRSTKSIZE], PowerStackY[PWRSTKSIZE];
+#endif
 QUAD MaxPower, NumPower;
 
 
 /* comefrom: TestForCond DoPowerScan TryGo */
+int
 MoveMapSim (short MDir)
 {
   switch (MDir) {
@@ -116,6 +122,7 @@ MoveMapSim (short MDir)
 /* inlined -Don */
 #if 0
 /* comefrom: DoPowerScan */
+void
 SetPowerBit(void) 
 {
   register int PowerWrd;
@@ -168,7 +175,7 @@ short TestForCond(short TFDir)
 	 (PowerWrd = POWERWORD(SMapX, SMapY)),
 #endif
 	 ((PowerWrd > PWRMAPSIZE) ||
-	  ((PowerMap[PowerWrd] & (1 << (SMapX & 15))) == 0))))
+	  ((PowerMap[PowerWrd] & POWERBIT(SMapX)) == 0))))
 #endif
     {
       SMapX = xsave;
@@ -183,6 +190,7 @@ short TestForCond(short TFDir)
 
 
 /* comefrom: Simulate SpecialInit InitSimMemory */
+void
 DoPowerScan()
 {	
   short ADir;
@@ -230,6 +238,7 @@ DoPowerScan()
 
 
 /* comefrom: DoPowerScan DoSPZone */
+void
 PushPowerStack(void) 
 { 	
   if (PowerStackNum < (PWRSTKSIZE - 2)) {
@@ -241,6 +250,7 @@ PushPowerStack(void)
 
 
 /* comefrom: DoPowerScan */
+void
 PullPowerStack(void)
 { 	
   if (PowerStackNum > 0)  {

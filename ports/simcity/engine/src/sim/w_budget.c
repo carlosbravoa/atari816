@@ -73,8 +73,10 @@ QUAD policeMaxValue;
 QUAD fireMaxValue;
 int MustDrawCurrPercents = 0;
 int MustDrawBudgetWindow = 0;
+#if !defined(MICROPOLIS_PORT)
 int SetBudget(char *flowStr, char *previousStr,
 	      char *currentStr, char *collectedStr, short tax);
+#endif
 
 
 void InitFundingLevel(void)
@@ -90,18 +92,21 @@ void InitFundingLevel(void)
 }
 
 
+void
 DoBudget()
 {
   DoBudgetNow(0);
 }
 
 
+void
 DoBudgetFromMenu()
 {
   DoBudgetNow(1);
 }
 
 
+void
 DoBudgetNow(int fromMenu)
 {
   QUAD yumDuckets;
@@ -109,9 +114,16 @@ DoBudgetNow(int fromMenu)
   QUAD moreDough;
   QUAD fireInt, policeInt, roadInt;
 
+#if defined(MICROPOLIS_PORT)
+  /* (QUAD): an int of 16 bits would cut a fund over 32,767 */
+  fireInt = (QUAD)(((float)FireFund) * firePercent);
+  policeInt = (QUAD)(((float)PoliceFund) * policePercent);
+  roadInt = (QUAD)(((float)RoadFund) * roadPercent);
+#else
   fireInt = (int)(((float)FireFund) * firePercent);
   policeInt = (int)(((float)PoliceFund) * policePercent);
   roadInt = (int)(((float)RoadFund) * roadPercent);
+#endif
 
   total = fireInt + policeInt + roadInt;
 
@@ -218,12 +230,14 @@ DoBudgetNow(int fromMenu)
 }
 
 
+void
 drawBudgetWindow(void)
 {
   MustDrawBudgetWindow = 1;
 }
 
 
+void
 ReallyDrawBudgetWindow(void)
 {
   short cashFlow, cashFlow2;
@@ -244,47 +258,49 @@ ReallyDrawBudgetWindow(void)
     sprintf(flowStr, "+%s", dollarStr);
   }
 
-  sprintf(numStr, "%d", TotalFunds);
+  sprintf(numStr, "%" PRIQ, TotalFunds);
   makeDollarDecimalStr(numStr, previousStr);
 
-  sprintf(numStr, "%d", cashFlow2 + TotalFunds);
+  sprintf(numStr, "%" PRIQ, cashFlow2 + TotalFunds);
   makeDollarDecimalStr(numStr, currentStr);
 
-  sprintf(numStr, "%d", TaxFund);
+  sprintf(numStr, "%" PRIQ, TaxFund);
   makeDollarDecimalStr(numStr, collectedStr);
 
   SetBudget(flowStr, previousStr, currentStr, collectedStr, CityTax);
 }
 
 
+void
 drawCurrPercents(void)
 {
   MustDrawCurrPercents = 1;
 }
 
 
+void
 ReallyDrawCurrPercents(void)
 {
   char num[256];
   char fireWant[256], policeWant[256], roadWant[256];
   char fireGot[256], policeGot[256], roadGot[256];
 
-  sprintf(num, "%d", fireMaxValue);
+  sprintf(num, "%" PRIQ, fireMaxValue);
   makeDollarDecimalStr(num, fireWant);
 
-  sprintf(num, "%d", policeMaxValue);
+  sprintf(num, "%" PRIQ, policeMaxValue);
   makeDollarDecimalStr(num, policeWant);
 
-  sprintf(num, "%d", roadMaxValue);
+  sprintf(num, "%" PRIQ, roadMaxValue);
   makeDollarDecimalStr(num, roadWant);
 
-  sprintf(num, "%d", (int)(fireMaxValue * firePercent));
+  sprintf(num, "%" PRIQ, (QUAD)(fireMaxValue * firePercent));
   makeDollarDecimalStr(num, fireGot);
 
-  sprintf(num, "%d", (int)(policeMaxValue * policePercent));
+  sprintf(num, "%" PRIQ, (QUAD)(policeMaxValue * policePercent));
   makeDollarDecimalStr(num, policeGot);
 
-  sprintf(num, "%d", (int)(roadMaxValue * roadPercent));
+  sprintf(num, "%" PRIQ, (QUAD)(roadMaxValue * roadPercent));
   makeDollarDecimalStr(num, roadGot);
 
   SetBudgetValues(roadGot, roadWant, 
@@ -293,6 +309,7 @@ ReallyDrawCurrPercents(void)
 }
 
 
+void
 UpdateBudgetWindow()
 {
   if (MustDrawCurrPercents) {
@@ -306,6 +323,7 @@ UpdateBudgetWindow()
 }
 
 
+void
 UpdateBudget()
 {
   drawCurrPercents();
@@ -314,6 +332,7 @@ UpdateBudget()
 }
 
 
+void
 ShowBudgetWindowAndStartWaiting()
 {
   Eval("UIShowBudgetAndWait");
@@ -322,6 +341,7 @@ ShowBudgetWindowAndStartWaiting()
 }
 
 
+void
 SetBudget(char *flowStr, char *previousStr,
 	  char *currentStr, char *collectedStr, short tax)
 {
@@ -333,6 +353,7 @@ SetBudget(char *flowStr, char *previousStr,
 }
 
 
+void
 SetBudgetValues(char *roadGot, char *roadWant,
 		char *policeGot, char *policeWant,
 		char *fireGot, char *fireWant)

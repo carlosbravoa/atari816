@@ -74,6 +74,7 @@ short TrafMaxX, TrafMaxY;
 
 
 /* comefrom: DoIndustrial DoCommercial DoResidential */
+int
 MakeTraf(int Zt)
 {
   short xtem, ytem;
@@ -106,6 +107,7 @@ MakeTraf(int Zt)
 
 
 /* comefrom: MakeTraf */
+void
 SetTrafMem(void)
 {
   register short x, z;
@@ -139,6 +141,7 @@ SetTrafMem(void)
 
 
 /* comefrom: TryGo */
+void
 PushPos(void)
 {
   PosStackN++;
@@ -148,6 +151,7 @@ PushPos(void)
 
 
 /* comefrom: SetTrafMem */
+void
 PullPos(void)
 {
   SMapX = SMapXStack[PosStackN];
@@ -157,6 +161,7 @@ PullPos(void)
 
 
 /* comefrom: DoSPZone MakeTraf */
+int
 FindPRoad(void)		/* look for road on edges of zone   */
 {
   static short PerimX[12] = {-1, 0, 1, 2, 2, 2, 1, 0,-1,-2,-2,-2};
@@ -178,6 +183,7 @@ FindPRoad(void)		/* look for road on edges of zone   */
 }
 
 
+int
 FindPTele(void)		/* look for telecommunication on edges of zone */
 {
   static short PerimX[12] = {-1, 0, 1, 2, 2, 2, 1, 0,-1,-2,-2,-2};
@@ -199,6 +205,7 @@ FindPTele(void)		/* look for telecommunication on edges of zone */
 
 
 /* comefrom: MakeTraf */
+int
 TryDrive(void)
 {
   short z;
@@ -221,6 +228,7 @@ TryDrive(void)
 
 
 /* comefrom: TryDrive */
+int
 TryGo(int z)
 {
   short x, rdir, realdir;
@@ -246,6 +254,37 @@ TryGo(int z)
 
 
 /* comefrom: TryGo DriveDone */
+#if defined(MICROPOLIS_PORT)
+/* the port: the same tests, the tile through one pointer to the map's column (Map[x][y]
+   computes a far address from two indexes each time; the map's columns are contiguous,
+   s_alloc.c) */
+int
+GetFromMap(int x)
+{
+  short MAPFAR *p = &Map[SMapX][SMapY];
+  switch (x) {
+  case 0:
+    if (SMapY > 0)
+      return (p[-1] & LOMASK);
+    return (FALSE);
+  case 1:
+    if (SMapX < (WORLD_X - 1))
+      return (p[WORLD_Y] & LOMASK);
+    return (FALSE);
+  case 2:
+    if (SMapY < (WORLD_Y - 1))
+      return (p[1] & LOMASK);
+    return (FALSE);
+  case 3:
+    if (SMapX > 0)
+      return (p[-WORLD_Y] & LOMASK);
+    return (FALSE);
+  default:
+    return (FALSE);
+  }
+}
+#else
+int
 GetFromMap(int x)
 {
   switch (x) {
@@ -269,9 +308,11 @@ GetFromMap(int x)
     return (FALSE);
   }
 }
+#endif
 
 
 /* comefrom: TryDrive */
+int
 DriveDone(void)
 {
   static short TARGL[3] = {COMBASE, LHTHR, LHTHR};
@@ -289,6 +330,32 @@ DriveDone(void)
   l = TARGL[Zsource];
   h = TARGH[Zsource];
 
+#if defined(MICROPOLIS_PORT)
+  {				/* (one pointer: GetFromMap's note) */
+    short MAPFAR *p = &Map[SMapX][SMapY];
+    if (SMapY > 0) {
+      z = p[-1] & LOMASK;
+      if ((z >= l) && (z <= h))
+        return (TRUE);
+    }
+    if (SMapX < (WORLD_X - 1)) {
+      z = p[WORLD_Y] & LOMASK;
+      if ((z >= l) && (z <= h))
+        return (TRUE);
+    }
+    if (SMapY < (WORLD_Y - 1)) {
+      z = p[1] & LOMASK;
+      if ((z >= l) && (z <= h))
+        return (TRUE);
+    }
+    if (SMapX > 0) {
+      z = p[-WORLD_Y] & LOMASK;
+      if ((z >= l) && (z <= h))
+        return (TRUE);
+    }
+    return (FALSE);
+  }
+#endif
   if (SMapY > 0) {
     z = Map[SMapX][SMapY - 1] & LOMASK;
     if ((z >= l) && (z <= h))
@@ -316,6 +383,7 @@ DriveDone(void)
 
 
 /* comefrom: TryGo FindPRoad */
+int
 RoadTest(int x)
 {
   x = x & LOMASK;

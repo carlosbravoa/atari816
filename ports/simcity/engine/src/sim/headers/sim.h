@@ -60,6 +60,11 @@
  * NOT APPLY TO YOU.
  */
 
+#if defined(MICROPOLIS_PORT)
+/* the Atari816 port (ports/simcity): no X11, Tcl or Tk; port.h has the types and
+ * the front end's hooks */
+#include "port.h"
+#else
 /* workaround sun c compiler junk */
 
 #ifdef sun
@@ -140,9 +145,16 @@
 #include "tkconfig.h"
 #include "tkint.h"
 
+#endif
+
 #include "mac.h"
+#if !defined(MICROPOLIS_PORT)
 #include "view.h"
+#endif
 #include "macros.h"
+#if defined(MICROPOLIS_PORT)
+#include "proto.h"
+#endif
 
 /* Constants */
 
@@ -190,7 +202,15 @@
 #define POWERWORD(x, y)		(((x) >>4) + ((y) <<3))
 #endif
 
-#define SETPOWERBIT(x, y)	PowerMap[POWERWORD((x), (y))] |= 1 << ((x) & 15)
+#if defined(MICROPOLIS_PORT)
+/* 1 << n from a table: a shift by a variable count is a loop on the 65816 (the same
+   bits; port_bit[15] is 0x8000, as 1 << 15 in a 16-bit int) */
+extern const unsigned short port_bit[16];
+#define POWERBIT(x)		((short)port_bit[(x) & 15])
+#else
+#define POWERBIT(x)		(1 << ((x) & 15))
+#endif
+#define SETPOWERBIT(x, y)	PowerMap[POWERWORD((x), (y))] |= POWERBIT(x)
 #define PWRMAPSIZE		(POWERMAPROW * WORLD_Y)
 #define PWRSTKSIZE		((WORLD_X * WORLD_Y) / 4)
 
@@ -470,16 +490,16 @@
 #define STATE_GRAPHS 3
 
 
-extern short *Map[WORLD_X];		/* Main Map 120 x 100  */
-extern Byte *PopDensity[HWLDX];		/* 2X2 Maps  60 x 50 */
-extern Byte *TrfDensity[HWLDX];
-extern Byte *PollutionMem[HWLDX];
-extern Byte *LandValueMem[HWLDX];
-extern Byte *CrimeMem[HWLDX];
-extern Byte *tem[HWLDX];
-extern Byte *tem2[HWLDX];
-extern Byte *TerrainMem[QWX];		/* 4X4 Maps  30 x 25 */
-extern Byte *Qtem[QWX];
+extern short MAPFAR *Map[WORLD_X];		/* Main Map 120 x 100  */
+extern Byte MAPFAR *PopDensity[HWLDX];		/* 2X2 Maps  60 x 50 */
+extern Byte MAPFAR *TrfDensity[HWLDX];
+extern Byte MAPFAR *PollutionMem[HWLDX];
+extern Byte MAPFAR *LandValueMem[HWLDX];
+extern Byte MAPFAR *CrimeMem[HWLDX];
+extern Byte MAPFAR *tem[HWLDX];
+extern Byte MAPFAR *tem2[HWLDX];
+extern Byte MAPFAR *TerrainMem[QWX];		/* 4X4 Maps  30 x 25 */
+extern Byte MAPFAR *Qtem[QWX];
 extern short RateOGMem[SmX][SmY];
 extern short FireStMap[SmX][SmY];	/* 8X8 Maps  15 x 13 */
 extern short PoliceMap[SmX][SmY];
@@ -517,10 +537,11 @@ extern short ShakeNow;
 extern QUAD DonDither;
 extern int DoOverlay;
 
-extern short *ResHis, ResHisMax;
-extern short *ComHis, ComHisMax;
-extern short *IndHis, IndHisMax;
-extern short *MoneyHis, *CrimeHis, *PollutionHis, *MiscHis;
+/* (far on the Atari816: s_alloc.c) */
+extern short MAPFAR *ResHis, ResHisMax;
+extern short MAPFAR *ComHis, ComHisMax;
+extern short MAPFAR *IndHis, IndHisMax;
+extern short MAPFAR *MoneyHis, MAPFAR *CrimeHis, MAPFAR *PollutionHis, MAPFAR *MiscHis;
 extern short *PowerMap;
 
 extern float roadPercent, policePercent, firePercent;
@@ -598,8 +619,13 @@ extern short CCx, CCy;
 extern QUAD CityPop, deltaCityPop;
 extern char *cityClassStr[6];
 extern short CityYes, CityNo;
+#if defined(MICROPOLIS_PORT)
+extern short ProblemTable[PROBNUM + 1];	/* (s_eval.c) */
+extern short ProblemVotes[PROBNUM + 1];
+#else
 extern short ProblemTable[PROBNUM];
 extern short ProblemVotes[PROBNUM];
+#endif
 extern short ProblemOrder[4];
 extern QUAD CityAssValue;
 
@@ -610,9 +636,11 @@ extern int StartupGameLevel;
 extern int PerformanceTiming;
 extern double FlushTime;
 
+#if !defined(MICROPOLIS_PORT)
 extern char *optarg;
 extern int optind;
 extern struct timeval start_time, now_time, beat_time, last_now_time;
+#endif
 extern Sim *sim;
 extern int WireMode;
 extern int MultiPlayerMode;
@@ -665,11 +693,14 @@ extern short MeltX, MeltY;
 extern int NeedRest;
 extern int ExitReturn;
 
+#if !defined(MICROPOLIS_PORT)
 extern Tcl_Interp *tk_mainInterp;
 extern Tk_Window MainWindow;
+#endif
 extern int FlushStyle;
 extern int GotXError;
 
+#if !defined(MICROPOLIS_PORT)	/* (proto.h declares them) */
 extern short Rand(short range);
 extern short RandInt(void);
 
@@ -678,10 +709,13 @@ extern SimView *MakeNewView();
 extern SimSprite *GetSprite();
 extern SimSprite *MakeSprite();
 extern SimSprite *MakeNewSprite();
+#endif
 
+#if !defined(MICROPOLIS_PORT)
 extern int setSpeed(short speed);
 extern int setSkips(int skips);
 extern int SetGameLevel(short level);
 extern int SetGameLevelFunds(short level);
+#endif
 
 extern struct XDisplay *XDisplays;

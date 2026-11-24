@@ -1,0 +1,5 @@
+# tests/save.script - the city given (TEST.CTY, paused) saved with Ctrl+S
+0 wait micropolis: ready
++1500 {ctrl-s}
++0 wait micropolis: saved
++1000 {f9}

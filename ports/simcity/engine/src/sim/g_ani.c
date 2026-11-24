@@ -64,14 +64,20 @@
 
 
 /* comefrom: moveWorld doEditWindow scoreDoer doMapInFront graphDoer */
+void
 animateTiles(void)
 {
   unsigned short tilevalue, tileflags;
-  unsigned short *tMapPtr;
+  unsigned short MAPFAR *tMapPtr;	/* (the map is far on the Atari816) */
   int i;
 
+#if defined(MICROPOLIS_PORT) && defined(__CC816__)
+  /* the same loop in assembly (ports/simcity/src/fast.s): 140 cycles a tile in C */
+  port_animate((unsigned short MAPFAR *)&(Map[0][0]), WORLD_X * WORLD_Y, aniTile);
+  return;
+#endif
   /* Animate whole world */
-  tMapPtr = (unsigned short *)&(Map[0][0]);
+  tMapPtr = (unsigned short MAPFAR *)&(Map[0][0]);
 
   for (i = WORLD_X * WORLD_Y; i > 0; i--) {
     tilevalue = (*tMapPtr);

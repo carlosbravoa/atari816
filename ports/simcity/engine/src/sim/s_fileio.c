@@ -62,6 +62,208 @@
 #include "sim.h"
 
 
+#if defined(MICROPOLIS_PORT)
+/* The port's reading and writing of upstream's .cty format (27,120 bytes, every value a
+ * big-endian 16-bit word: the six histories of 240 words, MiscHis's 120, the map's
+ * 12,000 by columns), the same files as upstream's on any machine:
+ *   - upstream reads the file's words into its arrays, swaps their bytes on a
+ *     little-endian machine and then reads 32-bit values (funds, the time, the budget's
+ *     percents) as `*(QUAD *)(MiscHis + n)`, which needs QUAD to be 32 bits and an
+ *     aligned 4-byte read; here each such value is two words, high one first;
+ *   - the map is in far memory on the Atari816 (Map, s_alloc.c): read and written
+ *     through a small buffer. */
+
+static unsigned char fbuf[512];
+
+static int
+_load_words(short MAPFAR *buf, int len, FILE *f)
+{
+  int n, i;
+
+  while (len > 0) {
+    n = len > 256 ? 256 : len;
+    if (fread(fbuf, 1, 2 * n, f) != (size_t)(2 * n))
+      return 0;
+    for (i = 0; i < n; i++)
+      buf[i] = (short)((fbuf[2 * i] << 8) | fbuf[2 * i + 1]);
+    buf += n;
+    len -= n;
+  }
+  return 1;
+}
+
+static int
+_save_words(short MAPFAR *buf, int len, FILE *f)
+{
+  int n, i;
+
+  while (len > 0) {
+    n = len > 256 ? 256 : len;
+    for (i = 0; i < n; i++) {
+      fbuf[2 * i] = (unsigned char)((unsigned short)buf[i] >> 8);
+      fbuf[2 * i + 1] = (unsigned char)buf[i];
+    }
+    if (fwrite(fbuf, 1, 2 * n, f) != (size_t)(2 * n))
+      return 0;
+    buf += n;
+    len -= n;
+  }
+  return 1;
+}
+
+/* MiscHis[n] (high) and MiscHis[n + 1] (low) as one 32-bit value, and back */
+static QUAD
+_misc_long(int n)
+{
+  return (QUAD)(((unsigned QUAD)(unsigned short)MiscHis[n] << 16) |
+                (unsigned short)MiscHis[n + 1]);
+}
+
+static void
+_set_misc_long(int n, QUAD l)
+{
+  MiscHis[n] = (short)((unsigned QUAD)l >> 16);
+  MiscHis[n + 1] = (short)l;
+}
+
+static
+int
+_load_file(char *filename, char *dir)
+{
+  FILE *f;
+  char path[160];
+  QUAD size;
+
+  if (dir != NULL) {
+    sprintf(path, "%s/%s", dir, filename);
+    filename = path;
+  }
+  if ((f = fopen(filename, "rb")) == NULL) {
+    return (0);
+  }
+
+  fseek(f, 0L, SEEK_END);
+  size = ftell(f);
+  fseek(f, 0L, SEEK_SET);
+
+  if (size != 27120) {          /* a normal city (upstream's 2 x 2 and 3 x 3 cities
+                                   are for its MEGA build) */
+    fclose(f);
+    return (0);
+  }
+
+  if ((_load_words(ResHis, HISTLEN / 2, f) == 0) ||
+      (_load_words(ComHis, HISTLEN / 2, f) == 0) ||
+      (_load_words(IndHis, HISTLEN / 2, f) == 0) ||
+      (_load_words(CrimeHis, HISTLEN / 2, f) == 0) ||
+      (_load_words(PollutionHis, HISTLEN / 2, f) == 0) ||
+      (_load_words(MoneyHis, HISTLEN / 2, f) == 0) ||
+      (_load_words(MiscHis, MISCHISTLEN / 2, f) == 0) ||
+      (_load_words((&Map[0][0]), WORLD_X * WORLD_Y, f) == 0)) {
+    fclose(f);
+    return(0);
+  }
+
+  fclose(f);
+  return(1);
+}
+
+
+int loadFile(char *filename)
+{
+  QUAD l;
+
+  if (_load_file(filename, NULL) == 0)
+    return(0);
+
+  SetFunds(_misc_long(50));
+  CityTime = _misc_long(8);
+
+  autoBulldoze = MiscHis[52];	/* flag for autoBulldoze */
+  autoBudget = MiscHis[53];	/* flag for autoBudget */
+  autoGo = MiscHis[54];		/* flag for autoGo */
+  UserSoundOn = MiscHis[55];	/* flag for the sound on/off */
+  CityTax = MiscHis[56];
+  SimSpeed = MiscHis[57];
+  ChangeCensus();
+  MustUpdateOptions = 1;
+
+  /* (upstream then reads the three percents a second time, unswapped: harmless, since
+     InitFundingLevel below sets them to 100 % anyway) */
+  l = _misc_long(58);
+  policePercent = l / 65536.0;
+  l = _misc_long(60);
+  firePercent = l / 65536.0;
+  l = _misc_long(62);
+  roadPercent = l / 65536.0;
+
+  if (CityTime < 0)
+    CityTime = 0;
+  if ((CityTax > 20) || (CityTax < 0))
+    CityTax = 7;
+  if ((SimSpeed < 0) || (SimSpeed > 3))
+    SimSpeed = 3;
+
+  setSpeed(SimSpeed);
+  setSkips(0);
+
+  InitFundingLevel();
+
+  /* set the scenario id to 0 */
+  InitWillStuff();
+  ScenarioID = 0;
+  InitSimLoad = 1;
+  DoInitialEval = 0;
+  DoSimInit();
+  InvalidateEditors();
+  InvalidateMaps();
+
+  return (1);
+}
+
+
+int saveFile(char *filename)
+{
+  FILE *f;
+
+  if ((f = fopen(filename, "wb")) == NULL) {
+    return(0);
+  }
+
+  _set_misc_long(50, TotalFunds);
+  _set_misc_long(8, CityTime);
+
+  MiscHis[52] = autoBulldoze;	/* flag for autoBulldoze */
+  MiscHis[53] = autoBudget;	/* flag for autoBudget */
+  MiscHis[54] = autoGo;		/* flag for autoGo */
+  MiscHis[55] = UserSoundOn;	/* flag for the sound on/off */
+  MiscHis[57] = SimSpeed;
+  MiscHis[56] = CityTax;	/* post release */
+
+  /* upstream: (int)(percent * 65536), 32 bits */
+  _set_misc_long(58, (QUAD)(policePercent * 65536));
+  _set_misc_long(60, (QUAD)(firePercent * 65536));
+  _set_misc_long(62, (QUAD)(roadPercent * 65536));
+
+  if ((_save_words(ResHis, HISTLEN / 2, f) == 0) ||
+      (_save_words(ComHis, HISTLEN / 2, f) == 0) ||
+      (_save_words(IndHis, HISTLEN / 2, f) == 0) ||
+      (_save_words(CrimeHis, HISTLEN / 2, f) == 0) ||
+      (_save_words(PollutionHis, HISTLEN / 2, f) == 0) ||
+      (_save_words(MoneyHis, HISTLEN / 2, f) == 0) ||
+      (_save_words(MiscHis, MISCHISTLEN / 2, f) == 0) ||
+      (_save_words((&Map[0][0]), WORLD_X * WORLD_Y, f) == 0)) {
+    fclose(f);
+    return(0);
+  }
+
+  if (fclose(f) != 0)
+    return(0);
+  return(1);
+}
+
+
+#else
 #define SWAP_SHORTS(a,b)	_swap_shorts(a,b)
 #define SWAP_LONGS(a,b)		_swap_longs(a,b)
 #define HALF_SWAP_LONGS(a,b)	_half_swap_longs(a,b)
@@ -374,6 +576,10 @@ int saveFile(char *filename)
 }
 
 
+#endif
+
+
+void
 LoadScenario(short s)
 {
   char *name, *fname;
@@ -452,7 +658,9 @@ LoadScenario(short s)
   InvalidateEditors();
   setSpeed(3);
   CityTax = 7;
+#if !defined(MICROPOLIS_PORT)
   gettimeofday(&start_time, NULL);
+#endif
 
   _load_file(fname, ResourceDir);
 
@@ -469,6 +677,7 @@ LoadScenario(short s)
 }
 
 
+void
 DidLoadScenario()
 {
   Eval("UIDidLoadScenario");
@@ -499,7 +708,9 @@ int LoadCity(char *filename)
     filename = (char *)ckalloc(strlen(cp) + 1);
     strcpy(filename, cp);
     setCityName(filename);
+#if !defined(MICROPOLIS_PORT)
     gettimeofday(&start_time, NULL);
+#endif
 
     InvalidateMaps();
     InvalidateEditors();
@@ -515,12 +726,14 @@ int LoadCity(char *filename)
 }
 
 
+void
 DidLoadCity()
 {
   Eval("UIDidLoadCity");
 }
 
 
+void
 DidntLoadCity(char *msg)
 {
   char buf[1024];
@@ -529,6 +742,7 @@ DidntLoadCity(char *msg)
 }
 
 
+void
 SaveCity()
 {
   char msg[256];
@@ -548,18 +762,21 @@ SaveCity()
 }
 
 
+void
 DoSaveCityAs()
 {
   Eval("UISaveCityAs");
 }
 
 
+void
 DidSaveCity()
 {
   Eval("UIDidSaveCity");
 }
 
 
+void
 DidntSaveCity(char *msg)
 {
   char buf[1024];
@@ -568,6 +785,7 @@ DidntSaveCity(char *msg)
 }
 
 
+void
 SaveCityAs(char *filename)
 {
   char msg[256];

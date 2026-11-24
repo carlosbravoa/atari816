@@ -68,13 +68,16 @@ short LastPicNum;
 short autoGo;
 short HaveLastMessage = 0;
 char LastMessage[256];
+#if !defined(MICROPOLIS_PORT)
 int DoAutoGoto(short x, short y, char *msg);
 int DoShowPicture(short id);
+#endif
 
 /* comefrom: Simulate */
+void
 SendMessages(void)
 {
-  register z;
+  register int z;
   short PowerPop;
   float TM;
 
@@ -186,6 +189,7 @@ SendMessages(void)
 
 
 /* comefrom: SendMessages */
+void
 CheckGrowth(void)
 {
   QUAD ThisCityPop;
@@ -212,6 +216,7 @@ CheckGrowth(void)
 
 
 /* comefrom: SendMessages */
+void
 DoScenarioScore(int type)
 {
   short z;
@@ -251,6 +256,7 @@ DoScenarioScore(int type)
 }
 
 
+void
 ClearMes(void)
 {
   MessagePort = 0;
@@ -262,6 +268,7 @@ ClearMes(void)
 
 /* comefrom: MakeEarthquake MakeFire MakeFire MakeFlood SendMessages 
 	     CheckGrowth DoScenarioScore DoPowerScan */
+int
 SendMes(int Mnum)
 {
   if (Mnum < 0) {
@@ -294,6 +301,7 @@ void SendMesAt(short Mnum, short x, short y)
 }
 
 
+void
 doMessage(void) 
 {
   char messageStr[256];
@@ -401,6 +409,7 @@ doMessage(void)
 }
 
 
+void
 DoAutoGoto(short x, short y, char *msg)
 {
   char buf[256];
@@ -411,6 +420,7 @@ DoAutoGoto(short x, short y, char *msg)
 }
 
 
+void
 SetMessageField(char *str)
 {
   char buf[256];
@@ -425,6 +435,7 @@ SetMessageField(char *str)
 }
 
 
+void
 DoShowPicture(short id)
 {
   char buf[256];
@@ -434,12 +445,14 @@ DoShowPicture(short id)
 }
 
 
+void
 DoLoseGame()
 {
   Eval("UILoseGame");
 }
 
 
+void
 DoWinGame()
 {
   Eval("UIWinGame");

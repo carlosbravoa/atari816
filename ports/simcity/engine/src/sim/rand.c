@@ -33,13 +33,57 @@
 
 #include "sim.h"
 
+#if !defined(MICROPOLIS_PORT)
 #include <sys/types.h>
 #include <stdlib.h>
+#endif
 
 #define SIM_RAND_MAX 0xffff
 
-static unsigned QUAD next = 1;
+#if defined(MICROPOLIS_PORT)
+/* (global: the Atari816's sim_rand is in assembly, ports/simcity/src/fast.s, with a
+   table of the multiplier's byte products, port_rand_tab) */
+unsigned QUAD port_rand_next = 1;
+unsigned QUAD port_rand_tab[256];
+#define next port_rand_next
 
+void
+port_rand_init(void)
+{
+	unsigned i;
+	for (i = 0; i < 256; i++)
+		port_rand_tab[i] = (unsigned QUAD)i * 1103515245UL;
+}
+#else
+static unsigned QUAD next = 1;
+#endif
+
+#if defined(MICROPOLIS_PORT)
+/* 16-bit int: SIM_RAND_MAX + 1 is 0 (0xffff is an unsigned int, + 1 wraps), the
+ * modulus a division by zero; and the result, 0 to 65,535, does not fit an int. The
+ * same numbers, in unsigned QUAD arithmetic and an unsigned result (Rand16, s_sim.c) */
+#if !defined(__CC816__)
+unsigned
+sim_rand(void)
+{
+	next = next * 1103515245UL + 12345;
+	return (unsigned)((next % ((SIM_RAND_MAX + 1UL) <<8)) >>8);
+}
+#endif
+
+void
+sim_srand(unsigned QUAD seed)
+{
+	next = seed;
+}
+
+/* the generator's state, for the port's checksum of the simulation */
+unsigned QUAD
+sim_rand_state(void)
+{
+	return next;
+}
+#else
 int
 sim_rand()
 {
@@ -53,3 +97,4 @@ u_int seed;
 {
 	next = seed;
 }
+#endif

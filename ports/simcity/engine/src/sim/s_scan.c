@@ -74,9 +74,10 @@ QUAD DonDither = 0;
 
 
 /* comefrom: Simulate SpecialInit */
+void
 FireAnalysis(void)		/* Make firerate map from firestation map  */
 {
-  register x,y;
+  register int x,y;
 
   SmoothFSMap();
   SmoothFSMap();
@@ -90,6 +91,7 @@ FireAnalysis(void)		/* Make firerate map from firestation map  */
 
 
 /* comefrom: Simulate SpecialInit */
+void
 PopDenScan(void)		/*  sets: PopDensity, , , ComRate  */
 {
   QUAD Xtot, Ytot, Ztot;
@@ -139,12 +141,17 @@ PopDenScan(void)		/*  sets: PopDensity, , , ComRate  */
 
 
 /* comefrom: PopDenScan */
+int
 GetPDen(int Ch9)
 {
   register int pop;
 
   if (Ch9 == FREEZ) {
+#if defined(MICROPOLIS_PORT)
+    pop = DoFreePop();          /* (upstream passes Ch9, which DoFreePop never read) */
+#else
     pop = DoFreePop(Ch9);
+#endif
     return (pop);
   }
   if (Ch9 < COMBASE) {
@@ -164,6 +171,7 @@ GetPDen(int Ch9)
 
 
 /* comefrom: Simulate SpecialInit */
+void
 PTLScan(void)   	/* Does pollution, terrain, land value   */
 {
   QUAD ptot, LVtot;
@@ -254,6 +262,7 @@ PTLScan(void)   	/* Does pollution, terrain, land value   */
 
 
 /* comefrom: PTLScan */
+int
 GetPValue(int loc)
 {
   if (loc < POWERBASE) {
@@ -274,6 +283,7 @@ GetPValue(int loc)
 
 
 /* comefrom: PTLScan DistIntMarket */
+int
 GetDisCC(int x, int y)
 {
   short xdis, ydis, z;
@@ -297,6 +307,7 @@ GetDisCC(int x, int y)
 
 
 /* comefrom: Simulate SpecialInit */
+void
 CrimeScan(void)
 {
   short numz;
@@ -344,6 +355,7 @@ CrimeScan(void)
 
 
 /* comefrom: PTLScan */
+void
 SmoothTerrain(void)
 {
   if (DonDither & 1) {
@@ -378,6 +390,7 @@ SmoothTerrain(void)
 }
 
 /* comefrom: PopDenScan */
+void
 DoSmooth (void)        /* smooths data in tem[x][y] into tem2[x][y]  */
 {
   if (DonDither & 2) {
@@ -425,6 +438,7 @@ DoSmooth (void)        /* smooths data in tem[x][y] into tem2[x][y]  */
 
 
 /* comefrom: PopDenScan */
+void
 DoSmooth2 (void)        /* smooths data in tem2[x][y] into tem[x][y]  */
 {
   if (DonDither & 4) {
@@ -472,6 +486,7 @@ DoSmooth2 (void)        /* smooths data in tem2[x][y] into tem[x][y]  */
 
 
 /* comefrom: PopDenScan */
+void
 ClrTemArray(void)
 {
   register short x, y, z;
@@ -484,6 +499,7 @@ ClrTemArray(void)
 
 
 /* comefrom: FireAnalysis */
+void
 SmoothFSMap(void)
 {
   register short x, y, edge;
@@ -505,9 +521,10 @@ SmoothFSMap(void)
 
 
 /* comefrom: CrimeScan */
+void
 SmoothPSMap(void)
 {
-  register x, y, edge;
+  register int x, y, edge;
 
   for (x = 0; x < SmX; x++)
     for (y = 0; y < SmY; y++) {
@@ -526,6 +543,7 @@ SmoothPSMap(void)
 
 
 /* comefrom: PopDenScan */
+void
 DistIntMarket(void)
 {
   register short x, y, z;

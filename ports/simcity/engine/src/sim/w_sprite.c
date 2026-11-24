@@ -62,14 +62,18 @@
 #include "sim.h"
 
 
+#if !defined(MICROPOLIS_PORT)
 Tcl_HashTable SpriteCmds;
+#endif
 short CrashX, CrashY;
 int absDist;
 short Cycle;
 
 SimSprite *GlobalSprites[OBJN];
 
+#if !defined(MICROPOLIS_PORT)
 SimSprite *NewSprite(char *name, int type, int x, int y);
+#endif
 
 
 #define TRA_GROOVE_X -39
@@ -77,6 +81,7 @@ SimSprite *NewSprite(char *name, int type, int x, int y);
 #define BUS_GROOVE_X -39
 #define BUS_GROOVE_Y 6
 
+#if !defined(MICROPOLIS_PORT)
 #define SPRITECMD_ACCESS_INT(var) \
   int SpriteCmd##var(SPRITE_ARGS) { \
     int val; \
@@ -198,6 +203,7 @@ int SpriteCmdInit(SPRITE_ARGS)
 }
 
 
+void
 sprite_command_init()
 {
   int i;
@@ -241,6 +247,7 @@ sprite_command_init()
     GlobalSprites[i] = NULL;
   }
 }
+#endif
 
 
 SimSprite *FreeSprites = NULL;
@@ -256,8 +263,17 @@ NewSprite(char *name, int type, int x, int y)
   } else {
     sprite = (SimSprite *)ckalloc(sizeof (SimSprite));
   }
+#if defined(MICROPOLIS_PORT)
+  /* (a small heap: a NULL here once wrote a train at address 0 and lost it) */
+  if (!sprite)
+    port_fatal("no memory for a sprite");
+#endif
 
   sprite->name = (char *)ckalloc(strlen(name) + 1);
+#if defined(MICROPOLIS_PORT)
+  if (!sprite->name)
+    port_fatal("no memory for a sprite");
+#endif
   strcpy(sprite->name, name);
   sprite->type = type;
 
@@ -269,6 +285,7 @@ NewSprite(char *name, int type, int x, int y)
 }
 
 
+void
 InitSprite(SimSprite *sprite, int x, int y)
 {
   sprite->x = x; sprite->y = y;
@@ -381,6 +398,7 @@ InitSprite(SimSprite *sprite, int x, int y)
 }
 
 
+void
 DestroyAllSprites()
 {
   SimSprite *sprite;
@@ -391,14 +409,17 @@ DestroyAllSprites()
 }
 
 
+void
 DestroySprite(SimSprite *sprite)
 {
   SimView *view;
   SimSprite **sp;
 
+#if !defined(MICROPOLIS_PORT)
   for (view = sim->editor; view != NULL; view = view->next)
     if (view->follow == sprite)
       view->follow = NULL;
+#endif
 
   if (GlobalSprites[sprite->type] == sprite) {
     GlobalSprites[sprite->type] = (SimSprite *)NULL;
@@ -458,6 +479,8 @@ MakeNewSprite(int type, int x, int y)
 }
 
 
+#if !defined(MICROPOLIS_PORT)
+void
 DrawObjects(SimView *view)
 {
   SimSprite *sprite;
@@ -479,6 +502,7 @@ DrawObjects(SimView *view)
 }
 
 
+void
 DrawSprite(SimView *view, SimSprite *sprite)
 {
   Pixmap pict, mask;
@@ -507,6 +531,9 @@ DrawSprite(SimView *view, SimSprite *sprite)
 }
 
 
+#endif
+
+
 short GetChar(int x, int y)
 {
   x >>= 4;
@@ -533,6 +560,7 @@ short TurnTo(int p, int d)
 }
 
 
+int
 TryOther(int Tpoo, int Told, int Tnew)
 {
   register short z;
@@ -588,6 +616,7 @@ short GetDir(int orgX, int orgY, int desX, int desY)
 }
 
 
+int
 GetDis(int x1, int y1, int x2, int y2)
 {
   register short dispX, dispY;
@@ -611,6 +640,7 @@ int CheckSpriteCollision(SimSprite *s1, SimSprite *s2)
 }
 
 
+void
 MoveObjects()
 {
   SimSprite *sprite;
@@ -660,6 +690,7 @@ MoveObjects()
 }
 
 
+void
 DoTrainSprite(SimSprite *sprite)
 {
   static short Cx[4] = {   0,  16,   0, -16 };
@@ -710,6 +741,7 @@ DoTrainSprite(SimSprite *sprite)
 }
 
 
+void
 DoCopterSprite(SimSprite *sprite)
 {
   static short CDx[9] = { 0,  0,  3,  5,  3,  0, -3, -5, -3 };
@@ -782,6 +814,7 @@ DoCopterSprite(SimSprite *sprite)
 }
 
 
+void
 DoAirplaneSprite(SimSprite *sprite)
 {
   static short CDx[12] = { 0,  0,  6,  8,  6,  0, -6, -8, -6,  8,  8,  8 };
@@ -833,6 +866,7 @@ DoAirplaneSprite(SimSprite *sprite)
 }
 
 
+void
 DoShipSprite(SimSprite *sprite)
 {
   static short BDx[9] = { 0,  0,  1,  1,  1,  0, -1, -1, -1 };
@@ -910,6 +944,7 @@ DoShipSprite(SimSprite *sprite)
 }
 
 
+void
 MakeAirCrash(void)
 {
 #ifndef NO_AIRCRASH
@@ -927,6 +962,7 @@ MakeAirCrash(void)
 }
 
 
+void
 DoMonsterSprite(SimSprite *sprite)
 {
   static short Gx[5] = {  2,  2, -2, -2,  0 };
@@ -1063,6 +1099,7 @@ DoMonsterSprite(SimSprite *sprite)
 }
 
 
+void
 DoTornadoSprite(SimSprite *sprite)
 {
   static short CDx[9] = {  2,  3,  2,  0, -2, -3 };
@@ -1114,6 +1151,7 @@ DoTornadoSprite(SimSprite *sprite)
 }
 
 
+void
 DoExplosionSprite(SimSprite *sprite)
 {
   short x, y;
@@ -1141,6 +1179,7 @@ DoExplosionSprite(SimSprite *sprite)
 }
 
 
+void
 DoBusSprite(SimSprite *sprite)
 {
   static short Dx[5] = {   0,   1,   0,  -1,   0 };
@@ -1367,6 +1406,7 @@ CanDriveOn(int x, int y)
 }
 
 
+void
 ExplodeSprite(SimSprite *sprite)
 {
   int x, y;
@@ -1423,6 +1463,7 @@ int checkWet(int x)
 }
 
 
+void
 Destroy(int ox, int oy)
 {
   short t, z, x, y;
@@ -1456,6 +1497,7 @@ Destroy(int ox, int oy)
 }
 
 
+void
 OFireZone(int Xloc, int Yloc, int ch)
 {
   register short Xtem, Ytem;
@@ -1480,9 +1522,10 @@ OFireZone(int Xloc, int Yloc, int ch)
 }
 
 
+void
 StartFire(int x, int y)
 {
-  register t, z;
+  register int t, z;
 
   x >>= 4;
   y >>= 4;
@@ -1498,6 +1541,7 @@ StartFire(int x, int y)
 }
 
 
+void
 GenerateTrain(int x, int y)
 {
   if ((TotalPop > 20) &&
@@ -1508,6 +1552,7 @@ GenerateTrain(int x, int y)
 }
 
 
+void
 GenerateBus(int x, int y)
 {
   if ((GetSprite(BUS) == NULL) &&
@@ -1517,6 +1562,7 @@ GenerateBus(int x, int y)
 }
 
 
+void
 GenerateShip(void)
 {
   register short x, y;
@@ -1524,39 +1570,42 @@ GenerateShip(void)
   if (!(Rand16() & 3))
     for (x = 4; x < WORLD_X - 2; x++)
       if (Map[x][0] == CHANNEL)  {
-	MakeShipHere(x, 0);
+	MakeShipHere(x, 0, 0);
 	return;
       }
   if (!(Rand16() & 3))
     for (y = 1; y < WORLD_Y - 2; y++)
       if (Map[0][y] == CHANNEL)  {
-	MakeShipHere(0, y);
+	MakeShipHere(0, y, 0);
 	return;
       }
   if (!(Rand16() & 3))
     for (x = 4; x < WORLD_X - 2; x++)			
       if (Map[x][WORLD_Y - 1] == CHANNEL)  {
-	MakeShipHere(x, WORLD_Y - 1);
+	MakeShipHere(x, WORLD_Y - 1, 0);
 	return;
       }
   if (!(Rand16() & 3))
     for (y = 1; y < WORLD_Y - 2; y++)
       if (Map[WORLD_X - 1][y] == CHANNEL)  {
-	MakeShipHere(WORLD_X - 1, y);
+	MakeShipHere(WORLD_X - 1, y, 0);
 	return;
       }
 }
 
 
+/* (z unused: the callers give two arguments, the port 0 as the third) */
+void
 MakeShipHere(int x, int y, int z)	
 {
   MakeSprite(SHI, (x <<4) - (48 - 1), (y <<4));
 }
 
 
+void
 MakeMonster(void)
 {
-  register x, y, z, done = 0;
+  register int x, y, z, done = 0;
   SimSprite *sprite;
 
   if ((sprite = GetSprite(GOD)) != NULL) {
@@ -1581,6 +1630,7 @@ MakeMonster(void)
 }
 
 
+void
 MonsterHere(int x, int y)
 {
   short z;
@@ -1591,6 +1641,7 @@ MonsterHere(int x, int y)
 }
 
 
+void
 GenerateCopter(int x, int y)
 {
   if (GetSprite(COP) != NULL) return;
@@ -1599,6 +1650,7 @@ GenerateCopter(int x, int y)
 }
 
 
+void
 GeneratePlane(int x, int y)
 {
   if (GetSprite(AIR) != NULL) return;
@@ -1607,6 +1659,7 @@ GeneratePlane(int x, int y)
 }
 
 
+void
 MakeTornado(void)
 {
   short x, y;
@@ -1625,6 +1678,7 @@ MakeTornado(void)
 }
 
 
+void
 MakeExplosion(int x, int y)
 {
   if ((x >= 0) && (x < WORLD_X) &&
@@ -1634,6 +1688,7 @@ MakeExplosion(int x, int y)
 }
 
 
+void
 MakeExplosionAt(int x, int y)
 {
   MakeNewSprite(EXP, x - 40, y - 16);

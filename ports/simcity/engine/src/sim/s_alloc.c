@@ -82,7 +82,7 @@ short CrimeAverage, PolluteAverage, LVAverage;
 QUAD CityTime;
 short StartingYear;
 
-short *Map[WORLD_X];
+short MAPFAR *Map[WORLD_X];
 
 short ResHisMax, Res2HisMax;
 short ComHisMax, Com2HisMax;
@@ -99,15 +99,15 @@ QUAD TaxFund;
 short CityTax, TaxFlag;
 unsigned char tileSynch = 0x01;
 
-Byte *PopDensity[HWLDX];
-Byte *TrfDensity[HWLDX];
-Byte *PollutionMem[HWLDX];
-Byte *LandValueMem[HWLDX];
-Byte *CrimeMem[HWLDX];
-Byte *tem[HWLDX];
-Byte *tem2[HWLDX];
-Byte *TerrainMem[QWX];
-Byte *Qtem[QWX];
+Byte MAPFAR *PopDensity[HWLDX];
+Byte MAPFAR *TrfDensity[HWLDX];
+Byte MAPFAR *PollutionMem[HWLDX];
+Byte MAPFAR *LandValueMem[HWLDX];
+Byte MAPFAR *CrimeMem[HWLDX];
+Byte MAPFAR *tem[HWLDX];
+Byte MAPFAR *tem2[HWLDX];
+Byte MAPFAR *TerrainMem[QWX];
+Byte MAPFAR *Qtem[QWX];
 
 short RateOGMem[SmX][SmY];
 short FireStMap[SmX][SmY];
@@ -137,16 +137,74 @@ Ptr auxCrimePtr;
 Ptr brettPtr;
 
 unsigned short *mapPtr;
-short *ResHis;
-short *ComHis;
-short *IndHis;
-short *MoneyHis;
-short *PollutionHis;
-short *CrimeHis;
-short *MiscHis;
+short MAPFAR *ResHis;
+short MAPFAR *ComHis;
+short MAPFAR *IndHis;
+short MAPFAR *MoneyHis;
+short MAPFAR *PollutionHis;
+short MAPFAR *CrimeHis;
+short MAPFAR *MiscHis;
 short *PowerMap;
 
 
+#if defined(MICROPOLIS_PORT)
+/* The port: the maps in one block of far memory (port_far_alloc, src/hooks*.c: a bank
+ * of its own on the Atari816): the map (24,000 bytes), the seven 2 x 2 maps (3,000 each),
+ * the two 4 x 4 maps (750 each), the power scan's stack (2 x 3,000, s_power.c); the
+ * histories (a few hundred bytes each) and the power map near, from malloc. */
+extern char MAPFAR *PowerStackX, MAPFAR *PowerStackY;
+
+int initMapArrays(void)
+{
+  short i;
+  unsigned char MAPFAR *m;
+  Byte MAPFAR *half[7];
+
+  if (Map[0] != NULL)
+    return 0;
+  m = port_far_alloc((unsigned)(sizeof(short) * WORLD_X * WORLD_Y) +
+                     7u * (HWLDX * HWLDY) + 2u * (QWX * QWY) + 2u * PWRSTKSIZE +
+                     6u * HISTLEN + MISCHISTLEN);
+  for (i = 0; i < WORLD_X; i++)
+    Map[i] = (short MAPFAR *)(m + (unsigned)i * (WORLD_Y * sizeof(short)));
+  m += sizeof(short) * WORLD_X * WORLD_Y;
+  for (i = 0; i < 7; i++) {
+    half[i] = m;
+    m += HWLDX * HWLDY;
+  }
+  for (i = 0; i < HWLDX; i++) {
+    PopDensity[i] = half[0] + (i * HWLDY);
+    TrfDensity[i] = half[1] + (i * HWLDY);
+    PollutionMem[i] = half[2] + (i * HWLDY);
+    LandValueMem[i] = half[3] + (i * HWLDY);
+    CrimeMem[i] = half[4] + (i * HWLDY);
+    tem[i] = half[5] + (i * HWLDY);
+    tem2[i] = half[6] + (i * HWLDY);
+  }
+  for (i = 0; i < QWX; i++) {
+    TerrainMem[i] = m + (i * QWY);
+    Qtem[i] = m + QWX * QWY + (i * QWY);
+  }
+  m += 2 * (QWX * QWY);
+  PowerStackX = (char MAPFAR *)m;
+  PowerStackY = (char MAPFAR *)m + PWRSTKSIZE;
+
+  m += 2 * PWRSTKSIZE;
+  /* the histories: far too (zeroed: port_far_alloc) */
+  ResHis = (short MAPFAR *)m;
+  ComHis = (short MAPFAR *)(m + HISTLEN);
+  IndHis = (short MAPFAR *)(m + 2 * HISTLEN);
+  MoneyHis = (short MAPFAR *)(m + 3 * HISTLEN);
+  PollutionHis = (short MAPFAR *)(m + 4 * HISTLEN);
+  CrimeHis = (short MAPFAR *)(m + 5 * HISTLEN);
+  MiscHis = (short MAPFAR *)(m + 6 * HISTLEN);
+  /* the power map near: the power scan's hottest data */
+  PowerMap = (short *)calloc(1, POWERMAPLEN);		/* power alloc */
+  if (!PowerMap)
+    port_fatal("no memory for the power map");
+  return 0;
+}
+#else
 int initMapArrays(void)
 {
   short i;
@@ -207,3 +265,4 @@ int initMapArrays(void)
   MiscHis = (short *)NewPtr(MISCHISTLEN);
   PowerMap = (short *)NewPtr(POWERMAPLEN);		/* power alloc */
 }
+#endif

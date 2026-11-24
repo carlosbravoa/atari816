@@ -1,0 +1,8 @@
+# Micropolis's APP.INF (the Makefile drops these # lines when it packs the app)
+name=Micropolis
+version=1.0
+description=the city simulator from the original SimCity source
+category=Games
+program=MICROPOL.PRG
+icon=MICROPOL.ICN
+types=CTY

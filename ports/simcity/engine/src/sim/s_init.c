@@ -66,6 +66,7 @@
 
 
 /* comefrom: loadFile bootUp main doMessage */
+void
 InitWillStuff()
 {
   register short x, y, z;
@@ -131,6 +132,7 @@ InitWillStuff()
 }
 
 
+void
 ResetMapState()
 {
   SimView *view;
@@ -141,6 +143,7 @@ ResetMapState()
 }
 
 
+void
 ResetEditorState()
 {
   SimView *view;

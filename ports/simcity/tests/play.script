@@ -1,0 +1,11 @@
+# tests/play.script - the Tokyo scenario at the fast speed: its intro (OK), about two
+# minutes of play (the monster comes), a picture now and then
+0 wait micropolis: scenario 5
++2000 {f9}
++0 wait micropolis: shot
++1000 \n
++20000 {f9}
++0 wait micropolis: shot
++40000 {f9}
++0 wait micropolis: shot
++60000 {f9}

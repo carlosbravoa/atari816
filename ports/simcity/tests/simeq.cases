@@ -1,0 +1,12 @@
+# tests/simeq.cases - the simulator's cases of tests/simeq.sh: NAME, then simtest's
+# arguments (cities from engine/cities, scenarios from engine/res)
+gen1234 gen 1234 build
+gen7 gen 7 build
+gen4242 gen 4242 build
+gen60000 gen 60000 build
+tokyo scen 5
+sanfran scen 2
+hamburg scen 3
+boston scen 7
+kobe load kobe.cty
+haight load haight.cty

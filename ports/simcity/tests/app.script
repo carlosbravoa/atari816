@@ -1,0 +1,41 @@
+# tests/app.script - the app installed and started as a user would (make test-app; --mode
+# none: time 0 = the Desktop, Files open at the card's root): MICROPOLIS.HZA found in Files
+# and opened, Install, its message; Programs > Games > Micropolis; the new city window (a
+# picture); Play; a road; Ctrl+S saves the city as MYTOWN in the app's folder; Esc, Quit;
+# the archive installed again (Replace): the saved city must survive (tests/app.sh)
+1000 micropolis\n
++0 wait install: asks
++800 shot
++500 \n
++0 wait install: installed
++800 \n
++6000 {f10}
++400 {right}
++3000 {end}
++400 \n
++3000 shot
++400 \n
++0 wait micropolis: ready
++2000 shot
++500 move 500 330
++300 click
++1500 r
++300 move 300 200
++200 press
++100 drag 420 200
++500 release
++1000 {ctrl-s}
++0 wait micropolis: window 7
++500 \b\b\b\b\b\b\b\bMYTOWN\n
++0 wait micropolis: saved
++1500 shot
++500 {esc}
++0 wait micropolis: window
++800 move 304 239
++300 click
++5000 micropolis\n
++0 wait install: asks
++800 shot
++500 \n
++0 wait install: replaced
++800 \n

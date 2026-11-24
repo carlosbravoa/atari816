@@ -1,0 +1,52 @@
+# tests/tools.script - the tools with the mouse and the keys on a new city (seed 1234,
+# paused: the view on dry land, tile (26, 75.5) at its top left): a coal power plant, two
+# residential zones, a commercial and an industrial one, a road dragged along row 82, a
+# police station; F9 (the state, a picture); the right button's query of a zone (a
+# picture); the zoomed-out view (a picture); the overview map (a picture).
+0 wait micropolis: ready
++1000 o
++300 move 104 128
++300 click
++0 wait micropolis: tool
++300 1
++300 move 168 128
++300 click
++0 wait micropolis: tool
++300 move 216 128
++300 click
++0 wait micropolis: tool
++300 2
++300 move 264 128
++300 click
++0 wait micropolis: tool
++300 3
++300 move 312 128
++300 click
++0 wait micropolis: tool
++300 r
++300 move 72 160
++300 press
++100 drag 392 160
++900 release
++500 p
++300 move 392 128
++300 click
++0 wait micropolis: tool
++500 down lshift
++100 {f9}
++100 up lshift
++0 wait micropolis: shot
++800 move 168 128
++300 click right
++0 wait micropolis: query
++800 {f9}
++0 wait micropolis: shot
++800 \n
++500 z
++1500 {f9}
++0 wait micropolis: shot
++800 m
++0 wait micropolis: window
++3000 {f9}
++0 wait micropolis: shot
++800 {esc}

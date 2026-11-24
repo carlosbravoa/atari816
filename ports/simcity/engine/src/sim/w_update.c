@@ -117,6 +117,7 @@ void UpdateHeads()
   DoUpdateHeads();
 }
 
+void
 UpdateFunds(void)
 {
   MustUpdateFunds = 1;
@@ -124,6 +125,7 @@ UpdateFunds(void)
 }
 
 
+void
 ReallyUpdateFunds(void)
 {
   char localStr[256], dollarStr[256], buf[256];
@@ -136,7 +138,7 @@ ReallyUpdateFunds(void)
 
   if (TotalFunds != LastFunds) {
     LastFunds = TotalFunds;
-    sprintf(localStr, "%d", TotalFunds);
+    sprintf(localStr, "%" PRIQ, TotalFunds);
     makeDollarDecimalStr(localStr, dollarStr);
 
     sprintf(localStr, "Funds: %s", dollarStr);
@@ -147,6 +149,7 @@ ReallyUpdateFunds(void)
 }
 
 
+void
 doTimeStuff(void) 
 {
 //  if ((CityTime >> 2) != LastCityTime) {
@@ -155,12 +158,13 @@ doTimeStuff(void)
 }
 
 
+void
 updateDate(void)
 {	
   int y;
   int m;
   char str[256], buf[256];
-  int megalinium = 1000000;
+  QUAD megalinium = 1000000;	/* (an int of 16 bits cannot hold it) */
 
   LastCityTime = CityTime >> 2;
 
@@ -191,6 +195,7 @@ updateDate(void)
 }
 
 
+void
 showValves(void)
 {
   if (ValveFlag) {
@@ -200,6 +205,7 @@ showValves(void)
 }
 
 
+void
 drawValve(void)
 {
   double r, c, i;
@@ -227,6 +233,7 @@ drawValve(void)
 }
 
 
+void
 SetDemand(double r, double c, double i)
 {
   char buf[256];
@@ -237,6 +244,7 @@ SetDemand(double r, double c, double i)
 }
 
 
+void
 updateOptions()
 {
   int options;
@@ -258,6 +266,7 @@ updateOptions()
 }
 
 
+void
 UpdateOptionsMenu(int options)
 {
   char buf[256];

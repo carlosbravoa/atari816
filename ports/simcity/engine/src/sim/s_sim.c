@@ -87,6 +87,7 @@ short MeltX, MeltY;
 
 
 /* comefrom: doEditWindow scoreDoer doMapInFront graphDoer doNilEvent */
+void
 SimFrame(void)
 {
   short i;
@@ -110,6 +111,7 @@ SimFrame(void)
 
 
 /* comefrom: SimFrame */
+void
 Simulate(int mod16)
 {
   static short SpdPwr[4] = { 1,  2,  4,  5 };
@@ -204,6 +206,7 @@ Simulate(int mod16)
 
 
 /* comefrom: Simulate */
+void
 DoSimInit(void)
 {
   Fcycle = 0;
@@ -235,6 +238,7 @@ DoSimInit(void)
 
 
 /* comefrom: SimLoadInit */
+void
 DoNilPower(void)
 {
   register short x, y, z;
@@ -253,6 +257,7 @@ DoNilPower(void)
 
 
 /* comefrom: Simulate */
+void
 DecTrafficMem(void)		/* tends to empty TrfDensity   */
 {
   register short x, y, z;
@@ -270,6 +275,7 @@ DecTrafficMem(void)		/* tends to empty TrfDensity   */
 
 
 /* comefrom: Simulate */
+void
 DecROGMem(void)			/* tends to empty RateOGMem   */
 {
   register short x, y, z;
@@ -292,6 +298,7 @@ DecROGMem(void)			/* tends to empty RateOGMem   */
 
 
 /* comefrom: DoSimInit */
+void
 InitSimMemory(void)
 {	
   register short x, z;
@@ -330,6 +337,7 @@ InitSimMemory(void)
 
 
 /* comefrom: DoSimInit */
+void
 SimLoadInit(void)
 {
   static short DisTab[9] = { 0, 2, 10, 5, 20, 3, 5, 5, 2 * 48};
@@ -395,6 +403,7 @@ SimLoadInit(void)
 
 
 /* comefrom: InitSimMemory SimLoadInit */
+void
 SetCommonInits(void)
 {
   EvalInit();
@@ -411,6 +420,7 @@ SetCommonInits(void)
 
 
 /* comefrom: Simulate DoSimInit */
+void
 SetValves(void)
 {
   static short TaxTable[21] = {
@@ -521,6 +531,7 @@ SetValves(void)
 
 
 /* comefrom: Simulate DoSimInit */
+void
 ClearCensus(void)
 {
   register short x, y, z;
@@ -556,6 +567,7 @@ ClearCensus(void)
 
 
 /* comefrom: Simulate */
+void
 TakeCensus(void)
 {
   short x;
@@ -608,6 +620,7 @@ TakeCensus(void)
 
 
 /* comefrom: Simulate */
+void
 Take2Census(void)    /* Long Term Graphs */
 {
   short x;
@@ -638,6 +651,7 @@ Take2Census(void)    /* Long Term Graphs */
 
 
 /* comefrom: Simulate */
+void
 CollectTax(void)
 {	
   static float RLevels[3] = { 0.7, 0.9, 1.2 };
@@ -649,9 +663,10 @@ CollectTax(void)
     /* XXX: do something with z */
     z = AvCityTax / 48;  /* post */
     AvCityTax = 0;			
-    PoliceFund = PolicePop * 100;
-    FireFund   = FireStPop * 100;
-    RoadFund   = (RoadTotal + (RailTotal * 2)) * RLevels[GameLevel];
+    /* (QUAD): in a 16-bit int these overflowed */
+    PoliceFund = (QUAD)PolicePop * 100;
+    FireFund   = (QUAD)FireStPop * 100;
+    RoadFund   = ((QUAD)RoadTotal + ((QUAD)RailTotal * 2)) * RLevels[GameLevel];
     TaxFund = (((QUAD)TotalPop * LVAverage) / 120) *
       	      CityTax * FLevels[GameLevel];
     if (TotalPop) {	/* if there are people to tax  */
@@ -667,6 +682,7 @@ CollectTax(void)
 }
 
 
+void
 UpdateFundEffects(void)
 {
   if (RoadFund)
@@ -692,6 +708,7 @@ UpdateFundEffects(void)
 
 
 /* comefrom: Simulate DoSimInit */
+void
 MapScan(int x1, int x2)
 {
   register short x, y;
@@ -744,6 +761,7 @@ MapScan(int x1, int x2)
 
 
 /* comefrom: MapScan */
+void
 DoRail(void)
 {
   RailTotal++;
@@ -762,6 +780,7 @@ DoRail(void)
 
 
 /* comefrom: MapScan */
+void
 DoRadTile(void)
 {
   if (!(Rand16() & 4095)) Map[SMapX][SMapY] = 0; /* Radioactive decay */
@@ -769,6 +788,7 @@ DoRadTile(void)
 
 
 /* comefrom: MapScan */
+void
 DoRoad(void)
 {
   register short Density, tden, z;
@@ -810,6 +830,7 @@ DoRoad(void)
 
 
 /* comefrom: MapScan */
+int
 DoBridge(void)
 {
   static short HDx[7] = { -2,  2, -2, -1,  0,  1,  2 };
@@ -828,7 +849,7 @@ DoBridge(void)
   static short VBRTAB2[7] = {
     VBRIDGE | BULLBIT, RIVER, VBRIDGE | BULLBIT, VBRIDGE | BULLBIT,
     VBRIDGE | BULLBIT, VBRIDGE | BULLBIT, RIVER };
-  register z, x, y, MPtem;
+  register int z, x, y, MPtem;
 
   if (CChr9 == BRWV) { /*  Vertical bridge close */
     if ((!(Rand16() & 3)) &&
@@ -900,7 +921,11 @@ GetBoatDis(void)
   register int dist, mx, my, dx, dy;
   SimSprite *sprite;
 
+#if defined(MICROPOLIS_PORT)
+  dist = 32767;		/* 99999 is negative in a 16-bit int: every bridge opened */
+#else
   dist = 99999;
+#endif
   mx = (SMapX <<4) + 8;
   my = (SMapY <<4) + 8;
 
@@ -918,6 +943,7 @@ GetBoatDis(void)
 
 
 /* comefrom: MapScan */
+void
 DoFire(void)
 {
   static short DX[4] = { -1,  0,  1,  0 };
@@ -955,6 +981,7 @@ DoFire(void)
 
 
 /* comefrom: DoFire MakeFlood */
+void
 FireZone(int Xloc, int Yloc, int ch)
 {
   register short Xtem, Ytem;
@@ -985,6 +1012,7 @@ FireZone(int Xloc, int Yloc, int ch)
 
 
 /* comefrom: DoSPZone DoHospChur */
+void
 RepairZone(short ZCent, short zsize)
 {
   short cnt;
@@ -1011,10 +1039,11 @@ RepairZone(short ZCent, short zsize)
 
 
 /* comefrom: DoZone */
+void
 DoSPZone(short PwrOn)
 {
   static short MltdwnTab[3] = { 30000, 20000, 10000 };  /* simadj */
-  register z;
+  register int z;
 
   switch (CChr9) {
 
@@ -1117,6 +1146,7 @@ DoSPZone(short PwrOn)
 
 
 /* comefrom: DoSPZone */
+void
 DrawStadium(int z)
 {
   register int x, y;
@@ -1130,6 +1160,7 @@ DrawStadium(int z)
 
 
 /* comefrom: DoSPZone */
+void
 DoAirport(void)
 {
   if (!(Rand(5))) {
@@ -1142,6 +1173,7 @@ DoAirport(void)
 
 
 /* comefrom: DoSPZone */
+void
 CoalSmoke(int mx, int my)
 {
   static short SmTb[4] = { COALSMOKE1, COALSMOKE2, COALSMOKE3, COALSMOKE4 };
@@ -1156,9 +1188,10 @@ CoalSmoke(int mx, int my)
 
 
 /* comefrom: DoSPZone MakeMeltdown */
+void
 DoMeltdown(int SX, int SY)
 {
-  register x, y, z, t;
+  register int x, y, z, t;
 
   MeltX = SX; MeltY = SY;
 
@@ -1191,6 +1224,63 @@ DoMeltdown(int SX, int SY)
 
 #define RANDOM_RANGE 0xffff
 
+#if defined(MICROPOLIS_PORT)
+/* 16-bit int: Rand16's numbers (0 to 65,535) do not fit an int; upstream's int
+ * arithmetic (32 bits) in unsigned: the same results for every range Rand is given
+ * (0 to 32,767, range + 1 as a short as upstream) */
+short
+Rand(short range)
+{
+  static unsigned last_r, last_max;	/* (the last range's: a divide and a multiply
+					   saved, Rand is called millions of times) */
+  unsigned maxMultiple, rnum, r;
+
+  range++;
+  r = (unsigned)range;
+  if (r != last_r) {
+    last_max = RANDOM_RANGE / r;
+    last_max *= r;
+    last_r = r;
+  }
+  maxMultiple = last_max;
+  while ((rnum = Rand16()) >= maxMultiple)
+    continue;
+  return (short)(rnum % r);
+}
+
+
+unsigned
+Rand16(void)
+{
+  return (sim_rand());
+}
+
+
+int
+Rand16Signed(void)
+{
+  QUAD i = sim_rand();
+
+  if (i > 32767) {
+    i = 32767 - i;
+  }
+  return ((int)i);
+}
+
+
+void
+RandomlySeedRand()
+{
+  SeedRand(port_seed() ^ sim_rand());
+}
+
+
+void
+SeedRand(unsigned QUAD seed)
+{
+  sim_srand(seed);
+}
+#else
 short
 Rand(short range)
 {
@@ -1224,6 +1314,7 @@ Rand16Signed(void)
 }
 
 
+void
 RandomlySeedRand()
 {
   struct timeval time;
@@ -1234,7 +1325,9 @@ RandomlySeedRand()
 }
 
 
+void
 SeedRand(int seed)
 {
   sim_srand(seed);
 }
+#endif

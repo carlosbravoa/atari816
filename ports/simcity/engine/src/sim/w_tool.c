@@ -122,16 +122,21 @@ QUAD toolColors[] = {
 };
 
 
+#if !defined(MICROPOLIS_PORT)
 Ink *NewInk();
+#endif
 
+#if !defined(MICROPOLIS_PORT)
 short tally(short tileValue);
 int DoSetWandState(SimView *view, short state);
+#endif
 
 
 /*************************************************************************/
 /* UTILITIES */
 
 
+void
 setWandState(SimView *view, short state)
 {
 #if 0
@@ -441,14 +446,18 @@ check3x3(SimView *view, short mapH, short mapV, short base, short tool)
 void
 check4x4border(short xMap, short yMap)
 {
+#if defined(MICROPOLIS_PORT)
+  short MAPFAR *tilePtr;		/* (the map is far on the Atari816) */
+#else
   Ptr tilePtr;
+#endif
   short xPos, yPos;
   short cnt;
 
   xPos = xMap; yPos = yMap - 1;
   for (cnt = 0; cnt < 4; cnt++) {
     /* this will do the upper bordering row */
-    tilePtr = (Ptr) &Map[xPos][yPos];
+    tilePtr = (void MAPFAR *) &Map[xPos][yPos];
     ConnecTile(xPos, yPos, tilePtr, 0);
     xPos++;
   }
@@ -456,7 +465,7 @@ check4x4border(short xMap, short yMap)
   xPos = xMap - 1; yPos = yMap;
   for (cnt = 0; cnt < 4; cnt++) {
     /* this will do the left bordering row */
-    tilePtr = (Ptr) &Map[xPos][yPos];
+    tilePtr = (void MAPFAR *) &Map[xPos][yPos];
     ConnecTile(xPos, yPos, tilePtr, 0);
     yPos++;
   }
@@ -464,7 +473,7 @@ check4x4border(short xMap, short yMap)
   xPos = xMap; yPos = yMap + 4;
   for (cnt = 0; cnt < 4;cnt++) {
     /* this will do the bottom bordering row */
-    tilePtr = (Ptr) &Map[xPos][yPos];
+    tilePtr = (void MAPFAR *) &Map[xPos][yPos];
     ConnecTile(xPos, yPos, tilePtr, 0);
     xPos++;
   }
@@ -472,7 +481,7 @@ check4x4border(short xMap, short yMap)
   xPos = xMap + 4; yPos = yMap;
   for (cnt = 0; cnt < 4; cnt++) {
     /* this will do the right bordering row */
-    tilePtr = (Ptr) &Map[xPos][yPos];
+    tilePtr = (void MAPFAR *) &Map[xPos][yPos];
     ConnecTile(xPos, yPos, tilePtr, 0);
     yPos++;
   }
@@ -766,6 +775,7 @@ int getDensityStr(short catNo, short mapH, short mapV)
 }
 
 
+void
 doZoneStatus(short mapH, short mapV)
 {
   char localStr[256];
@@ -806,6 +816,7 @@ doZoneStatus(short mapH, short mapV)
 }
 
 
+void
 DoShowZoneStatus(char *str, char *s0, char *s1, char *s2, char *s3, char *s4,
 		 int x, int y)
 {
@@ -818,9 +829,10 @@ DoShowZoneStatus(char *str, char *s0, char *s1, char *s2, char *s3, char *s4,
 
 
 /* comefrom: processWand */
+void
 put3x3Rubble(short x, short y)
 {
-  register xx, yy, zz;
+  register int xx, yy, zz;
 	
   for (xx = x - 1; xx < x + 2; xx++) {
     for (yy = y - 1; yy < y + 2; yy++)  {
@@ -840,9 +852,10 @@ put3x3Rubble(short x, short y)
 
 
 /* comefrom: processWand */
+void
 put4x4Rubble(short x, short y)
 {
-  register xx, yy, zz;
+  register int xx, yy, zz;
 	
   for (xx = x - 1; xx < x + 3; xx++) {
     for (yy = y - 1; yy < y + 3; yy++) {
@@ -862,9 +875,10 @@ put4x4Rubble(short x, short y)
 
 
 /* comefrom: processWand */
+void
 put6x6Rubble(short x, short y)
 {
-  register xx, yy, zz;
+  register int xx, yy, zz;
 
   for (xx = x - 1; xx < x + 5; xx++) {
     for (yy = y - 1; yy < y + 5; yy++)  {
@@ -883,6 +897,7 @@ put6x6Rubble(short x, short y)
 }	
 
 
+void
 DidTool(SimView *view, char *name, short x, short y)
 {
   char buf[256];
@@ -895,6 +910,7 @@ DidTool(SimView *view, char *name, short x, short y)
 }
 
 
+void
 DoSetWandState(SimView *view, short state)
 {
   char buf[256];
@@ -1294,6 +1310,8 @@ special_tool(SimView *view, short x, short y)
 }
 #endif
 
+#if !defined(MICROPOLIS_PORT)
+/* (chalk and the eraser draw on the X view: not in the port) */
 int
 ChalkTool(SimView *view, short x, short y, short color, short first)
 {
@@ -1307,6 +1325,7 @@ ChalkTool(SimView *view, short x, short y, short color, short first)
 }
 
 
+void
 ChalkStart(SimView *view, int x, int y, int color)
 {
   Ink *ink;
@@ -1326,6 +1345,7 @@ ChalkStart(SimView *view, int x, int y, int color)
 }
 
 
+void
 ChalkTo(SimView *view, int x, int y)
 {
   int x0, y0, lx, ly;
@@ -1391,6 +1411,7 @@ EraserTool(SimView *view, short x, short y, short first)
 }
 
 
+int
 InkInBox(Ink *ink, int left, int top, int right, int bottom)
 {
   if ((left <= ink->right) &&
@@ -1425,12 +1446,14 @@ InkInBox(Ink *ink, int left, int top, int right, int bottom)
 }
 
 
+void
 EraserStart(SimView *view, int x, int y)
 {
   EraserTo(view, x, y);
 }
 
 
+void
 EraserTo(SimView *view, int x, int y)
 {
   SimView *v;
@@ -1460,6 +1483,9 @@ EraserTo(SimView *view, int x, int y)
     }
   }
 }
+
+
+#endif
 
 
 int
@@ -1498,12 +1524,14 @@ do_tool(SimView *view, short state, short x, short y, short first)
   case roadState:
     result = road_tool(view, x >>4, y >>4);
     break;
+#if !defined(MICROPOLIS_PORT)
   case chalkState:
     result = ChalkTool(view, x - 5, y + 11, COLOR_WHITE, first);
     break;
   case eraserState:
     result = EraserTool(view, x, y, first);
     break;
+#endif
   case stadiumState:
     result = stadium_tool(view, x >>4, y >>4);
     break;
@@ -1542,6 +1570,7 @@ current_tool(SimView *view, short x, short y, short first)
 }
 
 
+void
 DoTool(SimView *view, short tool, short x, short y)
 {
   int result;
@@ -1564,6 +1593,7 @@ DoTool(SimView *view, short tool, short x, short y)
 }
 
 
+void
 ToolDown(SimView *view, int x, int y)
 {
   int result;
@@ -1592,16 +1622,23 @@ ToolDown(SimView *view, int x, int y)
 }
 
 
+int
 ToolUp(SimView *view, int x, int y)
 {
   int result;
 
+#if defined(MICROPOLIS_PORT)
+  ToolDrag(view, x, y);		/* (returns nothing) */
+  result = 0;
+#else
   result = ToolDrag(view, x, y);
+#endif
 
   return (result);
 }
 
 
+void
 ToolDrag(SimView *view, int px, int py)
 {
   int x, y, dx, dy, adx, ady, lx, ly, dist;
@@ -1685,6 +1722,7 @@ ToolDrag(SimView *view, int px, int py)
 }
 
 
+void
 DoPendTool(SimView *view, int tool, int x, int y)
 {
   char buf[256];

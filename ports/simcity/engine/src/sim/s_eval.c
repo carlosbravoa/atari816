@@ -67,9 +67,17 @@
 
 short EvalValid;
 short CityYes, CityNo;
+#if defined(MICROPOLIS_PORT)
+/* one more, always 0: VoteProblems reads ProblemTable[PROBNUM] (x runs to PROBNUM
+   inclusive), which upstream takes from whatever follows the array in memory */
+short ProblemTable[PROBNUM + 1];
+short ProblemTaken[PROBNUM];
+short ProblemVotes[PROBNUM + 1];	/* these are the votes for each  */
+#else
 short ProblemTable[PROBNUM];
 short ProblemTaken[PROBNUM];
 short ProblemVotes[PROBNUM];		/* these are the votes for each  */
+#endif
 short ProblemOrder[4];			/* sorted index to above  */
 QUAD CityPop, deltaCityPop;
 QUAD CityAssValue;
@@ -79,6 +87,7 @@ short TrafficAverage;
 
 
 /* comefrom: SpecialInit Simulate */
+void
 CityEvaluation(void)
 {
   EvalValid = 0;
@@ -98,6 +107,7 @@ CityEvaluation(void)
 
 
 /* comefrom: CityEvaluation SetCommonInits */
+void
 EvalInit(void)
 {
   register short x, z;
@@ -120,25 +130,29 @@ EvalInit(void)
 
 
 /* comefrom: CityEvaluation */
+void
 GetAssValue(void)
 {
   QUAD z;
 
-  z = RoadTotal * 5;
-  z += RailTotal * 10;
-  z += PolicePop * 1000;
-  z += FireStPop * 1000;
-  z += HospPop * 400;
-  z += StadiumPop * 3000;
-  z += PortPop * 5000;
-  z += APortPop * 10000;
-  z += CoalPop * 3000;
-  z += NuclearPop * 6000;
+  /* (QUAD): the products in a 16-bit int overflowed (33 police stations, 11
+     stadiums) */
+  z = (QUAD)RoadTotal * 5;
+  z += (QUAD)RailTotal * 10;
+  z += (QUAD)PolicePop * 1000;
+  z += (QUAD)FireStPop * 1000;
+  z += (QUAD)HospPop * 400;
+  z += (QUAD)StadiumPop * 3000;
+  z += (QUAD)PortPop * 5000;
+  z += (QUAD)APortPop * 10000;
+  z += (QUAD)CoalPop * 3000;
+  z += (QUAD)NuclearPop * 6000;
   CityAssValue = z * 1000;
 }
 
 
 /* comefrom: CityEvaluation */
+void
 DoPopNum(void)
 {
   QUAD OldCityPop;
@@ -160,6 +174,7 @@ DoPopNum(void)
 
 
 /* comefrom: CityEvaluation */
+void
 DoProblems(void)
 {
   register short x, z;
@@ -198,9 +213,10 @@ DoProblems(void)
 
 
 /* comefrom: DoProblems */
+void
 VoteProblems(void)
 {
-  register x, z, count;
+  register int x, z, count;
 
   for (z = 0; z < PROBNUM; z++)
     ProblemVotes[z] = 0;
@@ -221,6 +237,7 @@ VoteProblems(void)
 
 
 /* comefrom: DoProblems */
+int
 AverageTrf(void)
 {
   QUAD TrfTotal;
@@ -241,6 +258,7 @@ AverageTrf(void)
 
 
 /* comefrom: DoProblems */
+int
 GetUnemployment(void)
 {
   float r;
@@ -252,7 +270,13 @@ GetUnemployment(void)
   else
     return(0);
 
+#if defined(MICROPOLIS_PORT)
+  /* a float past a short's range to a short is undefined in C: through 32 bits, as gcc
+     on a PC does it, so that every build gives the same */
+  b = (short)(QUAD)((r - 1) * 255);
+#else
   b = (r - 1) * 255;
+#endif
   if (b > 255)
     b = 255;
   return (b);
@@ -260,6 +284,7 @@ GetUnemployment(void)
 
 
 /* comefrom: DoProblems GetScore */
+int
 GetFire(void)
 {
   short z;
@@ -273,9 +298,10 @@ GetFire(void)
 
 
 /* comefrom: CityEvaluation */
+void
 GetScore(void)
 {
-  register x, z;
+  register int x, z;
   short OldCityScore;
   float SM, TM;
 
@@ -329,9 +355,10 @@ GetScore(void)
 
 
 /* comefrom: CityEvaluation */
+void
 DoVotes(void)
 {
-  register z;
+  register int z;
 
   CityYes = 0;
   CityNo = 0;

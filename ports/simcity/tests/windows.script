@@ -1,0 +1,29 @@
+# tests/windows.script - the windows on a new city (seed 4321, paused): the budget (B),
+# the evaluation (V), the graphs (G), the File menu (a click on it), the load window
+0 wait micropolis: ready
++1000 b
++0 wait micropolis: window 2
++1000 {f9}
++0 wait micropolis: shot
++500 {esc}
++500 v
++0 wait micropolis: window 3
++1000 {f9}
++0 wait micropolis: shot
++500 {esc}
++500 g
++0 wait micropolis: window 4
++1500 {f9}
++0 wait micropolis: shot
++500 {esc}
++500 move 20 4
++300 click
++0 wait micropolis: window 1
++1000 {f9}
++0 wait micropolis: shot
++500 move 40 71
++300 click
++0 wait micropolis: window 6
++2000 {f9}
++0 wait micropolis: shot
++500 {esc}
