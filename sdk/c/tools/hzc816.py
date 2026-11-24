@@ -178,6 +178,35 @@ def compile_c(src, obj, opt="2", incs=(), defs=(), asm_out=None, opts=None, code
             assemble(path, obj, src_name=src, code=config(code, data))
 
 
+def check_calls(srcs, incs=(), defs=(), opts=None, code=None, data=None):
+    """hcc --check-calls: every C file read (not compiled) and the calls compared across
+    them (cc816 driver.cross_check): a call without a prototype, or a prototype, that
+    disagrees with the definition in another file. Prints those (and each file's own
+    -Wunprototyped-args warnings) -> how many were found; errors raise HccError"""
+    from cc816.ctypes816 import CError
+    units = []
+    n = 0
+    for src in srcs:
+        o = dict(opts or {}, sigs=units, front_only=True)
+        if is_large(code):
+            o["large"] = True
+        if is_far(code, data):
+            o["far_data"] = True
+        try:
+            _, warns = cc().compile_c(src, list(incs) + [os.path.join(SDKC, "include")],
+                                      defs, 2, opts=o)
+        except CError as e:
+            raise HccError(_where(str(e), src))
+        for w in warns:
+            if w.endswith("[-Wunprototyped-args]"):
+                print(w)
+                n += 1
+    for w in cc().cross_check(units):
+        print(w)
+        n += 1
+    return n
+
+
 # the library files whose code must stay in the main bank in the large code model: the
 # loader of the other banks (it runs before they are there) and what it calls
 RESIDENT = ("xload.c", "misc.c")
@@ -585,7 +614,62 @@ def o65_relocs(path):
     return count
 
 
-def object_sizes(out, s, top=None):
+def failed_sizes(out, keep):
+    """hcc --sizes when the link failed and the link to measure failed too: each module's
+    segments from the failed link's map ("Modules list": ld65 writes it even when the
+    program does not fit; the large model's trial link, every function that can move in
+    one pool), biggest first, with the totals; None when there is no map"""
+    if not keep:
+        return None
+    name = os.path.basename(out)
+    for mp in (os.path.join(keep, name + ".map"), os.path.join(keep, "trial.map")):
+        if os.path.exists(mp):
+            break
+    else:
+        return None
+    rows, mod = [], None
+    for ln in open(mp, encoding="latin-1"):
+        if ln.startswith("Segment list:"):
+            break
+        m = re.match(r"^(\S.*):\s*$", ln)
+        if m and not ln.startswith("Modules list"):
+            mod = m.group(1)
+            mm = re.search(r"\(([^()]+)\.o\)$", mod)
+            mod = mm.group(1) if mm else os.path.basename(mod)
+            mod = re.sub(r"^\d+_", "", mod)           # (hcc's temporary object names)
+            continue
+        m = re.match(r"^\s+(\w+)\s+Offs=[0-9A-F]+\s+Size=([0-9A-F]+)", ln)
+        if m and mod:
+            seg, size = m.group(1), int(m.group(2), 16)
+            if size and seg not in ("ZEROPAGE", "ZPEND", "HEAPSTART", "XREL"):
+                kind = {"RODATA": "constants", "DATA": "data", "BSS": "bss"}.get(
+                    seg, "far data" if seg.startswith("FD") else "code")
+                rows.append((size, mod, kind, seg))
+    if not rows:
+        return None
+    rows.sort(key=lambda r: (-r[0], r[1]))
+    tot = {}
+    for size, _, kind, _ in rows:
+        tot[kind] = tot.get(kind, 0) + size
+    lines = [f"{out}: the link failed; each file's (each library function's) segments, from "
+             f"the map of the failed link (hcc --sizes)",
+             f"{'bytes':>9}  {'what':<10} {'segment':<16} file"]
+    for size, mod, kind, seg in rows:
+        lines.append(f"{size:>9,}  {kind:<10} {seg[:16]:<16} {mod}")
+    lines.append("totals: " + ", ".join(f"{k} {v:,}" for k, v in sorted(tot.items())))
+    return "\n".join(lines)
+
+
+def _named(n):
+    """a label --sizes lists: a C object or function (not the compiler's internal labels,
+    branches and the like, nor ld65's own symbols)"""
+    return bool(re.match(r"^(_\w|L_S\d|L_lit\d|S[0-9a-f]{6}_)", n)) and \
+        not n.startswith("__T") and \
+        not re.match(r"^S[0-9a-f]{6}_L\w*_(b|x|asm)?\d+$", n) and \
+        not re.match(r"^__[A-Z0-9_]+__$", n)
+
+
+def object_sizes(out, s, top=None, unplaced=False):
     """hcc --sizes: every object and function of the link, its size and where it went
     (the main bank, code bank k, far data bank k), biggest first, from the link's map
     (its segments) and labels (each label's size: to the next label of its segment). The
@@ -611,7 +695,11 @@ def object_sizes(out, s, top=None):
     for ln in open(lbl, encoding="latin-1"):
         p = ln.split()
         if len(p) >= 3 and p[0] == "al":
-            labels.setdefault(int(p[1], 16), p[2].lstrip("."))
+            a, n = int(p[1], 16), p[2].lstrip(".")
+            # (several names at one address, an object at a segment's start and ld65's
+            # __DATA_RUN__: the object's name wins)
+            if a not in labels or (_named(n) and not _named(labels[a])):
+                labels[a] = n
     addrs = sorted(labels)
     nb = s.get("ncode", 0)
     rows = []
@@ -626,22 +714,19 @@ def object_sizes(out, s, top=None):
             i += 1
         bank = lo >> 16
         if seg.startswith("FD"):
-            kind, where = "far data", f"far data bank {bank - nb}" if bank else "main bank"
+            kind, where = "far data", ("far data" if unplaced else
+                                       f"far data bank {bank - nb}") if bank else "main bank"
         elif seg in ("RODATA",):
             kind, where = "constants", "main bank"
         elif seg == "DATA":
             kind, where = "data", "main bank"
         elif seg == "BSS":
             kind, where = "bss", "main bank"
+        elif unplaced and bank:
+            kind, where = "code", "movable"
         else:
             kind, where = "code", f"code bank {bank}" if bank else "main bank"
-        keep = []
-        for a in inside:
-            n = labels[a]
-            if re.match(r"^(_\w|L_S\d|L_lit\d|S[0-9a-f]{6}_)", n) and not n.startswith("__T") \
-                    and not re.match(r"^S[0-9a-f]{6}_L\w*_(b|x|asm)?\d+$", n) and \
-                    not re.match(r"^__[A-Z0-9_]+__$", n):     # (ld65's own symbols)
-                keep.append(a)
+        keep = [a for a in inside if _named(labels[a])]
         for k, a in enumerate(keep):
             end = keep[k + 1] if k + 1 < len(keep) else hi
             n = labels[a]
@@ -651,7 +736,7 @@ def object_sizes(out, s, top=None):
     rows.sort(key=lambda r: (-r[0], r[1]))
     tot = {}
     for size, _, kind, where in rows:
-        key = "main bank" if where == "main bank" else where.rsplit(" ", 1)[0]
+        key = where if where in ("main bank", "movable", "far data") else where.rsplit(" ", 1)[0]
         tot[(key, kind)] = tot.get((key, kind), 0) + size
     lines = [f"{out}: every object and function, its size and where it went (hcc --sizes)",
              f"{'bytes':>9}  {'what':<10} {'where':<18} name"]

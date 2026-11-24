@@ -110,6 +110,9 @@ click. `references/packaging.md`.
 - hgame: a game that clears and redraws the whole frame needs `HG_DOUBLE` (two pages);
   without it the text and pictures drawn after `hg_clear` can be lost from the screen.
 - Never write to hardware addresses: every device is a syscall (or hgame / hui call).
+- Old C (K&R, DOS compilers): `-std=c89` takes implicit int and extra arguments as
+  warnings; run `hcc --check-calls *.c` (the build's options) before the first run of a
+  port: an `int` passed where a far pointer is read shifts every later argument.
 
 ## References: read when
 

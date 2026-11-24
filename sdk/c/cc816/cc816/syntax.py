@@ -114,7 +114,7 @@ def explain(path, line, col, msg):
                 "type", False)
     if msg == 'Missing type in declaration':
         return ("a declaration without a type: write 'int x;', not 'x;' (C99 has no implicit "
-                "int), or an unknown type name", False)
+                "int: -fimplicit-int or -std=c89 takes C89's), or an unknown type name", False)
     if msg == 'Invalid multiple types specified':
         return ("two types in one declaration (a ';' missing after a struct, union or enum "
                 "definition, or 'unsigned float'?)", False)

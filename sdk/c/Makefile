@@ -12,7 +12,8 @@
 #                   tests and the c-window-app template), the examples and the c-console
 #                   template, the game library's tests (game/Makefile), the large code
 #                   model with three examples (LARGE_EXAMPLES), and the skill's examples
-#                   (sdk/skill/atari-816-dev/examples)
+#                   (sdk/skill/atari-816-dev/examples); tools/host16.py's test
+#                   (tests/host16: the PC build with the Atari816's types)
 #   make clean
 #
 # Needs Python 3 and cc65's ca65/ld65/ar65 (docs/c/getting-started.md).
@@ -50,6 +51,7 @@ check:
 	$(PYTHON) tools/genhui.py --check --horizon $(HORIZON)
 
 test: check
+	$(PYTHON) tests/host16/check.py
 	$(PYTHON) tests/run.py --horizon $(HORIZON)
 	@set -e; for p in $(EXAMPLES); do echo "== $$p"; \
 	  $(MAKE) --no-print-directory -C $$p test HORIZON=$(HORIZON); done

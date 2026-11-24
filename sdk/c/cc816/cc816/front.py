@@ -106,6 +106,57 @@ class Unit:
         self.fardata = False     # __far objects in banks of their own (the large model)
 
 
+def argsig(t):
+    """an argument's or a parameter's place on the stack: (bytes, kind, C type): a
+    structure goes as its address"""
+    if t.is_struct:
+        return (2, 'struct', cname(t))
+    kind = 'float' if t.is_float else 'ptr' if t.is_ptr else 'int'
+    return (vsz(t), kind, cname(t))
+
+
+def sig_mismatch(name, sig, params, variadic, defplace):
+    """the messages for a call without a prototype (its arguments' argsigs) against the
+    definition's parameters (argsigs); [] when they agree in size and in kind (float or
+    not). Pointers and integers of one size agree: the 65816 passes both the same way"""
+    out = []
+    at = f' ({defplace})' if defplace else ''
+    for k, (a, p) in enumerate(zip(sig, params), 1):
+        if a[0] != p[0] or (a[1] == 'float') != (p[1] == 'float'):
+            out.append(f"the call of '{name}' has no prototype: argument {k} is pushed as "
+                       f"{_article(a[2])} ({a[0]} bytes), but the definition{at} reads "
+                       f"{_article(p[2])} ({p[0]} bytes)" +
+                       (": it and every later parameter are read from the wrong place"
+                        if a[0] != p[0] else ": the bits are not converted") +
+                       f"; declare '{name}' with a prototype")
+            break
+    if len(sig) < len(params):
+        out.append(f"the call of '{name}' has no prototype and passes {len(sig)} "
+                   f"argument{'s' if len(sig) != 1 else ''}, but the definition{at} takes "
+                   f"{len(params)}{' or more' if variadic else ''}: the missing ones are "
+                   f"read from whatever is on the stack")
+    return out
+
+
+def short_place(p, other):
+    """'line N' when p ('file:line:col') is in other's file, else 'file:line'"""
+    if not p:
+        return ''
+    f, _, rest = p.rpartition(':')
+    if rest.isdigit() and f.rpartition(':')[2].isdigit():
+        f, line = f.rpartition(':')[0], f.rpartition(':')[2]
+    else:
+        line = rest
+    if other and other.startswith(f + ':'):
+        return f'line {line}'
+    import os
+    return f'{os.path.basename(f)}:{line}'
+
+
+def _article(t):
+    return ('an ' if t[:1] in 'aeiou' else 'a ') + t
+
+
 class Front:
     def __init__(self, filename='?', diag=None, implicit_int=(), attrs=None):
         self.diag = diag or Diag()
@@ -122,6 +173,11 @@ class Front:
         self.scopes = [{}]
         self.tags = [{}]
         self.strings = {}
+        # -Wunprototyped-args and hcc --check-calls: the calls made without a prototype
+        # [(name, place, [argsig])], the definitions {name: (place, [argsig], proto,
+        # variadic, static)}
+        self.unproto_calls = []
+        self.defsigs = {}
         self.nstatic = 0
         self.fn = None
         self.filename = filename
@@ -1018,17 +1074,22 @@ class Front:
 
     def string_sym(self, e):
         b = bytes(self.strbytes(e)) + b'\0' * self.str_elem(e).size
-        if b not in self.strings:
+        # (-fno-merge-strings, -fwritable-strings: each literal an object of its own, as
+        # DOS's compilers made them: old programs write into their literals; with
+        # -fwritable-strings in the data, not the constants)
+        key = b if MODEL['merge_strings'] else (len(self.strings), b)
+        if key not in self.strings:
             name = f'L_S{len(self.strings)}'
-            self.strings[b] = name
-            o = DataObj(name, 'RODATA', [('b', list(b))], len(b), False)
+            self.strings[key] = name
+            o = DataObj(name, 'DATA' if MODEL['writable_strings'] else 'RODATA',
+                        [('b', list(b))], len(b), False)
             if MODEL['far_data']:
                 # (the far data model: a string literal lives in far data, reached with
                 # long addressing; a library's (split) stay in the main bank)
                 self.unit.farsyms.add(name)
                 o.far = self.unit.fardata
             self.unit.data.append(o)
-        return self.strings[b]
+        return self.strings[key]
 
     # ================================================================== top level
     def translate(self, ast):
@@ -1060,6 +1121,7 @@ class Front:
         except _TooMany:
             self.diag.errors.append(f'{self.filename}: error: too many errors, stopped')
         self.end_of_unit()
+        self.check_unproto_calls()
         u = self.unit
         u.externs -= u.defined
         u.uses_float = self.uses_float
@@ -1087,6 +1149,30 @@ class Front:
                 o.size = t.size
             if t.is_struct or t.is_arr:
                 self.note_float(t)
+
+    def check_unproto_calls(self):
+        """-Wunprototyped-args: a call made without a prototype (an old declaration
+        'int f();', an implicit one, a K&R definition) to a function this file defines:
+        each argument is pushed as its promoted type says, and the function reads its
+        parameters as its definition says. A size that differs (an int pushed, 2 bytes,
+        where a far pointer, 4, is read) shifts every later parameter; fewer arguments
+        than parameters leave the last ones unset. The unit keeps what hcc --check-calls
+        compares across files (unit.sigs)"""
+        for name, place, sig in self.unproto_calls:
+            d = self.defsigs.get(name)
+            if d is None:
+                continue
+            for msg in sig_mismatch(name, sig, d[1], d[3], short_place(d[0], place)):
+                self.diag.warning(place, msg, 'unprototyped-args')
+        protos = {}
+        for name, sy in self.scopes[0].items():
+            if getattr(sy, 'kind', None) == 'global' and sy.t.is_func and \
+                    not getattr(sy, 'defined', False) and sy.t.proto:
+                protos[name] = (where(getattr(sy, 'coord', None)),
+                                [argsig(self.param_adjust(pt)) for _, pt in sy.t.params],
+                                bool(sy.t.variadic))
+        self.unit.sigs = {'calls': self.unproto_calls, 'defs': self.defsigs,
+                          'protos': protos}
 
     def static_assert(self, d):
         v = self.const_eval(d.cond)
@@ -1601,8 +1687,13 @@ class Front:
         self.loc = d.coord
         c = d.coord
         if c is not None and (c.file, c.line, c.column) in self.implicit_int:
-            self.diag.error(c, f"the function '{name}' has no return type: write 'int "
-                               f"{name}(...)' (C99 has no implicit int)")
+            if MODEL['implicit_int']:
+                self.diag.warning(c, f"type defaults to 'int' in the definition of "
+                                     f"'{name}' (C89's implicit int)", 'implicit-int')
+            else:
+                self.diag.error(c, f"the function '{name}' has no return type: write 'int "
+                                   f"{name}(...)' (C99 has no implicit int; -fimplicit-int "
+                                   f"or -std=c89 takes C89's)")
         ft = self.decl_type(d.type)
         if not ft.is_func:
             self.err(f"'{name}' is not a function, but is followed by a body", d)
@@ -1644,6 +1735,9 @@ class Front:
         sy = Sy('global', ft, asm=asm)
         sy.coord, sy.name, sy.defined = d.coord, name, True
         self.bind(name, sy)
+        self.defsigs[name] = (where(d.coord), [argsig(self.param_adjust(pt))
+                                               for _, pt in ft.params],
+                              bool(ft.proto), bool(ft.variadic), static)
         self.unit.defined.add(asm)
         if not static:
             self.unit.exports.add(asm)
@@ -3639,8 +3733,16 @@ class Front:
         params = ft.params
         fname = name or 'the function'
         if ft.proto and not ft.variadic and len(args) > len(params):
-            self.err(f"too many arguments to the function {_q(name)}: {len(args)} given, it "
-                     f"takes {len(params)}", e)
+            if MODEL['extra_args']:
+                # (-fextra-args, as DOS's compilers: the extra ones are pushed after the
+                # others, never read, and the caller takes them off the stack as always)
+                self.warn(f"too many arguments to the function {_q(name)}: {len(args)} "
+                          f"given, it takes {len(params)} (the extra ones are evaluated "
+                          f"and pushed, never read)", e, 'extra-args')
+            else:
+                self.err(f"too many arguments to the function {_q(name)}: {len(args)} given, "
+                         f"it takes {len(params)}"
+                         " (-fextra-args or -std=c89: a warning, as DOS's compilers)", e)
         if ft.proto and len(args) < len(params):
             self.err(f"too few arguments to the function {_q(name)}: {len(args)} given, it "
                      f"takes {len(params)}{' or more' if ft.variadic else ''}", e)
@@ -3649,6 +3751,9 @@ class Front:
         if len(args) > 1:
             self.check_sequence(args, name, e)
         parts = {}
+        # (a direct call without a prototype: what it pushes, for -Wunprototyped-args)
+        unsig = {} if not ft.proto and name is not None and \
+            getattr(self.lookup(name), 'kind', None) == 'global' else None
         order = range(len(args) - 1, -1, -1) if MODEL['args_rtl'] else range(len(args))
         for i in order:
             # (-fargs-right-to-left: the arguments evaluated last first, as DOS's compilers
@@ -3677,6 +3782,8 @@ class Front:
                     # (far data: a near pointer among the variable arguments goes as a
                     # far one, as a float goes as a double: va_arg(ap, char *) reads 4)
                     pt = PtrT(pt.to, far=True)
+                if unsig is not None:
+                    unsig[i] = argsig(pt)
             if pt.is_struct and ft.variadic and i >= len(params):
                 # a variadic argument: the structure's bytes themselves on the stack
                 # (va_arg(ap, struct s) reads them there), in words, the last one padded
@@ -3703,6 +3810,9 @@ class Front:
         ops = [sret] if sret is not None else []
         for i in range(len(args)):
             ops += parts[i]
+        if unsig is not None and len(unsig) == len(args):
+            self.unproto_calls.append((name, where(self.place_of(e)),
+                                       [unsig[i] for i in range(len(args))]))
         rt = ft.ret
         d = None
         if not rt.is_void and not rt.is_struct:

@@ -35,7 +35,25 @@ Options:
                     only): plain data pointers are 32-bit far pointers, malloc takes
                     other banks, string literals and const objects go to banks of far
                     data: DOS's large model (docs/c/reference.md, "The far data model")
-  -fdos-keywords    far, near and huge are keywords (as __far, __near, __far)
+  -fdos-keywords    far, near and huge are keywords (as __far, __near, __far); a DOS
+                    program is C89: also -fimplicit-int and -fextra-args
+  -std=c89, -std=gnu89, -ansi
+                    C89: -fimplicit-int and -fextra-args (-std=c99 and later: accepted,
+                    nothing changes)
+  -fimplicit-int    C89's implicit int: a function defined without a return type
+                    ('f(a) int a; {...}'), 'register x;', 'static n;': a warning
+                    (-Wimplicit-int), not an error
+  -fextra-args      a call with more arguments than the function's prototype: a warning
+                    (-Wextra-args, as DOS's compilers), the extra ones pushed, never read
+  -fno-merge-strings
+                    each string literal an object of its own (equal ones are one object
+                    by default): for old programs that write into their literals
+  -fwritable-strings
+                    the same, and the literals in the data (not the constants)
+  --check-calls     read the C files together, build nothing: every call without a
+                    prototype, and every prototype, against the definition in another file
+                    (sizes of the arguments: an int pushed where a far pointer is read);
+                    exit 1 when one disagrees (docs/c/reference.md, "Old C")
   -fargs-right-to-left
                     a call's arguments are evaluated right to left, as DOS's compilers
                     (Watcom, Microsoft, Borland) and gcc on x86 do; the default is left to
@@ -45,7 +63,9 @@ Options:
                     bank never changes, as with DOS's far pointers (docs/c/reference.md,
                     "The far data model", "Pointers")
   --sizes           print every object and function, its size and where it went
-                    (main bank, code bank k, far data bank k), biggest first
+                    (main bank, code bank k, far data bank k), biggest first; also when
+                    the program does not fit (linked again to measure it with the
+                    smallest stack, or each file's segments from the failed link)
   --stack N         bytes for the software stack (arrays, structures and locals whose
                     address is taken; default 8192, taken from the main bank)
   --heap N          --code large: bytes of the main bank kept free for malloc (and
@@ -158,8 +178,11 @@ def main(argv):
             o["ccopts"]["includes"].append(val("-include"))
         elif a.startswith("-U"):
             o["defs"].append("-U" + (a[2:] or val("-U")))   # (cc816: in order with -D)
-        elif a.startswith("-f") and _f_flag(a, o["ccopts"]):
+        elif (a.startswith("-f") or a.startswith("-std=") or a == "-ansi") and \
+                _f_flag(a, o["ccopts"]):
             pass
+        elif a == "--check-calls":
+            o["check_calls"] = True
         elif a == "-w" or (a.startswith("-W") and len(a) > 2):
             from cc816 import driver as _drv     # (tools/hzc816.py put cc816 on the path)
             _drv.parse_warning_flag(a, o["ccopts"])
@@ -241,7 +264,53 @@ def main(argv):
             o["needs"] = parse_needs(",".join(o["needs"]))
         except ValueError as e:
             die(f"--needs: {e}")
+    if o.get("check_calls"):
+        return check_calls(o)
     return build(o)
+
+
+def measure_sizes(o, objs, out, libs, ui, code):
+    """--sizes for a program that does not fit (the moment it is most wanted): linked once
+    more, only to measure it, with the smallest software stack (512) and no heap reserve
+    (--code large); if even that does not fit, each file's segments from the failed
+    link's map (hzc816.failed_sizes). The program itself is not written"""
+    import tempfile
+    import shutil
+    t = tempfile.mkdtemp(prefix="hccsz")
+    try:
+        tout = os.path.join(t, os.path.basename(out))
+        try:
+            s = hzc816.link(objs, tout, sstack=512, extra_libs=libs,
+                            keep=os.path.join(t, "link"), ui=ui, code=code,
+                            heap=0 if hzc816.is_large(code) else None,
+                            bank_room=o["bank_room"], main_room=o["main_room"],
+                            spread=o["spread"])
+        except HccError:
+            return hzc816.failed_sizes(out, o["keep"])
+        main = (f"  the main bank: code and constants {s['text']:,} + data {s['data']:,} + bss "
+                f"{s['bss']:,} = {s['code']:,} bytes"
+                + (f", of which {s['inmain']:,} movable code" if s.get("inmain") else ""))
+        return (f"{out} does not fit; linked once more only to measure it, with a software "
+                f"stack of 512 bytes" + (" and no heap reserve" if hzc816.is_large(code)
+                                         else "") + ":\n" + main + "\n"
+                + hzc816.object_sizes(out, s))
+    finally:
+        shutil.rmtree(t, ignore_errors=True)
+
+
+def check_calls(o):
+    """--check-calls: the program's C files read together, nothing built: exit 1 when a
+    call or a prototype disagrees with a definition (docs/c/reference.md, "Old C")"""
+    srcs = [s for s in o["srcs"] if s.lower().endswith(".c")]
+    try:
+        n = hzc816.check_calls(srcs, incs=o["incs"], defs=o["defs"], opts=o["ccopts"],
+                               code=hzc816.config(o["code"], o["data"]))
+    except HccError as e:
+        die(str(e))
+    print(f"hcc --check-calls: {len(srcs)} file(s), "
+          + (f"{n} call(s) or prototype(s) that disagree with a definition" if n else
+             "every call and prototype agrees with its definition"))
+    return 1 if n else 0
 
 
 NEED_FLAGS = {"lau": 0x01, "opl2": 0x02, "sprites": 0x04, "blitter": 0x08, "joystick": 0x10}
@@ -358,6 +427,9 @@ def build(o):
         die("--stack: the software stack is an even number of bytes, 512 to 32768")
     # cc816: the software stack's size (a frame bigger than it is an error)
     o["ccopts"]["sstack"] = stack
+    # (whether --stack was given: a file compiled alone, hcc -c, does not know the stack
+    # its program will link with: the warning names the default then)
+    o["ccopts"]["sstack_given"] = o["stack"] is not None or not o["compile_only"]
     opt = o["opt"] or "2"
     incs = o["incs"]
     code = hzc816.config(o["code"], o["data"])     # small, large or large-far
@@ -395,6 +467,12 @@ def build(o):
             except HccError as e:
                 undef = hzc816.undefined_names(str(e))
                 if ui or not undef or not undef <= hzc816.ui_names() | {"hui_rowtramp"}:
+                    if o["sizes"] and not undef:
+                        # (--sizes is most wanted when the program does not fit: what the
+                        # failed link's map knows)
+                        rep = measure_sizes(o, objs, out, libs, ui, code)
+                        if rep:
+                            print(rep)
                     raise
                 ui = True               # only hui.h names missing: the controls library
         if o["want_map"]:

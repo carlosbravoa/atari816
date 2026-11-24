@@ -12,7 +12,15 @@
       -w        no warnings but -Woverflow  -Wall  more warnings (unused variables, ...)
       -Werror   warnings are errors    -WNAME / -Wno-NAME  one warning on / off
       -fsigned-char                    plain char is signed (default: unsigned)
-      -fdos-keywords                   far, near and huge are keywords (DOS compilers')
+      -fdos-keywords                   far, near and huge are keywords (DOS compilers');
+                                       also -fimplicit-int and -fextra-args (C89)
+      -std=c89 (c90, gnu89, -ansi)     C89: -fimplicit-int and -fextra-args
+      -fimplicit-int                   C89's implicit int: 'f() {...}', 'register x;' a
+                                       warning (-Wimplicit-int), not an error
+      -fextra-args                     a call with more arguments than the prototype: a
+                                       warning (-Wextra-args), not an error
+      -fno-merge-strings               each string literal an object of its own
+      -fwritable-strings               string literals in the data, each its own
       -fargs-right-to-left             a call's arguments evaluated right to left (DOS's
                                        compilers' order; default: left to right)
       -ffar-wrap                       far pointer arithmetic on the offset alone, the bank
@@ -46,7 +54,7 @@ from .ctypes816 import CError, Unsupported, ICE, CHAR, MODEL   # noqa: E402
 from .diag import Diag                             # noqa: E402
 from .front import Front                           # noqa: E402
 from . import opt as optmod                        # noqa: E402
-from .regalloc import allocate                     # noqa: E402
+from .regalloc import allocate, demote_spills, sr_reach, SR_MAX  # noqa: E402
 from .gen import Gen, DP_NAMES, SSCHECK            # noqa: E402
 from .peep import peephole, text                   # noqa: E402
 
@@ -326,6 +334,8 @@ def compile_c(path, incs=(), defs=(), level=2, dump_ir=False, split=False, opts=
     MODEL['far_data'] = bool(o.get('far_data'))
     MODEL['far_wrap'] = bool(o.get('far_wrap'))
     MODEL['args_rtl'] = bool(o.get('args_rtl'))
+    (MODEL['implicit_int'], MODEL['extra_args'], MODEL['merge_strings'],
+     MODEL['writable_strings']) = old_c(o)
     old_limit = sys.getrecursionlimit()
     sys.setrecursionlimit(max(old_limit, 20000))
     try:
@@ -349,6 +359,8 @@ def compile_c(path, incs=(), defs=(), level=2, dump_ir=False, split=False, opts=
         sys.setrecursionlimit(old_limit)
         CHAR.signed = False
         MODEL['far_data'] = False
+        MODEL.update(implicit_int=False, extra_args=False, merge_strings=True,
+                     writable_strings=False)
         _CURRENT.clear()
 
 
@@ -374,6 +386,7 @@ def _compile(path, incs, defs, level, dump_ir, split, o, diag):
     src = _strip_gnu(src)
     src, attrs = gnu_attributes(src, diag)
     parser = c_parser.CParser()
+    parser.implicit_int_ok = MODEL['implicit_int']
     try:
         ast = parser.parse(src, path)
     except Exception as e:      # pycparser ParseError: 'file:line:col: before: X'
@@ -389,6 +402,9 @@ def _compile(path, incs, defs, level, dump_ir, split, o, diag):
             diag.error(path, f'syntax error: {str(e).split(": ", 1)[-1]}')
         _fail(diag)
     t0 = _tick('parse', t0)
+    for c, name in parser.implicit_int_decl:
+        diag.warning(c, f"type defaults to 'int' in the declaration of '{name}' (C89's "
+                        f"implicit int)", 'implicit-int')
     fr = Front(path, diag, parser.implicit_int, attrs)
     # __far objects in banks of their own: a large-model program's file (a library's
     # stay in the main bank, reached by far pointers as any object there)
@@ -405,6 +421,12 @@ def _compile(path, incs, defs, level, dump_ir, split, o, diag):
                       if getattr(sy, 'kind', None) == 'global' and sy.t.is_func}
     frame_sizes(unit, o, diag)
     _fail(diag)
+    if o.get('sigs') is not None:
+        # (hcc --check-calls: the unit's calls without a prototype, its definitions and
+        # its prototypes, compared across the files by cross_check)
+        o['sigs'].append((path, getattr(unit, 'sigs', {})))
+        if o.get('front_only'):
+            return '', unit.warnings
     large = bool(o.get('large'))
     lines_all = []
     helpers = set()
@@ -428,6 +450,26 @@ def _compile(path, incs, defs, level, dump_ir, split, o, diag):
         t0 = _tick('codegen', t0)
         lines = peephole(lines, level >= 1)
         t0 = _tick('peephole', t0)
+        tries = 0
+        while sr_reach(lines) > SR_MAX:
+            # a frame out of n,s's reach (8 bits: spills, saved registers and arguments
+            # past 255 bytes): its farthest spill slots move to the software stack, then
+            # once more all of them (demote_spills); what still does not fit is refused
+            reach = sr_reach(lines)
+            keep = max(0, f.frame_size - (reach - SR_MAX) - 32) if tries == 0 else 0
+            if tries >= 2 or not demote_spills(f, keep):
+                diag.error(getattr(f, 'coord', None),
+                           f"the function '{getattr(f, 'cname', f.name)}' needs "
+                           f"{reach} bytes of hardware stack under its arguments (its "
+                           f"parameters and the arguments of its calls: at most "
+                           f"{SR_MAX}); split it, or pass a structure's address")
+                break
+            tries += 1
+            allocate(f)
+            g = Gen(f, unit, {'level': level, 'large': large,
+                              'sscheck': o.get('sscheck', SSCHECK)})
+            lines = peephole(g.gen(), level >= 1)
+        _fail(diag)
         helpers |= g.helpers
         lines_all.append((f, lines, g.helpers))
     _CURRENT.pop('fn', None)
@@ -438,8 +480,52 @@ def _compile(path, incs, defs, level, dump_ir, split, o, diag):
                 large and not o.get('resident'), large), unit.warnings
 
 
+def cross_check(units):
+    """hcc --check-calls: [(path, unit.sigs)] of every file of a program -> warnings in
+    gcc's form. A call without a prototype in one file to a function another file defines
+    (its arguments against the definition's parameters: front.sig_mismatch), and a
+    prototype in one file that differs from the definition in another (the number of
+    parameters, or one's size or kind): both read the arguments from the wrong place,
+    and neither compile sees the other file"""
+    from .front import sig_mismatch, short_place
+    defs = {}
+    for path, sg in units:
+        for name, d in (sg.get('defs') or {}).items():
+            if not d[4]:                        # (not static)
+                defs.setdefault(name, d)
+    out = []
+    for path, sg in units:
+        own = sg.get('defs') or {}
+        for name, place, sig in sg.get('calls') or ():
+            d = defs.get(name)
+            if name in own or d is None:
+                continue
+            for msg in sig_mismatch(name, sig, d[1], d[3], short_place(d[0], place)):
+                out.append(f'{place}: warning: {msg} [-Wunprototyped-args]')
+        for name, (place, params, variadic) in (sg.get('protos') or {}).items():
+            d = defs.get(name)
+            if name in own or d is None:
+                continue
+            dp = short_place(d[0], place)
+            if len(params) != len(d[1]) or variadic != d[3]:
+                out.append(f"{place}: warning: the prototype of '{name}' takes "
+                           f"{len(params)} parameter{'s' if len(params) != 1 else ''}"
+                           f"{' and more' if variadic else ''}, but its definition ({dp}) "
+                           f"takes {len(d[1])}{' and more' if d[3] else ''} [-Wprototype-mismatch]")
+                continue
+            for k, (a, p) in enumerate(zip(params, d[1]), 1):
+                if a[0] != p[0] or (a[1] == 'float') != (p[1] == 'float'):
+                    out.append(f"{place}: warning: the prototype of '{name}' says parameter "
+                               f"{k} is {a[2]} ({a[0]} bytes), but its definition ({dp}) "
+                               f"reads {p[2]} ({p[0]} bytes): the callers that see this "
+                               f"prototype push the wrong thing [-Wprototype-mismatch]")
+                    break
+    return out
+
+
 # the software stack's size when hcc does not say (tools/hzc816.py SSTACK, hcc --stack)
 SSTACK = 8192
+SSTACK_MAX = 0x8000          # the largest one (hcc --stack)
 # a frame bigger than this is worth a warning (-Wframe-larger-than)
 FRAME_WARN = 1024
 
@@ -449,13 +535,32 @@ def frame_sizes(unit, o, diag):
     taken, the temporaries of structures returned by value) bigger than FRAME_WARN bytes:
     a warning; bigger than the whole software stack (o['sstack'], hcc --stack): an error
     (it would overflow into the heap at every call)"""
-    total = o.get('sstack') or SSTACK
+    given = o.get('sstack') and o.get('sstack_given', True)
+    total = o.get('sstack') if given else SSTACK
     for f in unit.funcs:
         n = sum(s.size for s in f.slots)
         if n <= FRAME_WARN:
             continue
         name = getattr(f, 'cname', f.name)
         where = getattr(f, 'coord', None)
+        if not given:
+            # (the stack the program links with is not known here: hcc -c without --stack;
+            # an error only past the largest stack hcc makes, else the default is named)
+            if n > SSTACK_MAX:
+                diag.error(where, f"the function '{name}' needs a software-stack frame of "
+                                  f"{n:,} bytes, more than the largest software stack "
+                                  f"({SSTACK_MAX:,} bytes, hcc --stack): make the big "
+                                  f"locals static or global")
+            else:
+                diag.warning(where, f"the function '{name}' needs a software-stack frame of "
+                                    f"{n:,} bytes (the default software stack is "
+                                    f"{SSTACK:,} bytes; the program's is what its link says, "
+                                    f"hcc --stack N" +
+                                    (f": at least {-(-(n + 1024) // 1024) * 1024}"
+                                     if n > SSTACK else '') +
+                                    "; arrays and structures returned by value are there)",
+                             'frame-larger-than')
+            continue
         if n > total:
             more = -(-(n + 1024) // 1024) * 1024
             diag.error(where, f"the function '{name}' needs a software-stack frame of {n:,} "
@@ -1034,11 +1139,48 @@ def parse_f_flag(a, opts):
          '-funsigned-char': ('signed_char', False), '-fno-signed-char': ('signed_char', False),
          '-fdos-keywords': ('dos_keywords', True),
          '-fargs-right-to-left': ('args_rtl', True), '-fargs-left-to-right': ('args_rtl', False),
-         '-ffar-wrap': ('far_wrap', True), '-fno-far-wrap': ('far_wrap', False)}.get(a)
+         '-ffar-wrap': ('far_wrap', True), '-fno-far-wrap': ('far_wrap', False),
+         # old code (docs/c/reference.md, "Old C"): C89's implicit int, calls with more
+         # arguments than the prototype, a string literal of its own each time (and in
+         # the data: written into)
+         '-fimplicit-int': ('implicit_int', True), '-fno-implicit-int': ('implicit_int', False),
+         '-fextra-args': ('extra_args', True), '-fno-extra-args': ('extra_args', False),
+         '-fmerge-strings': ('merge_strings', True),
+         '-fno-merge-strings': ('merge_strings', False),
+         '-fwritable-strings': ('writable_strings', True),
+         '-fno-writable-strings': ('writable_strings', False),
+         '-ansi': ('std89', True)}.get(a)
+    if f is None and a.startswith('-std='):
+        # -std=c89 (c90, gnu89, gnu90, iso9899:1990, iso9899:199409): -fimplicit-int and
+        # -fextra-args; the later standards: cc816's own (C99 with most of C11)
+        v = a[5:]
+        if v in STD89:
+            f = ('std89', True)
+        elif v in STD_LATER:
+            f = ('std89', False)
     if f is None:
         return False
     opts[f[0]] = f[1]
     return True
+
+
+STD89 = {'c89', 'c90', 'gnu89', 'gnu90', 'iso9899:1990', 'iso9899:199409'}
+STD_LATER = {'c99', 'c9x', 'gnu99', 'gnu9x', 'c11', 'c1x', 'gnu11', 'gnu1x', 'c17', 'c18',
+             'gnu17', 'gnu18', 'iso9899:1999', 'iso9899:2011', 'iso9899:2017',
+             'iso9899:2018', 'c2x', 'gnu2x', 'c23', 'gnu23'}
+
+
+def old_c(o):
+    """the old-code switches in force: (implicit int, extra arguments a warning, strings
+    merged, strings writable). -std=c89 and -fdos-keywords (a DOS program: C89) turn on
+    the first two unless -fno-... says otherwise"""
+    legacy = bool(o.get('std89') or o.get('dos_keywords'))
+    imp = o.get('implicit_int')
+    extra = o.get('extra_args')
+    writable = bool(o.get('writable_strings'))
+    merge = o.get('merge_strings', True) and not writable
+    return (legacy if imp is None else bool(imp), legacy if extra is None else bool(extra),
+            bool(merge), writable)
 
 
 def main(argv=None):

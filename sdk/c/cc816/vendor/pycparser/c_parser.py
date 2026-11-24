@@ -114,6 +114,9 @@ class CParser:
         # (cc816) the functions defined without a return type ('main() {...}'): their
         # coordinates, for the compiler's message
         self.implicit_int = []
+        # (cc816) the objects declared without a type under -fimplicit-int ('register x;'):
+        # (coordinate, name) each
+        self.implicit_int_decl = []
         self.compound_end = {}
         self.clex.input(text, filename)
         self._tokens = _TokenStream(self.clex.token)
@@ -304,7 +307,11 @@ class CParser:
         if not typename:
             # Functions default to returning int
             if not isinstance(decl.type, c_ast.FuncDecl):
-                self._parse_error("Missing type in declaration", decl.coord)
+                # (cc816: -fimplicit-int: C89's implicit int, 'register x;', 'static n;',
+                # the place kept for the warning)
+                if not getattr(self, "implicit_int_ok", False):
+                    self._parse_error("Missing type in declaration", decl.coord)
+                self.implicit_int_decl.append((decl.coord, getattr(decl, "name", None)))
             typ.type = c_ast.IdentifierType(["int"], coord=decl.coord)
         else:
             typ.type = c_ast.IdentifierType(names, coord=typename[0].coord)

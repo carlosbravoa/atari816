@@ -363,9 +363,11 @@ warn.c:10:9: warning: unused variable 'unused' [-Wunused-variable]
 | `format` | a real bug: `%d` with a `long` prints garbage and shifts later arguments; use `%ld`, `%lu` |
 | `far-pointer`, `far-cast` (-Wall) | a real bug: the bank is dropped, the pointer now points into the main bank |
 | `implicit-function-declaration` | missing header; the result is taken as a 16-bit int (a `long` or pointer result breaks) |
+| `unprototyped-args` | a real bug: a call without a prototype whose argument's size differs from the definition's parameter in the same file (`f(0)` where `f` takes a far pointer or a `long`: every later parameter read from the wrong place). Across files: `hcc --check-calls *.c` |
+| `implicit-int`, `extra-args` | (`-std=c89`, `-fimplicit-int`, `-fextra-args`, `-fdos-keywords`) C89 code taken as C89 did: `f() {...}` is `int`; extra arguments pushed, never read |
 | `int-conversion`, `incompatible-pointer-types` | pointer/int mixups; `long *` vs `int *` are different sizes here |
 | `return-type`, `shift-count-overflow`, `div-by-zero`, `excess-initializers` | real bugs |
-| `frame-larger-than` | a big array or structure (or a structure returned by value) on the software stack: near its size, or over it (`--stack N`), it overflows; make it `static` or fill it through a pointer |
+| `frame-larger-than` | a big array or structure (or a structure returned by value) on the software stack: near its size, or over it (`--stack N`), it overflows; make it `static` or fill it through a pointer. `hcc -c` without `--stack` names the default (8 KB): the link's `--stack` is what counts |
 | `tautological-compare` (-Wall) | `u >= 0`, `x <= 32767` with an int: dead tests |
 | `unused-variable`, `unused-label` (-Wall), `discarded-qualifiers`, `multichar`, `attributes`, `cpp`, `extern-initializer` | cleanup |
 
@@ -385,8 +387,11 @@ Build a port once with `-Wall` and read every warning.
 | `-ffar-wrap` | far pointer arithmetic on the offset alone, the bank never changes (DOS's far pointers; reference.md "The far data model") |
 | `--code small\|large` | the code model (default `$HZ_CODE`, else small) |
 | `--data near\|far` | the data model (default `$HZ_DATA`, else near); far needs `--code large`: plain data pointers 32 bits (DOS's large model, below) |
-| `-fdos-keywords` | `far`, `near`, `huge` are keywords (`__far`, `__near`, `__far`) |
-| `--sizes` | every object and function of the link, its size and where it went (main bank, code bank k, far data bank k), biggest first |
+| `-fdos-keywords` | `far`, `near`, `huge` are keywords (`__far`, `__near`, `__far`); also `-fimplicit-int` and `-fextra-args` (DOS code is C89) |
+| `-std=c89` (`gnu89`, `-ansi`) | C89: `-fimplicit-int` (`f(a) int a; {...}`, `register x;` are `int`, warning `-Wimplicit-int`) and `-fextra-args` (more arguments than the prototype: warning `-Wextra-args`, pushed and never read). `-std=c99`/`c11`/... accepted, no change |
+| `-fno-merge-strings`, `-fwritable-strings` | each string literal its own object (default: equal literals in a file are one); the second also puts them in the data. For programs that write into literals |
+| `--check-calls` | read the C files together, build nothing: calls without prototypes and prototypes against the definitions in the other files (argument sizes); exit 1 on a mismatch |
+| `--sizes` | every object and function of the link, its size and where it went (main bank, code bank k, far data bank k), biggest first; also when the program does not fit (a link at the smallest stack to measure it, or each file's segments from the failed map) |
 | `--stack N` | software stack bytes (512-32,768, even; default 8,192) |
 | `--heap N` | large model: main-bank bytes kept free for malloc (default 4,096) |
 | `--bank-room N`, `--main-room N`, `--spread N` | large model, for tests: limit code per bank |
@@ -441,6 +446,9 @@ What to do, in order:
 6. Many string literals: keep messages in a file, load them into a far bank.
 
 `hcc --map` shows each part; with `--code large` it also prints "the main bank without
-its movable code", what must fit whatever hcc does with the code.
+its movable code", what must fit whatever hcc does with the code. `hcc --sizes` lists
+every object and function also when the link fails for size: hcc links once more with a
+512-byte stack (and no heap reserve) only to measure it, or, when even that does not
+fit, prints each file's segments from the failed link's map.
 Speed questions (what costs what): references/performance.md. Porting step by step:
 references/porting.md. Traps: references/pitfalls.md.

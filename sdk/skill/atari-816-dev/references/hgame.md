@@ -128,7 +128,9 @@ window shown while paused. `hg_w`, `hg_h` are the size; `hg_win` the window (for
 Palette: `hg_palette(first, count, rgb)` (3 bytes each), `hg_color(i, r, g, b)`,
 `hg_palette_black()`. Full screen: all 256 entries are the game's (start: the system
 palette; its cube is `16 + 36 r + 6 g + b`, r g b 0-5; 1 white). In a window: entries 16-255
-that no other program holds, shown only while the window has the focus.
+that no other program holds, shown only while the window has the focus. The last write
+of an entry wins: `hg_palette(16, 240, rgb)` (a whole loaded palette) after your own
+`hg_color` calls replaces them; set your own entries after it.
 `hg_raster(count, changes)`: up to 16 palette changes at screen lines (`hz_raster` records).
 
 ## The frame

@@ -30,7 +30,10 @@ Options:
                   to the SDK). Build it with `make -C DIR`.
   --emu FILE      emu816 (default: $EMU, else DIR/../emu/emu816)
   --dest PATH     where the program goes on the card (default /APPS/NAME.PRG)
-  --args TEXT     argument string (shell mode)
+  --args TEXT     argument string (shell mode); the line typed (the program's path, a
+                  space and TEXT) may be at most 77 characters: the shell's line editor
+                  takes no more (the 80-column console less the prompt), so a longer one
+                  is refused here (before, the program got it cut short)
   --cd DIR        (shell mode) type "cd DIR" first; the program's path is then typed
                   relative to DIR when it lies in it (--dest /GAMES/MINE/X.PRG --cd /GAMES
                   types "MINE/X.PRG")
@@ -118,6 +121,9 @@ import inputscript  # noqa: E402
 DESK_BOOT_MS = 4000      # F10 at 4.0 s (the Desktop and Files are up by then)
 SHELL_ESC_MS = 1500      # the shell starts in the file browser: Esc
 SHELL_TYPE_MS = 2500
+# the longest line the shell takes from the keyboard: its line editor (Horizon's ulib
+# getline) stops at the console's width (80) - 3 and drops the keys after that
+SHELL_LINE_MAX = 77
 
 
 def die(msg):
@@ -236,6 +242,15 @@ def main():
         cmd = run + (' ' + opt['args'] if opt['args'] else '')
         if any(c in cmd + (cd or '') for c in '{}^') or '\\' in cmd + (cd or ''):
             die('the command line may not contain { } ^ or backslashes')
+        for line in ([f'cd {cd}'] if cd else []) + [cmd]:
+            if len(line) > SHELL_LINE_MAX:
+                # (the shell's line editor, ulib's getline, takes at most the console's
+                # width - 3 characters and drops the rest of the keys: the program got its
+                # last argument cut short, without a word)
+                die(f'the shell line "{line}" is {len(line)} characters; the shell takes '
+                    f'{SHELL_LINE_MAX} (its 80-column console less the prompt and the '
+                    f'cursor): use --cd DIR (the program\'s path is then typed relative to '
+                    f'it), a shorter --dest, or shorter arguments')
         boot = [f'{SHELL_ESC_MS} {{esc}}']
         t = SHELL_TYPE_MS
         if cd:

@@ -662,6 +662,12 @@ every program with it.
   or `double` too: its IEEE bits, the sign in bit 15 of X). A `long long` result is in
   the direct page, 8 bytes at `__h0`: `__h0` the low word, `__h0+2`, `__h1`, `__h1+2` the
   high word (A and X are then undefined).
+- **A C function's frame**: under the arguments, the callee-saved registers it uses, then
+  its spill slots (values live across calls), all read as `n,s`: 255 bytes is what that
+  addressing reaches, so a function whose slots would lie further keeps the farthest of
+  them in its software-stack frame ("Old C", "Big functions"). Since the callee reads its
+  parameters from the top and the caller removes what it pushed, arguments beyond the
+  parameters are harmless (`-fextra-args`).
 - **The order of evaluation** of the arguments is left to right by default, right to
   left with `-fargs-right-to-left` (DOS's compilers' order); either way they are pushed
   last first and lie on the stack as above: the order of evaluation is not tied to the
@@ -1418,7 +1424,9 @@ found and fixed.
 - C11: `_Static_assert`, `_Generic`, `_Alignof` (always 1), anonymous structures and
   unions, `_Noreturn`, `u"..."`, `U"..."`, `u8"..."`.
 - Old C: K&R function definitions (`int f(a, b) int a; char *b; { ... }`), functions
-  without a prototype, tentative definitions (`int x; int x = 5;`).
+  without a prototype, tentative definitions (`int x; int x = 5;`); with `-std=c89` (or
+  `-fimplicit-int`, or `-fdos-keywords`) C89's implicit int and calls with more arguments
+  than the prototype, as warnings ("Old C" below).
 - GNU C: statement expressions (`({ int t = f(); t * 2; })`), `typeof` and
   `__typeof__`, a cast as an lvalue, `case` and labels anywhere in a switch (Duff's
   device), case ranges (`case 'a' ... 'z':`: up to 32 values become cases, a wider range
@@ -1518,7 +1526,10 @@ a port built with `-w` hid the fault of `p + 4 * T`: "The far data model", "Poin
 | `extern-initializer` | `extern int x = 1;` (it defines x) |
 | `multichar` | a character constant of three or more characters |
 | `attributes` | a GNU attribute cc816 does not honour (`aligned(16)`, `constructor`, `section`, ...): ignored |
-| `frame-larger-than` | a function's software-stack frame over 1 KB (its arrays, structures, the copies of structures returned by value), with the stack's size ("The heap and the stacks"); a frame bigger than the whole software stack is an error |
+| `frame-larger-than` | a function's software-stack frame over 1 KB (its arrays, structures, the copies of structures returned by value), with the stack's size ("The heap and the stacks"); a frame bigger than the whole software stack is an error. A file compiled alone (`hcc -c` without `--stack`) does not know the stack its program links with: the message names the default (8 KB) and the `--stack` a bigger frame needs, and only a frame past the largest stack (32 KB) is an error; a build that links (`hcc -o`) or names `--stack` knows it |
+| `implicit-int` | (`-fimplicit-int`, `-std=c89`, `-fdos-keywords`) a function defined without a return type, an object declared without a type (`register x;`, `static n;`): taken as `int` ("Old C") |
+| `extra-args` | (`-fextra-args`, `-std=c89`, `-fdos-keywords`) a call with more arguments than the prototype: they are evaluated and pushed, never read (without the option: an error) |
+| `unprototyped-args` | a call made without a prototype (an old declaration `int f();`, an implicit one, a K&R definition) to a function the same file defines, whose arguments do not match its parameters: a size that differs (an `int` pushed, 2 bytes, where a far pointer or a `long`, 4, is read: every later parameter is read from the wrong place), a `float` against an integer, fewer arguments than parameters. A pointer and an integer of one size agree (the 65816 passes them alike). `hcc --check-calls` does the same across files |
 | `unknown-pragmas` | a `#pragma` cc816 does not know, ignored: Watcom's `#pragma aux name = "..."` (inline machine code: the function needs a C body) and `#pragma aux name parm ...`, `pack(n)` with n above 1; `once`, `pack(1)`, `GCC`, `STDC` and Watcom's message pragmas are silent |
 | `far-function` | `__far` on a function pointer (`void (__far *f)(void)`), ignored: a function pointer is the main-bank entry in every model |
 | `unused-variable` (-Wall) | a local or static variable that is never used |
@@ -1551,18 +1562,74 @@ hcc passes these to cc816 (`cc816.py`, the compiler alone, takes the same):
 | `-fsigned-char` | plain `char` is signed (-128 to 127): `CHAR_MIN` is -128, `__CHAR_UNSIGNED__` is not defined. The SDK's library is built with unsigned `char` and takes characters as `int`, so it works with both |
 | `-fargs-right-to-left` | a call's arguments are evaluated right to left, as DOS's compilers (Watcom, Microsoft, Borland) and gcc on x86 do; the default is left to right. C leaves the order unspecified; a DOS port whose calls draw from one state in two arguments (`hurt(roll(), side())`, both calling the random number generator) needs DOS's order to behave as DOS did. Only the order of evaluation changes: the arguments are pushed and laid out on the stack as always ("Calling convention"), so files built either way call each other, and it costs nothing (the code is the same size). `__CC816_ARGS_RTL__` is defined. `-Wsequence-args` finds the calls that depend on it. Test: `r050_args_rtl.c` (`r049_args_order.c` the default) |
 | `-ffar-wrap` | far pointer arithmetic on the offset alone, the bank never changes, as DOS's far pointers ("The far data model", "Pointers"); `__CC816_FAR_WRAP__` is defined |
+| `-std=c89` | C89 (also `c90`, `gnu89`, `gnu90`, `iso9899:1990`, `-ansi`): `-fimplicit-int` and `-fextra-args`. `-std=c99`, `c11`, `c17`, `c23` and their `gnu` forms are accepted and change nothing (cc816 reads C99 and most of C11 always) |
+| `-fimplicit-int` | C89's implicit int, as a warning (`-Wimplicit-int`) instead of an error ("Old C"); `-fno-implicit-int` turns it off where `-std=c89` or `-fdos-keywords` turned it on |
+| `-fextra-args` | a call with more arguments than the prototype is a warning (`-Wextra-args`), as DOS's compilers made it, not an error; `-fno-extra-args` |
+| `-fno-merge-strings` | each string literal is an object of its own; by default equal literals in a file are one object (as gcc does). For old programs that write into their literals (`strcpy(buf, ...)` into five `"    "` meant as five buffers) |
+| `-fwritable-strings` | `-fno-merge-strings`, and the literals go to the program's data instead of its constants (with `--data far`, they stay in far data) |
 | `-E` (`cc816.py` only) | preprocess only |
 
 hcc's own: `--code small|large` (the code model, "The two code models"; `HZ_CODE` in the
 environment), `--data near|far` (the data model, "The far data model"; `HZ_DATA`; far
 needs `--code large`), `-fdos-keywords` (`far`, `near`, `huge` as keywords; cc816 takes it
 too), `--sizes` (every object and function of the link, its size and where it went:
-"Where objects live"), with `--code large` also `--heap N` (the main bank's room kept for
+"Where objects live"; also when the program does not fit, the moment it is most wanted:
+hcc links it once more only to measure it, with a 512-byte software stack and no heap
+reserve, and lists that link, or, when even that does not fit, each file's segments from
+the failed link's map), with `--code large` also `--heap N` (the main bank's room kept for
 malloc) and, for tests, `--main-room N`,
 `--bank-room N` and `--spread N` (how much code the main bank and each other bank may
-take; the functions in turn in N banks); `--no-stack-check` (the program's functions
+take; the functions in turn in N banks); `--check-calls` (the program's C files read
+together, nothing built: "Old C"); `--no-stack-check` (the program's functions
 without the software stack's entry check, "The heap and the stacks": about 1-3 % less
 code, 10 cycles a call of a function with a frame; the library keeps its checks).
+
+### Old C
+
+C89 programs and DOS-era ones (Microsoft C 5.1, Turbo C, Watcom) were written for
+compilers that took what C99 refuses. cc816 takes it under options, as warnings, with the
+code C89 gives:
+
+| | Option | What cc816 does |
+| --- | --- | --- |
+| implicit int: `foo(a, b) int a; char *b; {...}`, `static bar() {...}`, `register x;`, `static n;`, `const k = 5;` | `-fimplicit-int` | the type is `int`; a warning `-Wimplicit-int` (without the option: an error that names the option). A function only declared without a type (`static bar();`, `extern baz();`) was always taken, silently |
+| a call before any declaration | none | `-Wimplicit-function-declaration` (its result an `int`), as before |
+| more arguments than the prototype (`f(1, 2, 3)` of `int f(int, int)`; MSC's C4020) | `-fextra-args` | a warning `-Wextra-args`; the extra ones are evaluated and pushed after the others. The caller takes its arguments off the stack, and the callee reads its parameters from the top, so the extra ones are never read: harmless in every code and data model and with `-fargs-right-to-left` (only the order of evaluation changes there, not the layout); a structure returned by value keeps its hidden pointer first (`r055_extra_args.c`) |
+| writing into string literals; equal literals meant as separate buffers | `-fno-merge-strings`, `-fwritable-strings` | each literal its own object (and, with the second, in the data) |
+| a call through an old declaration whose argument does not fit the definition (`picture_target(0)` where the definition takes a `char far *`) | none | `-Wunprototyped-args` within one file; `hcc --check-calls` across files |
+
+`-std=c89` (`c90`, `gnu89`, `-ansi`) turns on `-fimplicit-int` and `-fextra-args`;
+`-fdos-keywords` does too (a DOS program is C89 code): neither changes a program that
+compiled before, they only turn errors into warnings. `-fno-implicit-int` and
+`-fno-extra-args` turn them off again. String merging is not implied by any of them: a
+merged literal saves main-bank room every program wants, and a program that writes into
+its literals says so with `-fno-merge-strings` (the Civilization port: five equal
+literals used as five buffers).
+
+**`hcc --check-calls a.c b.c ...`** reads a program's C files together (with the same
+`-I`, `-D`, `--code` and `--data` as its build; nothing is built) and reports, as
+warnings in gcc's form:
+
+- a call without a prototype in one file to a function another file defines, when an
+  argument's size or kind differs from the parameter's, or there are fewer arguments
+  (`-Wunprototyped-args`, as within one file);
+- a prototype in one file that differs from the definition in another (the number of
+  parameters, or a parameter's size or kind: `-Wprototype-mismatch`): every caller that
+  sees that prototype pushes the wrong thing.
+
+It exits with 1 when it found one: an audit for a port's whole source (both the
+Civilization and the SimCity ports needed one by hand). In the near data model a pointer
+and an `int` are both 2 bytes and agree; with `--data far` a plain pointer is 4 and every
+`int` given for one is found.
+
+**Big functions.** A function whose values live across calls need more hardware-stack
+slots than `n,s` reaches (its offset is 8 bits: 255 bytes with the saved registers, the
+return address and the arguments) keeps its farthest spill slots in its software-stack
+frame instead (loaded into a register before each use, stored after each change: only
+such functions pay, and only for those slots). A function of more than 32 KB of code
+gets `JMP` where a `BRL` would not reach (the same size; a function never crosses its
+bank). Only parameters past 255 bytes (about 120 `int` parameters) remain an error that
+says so.
 
 ### How it is tested
 
@@ -1570,7 +1637,7 @@ Its regression set (`make -C sdk/c/cc816 check`) has five parts, and runs them i
 configurations: the small code model, the large one, and the large one with far data
 (`CODES=small large large-far`; `tests/check.py --code large-far`: every data pointer 32
 bits, every string literal and constant in far data, every function in another bank: the
-same programs give the same results). `tests/diag/` (114
+same programs give the same results). `tests/diag/` (122
 files, no emulator; `make -C sdk/c/cc816 diag` runs it alone): each file says the errors
 and warnings it must give, and nothing else may be said; a Python traceback fails the
 test. Then 400 test programs, each with one random change (a token taken out, doubled
@@ -1719,6 +1786,25 @@ the c-testsuite when `CTS=` points at a checkout. Every program runs under emu81
     `p + n` with `long n = 0x10000` did not move. The whole value is added in both data
     models now (`r048_far_carry.c`; found while `-ffar-wrap` was made). No SDK or port
     source had the case: their code is the same as before.
+33. **A function whose spill slots passed 255 bytes of hardware stack did not assemble**
+    (`lda 980,s`: ca65 "Range error"; the Civilization port's AI turn, 928 bytes of
+    spills; the port built four files with `-O1`, which spills less, to get round it).
+    After the register allocation cc816 measures how far its `n,s` operands reach; past
+    255 the farthest slots move to the software-stack frame, then all of them if that is
+    not enough, and the function is allocated again ("Old C", "Big functions";
+    `r052_big_frame.c`: 150 values live across calls, 32- and 64-bit ones, recursion, at
+    -O0, -O1, -O2 and in the three configurations). A function that fits is compiled as
+    before.
+34. **A `BRL` in a function of more than 32 KB did not reach** (ca65 "Range error (35946
+    not in [-32768..32767])"; Civilization's `city_process`, whose port changed `brl` to
+    `jmp` with sed). Branch relaxation now gives a `JMP` when the distance (estimated,
+    with a margin) is past 30,000 bytes (`r053_long_branch.c`: a 45 KB loop).
+35. **`-Wframe-larger-than` named a stack the program may not have**: a file compiled
+    alone (`hcc -c`) was told the default 8 KB, and its frame was refused past it, when
+    the program links with `--stack 5120` or `--stack 16384`. A compile that does not know
+    the stack now says "the default" and what `--stack` the frame needs; the error comes
+    only past 32 KB, or at a build that links or names `--stack`
+    (`tests/diag/w_frame.c`, `w_frame_link.c`).
 
 Faster code from the same port (its profile: 13 % of the time in `__mul16` and
 `__sdiv16`, and its board, a `__far` array of arrays, read through 32-bit address

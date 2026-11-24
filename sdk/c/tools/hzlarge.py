@@ -273,7 +273,8 @@ def link(objs, out, sstack, debug=False, mapfile=None, libs=(), keep=None, heap=
             g = glue(tmp, need, (), 0, 0, progname, "large")
             rc, msg = run_ld65(config(pool, 0, tmp, 0xFF00, trial=True,
                                       dplace=[(n, "POOL") for n, _ in fardata]), tmp, "trial",
-                               head + [g] + tail, defs, tmo, tmp_map)
+                               head + [g] + tail, defs, tmo, tmp_map,
+                               os.path.join(tmp, "trial.lbl"))
             if rc == 0:
                 break
             und = _undefined(msg)

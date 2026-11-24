@@ -210,3 +210,76 @@ def allocate(f):
     f.frame_size = slots_end
     f.saved = sorted(used_cs)
     return f
+
+
+# the 65816's stack-relative addressing (n,s and (n,s),y) has an 8-bit offset: a frame
+# whose slots, saved registers, return address and arguments lie further than this from
+# the stack pointer cannot be reached there
+SR_MAX = 255
+
+
+def sr_reach(lines):
+    """the largest n of an n,s or (n,s),y operand in generated lines (0: none)"""
+    m = 0
+    for l in lines:
+        if l[0] == 'I' and l[2]:
+            o = l[2]
+            if o.startswith('('):
+                o = o[1:]
+            if o.endswith(',s') or o.endswith(',s),y'):
+                n = o.split(',', 1)[0]
+                if n.isdigit():
+                    m = max(m, int(n))
+    return m
+
+
+def demote_spills(f, keep):
+    """a frame too big for n,s: the values allocated to hardware-stack slots at offset
+    `keep` or above (allocate() put the heaviest first, at the lowest offsets) move to one
+    region of the software-stack frame, laid out as their slots were (values that shared
+    a slot did not interfere: they share it there too). Each use becomes a load of the
+    value into a new virtual register just before the instruction, each definition a
+    store just after; allocate() must run again. -> the number of values moved."""
+    from .ir import Frame, FrameSlot, Ins
+    moved = {}
+    seen = set()
+    for b in f.blocks:
+        for ins in b.ins:
+            for v in ins.uses() + ins.defs():
+                if id(v) in seen:
+                    continue
+                seen.add(id(v))
+                if v.loc and v.loc[0] == 'sr' and v.loc[1] + v.size > keep and \
+                        v.param is None and v.pinned is None:
+                    moved[v] = v.loc[1]
+    if not moved:
+        return 0
+    size = max(off + v.size for v, off in moved.items())
+    slot = FrameSlot(f'spill{len(f.slots)}', size)
+    f.slots.append(slot)
+    for b in f.blocks:
+        out = []
+        for ins in b.ins:
+            loads = {}
+
+            def use(o):
+                if isinstance(o, V) and o in moved:
+                    t = loads.get(o)
+                    if t is None:
+                        t = loads[o] = f.newv(o.size, o.name)
+                        out.append(Ins('ld', t, base=Frame(slot, moved[o]), idx=None, off=0,
+                                       sz=o.size, sgn=False, vol=False))
+                    return t
+                return o
+            ins.subst(use)
+            stores = []
+            if isinstance(ins.d, V) and ins.d in moved:
+                v = ins.d
+                t = f.newv(v.size, v.name)
+                ins.d = t
+                stores.append(Ins('st', a=t, base=Frame(slot, moved[v]), idx=None, off=0,
+                                  sz=v.size, vol=False))
+            out.append(ins)
+            out.extend(stores)
+        b.ins = out
+    return len(moved)

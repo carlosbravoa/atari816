@@ -280,6 +280,29 @@ scrolling in 256 colours with FM music; its `PORTING-NOTES.md` has the same list
   `#include "\develop\game\include\x.h"` (absolute DOS paths) must become `"x.h"`.
   Sources in code page 437 (bytes above 127 in strings) and with CRLF line ends compile
   as they are.
+- [ ] **C89 code** (K&R, Microsoft C 5.1, Turbo C, Unix code of the 1980s): build with
+  `-std=c89` (`-fdos-keywords` does the same): a function without a return type
+  (`SimFrame() {...}`, `twice(a) int a; {...}`), `register x;`, `static n;` are `int`
+  with a warning (`-Wimplicit-int`; `-Wno-implicit-int` once you have seen them), and a
+  call with more arguments than the prototype is a warning (`-Wextra-args`), as Microsoft
+  C's C4020, not an error; the extra ones are pushed and never read. SimCity needed 248
+  functions edited before this option, Civilization several files (reference.md, "Old C").
+- [ ] **String literals written into**: DOS compilers gave each literal its own storage;
+  cc816, as gcc, makes equal literals in a file one object. A program that uses
+  `"    "` five times as five buffers, or `strupr("Land")`, needs `-fno-merge-strings`
+  (or `-fwritable-strings`: the literals in the data as well). It costs the main bank the
+  copies, so it is not implied by `-std=c89`.
+- [ ] **Calls without prototypes**: through an old declaration (`int f();`) or none, each
+  argument is pushed as its own type says. A DOS medium-model program passed `0` where a
+  pointer was meant (both 2 bytes there); with far data the callee reads 4 bytes and every
+  later parameter is wrong (Civilization's first crash: `picture_target(0)`).
+  `-Wunprototyped-args` finds the calls within a file; **`hcc --check-calls *.c`** (the
+  build's `-I`, `-D`, `--code`, `--data`) compares every file's calls and prototypes
+  with the definitions in the others, before the first run.
+- [ ] **Huge functions** compile as they are: a function whose values need more than 255
+  bytes of hardware stack keeps the rest in its software-stack frame, and one over 32 KB
+  of code gets `JMP` where `BRL` does not reach (before, the Civilization port needed
+  `-O1` for four files and a sed over the assembly of one).
 - [ ] **Code that reads hardware**: DOS games read the BIOS tick (`0040:006C`, through a
   pointer), the VGA's status port (`inportb(0x3DA)`: the retrace) and write the DAC
   (`outportb(0x3C8/0x3C9)`: the palette) and the CRTC (the page shown). Rather than
@@ -415,6 +438,20 @@ calls the same functions as before.
   the run ends there, and fails if the line never comes. `--console-times` puts the
   emulated time before each console line (seconds since power-on, the base of
   `--log-lau-us` and `--log-opl-us`).
+- [ ] **A host twin with the Atari816's types**: `sdk/c/tools/host16.py` builds the
+  program on the PC with a 16-bit `int`, a 32-bit `long`, unsigned plain `char`, packed
+  structures and `double` as the 32-bit float (`host16.py cc -O1 -I src -o game16
+  src/*.c`): run it and the Atari816's build with the same input and compare what they
+  print. The source is preprocessed first, so `unsigned QUAD` with a macro `QUAD` is
+  read as the compiler reads it. A callback the C library calls (`qsort`'s comparison)
+  keeps the PC's `int` with `--native NAME`. What it cannot give: 16-bit arithmetic
+  before a value is stored (the PC adds two shorts in 32 bits). The SimCity, X-COM and
+  Civilization ports each carried a copy of an older textual rewriter.
+- [ ] **Arguments typed at the shell**: `run816.py --mode shell --args` types the
+  program's path and the arguments at the prompt; the shell's line editor takes 77
+  characters (the 80-column console less the prompt) and dropped the rest, so a long
+  line reached the program cut short. run816.py now refuses such a line: use `--cd DIR`
+  (the path typed relative to it), a shorter `--dest`, or shorter names.
 - [ ] **Check the files it writes**: the high-score file on the emulated card
   (`build/test/card/`), a saved recording played back to the same score.
 - [ ] **Sound**: POKEY is silent in the emulator. Check its register writes

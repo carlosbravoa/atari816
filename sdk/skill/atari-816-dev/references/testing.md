@@ -28,7 +28,7 @@ Options worth knowing (all from `run816.py --help`):
 | `--mode desktop` | default. The Desktop boots and starts the program from its Programs menu (time 0 = 5 s). No arguments. Console output only in `console.txt` |
 | `--mode shell` | the text shell types the path and `--args`; console output on the screen too. Time 0 about 3-4 s |
 | `--mode none` | the Desktop boots, nothing is started (time 0 = Desktop up): installing an app, opening menus. Program `-` puts nothing on the card |
-| `--args TEXT` | argument string (shell mode) |
+| `--args TEXT` | argument string (shell mode); the typed line (path, space, TEXT) at most 77 characters, the shell's limit (longer is refused: `--cd DIR` or a shorter `--dest`) |
 | `--dest PATH`, `--cd DIR` | where the program goes; `--cd` types `cd DIR` first (shell) |
 | `--script FILE` | input script (below) |
 | `--shot S` | screenshot at S seconds after the start (repeatable; at most 16 with the script's `shot` lines) |
@@ -161,6 +161,7 @@ trails of erased sprites, wrong colours, things not redrawn after a dialog close
 | Lau | `--log-lau`; count `^lau ` lines (Xargon wants more than 100) |
 | Music / samples heard | `--wav FILE`: Xargon's `tests/wavcheck.py` wants RMS above 500 in the title and the game and under 0.05 % clipped samples; hgame's tests want a peak above 1000 |
 | Program self-test | the program prints `PASS ...` / `FAIL ...` lines; the checker counts them and fails on any FAIL **or on no PASS at all** (`sdk/c/game/tests/run.py`) |
+| The PC twin | `sdk/c/tools/host16.py cc -O1 ... -o game16 src/*.c` builds the program on the PC with the Atari816's types (16-bit `int`, 32-bit `long`, unsigned `char`, packed structures, `double` as `float`); feed both builds the same input and compare their output (`--native NAME` keeps a C-library callback's `int`) |
 
 ## Reference pictures
 

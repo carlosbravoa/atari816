@@ -849,6 +849,9 @@ def isize(m, o, m8):
 
 
 _relaxed = [0]
+# how far a BRL is trusted to reach (its range is -32768..32767; isize's estimates of the
+# code between may be a little off: the rest is margin)
+BRL_REACH = 30000
 
 
 def relax(lines):
@@ -883,6 +886,7 @@ def relax(lines):
             sizes.append(s)
             addr += s
         bad = []
+        far = []
         addr = 0
         for k, l in enumerate(lines):
             here = addr
@@ -891,6 +895,15 @@ def relax(lines):
                 d = pos[l[2]] - (here + 2)
                 if not -128 <= d <= 127:
                     bad.append(k)
+            elif l[0] == 'I' and l[1] == 'brl' and l[2] in pos:
+                # a BRL reaches 32 KB either way; in a function bigger than that (the
+                # sizes here are estimates: a margin) it becomes a JMP, which reaches the
+                # whole bank and has the same size (a function never crosses its bank)
+                d = pos[l[2]] - (here + 3)
+                if not -BRL_REACH <= d <= BRL_REACH:
+                    far.append(k)
+        for k in far:
+            lines[k] = ('I', 'jmp', lines[k][2])
         if not bad:
             return lines
         for k in reversed(bad):

@@ -10,7 +10,11 @@ import re
 # the data model of the compile (driver.compile_c sets it): far_data, the far data model
 # (hcc --data far: plain data pointers are far); far_wrap, -ffar-wrap (far pointer
 # arithmetic on the offset alone); args_rtl, -fargs-right-to-left
-MODEL = {'far_data': False, 'far_wrap': False, 'args_rtl': False}
+MODEL = {'far_data': False, 'far_wrap': False, 'args_rtl': False,
+         # (the old-code options: -fimplicit-int, -fextra-args, -fno-merge-strings,
+         # -fwritable-strings; -std=c89 and -fdos-keywords turn on the first two)
+         'implicit_int': False, 'extra_args': False, 'merge_strings': True,
+         'writable_strings': False}
 
 
 def where(coord):

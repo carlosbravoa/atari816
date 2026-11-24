@@ -250,7 +250,7 @@ Every function is described in `hgame.h`. In short:
 | `hg_window(w, h, title)`, `hg_window_menu(menus)` | a game in a window on the desktop (centred); its menus (`hg_menu()` reports picks) |
 | `hg_close()` | back to the desktop, everything freed (also at exit) |
 | `hg_w`, `hg_h`, `hg_win`, `hg_fb_bank`, `hg_fb_stride`, `hg_fb_rows` | the screen's size, the window, the framebuffer |
-| `hg_palette(first, count, rgb)`, `hg_color(i, r, g, b)`, `hg_palette_black()` | colours; in a window entries 16-255 that no other program holds |
+| `hg_palette(first, count, rgb)`, `hg_color(i, r, g, b)`, `hg_palette_black()` | colours; in a window entries 16-255 that no other program holds. Each call writes the entries it names, the last one wins: a whole palette loaded with `hg_palette(16, 240, rgb)` after the game's own `hg_color` calls (a panel's text colours) replaces them; set the game's own entries after the loaded palette, or keep them out of its range (SimCity's panel was black on black for one run) |
 | `hg_raster(count, changes)` | the raster table (full screen): up to 16 palette changes at given lines |
 | `hg_banks(n)` | n consecutive 64 KB banks |
 

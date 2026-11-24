@@ -35,6 +35,13 @@ WARNINGS = {
     'frame-larger-than': True,          # a function's software-stack frame over 1 KB
     'unknown-pragmas': True,            # a #pragma cc816 does not know (Watcom's aux, ...)
     'far-function': True,               # void (__far *f)(void): __far ignored
+    'implicit-int': True,               # -fimplicit-int: 'f() {...}', 'register x;'
+    'extra-args': True,                 # -fextra-args: a call with more arguments than
+                                        # the prototype (they are pushed, never read)
+    'unprototyped-args': True,          # a call without a prototype whose arguments'
+                                        # sizes differ from the definition's parameters
+    'prototype-mismatch': True,         # (hcc --check-calls) a prototype in one file that
+                                        # differs from the definition in another
     'unused-variable': False,
     'unused-label': False,
     'parentheses': False,               # if (a = b)
