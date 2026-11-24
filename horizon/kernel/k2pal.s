@@ -7,8 +7,12 @@
 ; keyboard focus (pal_act), and the system colour otherwise; it goes back to the system when the
 ; program ends (exit, kill, crash) or gives it back (pal_alloc 0). So the program in front looks
 ; as it means to, and a program's own colours never change what another program shows while
-; that one is in front. Entries 0-15 stay global (Settings' desktop colour). A program in full
-; screen mode (k2fs.s) has a whole palette of its own (fs_pal) while its screen is shown.
+; that one is in front. (0.31) Except in the spare ranges (76-113, 136-175: no UI colour or
+; desktop icon uses them, and pal_alloc gives them out first): there an entry always shows its
+; holder's colour, so a game in the background (FreeCell, Quabricks) keeps its colours instead
+; of turning into the cube's greens when another window comes in front. Entries 0-15 stay
+; global (Settings' desktop colour). A program in full screen mode (k2fs.s) has a whole palette
+; of its own (fs_pal) while its screen is shown.
 
         .segment "BSS"
 pal_act:    .res    2           ; the holder (slot*2 + 1) whose entries are shown, 0 none
@@ -81,8 +85,11 @@ pal_show:
         and     #$00FF
         beq     @sys
         cmp     pal_act
-        bne     @sys
-        lda     pal_prg,x
+        beq     @prg
+        lda     kx6                     ; (0.31) not in front: its colour in the spare
+        jsr     pal_spare               ; ranges, the system's elsewhere
+        bcc     @sys
+@prg:   lda     pal_prg,x
         pha
         lda     pal_prg+2,x
         bra     @put
@@ -94,6 +101,21 @@ pal_show:
         plx
         lda     kx6
         jmp     pal_hw
+
+; (0.31) C set if entry A lies in the spare ranges 76-113, 136-175 (keeps A)
+pal_spare:
+        cmp     #76
+        bcc     @no
+        cmp     #114
+        bcc     @yes
+        cmp     #136
+        bcc     @no
+        cmp     #176
+        bcs     @no
+@yes:   sec
+        rts
+@no:    clc
+        rts
 
 ; every entry 16-255 held by holder A or kx7 shown again (after pal_act changed)
 pal_redo:
@@ -144,7 +166,8 @@ pal_front:
         jmp     pal_redo
 @out:   rts
 
-; (ws_desk_mode, after the system palette was loaded) the front program's entries again
+; (ws_desk_mode, after the system palette was loaded) the held entries again: the front
+; program's, (0.31) the others' in the spare ranges
         .export k2_pal_apply: far
 k2_pal_apply:
         jsr     pal_live
@@ -153,6 +176,24 @@ k2_pal_apply:
         lda     pal_act
         beq     @out
         jsr     pal_redo
+        lda     #76                     ; (0.31) the others' entries in the spare ranges
+        sta     kx4
+@e:     ldx     kx4
+        lda     pal_own,x
+        and     #$00FF
+        beq     :+
+        cmp     pal_act
+        beq     :+
+        txa
+        jsr     pal_show
+:       inc     kx4
+        lda     kx4
+        cmp     #114
+        bne     :+
+        lda     #136
+        sta     kx4
+:       cmp     #176
+        bcc     @e
 @out:   rtl
 
 ; the current task's entries back to the system (its end; pal_alloc 0)
@@ -245,7 +286,10 @@ pal_one:
         lda     cur
         inc     a
         cmp     pal_act
-        bne     @ok
+        beq     @live
+        lda     kx2                     ; (0.31) not in front: shown in the spare ranges
+        jsr     pal_spare
+        bcc     @ok
 @live:  jsr     pal_live
         bcc     @ok
 @hw:    lda     kx2

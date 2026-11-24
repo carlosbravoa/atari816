@@ -335,7 +335,9 @@ In: A = index, X = red | green << 8, Y = blue. Sets one palette entry.
   and 3). Leave them alone.
 - **16-255** (Horizon 0.18): the entry becomes yours if nobody holds it (EAGAIN if another
   program does) and **shows your colour while one of your windows has the keyboard focus**,
-  the system colour otherwise; it goes back to the system when you end (or `pal_alloc` 0).
+  the system colour otherwise ((0.31) in the spare ranges 76-113 and 136-175, where
+  `pal_alloc` takes entries first: your colour always); it goes back to the system when you
+  end (or `pal_alloc` 0).
   So changing it no longer changes other programs' windows while they are in front.
 - In full-screen mode: your own palette, all 256 entries.
 

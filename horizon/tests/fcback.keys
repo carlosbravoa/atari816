@@ -1,0 +1,29 @@
+# (0.31) FreeCell in the background keeps its colours (DESK=1, the card's Programs menu with
+# FreeCell added; tests/mousegen.py makes tests/fcback.keys from this). FreeCell holds
+# palette entries of its own (pal_alloc: the spare range 76-...); before 0.31 they showed the
+# system cube's greens whenever another window had the focus. Shots: 1 FreeCell in front,
+# 2 Files clicked (FreeCell behind it), 3 Programs > Settings in front. tests/fcback.py
+# compares FreeCell's table and a card in the three.
+5000 M -100:-100:0:0
+5050 M -100:-72:0:0
+5100 M -30:0:0:0
+5300 M 0:0:0:1
+5380 M 0:0:0:0
+5700 M 15:99:0:0
+6000 M 0:0:0:1
+6080 M 0:0:0:0
+9500 shot
+9700 M -65:100:0:0
+9750 M 0:23:0:0
+10000 M 0:0:0:1
+10080 M 0:0:0:0
+10800 shot
+11000 M -2:-100:0:0
+11050 M 0:-100:0:0
+11100 M 0:-22:0:0
+11300 M 0:0:0:1
+11380 M 0:0:0:0
+11700 M 7:29:0:0
+12000 M 0:0:0:1
+12080 M 0:0:0:0
+15000 shot

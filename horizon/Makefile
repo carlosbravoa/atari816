@@ -92,7 +92,7 @@ FSHOTS := 5.4 10.6 11.2 15.8 17.6 19.0 19.8 22 26.6 29.5 32.5 35.5 39.5 42.2 43.
 BASSECS := 160
 BASSHOTS := 16.2 18.6 31.0 36.0 38.5
 # Edit pictures: shot times in the tests/edit.keys session
-ESHOTS := 8.9 9.9 12.0 14.2 16.4 19.6
+ESHOTS := 8.9 9.9 12.3 14.2 16.4 19.6
 # Sheet: the -t script run (tests/sheet-t.keys, tests/sheet.sht), emulated seconds; the picture
 # session (tests/sheet.keys) shot times. Its pictures are the same with and without the blitter.
 SHTSECS := 24
@@ -684,6 +684,10 @@ test-freecell: all $(EMU)
 	@if grep -l 'emu816: blitter:' $(B)/freecell-t.err $(B)/freecell.err; \
 	then echo "FAIL  blitter rules (FreeCell)"; exit 1; \
 	else echo "PASS  blitter rules: FreeCell"; fi
+	@# (0.31) FreeCell behind Files and behind Settings keeps its colours (tests/fcback.src)
+	@PREP='printf "FreeCell=/BIN/FREECELL.PRG\n" >> SYSTEM/PROGRAMS' DESK=1 sh tests/shots.sh "$(EMU) $(EMUFLAGS) $(CARDDATE)" $(SD) fcback 16
+	@if python3 tests/fcback.py $(B); then echo "PASS  FreeCell in the background keeps its own colours (its palette entries in the spare range)"; \
+	else echo "FAIL  FreeCell's colours behind other windows (look at $(B)/fcback*.ppm)"; exit 1; fi
 
 pictures-freecell:
 	cp $(B)/freecell.md5 tests/pictures/freecell.md5

@@ -123,8 +123,13 @@ background may look different meanwhile (games pause there anyway). Two programs
 the same entry (EAGAIN). A program that draws with system colours and wants them right also
 while another program is in front can claim them at their place with `pal_alloc` (they keep
 their system colours; the kernel gives other programs other entries). Entries 0-15 stay global
-(`ws_palette` sets them for everyone: Settings' desktop colours). In full-screen mode the
-program has a whole palette of its own (below).
+(`ws_palette` sets them for everyone: Settings' desktop colours). (0.31) **The spare ranges
+76-113 and 136-175** (no UI colour or desktop icon uses them; `pal_alloc` with X = $FFFF gives
+them out first) are the exception: an entry there always shows its holder's colour, so a game
+in the background keeps its look (before 0.31 it showed the cube's greens there while another
+window had the focus). A program that draws with system colours in those ranges claims them at
+their place to keep them right. In full-screen mode the program has a whole palette of its own
+(below).
 
 ### $9B pal_alloc (SYS_PALALLOC)
 In: A = count 1-240, X = the first entry wanted, or $FFFF: any. Out: A = the first entry.

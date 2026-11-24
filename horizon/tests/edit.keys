@@ -1,8 +1,9 @@
 # Edit (EDIT.PRG) session on the text shell (NODESK): sh tests/shots.sh EMU SD edit 22 T1 ...
-# Good shot times (s): 8.9 9.9 12.0 14.2 16.4 19.6
+# Good shot times (s): 8.9 9.9 12.3 14.2 16.4 19.6
 #   8.9  fixed font: an edited line, a new line, a 3-line selection (Shift + arrows)
 #   9.9  the selection copied (ctrl-C) and pasted at the end (ctrl-End, ctrl-V)
-#   12.0 View > Proportional font
+#   12.3 View > Proportional font (0.31: was 12.0, which on REV $07 caught the CPU redraw
+#        half done, at a time that moved with the kernel's code layout)
 #   14.2 File > Save as...: the file dialog (the name field holds LONG.TXT, selected)
 #   16.4 the dialog inside "docs" (double click), the name typed after Tab
 #   19.6 saved as docs/edited.txt, one more key, File > Close: the Save / Discard / Cancel alert
