@@ -36,6 +36,7 @@ static unsigned pending;        /* mouse click seen by input_ready */
 int g_popup_auto;
 int g_alert_pause;
 int g_track;                    /* MOVE returns KEY_MOVE (input.h) */
+void (*g_wait_hook)(void);      /* input.h */
 static int hold_left;           /* HOLD: repeats left with the button down */
 char g_log_path[32];             /* the LOG file, "" when none (input.h) */
 
@@ -130,11 +131,16 @@ static unsigned read_key(void)
             void plat_script_wait(void);
             while (*ticks - t0 < (unsigned long)atoi(tok) * 182 / 100) {
                 mouse_poll();
+                if (g_wait_hook)
+                    g_wait_hook();
                 plat_script_wait();
             }
 #else
-            while (*ticks - t0 < (unsigned long)atoi(tok) * 182 / 100)
+            while (*ticks - t0 < (unsigned long)atoi(tok) * 182 / 100) {
                 mouse_poll();
+                if (g_wait_hook)
+                    g_wait_hook();
+            }
 #endif
             continue;
         }

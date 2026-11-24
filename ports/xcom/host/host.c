@@ -111,6 +111,10 @@ void plat_busy_poll(void)
 {
 }
 
+void plat_busy_tick(void)
+{
+}
+
 /* a KEYS script's WAIT between two looks at the mouse (the virtual clock: nothing) */
 void plat_script_wait(void)
 {

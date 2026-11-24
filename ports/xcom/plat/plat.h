@@ -29,6 +29,8 @@ void plat_poll(void);
 /* the engine computes for long without polling (an alien turn's voxel lines): now and
    then the events and the pointer all the same (real clock only; nothing in /V runs) */
 void plat_busy_poll(void);
+/* the same where each call is milliseconds of work (the clock read every time) */
+void plat_busy_tick(void);
 /* The next key typed, BIOS form (scan << 8 | ASCII), 0 if none. */
 unsigned plat_key(void);
 /* Pointer in 320 x 200 pixels and buttons (bit 0 left, 1 right). */
@@ -130,21 +132,26 @@ void xd_shot_point(unsigned gap_ms, const char *why);
    the program's folder and to /PC:/ (README.TXT "Measuring"). The host: nothing. */
 #if defined(__CC816__)
 enum { PF_POLL, PF_IDLE, PF_VIEW, PF_PAL, PF_BLIT, PF_PRES, PF_PTR, PF_OPEN, PF_READ,
-       PF_SEEK, PF_CLOSE, PF_WRITE, PF_SFX, PF_KEY, PF_REPORT, PF_CARD, PF_SFXDEC, PF_N };
+       PF_SEEK, PF_CLOSE, PF_WRITE, PF_SFX, PF_KEY, PF_REPORT, PF_CARD, PF_SFXDEC,
+       PF_REDRAW, PF_PATH, PF_VOX, PF_FAN, PF_UNPACK, PF_SHADE, PF_SHIFT, PF_SPIN, PF_N };
 extern unsigned char g_perf;            /* 1: /M */
 unsigned long perf_now(void);           /* microseconds */
 void perf_add(int slot, unsigned long t0);
 void perf_io(int slot, const char *name, unsigned long bytes, unsigned long t0);
 void perf_ptr_drawn(void);              /* the engine drew the pointer */
+/* a piece of work counted without its time (bytes: its size, e.g. a redraw's pixels) */
+void perf_n(int slot, unsigned long bytes);
 /* the packs' cache (plat/xdos.c) gives a bank back: 1 if it had one */
 int xc_release(void);
 #define PERF_T0(v)          unsigned long v = g_perf ? perf_now() : 0UL
 #define PERF_ADD(s, v)      do { if (g_perf) perf_add(s, v); } while (0)
 #define PERF_IO(s, n, b, v) do { if (g_perf) perf_io(s, n, b, v); } while (0)
+#define PERF_N(s, b)        do { if (g_perf) perf_n(s, b); } while (0)
 #else
 #define PERF_T0(v)          int v = 0
 #define PERF_ADD(s, v)      ((void)(v))
 #define PERF_IO(s, n, b, v) ((void)(v))
+#define PERF_N(s, b)        ((void)0)
 #endif
 
 #endif

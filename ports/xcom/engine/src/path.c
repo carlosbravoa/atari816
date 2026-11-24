@@ -51,6 +51,7 @@ static unsigned mxy, ntiles;
 static int dir_off[8];          /* index offset of each horizontal direction */
 
 int g_path_asm = 1;             /* 0: use the C reference search */
+static int pend_unit = -1;      /* path_search_begin's unit while its search is unfinished */
 static unsigned char occ_mask = WF_OCC;     /* wf bits that bar a destination */
 static unsigned char fly;       /* the searching unit flies (hovertanks), or its missile */
 int g_path_mis;                 /* path.h: a missile's target unit + 1 */
@@ -120,6 +121,7 @@ static int fly_differs(const unsigned char *t)
 
 void path_update_tile(int x, int y, int z)
 {
+    path_search_finish();
     tile_update(TIDX(x, y, z), z);
     big_update(x, y, z);
     big_update(x - 1, y, z);
@@ -191,6 +193,7 @@ int path_init(void)
     unsigned char *p;
     int x, y, z;
 
+    path_search_finish();       /* (the last battle's, on its own tables) */
     mxy = g_mx * g_my;
     ntiles = n;
     for (x = 0; x < 8; x++)
@@ -413,6 +416,8 @@ level:
 int step_cost(int x, int y, int z, int dir, int *nz)
 {
     unsigned nidx;
+
+    path_search_finish();
     return path_step_idx(TIDX(x, y, z), x, y, z, dir, nz, &nidx);
 }
 
@@ -462,13 +467,14 @@ static unsigned heur(int x, int y, int gx, int gy, int hs)
     return (a > b ? 2 * a + b : 2 * b + a) << hs;
 }
 
-/* path_search, or with gx >= 0 the A* search toward (gx, gy, gz):
-   returns the tile index where it ended (the goal if reached). */
-static unsigned search(int unit, int max_tu, int gx, int gy, int gz, int slack)
+/* The search's parameters (and the other units' tiles marked, path.h's tables made
+   for the unit's movement type): search, path_search_begin. */
+static void prep(struct PathParams *pp, int unit, int max_tu, int gx, int gy, int gz,
+                 int slack)
 {
     const Unit *u = &g_units[unit];
     unsigned start;
-    struct PathParams p;
+#define p (*pp)
 
     if (max_tu >= COST_NONE)
         max_tu = COST_NONE - 1;
@@ -521,6 +527,17 @@ static unsigned search(int unit, int max_tu, int gx, int gy, int gz, int slack)
         p.h0 = heur(u->x, u->y, gx, gy, p.hs);
         p.kmax = slack < MAX_BUCKET ? slack : MAX_BUCKET - 1;
     }
+#undef p
+}
+
+/* path_search, or with gx >= 0 the A* search toward (gx, gy, gz):
+   returns the tile index where it ended (the goal if reached). */
+static unsigned search(int unit, int max_tu, int gx, int gy, int gz, int slack)
+{
+    struct PathParams p;
+
+    path_search_finish();
+    prep(&p, unit, max_tu, gx, gy, gz, slack);
 #if defined(XCOM_PORT) && defined(__CC816__)
     if (g_path_asm) {
         void hz_path_search(struct PathParams *p);  /* (plat/way.c: in assembly) */
@@ -541,6 +558,60 @@ void path_search(int unit, int max_tu)
     search(unit, max_tu, -1, 0, 0, 0);
 }
 
+/* path_search in slices of about ms milliseconds (path.h), where the platform can stop
+   and resume its search (the Atari816's hz_path.s); elsewhere the whole search at
+   once. Every other path call finishes it first (path_search_finish), so the tables
+   are always the whole search's when read, made from the world as it was at the
+   begin (the caller changes nothing meanwhile: bplayer.c). */
+int path_search_begin(int unit, int max_tu, unsigned ms)
+{
+#if defined(XCOM_PORT) && defined(__CC816__)
+    int hz_path_begin(struct PathParams *p, unsigned ms);
+    struct PathParams p;
+
+    path_search_finish();
+    if (g_path_asm) {
+        prep(&p, unit, max_tu, -1, 0, 0, 0);
+        if (hz_path_begin(&p, ms)) {
+            mark_units(unit, 0);
+            return 1;
+        }
+        pend_unit = unit;
+        return 0;
+    }
+#endif
+    (void)ms;
+    path_search(unit, max_tu);
+    return 1;
+}
+
+int path_search_more(unsigned ms)
+{
+#if defined(XCOM_PORT) && defined(__CC816__)
+    int hz_path_more(unsigned ms);
+
+    if (pend_unit < 0)
+        return 1;
+    if (!hz_path_more(ms))
+        return 0;
+    mark_units(pend_unit, 0);
+    pend_unit = -1;
+#endif
+    (void)ms;
+    return 1;
+}
+
+int path_search_busy(void)
+{
+    return pend_unit >= 0;
+}
+
+void path_search_finish(void)
+{
+    while (pend_unit >= 0)
+        path_search_more(1000);
+}
+
 int path_search_to(int unit, int x, int y, int z, int slack, int *bx, int *by, int *bz)
 {
     const Unit *u = &g_units[unit];
@@ -557,6 +628,7 @@ int path_search_to(int unit, int x, int y, int z, int slack, int *bx, int *by, i
 
 unsigned path_cost(int x, int y, int z)
 {
+    path_search_finish();
     if (!IN_MAP(x, y, z) || search_unit < 0)
         return NO_COST;
     return cost[TIDX(x, y, z)] == COST_NONE ? NO_COST : cost[TIDX(x, y, z)];
@@ -566,6 +638,8 @@ int path_build(int x, int y, int z, unsigned char *dirs, int max)
 {
     int n = 0, i;
     unsigned idx;
+
+    path_search_finish();
 
     if (path_cost(x, y, z) == NO_COST)
         return 0;
@@ -593,6 +667,8 @@ int path_build(int x, int y, int z, unsigned char *dirs, int max)
 unsigned path_checksum(void)
 {
     unsigned i, s = 0;
+
+    path_search_finish();
     for (i = 0; i < ntiles; i++)
         if (cost[i] != COST_NONE)
             s = s * 31 + cost[i] + (from[i] & 15) * 7 + (from[i] >> 4);

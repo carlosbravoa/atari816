@@ -24,6 +24,19 @@ int step_cost(int x, int y, int z, int dir, int *nz);
 void path_search(int unit, int max_tu);
 unsigned path_cost(int x, int y, int z);
 
+/* path_search in slices (the player's turn: bplayer.c, where the platform asks for it):
+   path_search_begin(unit, max_tu, ms) starts it and may leave it unfinished after about
+   ms milliseconds (0), path_search_more(ms) goes on (1 once it is done),
+   path_search_busy() is 1 while it is unfinished. Every other path call (path_cost,
+   path_build, another search, a tile's change, ...) finishes it first
+   (path_search_finish): the tables read are always the whole search's. Where the
+   search cannot stop (the C, upstream's assembly) begin does it all at once. Meanwhile
+   the caller changes nothing the search reads (the map, the units, their TU). */
+int path_search_begin(int unit, int max_tu, unsigned ms);
+int path_search_more(unsigned ms);
+int path_search_busy(void);
+void path_search_finish(void);
+
 /* Steps from the searched unit to the tile, written to dirs (start first).
    Returns the step count, 0 if unreachable. */
 int path_build(int x, int y, int z, unsigned char *dirs, int max);

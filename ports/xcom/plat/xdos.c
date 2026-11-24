@@ -131,7 +131,13 @@ unsigned xd_seg(const void *p)
 
     if (a == 0xFFFFFFFFUL) {
         /* a global or a local: no segment here; not 0, so that the engine's
-           "not NULL" tests (panel.c: FP_OFF(u)) hold */
+           "not NULL" tests (panel.c: FP_OFF(u)) hold. A global of the program's main
+           bank: sound.c's sb_isr FP_SEG(sb_stack), for plat/asm.c's sb_stack_enter,
+           which does not use it: expected, not reported (the console line cost 12 ms
+           at the end of every effect of a walk) */
+#if defined(__CC816__)
+        if (((unsigned long)p >> 16) != ((unsigned long)(void __far *)&xd_mem >> 16))
+#endif
         not_arena("FP_SEG");
         return p ? 0xFFFF : 0;
     }

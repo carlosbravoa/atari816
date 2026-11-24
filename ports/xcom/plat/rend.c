@@ -106,6 +106,8 @@ void __cdecl rd_setup(int top, const void *mcd, unsigned char **spr, unsigned *l
     b.cy0 = g_clip_y0;
     b.cx1 = g_clip_x1;
     b.cy1 = g_clip_y1;
+    plat_busy_tick();                   /* (a redraw's start: the pointer) */
+    PERF_N(PF_REDRAW, (unsigned long)(b.cx1 - b.cx0) * (unsigned)(b.cy1 - b.cy0));
     b.camx = g_cam_x;
     b.camy = g_cam_y;
     if (g_video == VIDEO_EGA) {
@@ -401,6 +403,7 @@ int __cdecl rd_level(int z)
 {
     int a, t, c;
 
+    plat_busy_tick();                   /* (the pointer between the levels of a redraw) */
     b.z = z;
     b.nlate = 0;
     b.curx = -1;

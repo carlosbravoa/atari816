@@ -478,7 +478,19 @@ static unsigned vx_seg[4] = { 0xFFFFu, 0xFFFFu, 0xFFFFu, 0xFFFFu };
 static unsigned char vx_probe;          /* a main-bank object */
 #endif
 
+static int vox_run1(void *block, int resume);
+
 int __cdecl vox_run(void *block, int resume)
+{
+    int r;
+    PERF_T0(pt0);
+
+    r = vox_run1(block, resume);
+    PERF_ADD(PF_VOX, pt0);
+    return r;
+}
+
+static int vox_run1(void *block, int resume)
 {
     int r;
 

@@ -1,7 +1,7 @@
 # Porting notes: XCOM-XT on the Atari816
 
 Stage 1 (assessment and foundation) to stage 5 (a playable app: section 4d), 23 November 2026;
-the board (4e) and the alien turn (4f), 24 November 2026.
+the board (4e), the alien turn (4f) and the stutter (4h), 24 November 2026.
 
 Upstream: <https://github.com/fmikowski/xcom-xt> at commit `a53918220c90` (18 November
 2026, alpha 0.5.1), GPL-3. Since 24 November 2026 it is **our fork, in `engine/`**
@@ -1271,6 +1271,113 @@ pop-up, kept its alert priority and silenced the clicks after it: the interface'
 now play at their own priority.) `soundcheck.py` names the effects again (its checksum
 had not followed `sb_sum`: the battle's blocks showed as "?").
 
+## 4h. The stutter (24 November 2026)
+
+"The game stutters a lot", "the battle is laggy": the kit's battle (`/M`, 3BAT) showed
+gaps of 263-901 ms between presents and between the engine's arrow draws, on the board and
+in the emulator alike; not the Desktop's card requests (another round proved it), so the
+game's own work.
+
+### What /M says now (`horizon/hz_perf.c`)
+
+The 5 s line's old "gap" columns measured the engine's arrow draws (since the pointer is a
+sprite, it moves at every event poll whatever the engine draws) and the time between two
+presents (waits for input included): neither is what the player feels. Now:
+
+- **gaps** between event polls (the sprite and the input stand still), and **frames**: a
+  battle view present that came after the CPU worked without looking for input or sleeping
+  (the time since the last present or the last look for input, without the vertical-blank
+  sleeps and the last-frame spin of a paced wait). Each over its limit (`/MG n`: 50 ms;
+  frames 100 ms) is kept with what ran in it, the counters since the poll or present
+  before: redraws (count / K pixels), presents, blitter waits, the night shade, scrolls,
+  pictures unpacked, path searches, voxel lines, sight fans, effects, palette, view sends,
+  file calls, the card, /M's own report (new slots: `plat/rend.c`, `plat/way.c`,
+  `plat/voxrun.c`, `plat/losfan.c`, `plat/vgabat.c`, `horizon/hz_bb.c`); flagged H under
+  the hourglass, L before the first input wait, R in /M's report: the rest are the
+  player's. Written raw and formatted at the next 5 s line (a formatted line cost 16 ms of
+  vformat and console: it lengthened the gaps it measured), to the console and the report,
+  with the machine's time of each (for `run816 --prof-from`: program time = machine time -
+  the "started at" of run816). The line's new `still` and `busy` columns are the longest
+  of each; the totals say how many and the longest, the player's apart.
+- the battle view's presents logged (time, a scroll before it, an effect before it: a
+  walk's step), printed at the exit: `tests/smooth.py` makes the frame rates of them.
+- /M's own cost: the 30 s and total counters are now added up from the 5 s line's
+  (`count` updated 3 far blocks a call, about 10 % of an idle battle's CPU).
+
+Method: `tests/perf/smooth.keys` (cursor steps with and without the view following, key
+bursts R*12 L*12 U*8 D*8, walks, two selections, kneeling, a snap and an auto shot, the
+turn's end), the gap lines, then `run816 --prof` over the worst ones, and temporary zones
+around walk(), refresh_paths(), cursor_to(), hud_status(), shoot() (removed again).
+
+### What it was, and what changed
+
+| Cause | Where | Before | After | How |
+| --- | --- | --- | --- | --- |
+| No poll while the view redraws, a panel draws, a fan or an unpack runs | the player's turn | the pointer still 100-1,444 ms (a key burst's scrolls: 59 redraws, 1.4 s) | 81 ms at most | `plat_busy_tick` (the clock every call, the DOS model's clock every 10 ms, `plat_poll` every 30 ms): per level of a redraw (`rd_level`), each redraw (`rd_setup`), every 32nd sprite (`plat/vgabat.c`), each unpack, every 8th ray of a fan, each 32 rows of the night's shade; `plat_busy_poll` (every 2nd call ticks) every 8th interface drawing call (`plat/vga.c`), in the engine's `busy_tick` (`mouse.c`, XCOM_PORT: its busy loops, the turn's end) |
+| The pointer between busy polls in an alien turn | voxel lines, path searches | 60-90 ms (every 8th call, 40 ms) | 45 ms at most | every 2nd call, 30 ms |
+| The atlas forgotten at the battle's start | `horizon/hz_bb.c` `plat_mem_changed` | a file read into a block between two kept pictures forgot all 208 (the 1.2 s bar for nothing): every picture unpacked again in play, 6-7 ms each (18 in the first walk: 112 ms) | none forgotten: 0-1 unpacks in play | the pictures' lengths kept (`PLEN`, in the table's bank); only a read or a free over a kept picture forgets them (as before, all) |
+| The selected unit's path search after each action | `bplayer.c` refresh_paths | 177-1,103 ms before the view or the panel answered (14 searches: 3.7 s) | 20 ms slices while the turn waits | `path_search_begin/more/finish` (`path.c`), `hz_path.s` stops at a tile's end when the slice is over and goes on (its tables and buckets are its whole state); the turn's wait (`map_key`, a KEYS script's WAIT through `g_wait_hook`) runs the slices, the next key finishes it first, the cursor's TU shown when it is done. Real clock only (`g_path_slice` 20; the tests: 0, all at once) |
+| The sight fan | `plat/losfan.c` | 32 ms a fan, 90 at most | 19, 41 at most | its walk (80 % of it) in assembly: `horizon/hz_fan.s` on `hz_fw` (the walk's state, a block both use), the C the reference; `-DFANCHECK` compares both on every fan |
+| The panel's pictures | `plat/vga.c` part() | a seek and a read a row (a hand's item 48 rows: 50 reads); a geoscape screen change 2.5 s | blocks of whole rows (4 KB): 3 reads | the same bytes, the pack left where the row reads left it |
+| The panel's numbers | `panel.c` number() | sprintf and a 1 x 1 fill a pixel | digits by hand, a fill a run of a row | the same pixels |
+| A console line at the end of each effect | `plat/xdos.c` xd_seg | sound.c's `FP_SEG(sb_stack)` (a main-bank global) reported, 12 ms each, 8 a run | not reported (as FP_OFF's) | |
+
+### Before and after (the emulator, the board's card, the pointer circling)
+
+`tests/smooth.sh` (make smooth), the same runs on the tree before (HEAD with only the new
+/M) and after:
+
+| | Before | After |
+| --- | --- | --- |
+| battle: the player's gaps over 50 ms / the longest | 59 / 1,444 ms | 31 / 79 ms |
+| battle: the player's frames over 100 ms / the longest | 16 / 297 ms | 15 / 181 ms |
+| battle: scrolling (presents after a scroll) | 23 a second (median 43 ms, the slowest 200) | 21 a second (median 47 ms, the slowest 116) |
+| battle: walking (a step's present; paced by the animation) | 5.7 a second (median 174 ms, the slowest 976) | 6.1 a second (median 165 ms, the slowest 572) |
+| battle: path searches / sight fans / unpacks in play | 3.7 s whole / 320 ms (90 at most) / 53, 353 ms | slices / 187 ms (41 at most) / 0 |
+| 3BAT (the kit's battle): gaps over 50 ms / the longest | 47 / 855 ms | 10 / 94 ms |
+| geoscape (geo.keys): the player's gaps over 50 ms / the longest | 7 / 2,526 ms | 17 / 330 ms (more over 50: the screen changes' long ones split) |
+
+BENCH and the alien turn (make speed): the polls cost a little: average full redraw 149 →
+157 ms by day, 253 → 267 at night; 360 voxel lines 724 → 790 ms; the abductor's turn 6.6 →
+6.9 s; cursor step 18 → 19 ms; scroll by one tile 89 → 93 ms.
+
+The game's state is the same: the slices and the polls are the real clock's only (the
+virtual clock's runs, the tests, search at once and never poll), the panel's numbers and
+pictures are the same pixels, the fan's walk the same tables (make test's pictures, host
+against Atari816); make test, test-long, test-app, kit, app pass.
+
+### make smooth
+
+`tests/smooth.sh`: the battle (smooth.keys) and the geoscape (geo.keys) as the kit runs
+them (tests/perf.sh: the app's folder, the board's card, `/M /W`), in parallel, about 15 s;
+`tests/smooth.py` prints the player's gaps and frames by cause and the frame rates, and
+fails when the battle's longest gap is over 120 ms or its longest frame over 250 ms, or the
+geoscape's longest gap over 450 ms (the figures above with about a third of headroom). The
+kit has it as `ARGS/6SMOOTH.ARG` (PSMOOTH.KEY) for the board.
+
+### What is left
+
+- Full redraws (the view centred on a selected unit, a walker leaving the view): 100-160
+  ms frames by day. Their time: the floor pass (`hz_rend.s`) 21 %, the sprites' records
+  17 %, `sheet_draw` 12 % (about 850 cycles a record in the kernel), gfx_sprite, the
+  late tiles' C, floor.c's scan of every item for each tile with items. Smaller steps each.
+- The night: the shade at each present is the CPU's (115 ms for the whole view: a full
+  redraw 157 ms by day, 267 at night). **Hardware**: a blitter copy through a colour table
+  (a remap mode of COPY: 256 bytes of table, each source byte through it) would make a
+  night present cost a day's (10 ms): about 105 ms saved on every full present at night,
+  110 ms on a scroll. (A palette per screen region instead would not do: the panel and
+  the pointer share the palette, the raster table changes 16 colours at most.)
+- Voxel lines in walks and shots (reaction checks: 31-86 lines, 50-290 ms): exact, only a
+  faster line helps (section 4f: its tile crossing).
+- The path search itself (about 8,000 cycles a tile: 200-350 ms for a soldier's TU); now
+  in the background, but a click right after an action waits for its rest.
+- The geoscape's screen changes (base screens, the graphs: 300-330 ms): most of it in
+  bank 0's code (Horizon's library: the far copies of the interface's clean screen).
+- The walking animation is one picture a step (upstream's engine): about 6 a second,
+  paced; more would need the engine's in-between frames.
+- /M itself: a clock reading is a syscall (0.1 ms); the gap lines cost nothing until
+  written.
+
 ## 5. The plan
 
 Principle: **upstream's code runs unchanged** on a model of the machine it was written for;
@@ -1315,8 +1422,10 @@ Risks:
 | What | Why | Estimate (agent time) |
 | --- | --- | --- |
 | ~~the A* goal search~~, ~~the voxel line in assembly~~ | done, exact (section 4f): the alien turns 4-5 times faster | |
+| ~~the stutter~~: the pointer alive in all work, the atlas kept, the path search in slices, the fan's walk in assembly | done (section 4h): the player's longest pointer stop 1.4 s → 80 ms | |
+| full redraws (100-160 ms), the night's shade (a blitter remap: hardware), the geoscape's screen changes (300 ms) | section 4h, "What is left" | 1-2 days |
 | the voxel line's tile crossing (about 1,300 cycles) and checked voxels (250-400); a search skipped when the same one was just done (a world version) | a first turn of a small battle 5-7 s (section 4f, "What limits it now"); 1-3 s needs about twice that | 1-2 days |
-| the sight fan (`plat/losfan.c`) in assembly | not seen in the turns' profiles (X-COM's fog of war, the player's turn) | 0.5 day |
+| the sight fan's rays and levels (`plat/losfan.c`) in assembly (its walk is: section 4h) | 20-40 ms a fan left | 0.5 day |
 | the start-up's CPU part (3 s: the palette and picture loaders read through stdio byte by byte) | the start menu sooner | 0.5 day |
 | the main bank: `hgame`'s queues (the `.s` code moved: done, section 4) | room for the next changes | with the SDK |
 | per-cell night lights (OpenXcom's lighting, a table per level at the present) | flares and fires lighting their area | 1 day |

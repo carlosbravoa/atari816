@@ -377,6 +377,14 @@ void busy_tick(void)
 {
     union REGS r;
 
+#if defined(XCOM_PORT)
+    {
+        /* the platform's clock and pointer while the engine is busy (plat.h: the BIOS
+           clock moves on there; nothing in the tests' runs) */
+        void plat_busy_poll(void);
+        plat_busy_poll();
+    }
+#endif
     if (TICKS - busy_t < (busy ? 5u : 9u))
         return;
     busy_t = TICKS;

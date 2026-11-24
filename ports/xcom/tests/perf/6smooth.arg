@@ -1,0 +1,2 @@
+# 6. a battle, scripted for smoothness (cursor steps and scrolls, key bursts, walks, selections, kneeling, shots, the turn's end), the pointer circling: ends after 120 s (make smooth: the same in the emulator)
+/M /MN PERFSM /W /Q 120 NOINTRO BATTLE SEED 6 MISSION FA1V.PAK RACE RSV.PAK KEYS PSMOOTH.KEY

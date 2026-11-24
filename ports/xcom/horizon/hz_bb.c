@@ -253,6 +253,8 @@ static unsigned long t_prep, t_view;    /* the battle's start (the console's lin
 
 static void forget_all(void)
 {
+    if (g_perf && npics)
+        printf("xcom: blitter: atlas forgotten (%u pictures)\n", npics);
     wait_done();
     arrow_pic.used = 0;
     prepared = 0;
@@ -265,13 +267,27 @@ static void forget_all(void)
     shelf_x = shelf_y = shelf_h = 0;
 }
 
+/* The kept pictures' lengths (in the table's bank, after the table, the OR map and the
+   bar's pixels): a file read or a free between two of them (the battle's start reads
+   into a block among the pictures) leaves them all kept; one over a picture forgets
+   them all, as before. */
+#define PLEN ((unsigned short far *)((unsigned char far *)pics + 40960u))
+
 void plat_mem_changed(const void far *p, unsigned long n)
 {
-    unsigned long a = (unsigned long)p;
+    unsigned long a = (unsigned long)p, b;
+    unsigned i;
 
     if (!npics || !n || a > hi_addr || a + n <= lo_addr)
         return;
-    forget_all();
+    for (i = 0; i < HASH_N; i++)
+        if (pics[i].used && PLEN[i]) {
+            b = (unsigned long)pics[i].bank << 16 | pics[i].lo;
+            if (b < a + n && b + PLEN[i] > a) {
+                forget_all();
+                return;
+            }
+        }
 }
 
 /* the slot of picture s: kept (fresh 0) or the free one to fill (fresh 1);
@@ -418,6 +434,7 @@ static Pic *unpack(Pic *p, const unsigned char far *s, int kind)
     p->kind = (unsigned char)kind;
     npics++;
     g_bb_unpacked++;
+    PLEN[p - pics] = arrow_making ? 0 : (unsigned short)(len_all > 65535UL ? 65535UL : len_all);
     if (arrow_making)
         ;                               /* (the arrow's static picture: never read into) */
     else if ((unsigned long)s < lo_addr)
@@ -482,11 +499,14 @@ int hzb_sprite_c(const unsigned char far *spr, int kind, unsigned dest, unsigned
             return 0;
     }
     if (fresh) {
+        PERF_T0(pt0);
         Pic *u = unpack(p, spr, kind);
         if (!u && !npics) {             /* the atlas was full: once more, empty */
             p = find(spr, &fresh);
             u = p ? unpack(p, spr, kind) : NULL;
         }
+        PERF_ADD(PF_UNPACK, pt0);
+        plat_busy_tick();               /* (an unpack is milliseconds) */
         p = u;
         if (!p) {
             plat_bb_sync();             /* the C draws this one, after what was sent */

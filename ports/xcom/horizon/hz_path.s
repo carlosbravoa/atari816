@@ -14,7 +14,7 @@
         .i16
         .include "model.inc"
         .importzp __rg
-        .import _hz_ph, _plat_busy_poll
+        .import _hz_ph, _plat_busy_poll, _hz_path_over
         .export _hz_path_run
 
 ; hz_ph (plat/way.c struct HzPath)
@@ -35,6 +35,11 @@ H_GX    = _hz_ph+100
 H_GY    = _hz_ph+102
 H_GMODE = _hz_ph+104            ; 1: end once the goal is reached; 3: also once it
                                 ; cannot be (plat/way.c hz_path_search)
+H_SLICE = _hz_ph+106            ; 1: a search in slices (plat/way.c hz_path_begin): every
+                                ; 8th tile hz_path_over says whether the slice is over
+H_CC    = _hz_ph+108            ; its bucket when it stopped,
+H_PAUSED = _hz_ph+110           ; 1 when it stopped before its end,
+H_RESUME = _hz_ph+112           ; 1: go on from H_CC (the tables as they were left)
 
 PWH     = __rg+0                ; long pointers: walk tables
 PWF     = __rg+4
@@ -99,7 +104,12 @@ npoll:  .res 2                  ; tiles expanded since the last plat_busy_poll
         FUNC    _hz_path_run
         jsr     ptrs
         stz     npoll
-        ldy     #0                      ; cost[] = FF (n bytes)
+        lda     H_RESUME                ; the next slice: on from the bucket it was at
+        beq     @init
+        lda     H_CC
+        sta     cc
+        jmp     @wl
+@init:  ldy     #0                      ; cost[] = FF (n bytes)
         lda     #$FFFF
 @c1:    cpy     H_N
         bcs     @c2
@@ -171,6 +181,18 @@ npoll:  .res 2                  ; tiles expanded since the last plat_busy_poll
         bne     @wl1
         CALL    _plat_busy_poll
         jsr     ptrs                    ; (C may change __rg)
+        lda     H_SLICE                 ; a slice's time up: stop at this tile's end
+        beq     @wl1                    ; (the tables are the search's whole state)
+        CALL    _hz_path_over
+        pha
+        jsr     ptrs
+        pla
+        beq     @wl1
+        lda     cc
+        sta     H_CC
+        lda     #1
+        sta     H_PAUSED
+        RET
 @wl1:   lda     cc                      ; while (bucket[c] != NONE)
         asl     a
         tax

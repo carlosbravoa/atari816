@@ -54,6 +54,9 @@ static int at_edge(void)
 
 static void hover(void);
 
+static void paths_slice(void);
+static void paths_done(void);
+
 static unsigned map_key(void)
 {
     const int far *r;
@@ -64,6 +67,7 @@ static unsigned map_key(void)
 
 again:
     while (!input_ready()) {
+        paths_slice();
         if (g_mouse) {
             if (g_bopt[BO_STYPE] == 2 && at_edge())
                 bu_scroll(0);
@@ -91,6 +95,7 @@ again:
     g_track = 1;                /* a script's MOVE x y: KEY_MOVE (hover) */
     key = read_key();
     g_track = 0;
+    paths_done();               /* (the action reads the whole search) */
     if (key == KEY_LCLICK && at_edge() && bu_scroll(1))
         goto again;
     return key;
@@ -145,7 +150,10 @@ static void hud_cursor(void)
 {
     char line[48];
     unsigned s = g_cur_spr[1];
-    unsigned c = bt_sel >= 0 ? path_cost(g_cur_x, g_cur_y, g_cur_z) : 0xFFFF;
+    /* (while the selected unit's search goes on in slices, no TU yet: paths_slice
+       shows them when it is done) */
+    unsigned c = bt_sel >= 0 && !path_search_busy() ? path_cost(g_cur_x, g_cur_y, g_cur_z)
+                                                    : 0xFFFF;
     int items = g_seen && !(g_seen[TIDX(g_cur_x, g_cur_y, g_cur_z)] & SEEN_BIT) ? 0
               : floor_count_at(g_cur_x, g_cur_y, g_cur_z);
 
@@ -258,10 +266,40 @@ static void arrow_to(int u)
     arrow_rect(a);
 }
 
+/* The selected unit's search after each action. With g_path_slice (a platform whose
+   search can stop and go on: the Atari816 on the real clock) it runs in slices of that
+   many milliseconds while the turn waits for the player (map_key, a KEYS script's
+   WAIT), so the action's picture and the panel come at once and the cursor follows the
+   mouse meanwhile; the next key finishes it first (map_key), so every action reads the
+   whole search's tables, made from the same world as before. 0 (the tests, DOS): all
+   at once, here. */
+unsigned g_path_slice;
+
+static void paths_slice(void)
+{
+    if (path_search_busy() && path_search_more(g_path_slice)) {
+        g_wait_hook = 0;
+        hud_cursor();           /* (its TU now) */
+    }
+}
+
+static void paths_done(void)
+{
+    if (path_search_busy()) {
+        path_search_finish();
+        g_wait_hook = 0;
+        hud_cursor();
+    }
+}
+
 static void refresh_paths(void)
 {
-    if (bt_sel >= 0 && g_units[bt_sel].alive)
-        path_search(bt_sel, g_units[bt_sel].tu);
+    if (bt_sel >= 0 && g_units[bt_sel].alive) {
+        if (!g_path_slice)
+            path_search(bt_sel, g_units[bt_sel].tu);
+        else if (!path_search_begin(bt_sel, g_units[bt_sel].tu, g_path_slice))
+            g_wait_hook = paths_slice;
+    }
 }
 
 static void select_unit(int u)
@@ -945,6 +983,7 @@ static void turn(void)
 void player_turn(void)
 {
     turn();
+    paths_done();               /* (a battle won by the last action: its search ends) */
     arrow_to(-1);
 }
 

@@ -29,23 +29,62 @@ struct RevealFan {
     signed char vx, vy, sx, sy;
 };
 
-static const u8 far *lf;                /* DS: the sight flags */
-static u8 far *seen;                    /* ES: the seen table */
 static u16 pi, mxy;
 static u8 mxb, myb, ux, uy, uz, up;
 static signed char vx, vy, sx, sy;
-static int revealed;
-static u8 key, majstep, c0[2], ends[2], zcur;
-static u8 box[6] = { 255, 0, 255, 0, 255, 0 };     /* x0 x1 y0 y1 z0 z1 */
+static u8 majstep, c0[2], ends[2];
 
-/* the patched constants */
-static u8 p_neg, p_pos, p_end, p_mstep, p_lim, p_h, p_h2;
-static u16 p_add, p_addd, p_a1, p_a2, p_a3, p_b1, p_b2, p_b3;
-static u8 p_a1b, p_a3b, p_b1b, p_b3b;
-
-/* the walk's registers */
-static u16 si, dxr, bpr, cxr;
-static u8 bl, bh, ah;
+/* What the walk reads and writes, in one block: the Atari816 walks in assembly
+   (horizon/hz_fan.s, its F_* offsets) on it; the names below are its fields. */
+#include <stddef.h>
+struct HzFan {
+    const u8 far *lf;                   /* DS: the sight flags */
+    u8 far *seen;                       /* ES: the seen table */
+    u16 si, dxr, bpr, cxr;              /* the walk's registers */
+    u16 p_add, p_addd, p_a1, p_a2, p_a3, p_b1, p_b2, p_b3;     /* the patched constants */
+    u8 bl, bh, ah, p_neg, p_pos, p_end, p_mstep, p_lim, p_h, p_h2;
+    u8 p_a1b, p_a3b, p_b1b, p_b3b, key, zcur, revealed, pad;
+    u8 box[6];                          /* x0 x1 y0 y1 z0 z1 */
+};
+#if defined(__CC816__)
+_Static_assert(offsetof(struct HzFan, si) == 8 && offsetof(struct HzFan, bl) == 32
+               && offsetof(struct HzFan, revealed) == 48 && offsetof(struct HzFan, box) == 50,
+               "hz_fan.s's F_* offsets");
+#endif
+struct HzFan hz_fw = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                       0, 0, 0, 0, 0, 0, 0, 0, { 255, 0, 255, 0, 255, 0 } };
+#define lf       hz_fw.lf
+#define seen     hz_fw.seen
+#define si       hz_fw.si
+#define dxr      hz_fw.dxr
+#define bpr      hz_fw.bpr
+#define cxr      hz_fw.cxr
+#define p_add    hz_fw.p_add
+#define p_addd   hz_fw.p_addd
+#define p_a1     hz_fw.p_a1
+#define p_a2     hz_fw.p_a2
+#define p_a3     hz_fw.p_a3
+#define p_b1     hz_fw.p_b1
+#define p_b2     hz_fw.p_b2
+#define p_b3     hz_fw.p_b3
+#define bl       hz_fw.bl
+#define bh       hz_fw.bh
+#define ah       hz_fw.ah
+#define p_neg    hz_fw.p_neg
+#define p_pos    hz_fw.p_pos
+#define p_end    hz_fw.p_end
+#define p_mstep  hz_fw.p_mstep
+#define p_lim    hz_fw.p_lim
+#define p_h      hz_fw.p_h
+#define p_h2     hz_fw.p_h2
+#define p_a1b    hz_fw.p_a1b
+#define p_a3b    hz_fw.p_a3b
+#define p_b1b    hz_fw.p_b1b
+#define p_b3b    hz_fw.p_b3b
+#define key      hz_fw.key
+#define zcur     hz_fw.zcur
+#define revealed hz_fw.revealed
+#define box      hz_fw.box
 
 void __cdecl reveal_reset_box(void)
 {
@@ -85,6 +124,20 @@ static void seen_new(u16 di, u8 mj, u8 mn, int under)
    it got there, 1 when the ray stopped before. Entered at .wall (the
    assembly's walk.wall) with wall_al >= 0: the tile at si with flags
    wall_al is seen through a wall or floor and ends the ray. */
+#if defined(__CC816__)
+/* The walk in assembly (horizon/hz_fan.s) on hz_fw: the C below is the reference (the
+   host's; -DFANCHECK runs both on every fan and compares). */
+int hz_fan_walk(int wall_al);
+static int walk_c(int wall_al);
+static unsigned char fan_c;             /* FANCHECK: the C's turn */
+
+static int walk_from(int wall_al)
+{
+    return fan_c ? walk_c(wall_al) : hz_fan_walk(wall_al);
+}
+#define walk_from walk_c
+#endif
+
 static int walk_from(int wall_al)
 {
     u8 al;
@@ -151,6 +204,10 @@ to:
         }
     }
 }
+
+#if defined(__CC816__)
+#undef walk_from
+#endif
 
 static int walk(void)
 {
@@ -354,7 +411,59 @@ end:
     p_addd = (u16)(p_addd - di);
 }
 
+static int fan(const struct RevealFan *p);
+
 int __cdecl reveal_fan_asm(const struct RevealFan *p)
+{
+    int r;
+    PERF_T0(pt0);
+
+#if defined(__CC816__) && defined(FANCHECK)
+    {
+        /* (a check: the C and the assembly on the same fan, the seen tables, the
+           boxes and the answers compared; differences on the console) */
+        extern unsigned g_mx, g_my, g_mz;
+        static unsigned char far sv[10000], sc[10000];
+        static unsigned nfan, nbad;
+        unsigned n = g_mx * g_my * g_mz, i, d = 0;
+        u8 b0[6], bc[6];
+        int rc;
+        u8 far *st = (u8 far *)MK_FP(p->seenseg, 0);
+        for (i = 0; i < n; i++)
+            sv[i] = st[i];
+        for (i = 0; i < 6; i++)
+            b0[i] = box[i];
+        fan_c = 1;
+        rc = fan(p);
+        fan_c = 0;
+        for (i = 0; i < n; i++) {
+            sc[i] = st[i];
+            st[i] = sv[i];
+        }
+        for (i = 0; i < 6; i++) {
+            bc[i] = box[i];
+            box[i] = b0[i];
+        }
+        r = fan(p);
+        for (i = 0; i < n; i++)
+            d += sc[i] != st[i];
+        for (i = 0; i < 6; i++)
+            d += bc[i] != box[i];
+        nfan++;
+        if ((d || rc != r) && nbad++ < 20)
+            printf("FANCHECK fan %u at %u,%u,%u: %u differ, %d/%d\n", nfan, p->x, p->y, p->z, d,
+                   rc, r);
+        if (!(nfan & 63))
+            printf("FANCHECK %u fans, %u differ\n", nfan, nbad);
+    }
+#else
+    r = fan(p);
+#endif
+    PERF_ADD(PF_FAN, pt0);
+    return r;
+}
+
+static int fan(const struct RevealFan *p)
 {
     int left;
 
@@ -375,6 +484,8 @@ int __cdecl reveal_fan_asm(const struct RevealFan *p)
     lf = (const u8 far *)MK_FP(p->lfseg, 0);
     seen = (u8 far *)MK_FP(p->seenseg, 0);
     for (left = 2 * RANGE + 1; left; left--) {
+        if (!(left & 7))
+            plat_busy_tick();           /* (a fan is 10-60 ms) */
         ray();
         vx = (signed char)(vx + sx);
         vy = (signed char)(vy + sy);

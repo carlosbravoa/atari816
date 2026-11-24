@@ -54,6 +54,7 @@ extern char g_perf_args[200];
 void perf_start(void);
 void perf_tick(unsigned long now);
 void perf_key(unsigned long now);
+void perf_look(unsigned long now);
 void perf_ptr_moved(unsigned long t);
 
 /* /W: the pointer goes round a circle by itself (a measuring run with a KEYS script
@@ -170,23 +171,44 @@ static void idle_vsync(void)
 }
 
 /* the engine computing for long without looking at the clock or the input (an alien
-   turn: plat/voxrun.c calls this once a voxel line, horizon/hz_path.s every few tiles
-   of a path search): every 8th call is an xd_poll, as DOS's timer interrupt and the
-   engine's own polls would have been: the clock is read, the BIOS clock moves on (so
-   upstream's busy pointer, mouse.c busy_tick, turns its hourglass over: the sprite shows
-   it), the timer hook and the Sound Blaster model run (about every 20-40 ms); every 40
-   ms plat_poll moves the pointer and queues keys (its events cost about 1 ms: as often
-   as at an idle screen, 8 ms, they took 7 % of an alien turn). Not with the virtual
-   clock (its readings move it: the tests' runs stay the host's) */
+   turn: plat/voxrun.c calls this once a voxel line, horizon/hz_path.s every 8th tile
+   of a path search; the player's turn: the battle view's drawing, plat_busy_tick):
+   every 2nd call the clock is read, and every 10 ms at most an xd_poll's clock part
+   runs, as DOS's timer interrupt and the engine's own polls would have: the BIOS clock
+   moves on (so upstream's busy pointer, mouse.c busy_tick, turns its hourglass over:
+   the sprite shows it), the timer hook and the Sound Blaster model run; every 30 ms
+   plat_poll moves the pointer and queues keys (its events cost about 1 ms: as often
+   as at an idle screen, 8 ms, they took 7 % of an alien turn). So the pointer stands
+   still for about 45 ms at most (it was 60-90 with every 8th call and 40 ms). Not
+   with the virtual clock (its readings move it: the tests' runs stay the host's) */
+#define BUSY_POLL_US 30000UL
+static unsigned long busy_us;           /* the last xd_clock of plat_busy_tick */
+
+/* the same from a piece of work that takes milliseconds itself (a picture unpacked,
+   32 sprites queued, a block of a panel picture, a part of the night's shade): the
+   clock read at every call (about 0.1 ms); the DOS model's clock (the BIOS clock, the
+   timer hook, the Sound Blaster model) every 10 ms at most */
+void plat_busy_tick(void)
+{
+    unsigned long now;
+
+    if (g_plat_virtual)
+        return;
+    now = hg_us();
+    if (now - busy_us < 10000UL)
+        return;
+    busy_us = now;
+    xd_clock();
+    if (last_us - poll_us >= BUSY_POLL_US)
+        plat_poll();
+}
+
 void plat_busy_poll(void)
 {
     static unsigned n;
 
-    if (g_plat_virtual || (++n & 7))
-        return;
-    xd_clock();
-    if (last_us - poll_us >= 40000UL)
-        plat_poll();
+    if (!g_plat_virtual && !(++n & 1))
+        plat_busy_tick();
 }
 
 /* a KEYS script's WAIT (patches/src-0006-perf.patch) between two looks at the mouse:
@@ -198,6 +220,8 @@ void plat_script_wait(void)
         return;
     if (load_t0)
         ready();
+    if (g_perf)
+        perf_look(last_us);
     idle_vsync();
 }
 
@@ -211,8 +235,12 @@ void plat_sleep_counts(unsigned long n)
         idle_vsync();
         xd_poll();
     }
-    while (plat_counts() - t0 < n)
-        xd_poll();
+    {
+        PERF_T0(pt0);                   /* (/M: the last frame's wait is spent polling) */
+        while (plat_counts() - t0 < n)
+            xd_poll();
+        PERF_ADD(PF_SPIN, pt0);
+    }
 }
 
 /* HID usage -> PC scan code (the BIOS's high byte). */
@@ -544,6 +572,13 @@ void plat_view(int on)
     }
 }
 
+/* /M's gap lines: the pointer shows the hourglass (the engine said it is busy: an
+   alien turn, a load), not the player's time */
+int perf_busy(void)
+{
+    return spr_on && spr_kind == 1;
+}
+
 /* /M's timeline: 'B' the battle view or 'S' a screen, << 8, and the rows panned */
 unsigned perf_screen(void)
 {
@@ -654,6 +689,10 @@ static void ready(void)
     }
     glass(-1);
     loading = 0;
+    {
+        extern unsigned char g_perf_ready;
+        g_perf_ready = 1;               /* (/M: the gaps from now on are the player's) */
+    }
     pan = -1;
     xd_dac_dirty = 1;
     show();
@@ -692,6 +731,8 @@ unsigned plat_key(void)
 void plat_mouse(int *x, int *y, int *buttons)
 {
     eng_look_t = last_us;
+    if (g_perf)
+        perf_look(last_us);
     *x = mx;
     *y = my;
     *buttons = mb;
@@ -1081,6 +1122,10 @@ int main(int argc, char **argv)
             strncpy(g_perf_name, argv[i + 1], 8);
             g_perf_name[8] = 0;
             i += 2;
+        } else if (i + 1 < argc && !stricmp(argv[i], "/MG")) {
+            extern unsigned g_perf_gap;
+            g_perf_gap = (unsigned)atoi(argv[i + 1]);
+            i += 2;
         } else if (i < argc && !stricmp(argv[i], "/IOB")) {
             iobench = 1;
             i++;
@@ -1110,6 +1155,14 @@ int main(int argc, char **argv)
         g_plat_dir[0] = 0;
     if (g_plat_dir[0])
         hz_chdir(g_plat_dir);
+    {
+        /* the real clock: the selected unit's path search in slices of 20 ms while the
+           player's turn waits (bplayer.c refresh_paths, horizon/hz_path.s); the virtual
+           clock's runs (the tests) search at once, as the host */
+        extern unsigned g_path_slice;
+        if (!g_plat_virtual)
+            g_path_slice = 20;
+    }
     {
         /* the game's data: the packs XCOMCONV made from the player's own copy, in the
            program's folder (README.TXT) */

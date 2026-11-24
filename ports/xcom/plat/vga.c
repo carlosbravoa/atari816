@@ -21,6 +21,11 @@
 #define ROW         320
 #define SCREEN      ((unsigned char far *)MK_FP(0xA000, 0))
 
+/* every 8th of the interface's drawing calls: the platform's clock and pointer (a
+   panel's redraw is a few hundred of them: 50-100 ms) */
+static unsigned char ui_ticks;
+#define UI_TICK() do { if (!(++ui_ticks & 7)) plat_busy_poll(); } while (0)
+
 unsigned char g_vpal[768];
 unsigned char g_vmap[16];
 unsigned g_vshade;
@@ -90,12 +95,20 @@ static void close_pack(void)
 }
 
 /* The part of entry e inside the rectangle q, read from the pack (vgaasm.asm
-   part). */
+   part). The rows are read a block of whole rows at a time (the pack's
+   picture is rows of e->w bytes): a file call costs far more than its bytes
+   (the DOS model, the packs' cache), and the panel's pictures (a hand's item,
+   48 rows) took one seek and one read a row. The same bytes reach the
+   screen; the pack is left where the row by row reads left it. */
+static unsigned char far blk[4096];
+
 static void part(const Entry *e)
 {
-    int t0, t1, r0, r1, rows, skip;
+    int t0, t1, r0, r1, rows, skip, n, i, k;
     unsigned char far *d;
-    unsigned got;
+    const unsigned char far *s;
+    unsigned got, per;
+    long at;
 
     t0 = qx > e->x ? qx : e->x;
     t1 = (qx + qw < e->x + e->w ? qx + qw : e->x + e->w) - t0;
@@ -107,15 +120,22 @@ static void part(const Entry *e)
     rows = r1 - r0;
     if (rows <= 0)
         return;
-    lseek(g_uk_fd, e->pos + (long)(r0 - e->y) * e->w + (t0 - e->x), SEEK_SET);
+    at = e->pos + (long)(r0 - e->y) * e->w;
     d = pbase + (unsigned)r0 * ROW + (unsigned)t0;
-    if (!(e->fl & 1)) {
-        if (t1 == ROW) {
-            _dos_read(g_uk_fd, d, (unsigned)rows * ROW, &got);
-            return;
-        }
+    if (!(e->fl & 1) && t1 == ROW) {
+        lseek(g_uk_fd, at, SEEK_SET);
+        _dos_read(g_uk_fd, d, (unsigned)rows * ROW, &got);
+        return;
+    }
+    per = sizeof blk / (unsigned)e->w;
+    if (!per) {
+        /* (a row wider than the block: row by row, as before) */
+        lseek(g_uk_fd, at + (t0 - e->x), SEEK_SET);
         for (;;) {
-            _dos_read(g_uk_fd, d, (unsigned)t1, &got);
+            _dos_read(g_uk_fd, rowbuf, (unsigned)t1, &got);
+            for (k = 0; k < t1; k++)
+                if (!(e->fl & 1) || rowbuf[k])
+                    d[k] = rowbuf[k];
             d += ROW;
             if (!--rows)
                 return;
@@ -123,17 +143,25 @@ static void part(const Entry *e)
                 lseek(g_uk_fd, skip, SEEK_CUR);
         }
     }
-    for (;;) {
-        int k;
-        _dos_read(g_uk_fd, rowbuf, (unsigned)t1, &got);
-        for (k = 0; k < t1; k++)
-            if (rowbuf[k])
-                d[k] = rowbuf[k];
-        d += ROW;
-        if (!--rows)
-            return;
-        if (skip)
-            lseek(g_uk_fd, skip, SEEK_CUR);
+    lseek(g_uk_fd, at, SEEK_SET);
+    while (rows > 0) {
+        n = rows < (int)per ? rows : (int)per;
+        /* (the last block ends with the last row's part: the pack is then where the
+           row by row reads left it) */
+        _dos_read(g_uk_fd, blk, (unsigned)(n - 1) * (unsigned)e->w + (unsigned)(t0 - e->x)
+                  + (unsigned)t1, &got);
+        if (rows > n)
+            lseek(g_uk_fd, (long)(skip - (t0 - e->x)), SEEK_CUR);  /* (the next row's start) */
+        s = blk + (t0 - e->x);
+        for (i = 0; i < n; i++, s += e->w, d += ROW)
+            if (!(e->fl & 1))
+                _fmemcpy(d, s, (unsigned)t1);
+            else
+                for (k = 0; k < t1; k++)
+                    if (s[k])
+                        d[k] = s[k];
+        rows -= n;
+        plat_busy_poll();
     }
 }
 
@@ -313,6 +341,7 @@ void vga_uk_glyph(int x, int y, const unsigned char far *g, int h, int bpr, int 
     int right = ROW - x, n;
     unsigned bits;
 
+    UI_TICK();
 #if defined(__CC816__)
     hz_glyph(d, g, h, bpr, c, right);
     (void)n;
@@ -382,6 +411,7 @@ void vga_uk_restore(int x, int y, int w, int h)
 {
     unsigned off;
 
+    UI_TICK();
     if (y < sy0) {
         h -= sy0 - y;
         y = sy0;
@@ -408,6 +438,7 @@ void vga_uk_restore(int x, int y, int w, int h)
 /* 15 uk_fill, with vx_fill in front: 16-255 is a palette index. */
 void vga_uk_fill(int x, int y, int w, int h, int c)
 {
+    UI_TICK();
     if (w <= 0 || h <= 0)
         return;
     qx = x;

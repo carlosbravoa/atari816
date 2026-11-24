@@ -182,6 +182,11 @@ test-long: builds $(CARD)
 # ---- speed (the speed helper's block): the felt figures with the real clock (tests/speed.sh)
 speed: XCOM.PRG $(CARD)
 	sh tests/speed.sh
+# ---- smooth: the player's gaps and frames with limits (tests/smooth.sh, PORTING-NOTES.md 4h)
+smooth: XCOM.PRG $(CARD)
+	$(MAKE) MUSD.PRG
+	@$(PACKS_OK)
+	sh tests/smooth.sh
 # ----
 refs: builds $(CARD)
 	sh tests/check.sh $(HORIZON) --refs
@@ -269,9 +274,10 @@ kit: builds
 	cp XCOM.PRG MUSD.PRG build/kit/APPS/XCOM/
 	cp tests/perf/geo.keys build/kit/APPS/XCOM/PGEO.KEY
 	cp tests/perf/bat.keys build/kit/APPS/XCOM/PBAT.KEY
+	cp tests/perf/smooth.keys build/kit/APPS/XCOM/PSMOOTH.KEY
 	for f in tests/perf/*.arg; do cp $$f build/kit/ARGS/$$(basename $$f .arg | tr a-z A-Z).ARG; done
 	@ls build/kit/APPS/XCOM build/kit/ARGS
 
 .SECONDARY:
-.PHONY: kit all data host host-run check-host refs-host builds test test-long refs refs-long run app card test-app speed clean FORCE
+.PHONY: kit all data host host-run check-host refs-host builds test test-long refs refs-long run app card test-app speed smooth clean FORCE
 FORCE:

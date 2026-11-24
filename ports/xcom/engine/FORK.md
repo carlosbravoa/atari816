@@ -35,7 +35,7 @@ changed except where said below. Build it with `build.ps1` before a release for 
 
 ## Our changes, by topic
 
-`git diff cca0456 -- ports/xcom/engine` shows them all (36 files, about 520 lines added, at the time of writing).
+`git diff cca0456 -- ports/xcom/engine` shows them all (about 40 files, 690 lines added, at the time of writing).
 
 **The Atari816's hooks** (all `#if defined(XCOM_PORT)`; the DOS build compiles upstream's
 code there):
@@ -57,6 +57,8 @@ code there):
 - Test hooks: `cut.c` a test picture of each end slide, `input.c` a KEYS script's `WAIT`
   sleeps on the platform, `vbench.c` BENCH's VGA block checks left out and a check of the
   port's smoke and fire pictures instead.
+- `mouse.c` `busy_tick`: the platform's clock and pointer (`plat_busy_poll`) in the
+  engine's busy loops (the turn's end, the AI).
 - `pedia.c`: after an article, the screen under the list again (VGA; the port keeps a
   real copy of the clean screen).
 
@@ -75,6 +77,21 @@ code there):
 - `music.c` `decode`: an instrument ends at its track's end (GMTACTIC's instrument 10 read
   past it).
 - (`pedia.c`'s list over the article, fault 6, is fixed for the port's VGA only, above.)
+
+**Smoothness** (every build; PORTING-NOTES.md section 4h):
+
+- `path.c`, `path.h`: `path_search_begin` / `path_search_more` / `path_search_busy` /
+  `path_search_finish`: a whole search in slices where the platform can stop and resume
+  it (the Atari816's hz_path.s, XCOM_PORT); elsewhere `begin` is the whole search at once.
+  Every other path call (path_cost, path_build, a search, a tile's change, step_cost, the
+  checksum) finishes it first. `search` split into `prep` and the search.
+- `bplayer.c`: `refresh_paths` with `g_path_slice` (ms; 0, the default: as before) begins
+  the search and leaves its rest to the turn's wait (`map_key`'s idle loop, a KEYS
+  script's WAIT through `input.c`'s new `g_wait_hook`); the next key finishes it before
+  the action; `hud_cursor` shows the TU when it is done. The DOS build and the tests (the
+  port's virtual clock) keep 0.
+- `panel.c` `number`: the digits without sprintf, one fill a run of a row's set pixels (the
+  same pixels).
 
 **The converter** (`tools/convert.py`): the GOG edition's MCD records with HE_Type 1 (smoke)
 are left out of the explosives list instead of stopping the conversion.

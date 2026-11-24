@@ -39,14 +39,27 @@ unsigned perf_screen(void);             /* hz_plat.c: 'B' battle view, 'S' a scr
 
 static const char *const slot_name[PF_N] = {
     "poll", "idle", "view", "palette", "blitwait", "present", "pointer", "open", "read",
-    "seek", "close", "write", "sfx", "keypoll", "report", "card", "sfxdecode"
+    "seek", "close", "write", "sfx", "keypoll", "report", "card", "sfxdecode",
+    "redraw", "path", "voxline", "sightfan", "unpack", "shade", "shift", "spin"
 };
+
 
 typedef struct {
     unsigned long n, us, max, bytes;
 } Ctr;
 
 static Ctr __far line[PF_N], period[PF_N], total[PF_N];
+/* since the last event poll (0) and since the last battle view present (1): what a long
+   gap between two polls (the pointer frozen, no input looked at) or between two presents
+   (the view stands still while the CPU works) was spent on: the gap lines */
+static Ctr __far since[2][PF_N];
+unsigned g_perf_gap = 50;               /* /MG n: gaps between polls over n ms are listed */
+unsigned g_perf_pgap = 100;             /* and presents more than n ms apart, busy */
+static unsigned gaps_line;              /* gap lines in this 5 s line (12 at most) */
+/* [0] polls, [1] presents: all gaps over the limit, the player's (not under the hourglass,
+   not /M's own report), the longest of each */
+static unsigned long gaps_n[2], gaps_max[2], gaps_ctl_n[2], gaps_ctl_max[2];
+static unsigned long up0;               /* the machine's time at the start, ms */
 
 /* histograms of gaps, ms: bucket upper bounds */
 enum { H_KEY, H_POLL, H_PLAG, H_PGAP, H_PRES, H_N };
@@ -71,6 +84,8 @@ static struct {
 static int nf;
 
 static unsigned long t_start, t_line, t_period, last_key, last_poll, last_draw, last_pres;
+static unsigned long last_look;        /* perf_look */
+static unsigned long busy_l;            /* this line's longest busy frame */
 static unsigned long ptr_t;
 static unsigned char ptr_pending, started;
 static unsigned nline, nperiod;
@@ -106,21 +121,155 @@ static void hist(int h, unsigned long us)
     if (us > hmax_l[h]) hmax_l[h] = us;
 }
 
+/* (the 5 s line's counters only: the period's and the total's are added up from them
+   at each line, fold_line; the gap lines' since the last poll and present: not the
+   keyboard looks, a hundred a second) */
+/* the battle view's presents: their times (ms from the start) and what came before each
+   (1 a scroll, 2 an effect started: a walk's step), printed at the exit (the console's
+   "xcom: presents" lines: tests/smooth.py makes the frame rates of them) */
+#define NPLOG 3000
+static unsigned long __far plog[NPLOG];
+static unsigned nplog;
+static unsigned char pres_flags;
+
 static void count(int s, unsigned long d, unsigned long bytes)
 {
-    Ctr __far *c[3];
+    Ctr __far *c = &line[s];
     int i;
 
-    c[0] = &line[s];
-    c[1] = &period[s];
-    c[2] = &total[s];
-    for (i = 0; i < 3; i++) {
-        c[i]->n++;
-        c[i]->us += d;
-        c[i]->bytes += bytes;
-        if (d > c[i]->max)
-            c[i]->max = d;
+    if (s == PF_SHIFT)
+        pres_flags |= 1;
+    else if (s == PF_SFX)
+        pres_flags |= 2;
+    c->n++;
+    c->us += d;
+    c->bytes += bytes;
+    if (d > c->max)
+        c->max = d;
+    if (s == PF_KEY)
+        return;
+    for (i = 0; i < 2; i++) {
+        c = &since[i][s];
+        c->n++;
+        c->us += d;
+        c->bytes += bytes;
     }
+}
+
+static void fold_line(void)
+{
+    int s, i;
+
+    for (s = 0; s < PF_N; s++) {
+        Ctr __far *l = &line[s];
+        if (!l->n)
+            continue;
+        for (i = 0; i < 2; i++) {
+            Ctr __far *c = i ? &total[s] : &period[s];
+            c->n += l->n;
+            c->us += l->us;
+            c->bytes += l->bytes;
+            if (l->max > c->max)
+                c->max = l->max;
+        }
+    }
+}
+
+int perf_busy(void);                    /* hz_plat.c: the pointer is the hourglass */
+static void put(const char *s);
+static void putf(const char *fmt, ...);
+
+/* A long gap between two event polls (w 0: the pointer and the input stood still) or a
+   present that came long after the one before while the CPU worked (w 1: the view
+   stood still): what ran in it (the counters since then). Kept raw (a formatted line
+   costs milliseconds of vformat: it would lengthen the gaps measured), written at the
+   next 5 s line to the console and the report. */
+static const unsigned char gshow[] = { PF_REDRAW, PF_PRES, PF_BLIT, PF_SHADE, PF_SHIFT,
+                                       PF_UNPACK, PF_PATH, PF_VOX, PF_FAN, PF_SFX,
+                                       PF_SFXDEC, PF_PAL, PF_VIEW, PF_PTR, PF_IDLE,
+                                       PF_SPIN, PF_OPEN, PF_READ, PF_CARD, PF_REPORT };
+#define NGS sizeof gshow
+typedef struct {
+    unsigned long t, total, busy;       /* its end (us from the start), us */
+    unsigned char w, flag;
+    unsigned short n[NGS], ms[NGS];     /* counts, ms (redraw, shift: K pixels) */
+} GapRec;
+#define NGAPR 24
+static GapRec __far gapr[NGAPR];
+static unsigned ngapr;
+unsigned char g_perf_ready;             /* the first input wait came (hz_plat.c ready) */
+
+static void gap_out(int w, unsigned long t0, unsigned long total, unsigned long busy)
+{
+    Ctr __far *sc = since[w];
+    GapRec __far *g;
+    unsigned i;
+    int hg = perf_busy(), rep = sc[PF_REPORT].n != 0;
+    unsigned char flag = !g_perf_ready ? 'L' : hg ? 'H' : rep ? 'R' : ' ';
+
+    if (w && busy > busy_l)
+        busy_l = busy;
+    gaps_n[w]++;
+    if (busy > gaps_max[w])
+        gaps_max[w] = busy;
+    if (flag == ' ') {
+        gaps_ctl_n[w]++;
+        if (busy > gaps_ctl_max[w])
+            gaps_ctl_max[w] = busy;
+    }
+    if (ngapr == NGAPR)
+        return;
+    g = &gapr[ngapr++];
+    g->t = t0 - t_start;
+    g->total = total;
+    g->busy = busy;
+    g->w = (unsigned char)w;
+    g->flag = flag;
+    for (i = 0; i < NGS; i++) {
+        Ctr __far *c = &sc[gshow[i]];
+        g->n[i] = (unsigned short)c->n;
+        g->ms[i] = (unsigned short)((gshow[i] == PF_REDRAW || gshow[i] == PF_SHIFT ? c->bytes
+                                     : c->us) / 1000UL);
+    }
+}
+
+static void gaps_flush(void)
+{
+    char b[420];
+    unsigned k, i, r;
+    unsigned long m, timed;
+    GapRec __far *g;
+
+    for (r = 0; r < ngapr; r++) {
+        g = &gapr[r];
+        m = g->t / 1000UL + up0;        /* the machine's time, ms */
+        k = (unsigned)sprintf(b, "%s %4lu ms at %lu.%03lu (on %lu.%03lu) %c%c",
+                              g->w ? "frame" : "gap  ", g->busy / 1000UL,
+                              g->t / 1000000UL, g->t / 1000UL % 1000UL, m / 1000UL, m % 1000UL,
+                              g->w ? 'B' : (char)(perf_screen() >> 8), g->flag);
+        if (g->w)
+            k += (unsigned)sprintf(b + k, " (%lu apart)", g->total / 1000UL);
+        b[k++] = ':';
+        timed = 0;
+        for (i = 0; i < NGS && k < sizeof b - 40; i++) {
+            if (!g->n[i])
+                continue;
+            k += (unsigned)sprintf(b + k, " %s %u/%u%s", slot_name[gshow[i]], g->n[i], g->ms[i],
+                                   gshow[i] == PF_REDRAW || gshow[i] == PF_SHIFT ? "K" : "");
+            if (gshow[i] != PF_UNPACK && gshow[i] != PF_SHADE
+                && gshow[i] != PF_REDRAW && gshow[i] != PF_SHIFT)
+                timed += g->ms[i];
+        }
+        sprintf(b + k, " other %ld\n", (long)(g->total / 1000UL) - (long)timed);
+        printf("xcom: %s", b);
+        put(b);
+    }
+    ngapr = 0;
+}
+
+void perf_n(int slot, unsigned long bytes)
+{
+    count(slot, 0, bytes);
 }
 
 void perf_add(int slot, unsigned long t0)
@@ -131,18 +280,47 @@ void perf_add(int slot, unsigned long t0)
     if (slot == PF_POLL) {
         if (last_poll && t0 - last_poll > 8000UL)
             hist(H_POLL, t0 - last_poll);
+        if (last_poll && t0 - last_poll > (unsigned long)g_perf_gap * 1000UL
+            && t0 - last_poll < 30000000UL)
+            gap_out(0, t0, t0 - last_poll, t0 - last_poll);
+        memset(since[0], 0, sizeof since[0]);
         last_poll = t0;
     } else if (slot == PF_PRES) {
-        if (last_pres && now - last_pres < 1000000UL)
-            hist(H_PRES, now - last_pres);
+        unsigned long gap = now - last_pres, idle = since[1][PF_IDLE].us + since[1][PF_SPIN].us;
+        unsigned long from = last_look > last_pres ? last_look : last_pres;
+        if (last_pres && gap < 1000000UL)
+            hist(H_PRES, gap);
+        /* (busy: since the last present or the last look for input, without the CPU's
+           sleeps in it: how long the view stood still while the engine worked) */
+        gap = now - from;
+        if (last_pres && gap > idle && gap - idle > (unsigned long)g_perf_pgap * 1000UL
+            && gap < 30000000UL)
+            gap_out(1, now, gap, gap - idle);
+        memset(since[1], 0, sizeof since[1]);
         last_pres = now;
+        if (nplog < NPLOG)
+            plog[nplog++] = (now - t_start) / 1000UL << 2 | pres_flags;
+        pres_flags = 0;
     }
+}
+
+/* the engine looked for input (the keyboard, the mouse, a KEYS script's wait): the view
+   standing still since is the engine waiting, not working; a frame's busy time counts
+   from here (no clock reading: the caller's) */
+
+void perf_look(unsigned long now)
+{
+    if (now - last_look < 2000UL)
+        return;
+    last_look = now;
+    memset(since[1], 0, sizeof since[1]);
 }
 
 /* the engine looked at the keyboard (plat_key): counted, the gap from the clock already
    read (no reading of its own: they cost about 100 us each) */
 void perf_key(unsigned long now)
 {
+    perf_look(now);
     count(PF_KEY, 0, 0);
     if (last_key && now - last_key > 8000UL)
         hist(H_KEY, now - last_key);
@@ -271,16 +449,21 @@ static void line_out(unsigned long now)
 
     if (!wall)
         wall = 1;
-    putf("%5lu %c%3u idle%3lu%% keys/s%4lu ptr%4lu lag%4lu gap%4lu pres%3lu gap%4lu blit%5lu io%4lu/%5luK/%5lu card%4lu/%5lu vw%3lu pal%2lu sfx%2lu poll%4lu\n",
+    putf("%5lu %c%3u idle%3lu%% keys/s%4lu still%4lu busy%4lu ptr%4lu lag%4lu gap%4lu pres%3lu gap%4lu blit%5lu io%4lu/%5luK/%5lu card%4lu/%5lu vw%3lu pal%2lu sfx%2lu poll%4lu\n",
          (now - t_start) / 1000000UL, (char)(sc >> 8), sc & 0xFFu,
          line[PF_IDLE].us * 100UL / wall, line[PF_KEY].n * 1000000UL / wall,
+         hmax_l[H_POLL] / 1000UL, busy_l / 1000UL,
          line[PF_PTR].n, hmax_l[H_PLAG] / 1000UL, hmax_l[H_PGAP] / 1000UL,
          line[PF_PRES].n, hmax_l[H_PRES] / 1000UL, line[PF_BLIT].us / 1000UL,
          io, line[PF_READ].bytes / 1024UL, iou / 1000UL, line[PF_CARD].n, line[PF_CARD].us / 1000UL,
          line[PF_VIEW].n, line[PF_PAL].n,
          line[PF_SFX].n, line[PF_POLL].max / 1000UL);
+    fold_line();
     memset(line, 0, sizeof line);
+    gaps_line = 0;
+    gaps_flush();
     hmax_l[H_PLAG] = hmax_l[H_PGAP] = hmax_l[H_PRES] = hmax_l[H_KEY] = hmax_l[H_POLL] = 0;
+    busy_l = 0;
     t_line = now;
     nline++;
 }
@@ -367,7 +550,7 @@ static void period_out(unsigned long now, const char *what)
 
 static void timeline_head(void)
 {
-    put("    s sc pan idle keys/s ptr lag(max ms) gap(max) pres gap(max) blit(ms) io(calls/KB/ms) card(the card's own calls/ms) vw(view sends) pal sfx poll(max ms)\n");
+    put("    s sc pan idle keys/s still(max ms) busy(max ms) ptr lag(max ms) gap(max) pres gap(max) blit(ms) io(calls/KB/ms) card(the card's own calls/ms) vw(view sends) pal sfx poll(max ms)\n");
 }
 
 static void report(unsigned long now, int final)
@@ -384,6 +567,14 @@ static void report(unsigned long now, int final)
         for (i = 0; i < nf; i++)
             putf("    %-13s %5lu %6lu %7lu %7lu\n", ftab[i].name, ftab[i].opens, ftab[i].reads,
                  ftab[i].bytes / 1024UL, ftab[i].us / 1000UL);
+        for (i = 0; i < 2; i++) {
+            putf("  %s over %u ms: %lu (longest %lu ms); the player's (the arrow): %lu (longest %lu ms)\n",
+                 i ? "presents apart, busy," : "gaps between polls", i ? g_perf_pgap : g_perf_gap,
+                 gaps_n[i], gaps_max[i] / 1000UL, gaps_ctl_n[i], gaps_ctl_max[i] / 1000UL);
+            printf("xcom: /M %s over %u ms: %lu, longest %lu ms; the player's %lu, longest %lu ms\n",
+                   i ? "frames" : "gaps", i ? g_perf_pgap : g_perf_gap,
+                   gaps_n[i], gaps_max[i] / 1000UL, gaps_ctl_n[i], gaps_ctl_max[i] / 1000UL);
+        }
         put("== end\n");
         pc_bad = 0;                     /* (the PC tried again) */
     } else {
@@ -418,6 +609,8 @@ static void at_exit(void)
 {
     int i;
     unsigned long now = now_us();
+    char b[200];
+    unsigned k, n;
 
     if (!started)
         return;
@@ -425,6 +618,12 @@ static void at_exit(void)
     g_perf = 0;
     line_out(now);
     report(now, 1);
+    for (n = 0; n < nplog; ) {
+        k = (unsigned)sprintf(b, "xcom: presents");
+        for (i = 0; i < 12 && n < nplog; i++, n++)
+            k += (unsigned)sprintf(b + k, " %lu:%u", plog[n] >> 2, (unsigned)(plog[n] & 3));
+        printf("%s\n", b);
+    }
     for (i = 0; i < g_perf_ncopy; i++)
         copy_to_pc(g_perf_copy[i]);
 }
@@ -448,13 +647,20 @@ void perf_start(void)
 
     measure_reading();
     t_start = t_line = t_period = now;
+    up0 = (unsigned long)hz_uptime();
     started = 1;
     putf("XCOM-XT on the Atari816: /M (horizon/hz_perf.c)\noptions: %s\nmachine on %lu s\n",
          g_perf_args, (unsigned long)hz_uptime() / 1000UL);
     put("a line every 5 s: sc = B the battle view / S a screen, then the pan (rows);\n"
         "idle = the CPU asleep in vertical-blank waits; keys/s = the engine's keyboard looks;\n"
-        "ptr = arrow draws, lag = the longest pointer move -> arrow drawn, gap = the longest\n"
-        "between arrow draws; pres = battle view presents; io = the engine's file calls/KB read/ms;\n"
+        "still = the longest gap between event polls (the pointer's sprite and the input stand\n"
+        "still: what the player feels), busy = the longest frame (a battle view present after\n"
+        "the CPU worked without looking for input); the gaps and frames over /MG's limit (50 and\n"
+        "100 ms) follow each line, with what ran in them (tests/smooth.py reads them);\n"
+        "ptr = the engine's arrow draws, lag = the longest pointer move -> arrow drawn, gap = the\n"
+        "longest between the engine's arrow draws (the sprite moves at every poll meanwhile);\n"
+        "pres = battle view presents, gap = the longest between two (waits included);\n"
+        "io = the engine's file calls/KB read/ms;\n"
         "card = the calls that reached the card (the packs are cached: plat/xdos.c)\n\n");
     timeline_head();
     write_out(1);
@@ -468,7 +674,9 @@ void perf_tick(unsigned long now)
     if (!started)
         return;
     if (now - t_line >= 5000000UL) {
+        unsigned long t0 = now_us();
         line_out(now);
+        count(PF_REPORT, now_us() - t0, 0);     /* (the gap lines' print: /M's own time) */
         if (now - t_period >= 30000000UL - 1000000UL)
             report(now, 0);
     }

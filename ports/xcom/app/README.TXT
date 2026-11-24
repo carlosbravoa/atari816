@@ -94,6 +94,8 @@ SEED n, KEYS file, LOG file, BENCH, ...). The port's own come first:
               its folder (and /PC:/XCOMPERF.TXT when the PC link is up):
               a line every 5 s, a block every 30 s, the totals at the end
   /MN NAME    the same, into NAME.TXT
+  /MG n       with /M: list each stop of the pointer longer than n ms (50)
+              with what the game did meanwhile
   /W          the pointer goes round in circles by itself (for /M runs)
   /Q n        end after n seconds (with /M)
   /E          end when the game first waits for input (after BENCH)

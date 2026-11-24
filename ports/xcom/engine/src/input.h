@@ -117,4 +117,8 @@ char __far * __cdecl rd_lastname(void);
 extern unsigned g_rd_mark;
 extern unsigned long g_rd_mark_bytes;
 
+/* Called while a KEYS script waits (WAIT), as a player's turn waits for input: the
+   player's turn's work in slices (bplayer.c, g_path_slice); 0 none. */
+extern void (*g_wait_hook)(void);
+
 #endif

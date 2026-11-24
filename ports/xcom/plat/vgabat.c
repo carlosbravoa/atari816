@@ -75,6 +75,11 @@ static u16 header(const unsigned char far *s, unsigned dest, unsigned *first, un
     return (u16)(s[0] * ROW + (u16)(dest << 2));
 }
 
+/* every 32nd sprite the platform's clock and input (plat_busy_tick: a full redraw is
+   100-250 ms of them) */
+static unsigned char spr_ticks;
+#define SPRITE_TICK() do { if (!(++spr_ticks & 31)) plat_busy_tick(); } while (0)
+
 /* ---- 0: masked (transparent spans), unclipped */
 void __cdecl blitc_masked(const void *spr, unsigned bufseg, unsigned dest)
 {
@@ -83,6 +88,7 @@ void __cdecl blitc_masked(const void *spr, unsigned bufseg, unsigned dest)
     unsigned first, rows, n, x, len;
     u16 o;
 
+    SPRITE_TICK();
     if (plat_bb_sprite(s, 0, dest, 0, 0xFFFF, 0, 0xFFFF))
         return;
     buf = BUF(bufseg);
@@ -141,6 +147,7 @@ void __cdecl blitc_masked_clip(const void *spr, unsigned bufseg, unsigned dest,
     u16 o;
 
     clip_vars(top, bottom, wmask);
+    SPRITE_TICK();
     if (plat_bb_sprite(s, 0, dest, vtop, vbot, lx, rx))
         return;
     buf = BUF(bufseg);
@@ -171,6 +178,7 @@ void __cdecl blitc_or(const void *spr, unsigned bufseg, unsigned dest)
     unsigned first, rows, x, n;
     u16 o;
 
+    SPRITE_TICK();
     if (plat_bb_sprite(s, 1, dest, 0, 0xFFFF, 0, 0xFFFF))
         return;
     buf = BUF(bufseg);
@@ -199,6 +207,7 @@ void __cdecl blitc_or_clip(const void *spr, unsigned bufseg, unsigned dest,
     u16 o;
 
     clip_vars(top, bottom, wmask);
+    SPRITE_TICK();
     if (plat_bb_sprite(s, 1, dest, vtop, vbot, lx, rx))
         return;
     buf = BUF(bufseg);
@@ -273,8 +282,14 @@ void __cdecl bufc_present_rect(unsigned bufseg, unsigned col, unsigned row, unsi
                a second for the whole view) */
             void hz_shade_rect(unsigned char far *d, const unsigned char far *s, unsigned w,
                                unsigned rows, const unsigned char far *tab);
-            hz_shade_rect(scr + d, buf + d, w, n, shade_tab);
-            (void)i;
+            PERF_T0(pt0);
+            /* (in blocks of 32 rows: the pointer between them) */
+            for (; n; n -= i, d = (u16)(d + i * ROW)) {
+                i = n < 32 ? n : 32;
+                hz_shade_rect(scr + d, buf + d, w, i, shade_tab);
+                plat_busy_tick();
+            }
+            PERF_ADD(PF_SHADE, pt0);
         }
 #else
         for (; n; n--, d = (u16)(d + ROW))
@@ -302,6 +317,7 @@ void __cdecl buf_shift(unsigned bufseg, unsigned plane_bytes, unsigned planes, i
 
     (void)plane_bytes;
     (void)planes;
+    PERF_N(PF_SHIFT, 0);
     if (plat_bb_shift(dx))
         return;
     if (dx > 0) {
