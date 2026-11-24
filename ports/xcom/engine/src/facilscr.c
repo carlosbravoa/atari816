@@ -250,22 +250,21 @@ static int okcancel(const char *l1, const char *l2)
     int ok = 0;
 
     uk_theme(T_PURPLE);
-    uk_fill(20, 60, 152, 80, 0);
-    uk_window(20, 60, 152, 80);
+    uk_popup(20, 60, 152, 80, UK_POP_NONE, 0);     /* (it does not pop up: no sound) */
     uk_center(20, 152, 75, UK_SMALL, 9, l1);
     uk_center(20, 152, 85, UK_SMALL, 9, l2);
     uk_button(36, 115, 44, 16, "OK", 0);
     uk_button(112, 115, 44, 16, "CANCEL", 0);
-    snd_window();
     for (;;) {
         unsigned key = input_key();
         if (key == KEY_LCLICK && g_mouse_y >= 115 && g_mouse_y < 131) {
-            if (g_mouse_x >= 36 && g_mouse_x < 80)
+            if (g_mouse_x >= 36 && g_mouse_x < 80) {
+                uk_press(36, 115, 44, 16, "OK");
                 key = 13;
-            else if (g_mouse_x >= 112 && g_mouse_x < 156)
+            } else if (g_mouse_x >= 112 && g_mouse_x < 156) {
+                uk_press(112, 115, 44, 16, "CANCEL");
                 key = 27;
-            if (key != KEY_LCLICK)
-                snd_button();
+            }
         }
         if ((key & 0xFF) == 13) {
             ok = 1;
@@ -355,11 +354,11 @@ static int buildable(int type)
    a bar). Strings and column offsets as literals: in this -zc section a
    named table that the menu points at would get an overlay vector. */
 static const UkMenu build_menu = {
-    UI_BG_FACIL, T_GOLD, UKS_LIST | UKS_POPUP, 192, 40, 128, 160, 198, 64, 114, 11, 9, 48,
+    UI_BG_FACIL, T_GOLD, UKS_LIST | UKS_POPUP | UKS_POPV, 192, 40, 128, 160, 198, 64, 114, 11, 9, 48,
     "Installation", NULL, NULL, "Esc=OK", 176, NULL
 };
 static const UkMenu build_menu_long = {
-    UI_BG_FACIL, T_GOLD, UKS_LIST | UKS_POPUP, 192, 40, 128, 160, 198, 64, 114, 11, 9, 48,
+    UI_BG_FACIL, T_GOLD, UKS_LIST | UKS_POPUP | UKS_POPV, 192, 40, 128, 160, 198, 64, 114, 11, 9, 48,
     "Installation", NULL, NULL, "Up=Up|Esc=OK|Down=Down", 176, NULL
 };
 

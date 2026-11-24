@@ -65,7 +65,7 @@ static void bases_extra(void)
 }
 
 static const UkMenu bases_menu = {
-    UI_BG_STORES, T_BLUE, UKS_LIST | UKS_POPUP, 20, 30, 280, 140, 28, 80, 248, 8, 8, 38,
+    UI_BG_STORES, T_BLUE, UKS_LIST | UKS_POPUP | UKS_POPNONE, 20, 30, 280, 140, 28, 80, 248, 8, 8, 38,
     NULL, NULL, TABS("\x82"), "Esc=Cancel", 146, bases_extra
 };
 

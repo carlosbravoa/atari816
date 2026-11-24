@@ -54,10 +54,13 @@ def detect_at(seq):
     return -1
 
 
-def opl(name, hostlog, emuerr, ticks, late_ms):
+def opl(name, hostlog, emuerr, ticks, late_ms, last=False):
     host, play = [], None
     for ln in open(hostlog):
-        if ln.startswith('# play') and play is None:
+        if ln.startswith('# play') and (play is None or last):
+            # (last: the run's last track, e.g. the geoscape's after the start menu's
+            # GMSTORY, which the player leaves at a moment of the real clock on the
+            # Atari816 and of the virtual one on the host: compared from its start)
             play = int(ln.split()[-1])
             host_play_at = len(host)
         elif not ln.startswith('#'):
@@ -74,6 +77,14 @@ def opl(name, hostlog, emuerr, ticks, late_ms):
     h0, e0 = detect_at(host), detect_at(emu)
     if h0 < 0 or e0 < 0:
         return fail(f'{name}: no OPL2 detection in the {"host" if h0 < 0 else "Atari816"} log')
+    if last:
+        # the track's first 64 writes found in the Atari816's log
+        want = [w[:2] for w in host[host_play_at:host_play_at + 64]]
+        at = next((i for i in range(e0, len(emu) - len(want))
+                   if [w[:2] for w in emu[i:i + len(want)]] == want), None)
+        if at is None:
+            return fail(f'{name}: the last track\'s start is not in the Atari816\'s writes')
+        h0, e0 = host_play_at, at
     if ticks:
         end = next((i for i, w in enumerate(host) if w[2] > play + ticks), None)
         if end is None:
@@ -137,7 +148,11 @@ def sfx_names():
              'die sectoid', 'die snakeman', 'die muton', 'die ethereal', 'die male',
              'die female', 'door', 'step', 'throw', 'geo popup', 'craft cannon',
              'craft missile', 'ufo fire', 'ufo hit', 'ufo crash', 'craft explode',
-             'button', 'window 1', 'window 2']
+             'button', 'window 1', 'window 2',
+             # pack format 6 (engine/tools/sound.py)
+             'step 1a', 'step 1b', 'step 2b', 'step 3b', 'step 5a', 'step 5b', 'step 6a',
+             'step 6b', 'fly', 'explosion big', 'ufo door', 'drop', 'reload', 'die mech',
+             'rocket', 'blaster']
     n = struct.unpack('<H', d[4:6])[0]
     out = {}
     for i in range(n):
@@ -197,7 +212,13 @@ def sfx(name, hostsb, console, emuerr, minimum=0, expect=None):
         return fail(f'{name}: Lau starts {lau[:6]}... are not the effects\' (samples, pitch) {want[:6]}...')
     if any(v < 0 for v in voices):
         return fail(f'{name}: an effect found no Lau voice')
-    if expect is not None:
+    if expect is not None and expect.startswith('has:'):
+        # the effects that must be among those started (names, comma separated)
+        miss = [w for w in expect[4:].split(',') if not any(w in s[0].split('/') for s in starts)]
+        if miss:
+            return fail(f'{name}: no {", ".join(miss)} among the effects started '
+                        f'({", ".join(s[0] for s in starts)})')
+    elif expect is not None:
         got = ''.join('B' if s[0] == 'button' else 'W' if s[0] in ('window 1', 'window 2', 'geo popup')
                       else '?' for s in starts)
         if got != expect:
@@ -248,7 +269,7 @@ def wav(name, path, lo, hi, minrms):
 def main():
     a = sys.argv[1:]
     if a[0] == 'opl':
-        opl(a[1], a[2], a[3], int(a[4]), float(a[5]))
+        opl(a[1], a[2], a[3], int(a[4]), float(a[5]), len(a) > 6 and a[6] == 'last')
     elif a[0] == 'sfx':
         sfx(a[1], a[2], a[3], a[4], int(a[5]) if len(a) > 5 else 0, a[6] if len(a) > 6 else None)
     elif a[0] == 'quieter':

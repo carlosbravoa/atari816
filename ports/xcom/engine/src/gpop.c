@@ -23,9 +23,10 @@
 #define WHITE       15
 #define LIST_ROWS   6
 
-typedef struct { int x, y, w, h; unsigned char key, key2; } Hit;
+typedef struct { int x, y, w, h; unsigned char key, key2; char s[28]; } Hit;     /* s: the label, drawn pressed */
 
-static void win(unsigned bg, int x, int y, int w, int h)
+/* kind: how it opens (uik.h UK_POP_*, as OpenXcom's state's window) */
+static void win(unsigned bg, int x, int y, int w, int h, int kind)
 {
     int pw, ph;
 
@@ -34,12 +35,7 @@ static void win(unsigned bg, int x, int y, int w, int h)
     uk_save(0, 200);
     if (!(uk_pic_box(bg, &pw, &ph) && pw == 320 && ph == 200))
         bg = UI_BG_MENU;
-    if (uk_pic_clean(bg))
-        uk_restore(x, y, w, h);
-    else
-        uk_fill(x, y, w, h, 0);
-    uk_window(x, y, w, h);
-    snd_window();
+    uk_popup(x, y, w, h, kind, uk_pic_clean(bg) ? -1 : 0);
 }
 
 static void btn(Hit *b, int x, int y, int w, int h, int key, int key2, const char *s)
@@ -50,6 +46,8 @@ static void btn(Hit *b, int x, int y, int w, int h, int key, int key2, const cha
     b->h = h;
     b->key = (unsigned char)key;
     b->key2 = (unsigned char)key2;
+    strncpy(b->s, s, sizeof b->s - 1);
+    b->s[sizeof b->s - 1] = 0;
     uk_button(x, y, w, h, s, 0);
 }
 
@@ -66,8 +64,7 @@ static int wait2(const Hit *b, void (*scroll)(int))
             for (i = 0; i < 2; i++)
                 if (g_mouse_x >= b[i].x && g_mouse_x < b[i].x + b[i].w && g_mouse_y >= b[i].y
                     && g_mouse_y < b[i].y + b[i].h) {
-                    snd_button();
-                    uk_button(b[i].x, b[i].y, b[i].w, b[i].h, "", 1);
+                    uk_press(b[i].x, b[i].y, b[i].w, b[i].h, b[i].s);
                     return i;
                 }
             continue;
@@ -124,7 +121,7 @@ int gpop_research(int topic)
     Hit b[2];
     int r;
 
-    win(UI_BG_RESEARCH, 48, 30, 224, 140);
+    win(UI_BG_RESEARCH, 48, 30, 224, 140, UK_POP_BOTH);
     uk_center(48, 224, 70, UK_BIG, g_uk->text, "Research Completed");
     big_text(48, 224, 96, g_topics[topic].name, 1);
     btn(&b[0], 64, 146, 80, 16, 27, 'o', "OK");
@@ -159,7 +156,7 @@ static int possible(unsigned bg, const char *title, const char *alloc, char (*ln
     Hit b[2];
     int r;
 
-    win(bg, 16, 10, 288, 180);
+    win(bg, 16, 10, 288, 180, UK_POP_NONE);
     uk_center(16, 288, 20, UK_BIG, g_uk->text, title);
     btn(&b[0], 80, 149, 160, 14, 27, 'o', "OK");
     btn(&b[1], 80, 165, 160, 14, 13, 'a', alloc);
@@ -236,7 +233,7 @@ int gpop_production(int kind, int id, int base)
     Hit b[2];
     int n, y, r;
 
-    win(UI_BG_MANUF, 32, 20, 256, 160);
+    win(UI_BG_MANUF, 32, 20, 256, 160, UK_POP_BOTH);
     n = big_text(37, 246, 0, head, 0) + big_text(37, 246, 0, what, 0) + 2
         + (kind == POP_PROD_DONE || kind == POP_BUILT);
     y = 35 + (110 - n * 16) / 2;
@@ -263,7 +260,7 @@ int gpop_arrivals(int k)
     char t[24];
     int i, n = 0, r, last = 0;
 
-    win(UI_BG_REPORT, 0, 8, 320, 184);
+    win(UI_BG_REPORT, 0, 8, 320, 184, UK_POP_BOTH);
     uk_center(0, 320, 18, UK_BIG, g_uk->title, "Items Arriving");
     uk_text(16, 34, UK_SMALL, g_uk->text, "ITEM");
     uk_text(152, 34, UK_SMALL, g_uk->text, "QUANTITY");

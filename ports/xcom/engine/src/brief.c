@@ -42,6 +42,7 @@ void brief_show(const char *pak, const char *craft)
     int k = kind_of(pak), n, dy;
     char *buf, *title, line[40];
 
+    snd_brief(k);               /* BriefingState's music */
     uk_open();
     if (!uk_read(UI_BRIEFING, k * 2, off, 4) || (n = off[1] - off[0]) < 5
         || (buf = malloc(n)) == NULL) {
@@ -89,7 +90,7 @@ void brief_show(const char *pak, const char *craft)
                                   || g_mouse_y >= 182))
             continue;
         if (key == KEY_LCLICK)
-            snd_button();
+            uk_press(100, 164, 120, 18, "OK");
         break;
     }
     free(buf);

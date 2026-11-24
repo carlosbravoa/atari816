@@ -15,6 +15,9 @@
 +500 click
 +3000 shot
 +300 {enter}
+# the base's name (BaseNameState), Enter
++3000 shot
++300 HQ{enter}
 +4000 shot
 # the INTERCEPT / BASES buttons sit in rows 0-21: the wheel shows them (rows 0-179)
 +300 wheel 2

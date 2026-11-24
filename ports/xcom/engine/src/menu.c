@@ -221,7 +221,7 @@ static const UkMenu start_menu = {
     "X-COM", NULL, NULL, NULL, 0
 };
 static const UkMenu diff_menu = {
-    UI_BG_MENU, T_GREEN, UKS_BUTTONS | UKS_CLEAR, 64, 10, 192, 180, 80, 50, 160, 5, 24, 20,
+    UI_BG_MENU, T_GREEN, UKS_BUTTONS | UKS_CLEAR | UKS_POPV, 64, 10, 192, 180, 80, 50, 160, 5, 24, 20,
     "Difficulty", NULL, NULL, NULL, 0
 };
 /* The geoscape's options window as DOS 1.4 has it (PauseState from the

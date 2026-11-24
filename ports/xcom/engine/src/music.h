@@ -7,7 +7,9 @@
    the timer interrupt. */
 
 enum { MUS_GEO1, MUS_GEO2, MUS_TACTIC, MUS_INTER, MUS_WIN, MUS_LOSE, MUS_MARS,
-       MUS_INTRO1, MUS_INTRO2, MUS_INTRO3, N_MUS };
+       MUS_INTRO1, MUS_INTRO2, MUS_INTRO3,
+       MUS_STORY, MUS_DEFEND, MUS_ENBASE, MUS_NEWMAR,  /* pack format 6 */
+       N_MUS };
 
 extern int g_opl;               /* OPL2 found at 388h */
 

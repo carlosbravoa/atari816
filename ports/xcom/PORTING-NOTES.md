@@ -1378,6 +1378,53 @@ kit has it as `ARGS/6SMOOTH.ARG` (PSMOOTH.KEY) for the board.
 - /M itself: a clock reading is a syscall (0.1 ms); the gap lines cost nothing until
   written.
 
+## 4i. Closer to the original (24 November 2026)
+
+What the DOS game does, from OpenXcom's source and rules (it reproduces the DOS game and
+names every sound, timing and window) and ufopaedia.org's list of the sound files; each
+change is in the engine (`engine/FORK.md` "Closer to the original": the DOS build has it
+too, nothing of it behind `XCOM_PORT` but the sample cache's size). The list of what is
+still different, and how complete the game is against DOS: `engine/FORK.md`
+"Differences from the original game".
+
+| Difference | DOS (source) | Now | Tested |
+| --- | --- | --- | --- |
+| Windows appeared at once | Window::popup: the frame grows from the centre, 20 steps, the contents after it; across, down or both by window (`new Window(..., POPUP_*)` in each state) | `uk_popup` (20 steps of 14 ms, 0.28 s, the pointer alive), each window's kind; the windows that do not pop up in DOS open at once and silently (10 had the pop-up sound) | `make test`'s pictures (a step is a picture when a poll falls in it), sndui's sound order |
+| A menu popped up and sounded again after a window over it closed | OpenXcom's states: the one under is drawn again, not opened | the open pop-up menus kept as a stack (`uk_menu`), forgotten by a full screen | sndui: Load Saved Game's list and CANCEL: the start menu again without a sound |
+| Buttons did not press | TextButton: pressed (inverted) while the button is held, the click on press, the action on release | `uk_press` / `uk_held`: every bottom row, button columns, the geoscape's pop-ups and its six function buttons, the base, research, production, UFOpaedia, report, briefing screens; a KEYS script's `HOLD x y n` holds it | the pressed picture by HOLD (checked by eye), sndui |
+| The first base was named after its region | BuildNewBaseState's window, then BaseNameState (192 x 80, "Base Name?", OK only with a name, no cancel) | `uk_name_box`, `base_site_window`; Build New Base asks the same | every new-game script types HQ (`'H 'Q ENTER`; the real input `HQ{enter}` through Horizon's keyboard, its capitals; the app's test) and the LOG's `NAME` |
+| A UFO's detection played an alert that held the window's pop-up sound off | no alert: UfoDetectedState pops up with one of the three pop-up sounds (GEO.CAT 1-3; upstream's alert is 3) | the alert removed | the dogfight and mission runs (detections; their LOG and pictures on both builds); no sound test records them |
+| Explosions sounded as the snakeman's slither | SOUND1.CAT 0 is the slither (ufopaedia.org; OpenXcom's snakeman moveSound 0); explosions are 2 (power up to 80) and 5 | 2 and 5 by power | the battle runs with grenades and HE (bsave, soak) on both builds; no sound test records them |
+| One footstep for every floor | Tile::getFootstepSound: the MCD's Footstep byte, WALK_OFFSET 22 + 2 f at the walk's phase 3 of 8 and + 1 at phase 7; the flying warble (15) for fliers | the byte in the mission packs ("XFS1"), both halves of each step on the walk's own pace, the warble for floaters and for fliers in the air | sndbat: the craft's metal floor (step 1a, 1b), then the ground (step 2b), host and Atari816 block for block |
+| Silent: UFO doors, the inventory, reloads, throws (upstream had the sample, unused), machines' deaths; the rifle's shot for the autocannon, rocket and blaster launchers | SLIDING_DOOR_OPEN 20, ITEM_DROP 38, ITEM_RELOAD 17, ITEM_THROW 39, deathSound 23, fireSound 12 / 52 / 53 | all of them | make test's battle runs (the same LOG and pictures on both builds) |
+| Music: GMGEO1 in the start menu, none in the briefing, GMMARS in Cydonia's battle, GMWIN / GMLOSE after every battle, GMGEO2 never | GMSTORY (mainMenu, once), the briefing's (GMDEFEND; GMENBASE for terror sites and base defence; GMNEWMAR for Cydonia), GMTACTIC in every battle, GMMARS in the debriefing (DEBRIEF_MUSIC_GOOD / _BAD), GMGEO1 in the first month then GMGEO1 or GMGEO2 at random; GMWIN / GMLOSE only at the game's end | as DOS | sound.sh: the geoscape's track compared from its start (after GMSTORY, found in the task's writes) |
+
+**Pack format 6** (`engine/src/packver.h`): SOUNDS.PAK 42 effects (16 new: 8 footsteps, the
+warble, the large explosion, the UFO door, drop, reload, the machines' death, rocket,
+blaster; the small explosion now entry 2), MUSIC.PAK 14 tracks (GMSTORY 2,314 bytes,
+GMDEFEND 2,211, GMENBASE 2,027, GMNEWMAR 1,470), mission packs "XFS1" (a byte a MCD
+record). **The card's packs must be made again** (`make data GAME=...`, then the card's
+`/APPS/XCOM/*.PAK` and `PACKS.VER`): format 5 packs stop the program with its message.
+
+**Memory.** The sound's 64 KB UMB (65,520 bytes): the effects 59,448 (46,154 before),
+the battle's GMTACTIC 4,797 after them: 1,275 bytes left in a battle. The geoscape's track
+(GMGEO1 14,058 bytes, GMGEO2 23,088) no longer fits beside the effects: it goes to
+conventional memory in the geoscape (`music: track 0, 14058 bytes, 281 KB free`; DOS with
+a 64 KB UMB the same, kept only while 15 KB stay free, GMGEO1 when GMGEO2 does not fit);
+the battle's track stays in the UMB. On the Atari816 the decoded samples take about 119 KB
+of the cache's 3 far banks (92 KB before), 42 of its 48 entries (`horizon/hz_snd.c`
+NCACHE, 32 before). What is still missing for lack of UMB room (the units' own move
+sounds, melee, AP hits, more screams: about 8 KB) is listed in FORK.md.
+
+**Tests changed.** The new-game scripts type the base's name; `tests/runs.md5` (288
+pictures, 264 before) and `tests/runs-long.md5` (103) written again after a look at the
+pictures (the windows' steps, the name window, the site window); sound.sh: sndui starts
+with Load Saved Game's list and CANCEL and expects 19 effects in order
+(`WBWBBWBWBBWBBWBWBBW`), runs NOMUSIC (the start menu's GMSTORY is as loud as the shots),
+sndbat must have the footsteps; soundcheck.py knows the new effects' names. The
+Makefile's `make -j app` race fixed (XCOM.HZA's folder after `builds`: two sub-makes wrote
+the same `build/sum/` files).
+
 ## 5. The plan
 
 Principle: **upstream's code runs unchanged** on a model of the machine it was written for;
@@ -1431,6 +1478,7 @@ Risks:
 | per-cell night lights (OpenXcom's lighting, a table per level at the present) | flares and fires lighting their area | 1 day |
 | the FLI's runs in assembly | the intro's explosion scene (1.1 s behind at worst) | 0.5 day |
 | report upstream: faults 1, 2, 3, 5, 6, 8 above, the GOG data, voxcheck.py | | |
+| the rest of the differences from DOS (walk frames, explosions, UFO doors, the 5-second speed, the battle's unit stats, terror units' abilities, the missing samples) | `engine/FORK.md` "Differences from the original game", with estimates | 0.5-5 days each |
 
 ## What the user needs to provide or decide
 

@@ -115,15 +115,14 @@ static void draw_rows(const Slots *s)
 static void draw_screen(int saving)
 {
     uk_invalidate();                /* uk_menu draws its screen again after this one */
-    uk_screen(UI_BG_MENU, T_GREEN);
-    uk_window(0, 0, 320, 200);
+    uk_theme(T_GREEN);
+    uk_popup_bg(UI_BG_MENU, 0, 0, 320, 200, UK_POP_BOTH);  /* ListGamesState's window */
     uk_center(0, 320, 8, UK_BIG, g_uk->title,
               saving ? "Select Save Position" : "Select Game to Load");
     uk_text(NAME_X, 24, UK_SMALL, g_uk->text, "Name");
     uk_text(TIME_X, 24, UK_SMALL, g_uk->text, "Time");
     uk_text(DATE_X, 24, UK_SMALL, g_uk->text, "Date");
     uk_button(BTN_X, BTN_Y, 80, 16, "CANCEL", 0);
-    snd_window();                       /* (ListGamesState's window pops up) */
     if (g_video == VIDEO_CGA) {
         /* Four colours: the picture under the rows at half strength, or
            the text would not stand out (as uk_menu's lists). */
@@ -170,7 +169,7 @@ int sv_list(int saving, char *name)
         if (key == KEY_LCLICK) {
             if (g_mouse_x >= BTN_X && g_mouse_x < BTN_X + 80 && g_mouse_y >= BTN_Y
                 && g_mouse_y < BTN_Y + 16) {
-                snd_button();
+                uk_press(BTN_X, BTN_Y, 80, 16, "CANCEL");
                 break;                          /* CANCEL */
             }
             r = row_at(g_mouse_x, g_mouse_y);

@@ -238,7 +238,7 @@ static int craft_info(int k)
             }
             if (key == KEY_LCLICK) {
                 if (hit(128, 168, 64, 24)) {
-                    snd_button();
+                    uk_press(128, 168, 64, 24, "OK");
                     uk_close();
                     return 0;
                 }

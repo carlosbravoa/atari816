@@ -235,7 +235,9 @@ PACKFILES = $(wildcard data/packs/*.PAK) data/packs/PACKS.VER
 build/XCOM.ICN: app/XCOM-ICON.txt
 	@mkdir -p build
 	$(PYTHON) $(HORIZON)/tools/mkicons.py $< $@ /dev/null
-build/app/XCOM/APP.INF: $(APPFILES) $(SDK)/tools/hzapp.py FORCE
+# (after builds, not beside it: XCOM.PRG and MUSD.PRG are sub-makes that write the same
+# build/sum/ files, which two at once under make -j raced on)
+build/app/XCOM/APP.INF: builds $(filter-out XCOM.PRG MUSD.PRG,$(APPFILES)) $(SDK)/tools/hzapp.py FORCE
 	rm -rf build/app && mkdir -p build/app/XCOM
 	cp XCOM.PRG MUSD.PRG build/XCOM.ICN app/README.TXT build/app/XCOM/
 	grep -v '^#' app/APP.INF > build/app/XCOM/APP.INF

@@ -19,7 +19,7 @@ with Python 3 and PyYAML.
      This runs XCOMCONV, the engine's converter, and writes data/packs/.
   2. Copy onto the card, into this app's folder /APPS/XCOM/:
          data/packs/PACKS.VER
-         data/packs/*.PAK          (5 files, 290 KB)
+         data/packs/*.PAK          (4 files, 316 KB)
          data/packs/VGA/           (the whole folder, 82 files, 18 MB)
      The EGA and CGA folders are not needed.
      (Or, on the PC: make card -- it builds build/card/APPS/XCOM/ with the
@@ -27,9 +27,9 @@ with Python 3 and PyYAML.
 
 Without the data the program says so and ends. Updating the app keeps the
 data and your saves (the Installer keeps files that are not in the archive).
-When a new version needs new packs (PACKS.VER names their format: 5 since
-the buttons' and windows' sounds came in), the program says so on its
-screen: make them again (make data) and copy them over the old ones.
+When a new version needs new packs (PACKS.VER names their format: 6 since
+the footsteps and the battle's other sounds came in), the program says so
+on its screen: make them again (make data) and copy them over the old ones.
 
 
 2. PLAYING

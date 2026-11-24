@@ -9,8 +9,10 @@
 #ifndef PACKVER_H
 #define PACKVER_H
 
-/* 5: SOUNDS.PAK has the interface's three effects (the fork, engine/FORK.md) */
-#define PACK_FORMAT_VERSION 5
+/* 5: SOUNDS.PAK has the interface's three effects (the fork, engine/FORK.md)
+   6: SOUNDS.PAK the battle's footsteps and other samples, the small explosion
+      SOUND1.CAT 2 (not 0, the slither); mission packs "XFS1" (footsteps) */
+#define PACK_FORMAT_VERSION 6
 
 /* PACKS.VER holds PACK_MARKER_TEXT, the number and a line end. */
 #define PACK_MARKER_FILE "PACKS.VER"

@@ -142,7 +142,7 @@ for v in input late5 wrap; do
              wrap) what=", the microsecond clock wrapping during the game (71.6 minutes)" ;; esac
   L=$O/$v/card/GAMES/XCOM/INPUT.TXT
   okl=1
-  for w in "new game, difficulty Beginner" "X-COM base operational" "BASE menu: 11 buttons" \
+  for w in "new game, difficulty Beginner" "NAME HQ" "X-COM base operational" "BASE menu: 11 buttons" \
            "GRAPHS UFO areas"; do
     grep -q "$w" $L 2>/dev/null || { bad "the real input ($v): no '$w' in INPUT.TXT"; okl=0; }
   done
@@ -150,7 +150,7 @@ for v in input late5 wrap; do
   if [ $v = wrap ] && ! grep -aq "xcom: the microsecond clock wrapped" $O/$v/console.txt; then
     bad "the real input (wrap): the clock did not wrap during the run"; okl=0
   fi
-  [ $okl = 1 ] && ok "the real input (mouse and keys through Horizon): new game, base placed, base screen, back, graphs$what"
+  [ $okl = 1 ] && ok "the real input (mouse and keys through Horizon): new game, base placed and named, base screen, back, graphs$what"
 done
 fi
 

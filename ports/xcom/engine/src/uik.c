@@ -13,6 +13,7 @@
 #include "hud.h"
 #include "input.h"
 #include "sound.h"
+#include "timer.h"
 #include "uik.h"
 
 #define SAVE_OFF    0x2000u     /* EGA: the clean screen (page 1) */
@@ -656,6 +657,96 @@ void uk_button(int x, int y, int w, int h, const char *label, int pressed)
 }
 
 /* ------------------------------------------------------------------ */
+/* Windows that pop up, buttons that press (uik.h) */
+
+/* OpenXcom's Window: POPUP_SPEED 0.05 a step, a step a frame; here a frame
+   of the VGA's 70 Hz (DOS's pace): 20 steps, 0.28 s. */
+#define POP_STEPS   20
+#ifndef POP_STEP_MS
+#define POP_STEP_MS 14
+#endif
+
+/* The pointer while a window opens or a button is held: a click waits for
+   input_key (input_ready keeps it). A KEYS script's clicks come from its
+   file: the mouse is only looked at (the test runs' pictures are taken
+   there, plat.h). */
+static void ui_poll(void)
+{
+    if (g_script)
+        mouse_poll();
+    else
+        input_ready();
+}
+
+static void pop_inside(int x, int y, int w, int h, int fill)
+{
+    if (fill >= 0)
+        uk_fill(x, y, w, h, fill);
+    else
+        uk_restore(x, y, w, h);
+}
+
+void uk_popup(int x, int y, int w, int h, int kind, int fill)
+{
+    /* the growing frame's left edge on whole bytes (EGA 8 pixels, CGA 4), where
+       the inside's copy starts (uk_restore) */
+    int g = g_vga ? 1 : g_video == VIDEO_EGA ? 8 : 4, k;
+    unsigned long t0;
+
+    if (kind != UK_POP_NONE) {
+        snd_window();                   /* Window::popup's first step */
+        t0 = timer_read();
+        for (k = 1; k < POP_STEPS; k++) {
+            int sx = x, sy = y, sw = w, sh = h;
+            if (kind != UK_POP_V) {
+                sx = x + (w - (int)((long)w * k / POP_STEPS)) / 2 / g * g;
+                sw = w - 2 * (sx - x);
+            }
+            if (kind != UK_POP_H) {
+                sy = y + (h - (int)((long)h * k / POP_STEPS)) / 2;
+                sh = h - 2 * (sy - y);
+            }
+            /* (each step covers the last: the frame only grows) */
+            if (sw >= 10 && sh >= 10) {
+                pop_inside(sx + 5, sy + 5, sw - 10, sh - 10, fill);
+                uk_window(sx, sy, sw, sh);
+            }
+            ui_poll();
+            timer_pace(t0, k * POP_STEP_MS, 0);
+        }
+    }
+    pop_inside(x, y, w, h, fill);
+    uk_window(x, y, w, h);
+}
+
+void uk_popup_bg(unsigned bg, int x, int y, int w, int h, int kind)
+{
+    uk_save(0, 200);
+    uk_popup(x, y, w, h, kind, bg != UK_NOBG && pic(bg, 0, 0, 1) ? -1 : 0);
+}
+
+void uk_press(int x, int y, int w, int h, const char *label)
+{
+    snd_button();                       /* TextButton::mousePress */
+    uk_button(x, y, w, h, label, 1);
+    uk_held();
+    uk_button(x, y, w, h, label, 0);    /* TextButton::mouseRelease, then the click */
+}
+
+void uk_held(void)
+{
+    unsigned long t0;
+
+    for (;;) {
+        t0 = timer_read();
+        if (!input_held(0))
+            break;
+        ui_poll();
+        timer_pace(t0, 20, 0);
+    }
+}
+
+/* ------------------------------------------------------------------ */
 /* Text */
 
 static void glyph_ega(int x, int y, const unsigned char far *g, int h, int bpr, int c)
@@ -941,6 +1032,7 @@ void uk_restore(int x, int y, int w, int h)    /* (VGA) */
 
 void uk_screen(unsigned bg, int theme)
 {
+    uk_popup_reset();                   /* a screen of its own: no window is open */
     mouse_hide();
     uk_theme(theme);
     if (bg == UK_NOBG || !uk_pic(bg, 0, 0))
@@ -1013,8 +1105,7 @@ static int box(const char *s, const char *spec, int *bx, int *bw, int *top, int 
     int starts[4], lens[4], n = wrap(s, BOX_W - 24, starts, lens, 4), i;
     int h = 20 + n * 10 + (spec ? 20 : 12), y = (200 - h) / 2;
 
-    uk_fill(BOX_X, y, BOX_W, h, 0);
-    uk_window(BOX_X, y, BOX_W, h);
+    uk_popup(BOX_X, y, BOX_W, h, UK_POP_BOTH, 0);      /* (ErrorMessageState and the like) */
     for (i = 0; i < n; i++) {
         char line[41];
         memcpy(line, s + starts[i], lens[i]);
@@ -1027,7 +1118,6 @@ static int box(const char *s, const char *spec, int *bx, int *bw, int *top, int 
     *height = h;
     if (spec)
         uk_buttons(spec, *bx, *bw, y + h - 22);
-    snd_window();
     return y + h - 22;
 }
 
@@ -1095,6 +1185,72 @@ int uk_edit(const char *prompt, char *name, int max)
     }
     uk_close();
     return ok;
+}
+
+/* BaseNameState (OpenXcom, as DOS): a window of 192 x 80 at 32, 60 that pops
+   up on BACK01, "Base Name?" in the big font, the name typed in the big font
+   at 59, 94 (127 wide) after a blinking caret, OK (162 x 12 at 47, 118) shown
+   only while there is a name; Enter, Esc or OK end it when there is one.
+   Nothing cancels it. The screen under it is left as the window: the caller
+   draws its own again. */
+int uk_name_box(const char *title, char *name, int max)
+{
+    int len = strlen(name), shown_ok = -1, caret = 1;
+    unsigned long t0;
+
+    uk_open();
+    uk_theme(T_GREEN);
+    uk_popup_bg(UI_BG_MENU, 32, 60, 192, 80, UK_POP_BOTH);
+    uk_center(37, 182, 70, UK_BIG, g_uk->title, title);
+    for (;;) {
+        unsigned key;
+        int ch;
+        uk_restore(59, 94, 127 + 8, 17);
+        uk_text(uk_text(59, 94, UK_BIG, g_uk->title, name), 94, UK_BIG, g_uk->title, caret ? "|" : "");
+        if (shown_ok != (len > 0)) {
+            shown_ok = len > 0;
+            if (shown_ok)
+                uk_button(47, 118, 162, 12, "OK", 0);
+            else
+                uk_restore(47, 118, 162, 12);
+        }
+        /* TextEdit's caret blinks every 0.1 s while it waits */
+        t0 = timer_read();
+        while (!input_ready())
+            if (timer_read() - t0 >= 100 * 1193UL) {
+                caret ^= 1;
+                break;
+            }
+        if (!input_ready())
+            continue;
+        caret = 1;
+        key = input_key();
+        ch = key & 0xFF;
+        if (key == KEY_LCLICK) {
+            if (len && g_mouse_x >= 47 && g_mouse_x < 209 && g_mouse_y >= 118 && g_mouse_y < 130) {
+                uk_press(47, 118, 162, 12, "OK");
+                break;
+            }
+            continue;
+        }
+        if (IS_CLICK(key))
+            continue;
+        if ((ch == 13 || ch == 27) && len)
+            break;
+        if (ch == 8 && len > 0)
+            name[--len] = 0;
+        else if (ch >= ' ' && ch < 127 && len < max) {
+            name[len] = (char)ch;
+            name[len + 1] = 0;
+            if (uk_width(UK_BIG, name) + 8 <= 127)
+                len++;
+            else
+                name[len] = 0;
+        }
+    }
+    log_printf("NAME %s", name);
+    uk_close();
+    return 1;
 }
 
 /* ------------------------------------------------------------------ */
@@ -1170,7 +1326,13 @@ unsigned uk_buttons_key(const char *spec, int x, int w, int y)
             int klen, llen;
             const char *label;
             const char *k = spec_item(spec, i, &klen, &label, &llen);
-            snd_button();               /* (every bottom button's click comes here once) */
+            char t[32];
+            if (llen > 31)
+                llen = 31;
+            memcpy(t, label, llen);
+            t[llen] = 0;
+            /* (every bottom button's click comes here once: its sound, pressed) */
+            uk_press(x + i * (bw + 8), y, bw, g_uk_bh, t);
             return uk_key_named(k, klen);
         }
     return 0;
@@ -1182,6 +1344,44 @@ static char shown_info[48];
 void uk_invalidate(void)
 {
     shown = NULL;
+}
+
+/* The pop-up menus open now, the first under the others (OpenXcom's states
+   over the screen): a menu drawn again that is among them is under a window
+   that has closed: it does not open again, and the ones over it are gone. */
+#define N_POPPED    8
+static const UkMenu *popped[N_POPPED];
+static int n_popped;
+
+void uk_popup_reset(void)
+{
+    n_popped = 0;
+}
+
+/* How m's window opens (uik.h UKS_POP*). */
+static int pop_kind(const UkMenu *m)
+{
+    int i;
+
+    for (i = 0; i < n_popped; i++)
+        if (popped[i] == m) {
+            n_popped = i + 1;
+            return UK_POP_NONE;
+        }
+    if (n_popped == N_POPPED) {
+        memmove(popped, popped + 1, sizeof popped - sizeof popped[0]);
+        n_popped--;
+    }
+    popped[n_popped++] = m;
+    switch (m->style & UKS_POPNONE) {
+    case UKS_POPH:
+        return UK_POP_H;
+    case UKS_POPV:
+        return UK_POP_V;
+    case UKS_POPNONE:
+        return UK_POP_NONE;
+    }
+    return UK_POP_BOTH;
 }
 
 static int win_x(const UkMenu *m)
@@ -1278,16 +1478,15 @@ int uk_menu(const UkMenu *m, const char *info, char lines[][41], int n, int sel,
             hud_clear_rows(0, 25);
         }
         if (m->style & (UKS_CLEAR | UKS_POPUP)) {
-            /* The picture only inside the window. */
-            uk_save(0, 200);
-            if (m->bg != UK_NOBG && pic(m->bg, 0, 0, 1))
-                uk_restore(m->wx, m->wy, m->ww, m->wh);
-            else
-                uk_fill(m->wx, m->wy, m->ww, m->wh, 0);
-        } else
+            /* The picture only inside the window, which pops up (the first time). */
+            int kind = pop_kind(m);
+            if (m->ww)
+                uk_popup_bg(m->bg, m->wx, m->wy, m->ww, m->wh, kind);
+        } else {
             uk_screen(m->bg, m->theme);
-        if (m->ww)
-            uk_window(m->wx, m->wy, m->ww, m->wh);
+            if (m->ww)
+                uk_window(m->wx, m->wy, m->ww, m->wh);
+        }
         if (m->title)
             uk_center(wx, ww, m->ty, UK_BIG, g_uk->title, m->title);
         if (m->header)
@@ -1310,8 +1509,6 @@ int uk_menu(const UkMenu *m, const char *info, char lines[][41], int n, int sel,
         uk_save(0, 200);
         shown = m;
         shown_info[0] = 0;
-        if (m->style & (UKS_CLEAR | UKS_POPUP))
-            snd_window();               /* a window over the screen (Window::popup) */
     } else
         uk_theme(m->theme);
     for (;;) {
@@ -1363,8 +1560,17 @@ int uk_menu(const UkMenu *m, const char *info, char lines[][41], int n, int sel,
             if (g_mouse_y >= m->ly && r < m->rows && g_mouse_x >= hx0
                 && g_mouse_x < hx1 && top + r < n) {
                 g_uk_row = top + r;
-                if (m->style & UKS_BUTTONS)
-                    snd_button();       /* a column of buttons (text rows: none) */
+                if (m->style & UKS_BUTTONS) {
+                    /* a column of buttons (text rows: no sound): pressed while held */
+                    int bh = m->rowh > 21 ? 20 : m->rowh - 1, y = m->ly + r * m->rowh;
+                    if (m->style & UKS_REPEAT)
+                        snd_button();
+                    else {
+                        uk_press(m->lx, y, m->lw, bh, lines[top + r]);
+                        if (top + r == sel)
+                            uk_button(m->lx, y, m->lw, bh, lines[top + r], 1);
+                    }
+                }
                 if (on_key == NULL || top + r == sel || (m->style & UKS_CLICK))
                     act = 1;
                 sel = top + r;

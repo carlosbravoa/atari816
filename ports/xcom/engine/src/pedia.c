@@ -261,7 +261,13 @@ static int draw_page(unsigned k, int page)
     bg = d.layout == PL_PICTURE ? d.pic : d.layout == PL_ITEM ? UI_BG_PEDIA_ITEM
        : d.layout == PL_UFO ? UI_BG_PEDIA_UFO : d.layout == PL_FACIL ? UI_BG_PEDIA_FACIL
        : UI_BG_PEDIA_TEXT;
-    uk_screen(bg, T_GREEN);
+    /* (uk_screen's picture, but the windows under the article stay open: back in the
+       list and the start window, neither opens again) */
+    mouse_hide();
+    uk_theme(T_GREEN);
+    if (!uk_pic(bg, 0, 0))
+        hud_clear_rows(0, 25);
+    uk_theme(T_GREEN);
     if (d.layout == PL_ITEM)
         uk_pic_in(d.pic, 160, 6);
     if (d.layout == PL_UFO)
@@ -339,8 +345,9 @@ static void show_page(unsigned k)
             if (g_mouse_y < BTN_Y || g_mouse_y >= BTN_Y + 14 || g_mouse_x < 5 || g_mouse_x >= 105)
                 key = g_mouse_y > BTN_Y + 14 ? 0x5100 : 0;
             else {
-                key = g_mouse_x < 38 ? 0x011B : g_mouse_x < 73 ? 0x4B00 : 0x4D00;
-                snd_button();
+                int b = g_mouse_x < 38 ? 0 : g_mouse_x < 73 ? 1 : 2;
+                key = b == 0 ? 0x011B : b == 1 ? 0x4B00 : 0x4D00;
+                uk_press(5 + 35 * b, BTN_Y, 30, 14, b == 0 ? "OK" : b == 1 ? "<<" : ">>");
             }
         }
         if ((key & 0xFF) == 27 || (key & 0xFF) == 13)
@@ -372,7 +379,7 @@ static void show_page(unsigned k)
 }
 
 static const UkMenu section_menu = {
-    UI_BG_MENU, T_GREEN, UKS_LIST | UKS_POPUP, 32, 10, 256, 180, 40, 50, 240, 12, 9, 24,
+    UI_BG_MENU, T_GREEN, UKS_LIST | UKS_POPUP | UKS_POPNONE, 32, 10, 256, 180, 40, 50, 240, 12, 9, 24,
     NULL, NULL, NULL, "Esc=OK", 166, NULL
 };
 

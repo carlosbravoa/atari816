@@ -383,10 +383,10 @@ fight:
     }
     snd_result(res);
     /* The panel shows the result; the geoscape updates the roster
-       (roster_after_battle) after the key. */
+       (roster_after_battle) after the key. The debriefing's music goes on
+       (the geoscape's after it: geo.c). */
     input_key();
     busy_show();                /* the geoscape and the debriefing load */
-    snd_set_geo();
     uk_resume();
     return res;
 }
@@ -496,10 +496,13 @@ int main(int argc, char **argv)
         if (geo_init()) {
             err = "world map (WORLDx.PAK) missing";
         } else {
-            snd_set_geo();
-            /* Start menu; abandoning a game comes back to it. A campaign
-               loaded in a quick battle goes on first (menu_start). */
-            while (menu_start()) {
+            /* Start menu (its GMSTORY, once); abandoning a game comes back to it. A
+               campaign loaded in a quick battle goes on first (menu_start). */
+            for (;;) {
+                snd_story();
+                if (!menu_start())
+                    break;
+                snd_set_geo();
                 busy_show();    /* the geoscape's code and world: a second or two */
                 geo_run(campaign_battle);
                 if (!g_geo_abandon)

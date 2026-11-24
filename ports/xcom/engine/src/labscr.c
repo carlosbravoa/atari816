@@ -111,18 +111,14 @@ static int inside(int x, int y, int w, int h)
 }
 
 /* A popup window with the screen's picture inside (as uk_menu's
-   UKS_POPUP); its static parts then become the clean copy. */
-static void popup(unsigned bg, int theme, int x, int y, int w, int h)
+   UKS_POPUP); its static parts then become the clean copy. kind: how it
+   opens (uik.h UK_POP_*, as OpenXcom's state's window). */
+static void popup(unsigned bg, int theme, int x, int y, int w, int h, int kind)
 {
     uk_invalidate();
     uk_theme(theme);
     uk_save(0, 200);
-    if (uk_pic_clean(bg))
-        uk_restore(x, y, w, h);
-    else
-        uk_fill(x, y, w, h, 0);
-    uk_window(x, y, w, h);
-    snd_window();
+    uk_popup(x, y, w, h, kind, uk_pic_clean(bg) ? -1 : 0);
 }
 
 /* ------------------------------------------------------------------ */
@@ -155,7 +151,7 @@ static void research_alloc(int i, int isnew)
     int t = p->topic, cancel = 0, first = 0;
     unsigned rep = 0;           /* an arrow button held (DOS: repeats) */
 
-    popup(UI_BG_RESEARCH, T_BLUE, 45, 30, 230, 140);
+    popup(UI_BG_RESEARCH, T_BLUE, 45, 30, 230, 140, UK_POP_NONE);
     uk_text(61, 40, UK_BIG, g_uk->title, g_topics[t].name);
     uk_text(85, 100, UK_BIG, g_uk->text, "Increase");
     uk_text(85, 120, UK_BIG, g_uk->text, "Decrease");
@@ -193,8 +189,10 @@ static void research_alloc(int i, int isnew)
                 key = 0x1C0D;
             else
                 continue;
-            if (key == 'c' || key == 0x1C0D || (key == 0x011B && !all))
-                snd_button();
+            if (key == 0x1C0D)
+                uk_press(169, 145, 90, 16, isnew ? "START PROJECT" : "OK");
+            else if (key == 'c' || (key == 0x011B && !all))
+                uk_press(61, 145, 90, 16, isnew ? "CANCEL" : "CANCEL PROJECT");
         }
         ch = key & 0xFF;
         scan = key >> 8;
@@ -394,7 +392,7 @@ static void production_alloc(int i, int isnew)
     unsigned rep = 0;           /* an arrow button held (DOS: repeats) */
     char t[12];
 
-    popup(UI_BG_MANUF, T_PURPLE, 0, 20, 320, 160);
+    popup(UI_BG_MANUF, T_PURPLE, 0, 20, 320, 160, UK_POP_BOTH);  /* ManufactureInfoState */
     uk_center(0, 320, 30, UK_BIG, g_uk->title, name);
     uk_text(16, 80, UK_BIG, g_uk->text, "Engineers");
     uk_text(16, 96, UK_BIG, g_uk->text, "Allocated");
@@ -451,8 +449,12 @@ static void production_alloc(int i, int isnew)
                 key = 'l';
             else if (inside(168, 155, 136, 16))
                 key = 0x1C0D;
-            if (key == 's' || key == 'l' || key == 0x1C0D)
-                snd_button();
+            if (key == 's')
+                uk_press(16, 155, 136, 16, "STOP PRODUCTION");
+            else if (key == 0x1C0D)
+                uk_press(168, 155, 136, 16, "OK");
+            else if (key == 'l')
+                snd_button();           /* (a toggle: drawn by its state) */
             else
                 continue;
         }
@@ -547,7 +549,7 @@ static void production_start(int r)
     mat_item[3] = IT_UFO_NAV;
 
     ok = funds_dollars() >= rc->cost100 * 100L && workshops_free() > 0;
-    popup(UI_BG_MANUF, T_BLUE, 0, 20, 320, 160);
+    popup(UI_BG_MANUF, T_BLUE, 0, 20, 320, 160, UK_POP_NONE);  /* ManufactureStartState */
     uk_center(0, 320, 30, UK_BIG, g_uk->title, g_items[rc->item].name);
     sprintf(t, "%u", rc->hours);
     uk_text(uk_text(16, 50, UK_SMALL, WHITE, t) + 3, 50, UK_SMALL, g_uk->text,
@@ -584,10 +586,13 @@ static void production_start(int r)
         if (key == KEY_RCLICK)
             break;
         if (key == KEY_LCLICK) {
-            if (inside(16, 155, 136, 16))
+            if (inside(16, 155, 136, 16)) {
+                uk_press(16, 155, 136, 16, "CANCEL");
                 break;
+            }
             if (!ok || !inside(168, 155, 136, 16))
                 continue;
+            uk_press(168, 155, 136, 16, "START PRODUCTION");
             key = 0x1C0D;
         }
         ch = key & 0xFF;

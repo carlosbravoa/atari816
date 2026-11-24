@@ -108,7 +108,7 @@ extern int bt_nwp;
 void bv_round(const int *o, const int *h, int n);
 void bv_melee(int t);
 void bv_fallen(int u);
-int bv_blast(int cx, int cy, int cz);
+int bv_blast(int cx, int cy, int cz, int power);    /* power: its sound (snd_blast) */
 
 /* bturn.c (a section of its own: between turns) */
 void bt_side_start(int faction);    /* TU, energy, bleeding, panic */

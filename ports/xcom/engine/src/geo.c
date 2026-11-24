@@ -462,6 +462,7 @@ static int fight_icons(int draw, int want);
 
 static void draw_map(void)
 {
+    uk_popup_reset();           /* the geoscape itself: no window open over it */
     draw_world();
     uk_fill(0, WMAP_H, VIEW_W, 200 - WMAP_H, 0);
     draw_panel();
@@ -655,6 +656,28 @@ static void draw_speeds(void)
             uk_center(x - 1, 33, y + 3, UK_SMALL, 8 | UK_FLAT, speed_names[i]);
         }
     }
+}
+
+/* One of the six function buttons (GeoscapeState's TextButtons, geoscape
+   style): pressed (the click) while the left button is held, as the time
+   buttons are drawn pressed (GEOBORD's own label covered by the short one). */
+static void side_press(int i)
+{
+    int x = PANEL_X + 1, y = i * BTN_H;
+
+    snd_button();
+    uk_theme(T_BLUE);
+    if (!bord_pic)
+        panel_label(x, y, 63, BTN_H, panel_buttons[i].label, 1);
+    else {
+        uk_fill(x + 2, y + 2, 59, BTN_H - 4, 7);
+        uk_center(x - 1, 65, y + (BTN_H - 8) / 2, UK_SMALL, 8 | UK_FLAT, panel_buttons[i].label);
+    }
+    uk_held();
+    if (!bord_pic)
+        panel_label(x, y, 63, BTN_H, panel_buttons[i].label, 0);
+    else
+        draw_panel();
 }
 
 static void draw_panel(void)
@@ -1139,7 +1162,8 @@ static void half_hour_tick(void)
             message(COL_ALERT, line);
             if (selected < 0)
                 selected = i;
-            snd_hit();
+            /* (no alert of its own: UfoDetectedState's window pops up with one of
+               the three pop-up sounds, as OpenXcom's) */
             geo_popup(PU_DETECTED, i, u->id);   /* UfoDetectedState */
         } else if (!u->detected && was) {
             sprintf(line, "UFO-%d: contact lost", u->id);
@@ -1724,6 +1748,7 @@ static int ground_battle(int k, BattleFn battle, const char *pak, int x, int y, 
         equip_reequip(k);               /* its equipment from the stores again */
     gpop_debrief(loot_type ? DB_UFO : terror ? DB_TERROR : win_pts ? DB_ALIEN_BASE : DB_TERROR,
                  res, craft_lost, &ds);
+    snd_set_geo();              /* the debriefing's music ends (snd_result) */
     hud_clear_rows(0, 25);
     hwp_reequip_report();
     contain_check();
@@ -2124,6 +2149,7 @@ static int base_defence(BattleFn battle)
         facil_wreck(g_xbase_had, g_xbase_now);  /* blocks without base objects left */
     }
     gpop_debrief(DB_BASE, res, 0, &ds);
+    snd_set_geo();              /* the debriefing's music ends (snd_result) */
     hud_clear_rows(0, 25);
     hwp_reequip_report();
     contain_check();
@@ -2897,7 +2923,7 @@ static unsigned geo_click(unsigned key)
         return 0;
     if (mx >= PANEL_X) {
         if (my < 6 * BTN_H) {
-            snd_button();
+            side_press(my / BTN_H);
             if (my < BTN_H) {
                 intercept_window(-1, NULL);
                 return 0;
@@ -2914,18 +2940,48 @@ static unsigned geo_click(unsigned key)
     return 0;
 }
 
+/* BuildNewBaseState's window over the map's top (256 x 28 at 0, 0 on BACK01,
+   not popping up): "SELECT SITE FOR NEW BASE" and, but for the first base,
+   CANCEL. Drawn after the map and its marks each time (the clean copy holds
+   BACK01 while the site is chosen). */
+static void base_site_window(int cancel)
+{
+    uk_theme(T_GREEN);
+    uk_restore(0, 0, VIEW_W, 28);
+    uk_window(0, 0, VIEW_W, 28);
+    uk_text(8, 10, UK_SMALL, g_uk->text, "SELECT SITE FOR NEW BASE");
+    if (cancel)
+        uk_button(186, 8, 54, 12, "CANCEL", 0);
+}
+
 /* A map point chosen with the arrows or the mouse and Enter (on land if
-   land is set); Esc cancels when cancel is set. Returns 1 if chosen. */
+   land is set: a base's site, under BuildNewBaseState's window); Esc
+   cancels when cancel is set. Returns 1 if chosen. */
 static int pick_point(int *px, int *py, int land, int cancel, const char *prompt)
 {
     centre_on(*px, *py);
     message(COL_TEXT, prompt);
+    if (land) {
+        uk_save(0, 200);
+        if (!uk_pic_clean(UI_BG_MENU))
+            uk_fill(0, 0, VIEW_W, 28, 0);       /* (no picture: uk_restore gives the map) */
+    }
     for (;;) {
         unsigned key;
         erase_marks();
         draw_marks();
         mark(*px, *py, 3, 15);
+        if (land)
+            base_site_window(cancel);
         key = input_key();
+        if (land && IS_CLICK(key) && g_mouse_x < VIEW_W && g_mouse_y < 28) {
+            if (key == KEY_LCLICK && cancel && g_mouse_x >= 186 && g_mouse_x < 240
+                && g_mouse_y >= 8 && g_mouse_y < 20) {
+                uk_press(186, 8, 54, 12, "CANCEL");
+                key = 27;
+            } else
+                continue;               /* (the window, not the map) */
+        }
         if (IS_CLICK(key) || (key & 0xFF) == '+' || (key & 0xFF) == '-') {
             int sx, sy;
             if (!IS_CLICK(key) || g_mouse_x >= VIEW_W || g_mouse_y >= WMAP_H) {
@@ -2943,8 +2999,11 @@ static int pick_point(int *px, int *py, int land, int cancel, const char *prompt
         }
         if ((key & 0xFF) == 13 && (!land || land_at(*px, *py)))
             break;
-        if ((key & 0xFF) == 27 && cancel)
+        if ((key & 0xFF) == 27 && cancel) {
+            if (land)
+                draw_map();
             return 0;
+        }
         switch (key >> 8) {
         case 0x48: *py -= 4; break;
         case 0x50: *py += 4; break;
@@ -2962,10 +3021,15 @@ static int pick_point(int *px, int *py, int land, int cancel, const char *prompt
         }
     }
     erase_marks();
+    if (land) {
+        draw_map();                     /* (the site's window gone) */
+        uk_save(0, 200);                /* the map under the windows that follow */
+    }
     return 1;
 }
 
-/* The first base, named after its region (the DOS game asks for a name). */
+/* The first base: its site (BuildNewBaseState, no Cancel), then its name
+   (BaseNameState: the DOS game asks for it; no cost to confirm). */
 static void place_base(void)
 {
     int x = 170, y = 36;
@@ -2973,9 +3037,9 @@ static void place_base(void)
     pick_point(&x, &y, 1, 0, "Place your base: arrows or click, Enter.");
     BASE_X(0) = x;
     BASE_Y(0) = y;
-    strncpy(g_bhdr[0].name, alien_region_name(x, y), sizeof g_bhdr[0].name - 1);
-    if (!g_bhdr[0].name[0])
-        strcpy(g_bhdr[0].name, "X-COM Base");
+    g_bhdr[0].name[0] = 0;
+    uk_name_box("Base Name?", g_bhdr[0].name, sizeof g_bhdr[0].name - 1);
+    draw_map();
     message(COL_GOOD, "X-COM base operational.");
 }
 
@@ -3002,10 +3066,8 @@ static void new_base(void)
         message(COL_ALERT, "Not enough money for a new base.");
         return;
     }
-    strncpy(name, alien_region_name(x, y), sizeof name - 1);
-    name[sizeof name - 1] = 0;
-    if (!uk_edit("Name of the new base:", name, 15) || !name[0])
-        return;
+    name[0] = 0;
+    uk_name_box("Base Name?", name, 15);        /* BaseNameState (nothing cancels it) */
     g_base.funds -= cost;
     base_add(x, y, name);
     facil_screen(1);
@@ -3320,6 +3382,7 @@ static void cyd_battle(BattleFn battle)
         ds.qty[DS_KILLED] = kills;
         ds.qty[DS_SOLDIERS] = lost;
         gpop_debrief(DB_CYDONIA, res, 0, &ds);
+        snd_set_geo();              /* the debriefing's music ends (snd_result) */
     }
     base_select(cur);
     hud_clear_rows(0, 25);

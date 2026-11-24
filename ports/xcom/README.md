@@ -12,14 +12,14 @@ the fork also serves a 286 DOS machine: upstream's DOS build stays). **State: a 
 app** (`make app`: XCOM.HZA, no game data in it): the intro, menus, geoscape, base screens,
 UFOpaedia, interceptions, battles, debriefings, the end slides; the AdLib music on the
 OPL2 (a helper task keeps its tempo while the game computes) and the Sound Blaster effects
-on Lau (also the buttons' clicks and the windows' pop-up sounds, as DOS); saves (also inside a battle) in the app's folder. Every screen is checked against
+on Lau (also the buttons' clicks and the windows' pop-up sounds, the footsteps by terrain, as DOS); windows that pop up and buttons that press as DOS's; saves (also inside a battle) in the app's folder. Every screen is checked against
 the PC build by `make test`. Battles are still slow in places (PORTING-NOTES.md, "What is
 next").
 
 | | State |
 | --- | --- |
 | Engine | our fork in `engine/` (`engine/FORK.md`: what it is, our changes by topic, `git diff cca0456 -- ports/xcom/engine`, how to take a newer upstream); the port's hooks are `#if defined(XCOM_PORT)`, fixes and the interface's sounds are for every build; `plat/` replaces three of its files on the Atari816 (the Makefile leaves them out) |
-| Data | `tools/getdata.sh` runs the fork's XCOMCONV (`engine/tools`) on your copy (GOG works with `--skip-check`); the VGA mode uses 18.3 MB of it; pack format 5 (`PACKS.VER`: older packs are refused, `make` says so, the app on its screen) |
+| Data | `tools/getdata.sh` runs the fork's XCOMCONV (`engine/tools`) on your copy (GOG works with `--skip-check`); the VGA mode uses 18.3 MB of it; pack format 6 (`PACKS.VER`: older packs are refused, `make` says so, the app on its screen: a card's packs of format 5 must be made again) |
 | Host build (Linux) | the whole engine headless on a model of the DOS machine (`plat/xdos.c`), with DOS's 16-bit `int` (`tools/host16.py`): the reference |
 | Atari816 build | `hcc --code large --data far`: XCOM.PRG and MUSD.PRG (the music task) |
 | Tests | `make test`: 14 KEYS-script runs of every screen on both builds (same LOG, same pictures pixel for pixel, same saves, open files counted), the real mouse and keyboard three times (the clock as after the start, after 5 minutes, wrapping), a full card, the sound (OPL2 stream and Sound Blaster blocks against the host's, the beat, the volume); `make test-long`: longer runs (a big battle saved and loaded, the defeat slides, the campaign soak); `make test-app`: the app installed and started from the Desktop; `make speed`: BENCH and an alien turn on the real clock; `make smooth`: the player's pointer stops and frames in a scripted battle and the geoscape, with limits (PORTING-NOTES.md 4h) |

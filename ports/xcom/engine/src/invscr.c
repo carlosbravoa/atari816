@@ -28,6 +28,7 @@
 #include "input.h"
 #include "inv.h"
 #include "items.h"
+#include "sound.h"
 #include "uik.h"
 #include "battle.h"
 #include "battle_in.h"
@@ -528,6 +529,7 @@ static const char *move(Unit *un, int u, const Thing *t, int slot)
         if (!pre)
             un->tu -= (unsigned char)cost;
         log_printf("%s loaded %s %s", un->name, g_items[w].name, load ? ammo_find(w, load)->tag : "");
+        snd_reload();           /* Inventory::mouseClick: ITEM_RELOAD */
         return NULL;
     }
     if (sec != SEC_GROUND) {
@@ -542,6 +544,7 @@ static const char *move(Unit *un, int u, const Thing *t, int slot)
         return "Not enough time units!";
     take(un, u, t, &n);
     put(un, u, slot, item, n);
+    snd_drop();                 /* Inventory::mouseClick: ITEM_DROP */
     if (!pre)
         un->tu -= (unsigned char)cost;
     inv_medikit(u);

@@ -392,6 +392,9 @@ def build_smoke(root):
 #                               Tile::destroy; 0 none) and the MCD records
 #                               that are light sources of 6 or more
 #                               (calculateTerrainLighting; src/pak.c)
+#     "XFS1" u16 n, u8 step[n]  mission packs: the footstep sound of MCD records
+#                               0..n-1 (MCD byte 52, UnitWalkBState's WALK_OFFSET
+#                               + 2 x it; src/sound.c snd_footstep)
 #     "XEX1" u16 n, n x (u8 record, u8 strength)
 #                               mission packs: the common MCD records that
 #                               explode when destroyed (HE_Strength; flag
@@ -475,6 +478,12 @@ def flammability(records):
     """'XFM1' section: the MCD records' Flammable byte (255: never burns)."""
     return (b"XFM1" + struct.pack("<H", len(records))
             + bytes([255] + [r["flammable"] for r in records[1:]]))
+
+
+def footsteps(records):
+    """'XFS1' section: the MCD records' Footstep byte (Tile::getFootstepSound)."""
+    return (b"XFS1" + struct.pack("<H", len(records))
+            + bytes([0] + [r["footstep"] for r in records[1:]]))
 
 
 MAX_EXPL = 8            # src/pak.h Pack.expl
@@ -1321,7 +1330,8 @@ def build_spec(root, spec, video, rules):
     else:
         mini = minimap_frames(root, m.mcd, video, mapping)
     out += trailer(*sections, mini, he_blocks(m.mcd),
-                   flammability(m.mcd), light_section(m), explosives(m.mcd, n_common), xlf, pal)
+                   flammability(m.mcd), footsteps(m.mcd), light_section(m),
+                   explosives(m.mcd, n_common), xlf, pal)
 
     stats = {"title": spec["title"], "mcd": len(m.mcd), "sprites": len(sprite_frames),
              "aliens": sum(c for _, c in spawn), "total": len(out)}

@@ -75,6 +75,30 @@ void uk_rect(int x, int y, int w, int h, int c);        /* outline */
 void uk_window(int x, int y, int w, int h);             /* ridge frame */
 void uk_button(int x, int y, int w, int h, const char *label, int pressed);
 
+/* A window that opens over the screen as the DOS game's (OpenXcom's Window
+   and its WindowPopup): one of the three pop-up sounds as it starts, then
+   the frame grows from the window's centre (both ways, or only across or
+   down) with the inside (the clean copy, uk_save, or colour fill if fill
+   >= 0) in it, 20 steps over about 0.28 s; the pointer stays alive (input
+   is kept for later). UK_POP_NONE: the window at once and no sound (the
+   DOS windows that do not pop up). Ends with the whole window drawn: the
+   caller draws what is in it (OpenXcom shows the window's contents when it
+   has opened). */
+enum { UK_POP_NONE, UK_POP_H, UK_POP_V, UK_POP_BOTH };
+void uk_popup(int x, int y, int w, int h, int kind, int fill);
+/* The same with picture bg inside (UK_NOBG: black): the screen as it is
+   becomes the clean copy with bg drawn into it (uk_save). */
+void uk_popup_bg(unsigned bg, int x, int y, int w, int h, int kind);
+
+/* TextButton: the button drawn pressed (the click's sound), kept so while
+   the left button is held (a KEYS script's HOLD x y n: n steps of 20 ms),
+   then drawn again as it was; the caller then acts (OpenXcom: the click is
+   the release). */
+void uk_press(int x, int y, int w, int h, const char *label);
+/* Returns when the left button is up (uk_press's wait, for buttons drawn
+   otherwise). */
+void uk_held(void);
+
 int uk_text(int x, int y, int font, int c, const char *s);     /* returns the end x */
 int uk_width(int font, const char *s);
 void uk_center(int x, int w, int y, int font, int c, const char *s);
@@ -111,6 +135,9 @@ void uk_notice(const char *s);
 int uk_confirm(const char *s);
 /* One line of text input in a box (name: NUL-terminated, max chars). */
 int uk_edit(const char *prompt, char *name, int max);
+/* A new base's name, as DOS's BaseNameState (uik.c); returns when there is
+   one (no cancel). */
+int uk_name_box(const char *title, char *name, int max);
 
 /* Key named in a button spec ("Esc", "Enter", "Tab", "+", a letter). */
 unsigned uk_key_named(const char *k, int len);
@@ -132,10 +159,16 @@ unsigned uk_key_named(const char *k, int len);
 #define UKS_LEFT    128         /* ql_menu: the info line at the list's left, 17 under
                                    ty, its columns at the tabs, in the title's colour;
                                    a row starting  is white,  the title's colour */
+/* uk_menu: how a UKS_POPUP / UKS_CLEAR window opens (OpenXcom's WindowPopup;
+   none of these: POPUP_BOTH) */
+#define UKS_POPH    0x100       /* across only (POPUP_HORIZONTAL) */
+#define UKS_POPV    0x200       /* down only (POPUP_VERTICAL) */
+#define UKS_POPNONE 0x300       /* at once, no sound (POPUP_NONE) */
 
 typedef struct {
     unsigned bg;
-    unsigned char theme, style;
+    unsigned char theme;
+    unsigned short style;
     short wx, wy, ww, wh;       /* window frame (ww = 0: none) */
     short lx, ly, lw, rows, rowh;
     short ty;                   /* title y, big font, centred in the window */
@@ -152,11 +185,16 @@ typedef struct {
    returns 0 nothing, 1 rows changed (redrawn), 2 return sel now. The info
    line is drawn again when its text changed (on_key may change it).
    hotkeys: one letter per row. The screen is drawn again only when another
-   menu (or uk_invalidate) came in between. */
+   menu (or uk_invalidate) came in between. A pop-up menu's window opens
+   (uk_popup) the first time it is drawn; drawn again after a window it
+   opened has closed (the start menu after Load Saved Game's list), it
+   does not open again, as OpenXcom's state under another; uk_popup_reset
+   (a full screen drawn: uk_screen, the geoscape) forgets them. */
 typedef int (*UkKey)(int sel, int ch, int scan);
 int uk_menu(const UkMenu *m, const char *info, char lines[][41], int n, int sel,
             UkKey on_key, const char *hotkeys);
 void uk_invalidate(void);
+void uk_popup_reset(void);
 
 /* Picks a pressed bottom button or list row for a click (used by screens
    with their own loop). Returns the key of the button under the click, or 0. */

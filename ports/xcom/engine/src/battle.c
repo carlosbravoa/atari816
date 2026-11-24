@@ -344,6 +344,14 @@ static void zombie_burst(int z)
     update_vision(c, 0);
 }
 
+/* A machine's death sound (units.rul deathSound 23): tanks and hovertanks,
+   cyberdiscs, sectopods. */
+static int unit_mech(const Unit *u)
+{
+    return UNIT_HWP(u) || (u->xtype < XT_XCOM && (!strncmp(u->name, "Cyberdisc", 9)
+                                                  || !strncmp(u->name, "Sectopod", 8)));
+}
+
 /* A unit dies (shooter -1: bled to death). Out of X-COM's sight only the
    log hears it. zombify: a chryssalid's victim rises as a zombie. */
 void kill_unit(int victim, int shooter, int zombify)
@@ -404,7 +412,7 @@ void kill_unit(int victim, int shooter, int zombify)
     if (s && v->faction == FACTION_ALIEN && s->faction == FACTION_XCOM)
         g_units[shooter].kills++;
     if (!quiet)
-        snd_kill(v->faction == FACTION_ALIEN);
+        snd_die(v->faction == FACTION_ALIEN, unit_mech(v));
     say(v->faction == FACTION_ALIEN ? COL_GOOD : COL_BAD,
         unit_fmt(text, s ? "%s killed!" : "%s died of wounds", v, 0));
     if (zombify && (i = unit_spawn_zombie(victim)) >= 0) {
@@ -795,7 +803,7 @@ next_leg:
         if (round_blast == BLAST_STUN)
             explode(bx, by, bz, power, DT_STUN, rl_blast_radius(clip, power), s);
         else if (round_blast == BLAST_FIRE) {
-            bv_blast(bx, by, bz);                   /* seen and heard as any */
+            bv_blast(bx, by, bz, power);            /* seen and heard as any */
             fx_incendiary(bx, by, bz, power, s);    /* fire damage only */
         }
         else
@@ -942,7 +950,7 @@ void explode(int cx, int cy, int cz, int power, int dtype, int radius, int throw
     unsigned long t0 = timer_read();
 
     if (!quiet_blast)
-        shown = bv_blast(cx, cy, cz);   /* 1: no picture, its time still to keep */
+        shown = bv_blast(cx, cy, cz, power);    /* 1: no picture, its time still to keep */
     if (dtype == DT_HE)
         gone = fx_blast_items(cx, cy, cz, power, radius);
     for (i = 0; i < g_nunits; i++) {
@@ -1086,6 +1094,7 @@ int throw_grenade(int s, int tx, int ty, int tz)
 {
     Unit *u = &g_units[s];
     int item = u->grenade, cost, c[3], x, y, z, h, acc, curv, fuse;
+    unsigned long t0;
 
     if (item == NO_ITEM || !u->n_grenades) {
         msg(COL_BAD, "No grenades");
@@ -1108,6 +1117,8 @@ int throw_grenade(int s, int tx, int ty, int tz)
     u->tu -= cost;
     u->n_grenades--;
     turn_unit(s, &u->dir, dir_towards(u->x, u->y, tx, ty));
+    t0 = timer_read();
+    snd_throw();                /* ITEM_THROW (ProjectileFlyBState) */
     acc = u->throwing * unit_acc_mod(u, NO_ITEM) / 100;
     if (u->panicked == PANIC_BERSERK)
         acc /= 2;
@@ -1129,6 +1140,11 @@ int throw_grenade(int s, int tx, int ty, int tz)
     if (!fx_throw(s, item, x, y, z, fuse))
         explode(x, y, z, g_items[item].power, rl_item_dtype(item),
                 rl_blast_radius(item, g_items[item].power), s);
+    else {
+        /* it lands (ITEM_DROP) after the throw's swish (the flight is not drawn) */
+        pace(t0, 300, 0);
+        snd_drop();
+    }
     if (u->alive && !bt_result)
         reaction_fire(s);
     return 1;
@@ -1287,6 +1303,51 @@ int reserve_ok(const Unit *u, int cost)
     return 1;
 }
 
+/* Tile::getFootstepSound(tile below): the floor's, an object's that is no big
+   wall (bigWall 0 or 1), else on an empty tile the object's of the tile
+   below if its terrain level is -24 (a stair top); -1 none. */
+static int step_sound(int x, int y, int z)
+{
+    const unsigned char *t = TILE(x, y, z), *b;
+    int f = -1;
+
+    if (t[PART_FLOOR])
+        f = MCD_STEP(t[PART_FLOOR]);
+    if (t[PART_OBJECT] && MCD_BW(&g_pak.mcd[t[PART_OBJECT]]) <= 1)
+        f = MCD_STEP(t[PART_OBJECT]);
+    if (!t[PART_FLOOR] && !t[PART_OBJECT] && z > 0) {
+        b = TILE(x, y, z - 1);
+        if (b[PART_OBJECT] && (g_pak.mcd[b[PART_OBJECT]].t_level == -24
+                               || (b[PART_FLOOR] && g_pak.mcd[b[PART_FLOOR]].t_level == -24)))
+            f = MCD_STEP(b[PART_OBJECT]);
+    }
+    return f;
+}
+
+/* The step's sound is the flying one (UnitWalkBState::playMovementSound): a
+   unit whose move sound it is (floaters; the cyberdiscs', celatids' and
+   hovertanks' own hums are not in the packs: this one), or one flying
+   (BattleUnit::startWalking: up or down, or from a tile with no floor,
+   Tile::hasNoFloor). */
+static int walk_flies(const Unit *un, int x, int y, int z, int dir)
+{
+    const unsigned char *t = TILE(x, y, z), *b;
+
+    if ((un->xtype < XT_XCOM && (g_pak.race[un->xtype].flags & AT_FLY)) || un->xtype == XT_HOVER)
+        return 1;
+    if (!unit_flies(un))
+        return 0;
+    if (dir >= 8)
+        return 1;
+    if (z > 0) {
+        b = TILE(x, y, z - 1);
+        if ((b[PART_FLOOR] && g_pak.mcd[b[PART_FLOOR]].t_level == -24)
+            || (b[PART_OBJECT] && g_pak.mcd[b[PART_OBJECT]].t_level == -24))
+            return 0;
+    }
+    return !t[PART_FLOOR] || (g_pak.mcd[t[PART_FLOOR]].flags & MCD_NO_FLOOR);
+}
+
 /* Walks a unit towards a tile along the searched path (path_search must
    have been run for it). Each step costs TU and half as much energy.
    Stops early when spotting aliens, under reaction fire, or short of TU
@@ -1379,8 +1440,14 @@ void walk(int u, int tx, int ty, int tz)
         if (was_shown && !shown)
             render_at(un, ox, oy, oz);
         if (shown) {
+            /* X-COM / Alien Movement Speed: a step shown takes at least 8
+               frames (16 on a diagonal), after a frame an eighth turned. */
+            unsigned turn = dir < 8 ? eighths(od, dir) * move_ms(un) : 0,
+                     ms = (dir < 8 ? eighths(od, dir) + 8 + (dir & 1) * 8 : 8) * move_ms(un);
+            int fly = walk_flies(un, ox, oy, oz, dir);
             bt_view_on();
-            snd_step();
+            if (fly)
+                snd_fly();      /* FLYING_SOUND (a floater's moveSound) */
             if (was_shown)
                 render_step(un->big, ox, oy, oz, nx, ny, nz);
             else
@@ -1389,9 +1456,15 @@ void walk(int u, int tx, int ty, int tz)
                civilian here: compromises.md) */
             if (un->faction != FACTION_CIVILIAN)
                 render_follow(nx, ny, nz);
-            /* X-COM / Alien Movement Speed: a step shown takes at least 8
-               frames (16 on a diagonal), after a frame an eighth turned. */
-            pace(t0, (dir < 8 ? eighths(od, dir) + 8 + (dir & 1) * 8 : 8) * move_ms(un), 'w');
+            if (!fly) {
+                /* playMovementSound: the footsteps at the walk's phases 3 and 7 of 8,
+                   the tile left's and the tile reached's */
+                pace(t0, turn + (ms - turn) * 3 / 8, 0);
+                snd_footstep(step_sound(ox, oy, oz), 0);
+                pace(t0, turn + (ms - turn) * 7 / 8, 0);
+                snd_footstep(step_sound(nx, ny, nz), 1);
+            }
+            pace(t0, ms, 'w');
         }
         if (g_fx_count && fx_step(u))
             n = i + 1;          /* burnt or blown up: stop after this step */

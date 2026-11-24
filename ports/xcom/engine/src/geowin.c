@@ -19,12 +19,13 @@
 #include "sound.h"
 #include "uitext.h"
 
-typedef struct { int x, y, w, h; unsigned key, key2; } Hit;
+typedef struct { int x, y, w, h; unsigned key, key2; char s[28]; } Hit;     /* s: the label, drawn pressed */
 
-/* A popup window over the geoscape with the picture bg inside it. Packs
+/* A popup window over the geoscape with the picture bg inside it, opening
+   as OpenXcom's state's window does (kind: uik.h UK_POP_*). Packs
    converted before BACK12 / BACK15 were added end before their entries:
    BACK01 then (a full-screen picture or nothing). */
-static void win_open(unsigned bg, int x, int y, int w, int h)
+static void win_open(unsigned bg, int x, int y, int w, int h, int kind)
 {
     int pw, ph;
 
@@ -33,12 +34,7 @@ static void win_open(unsigned bg, int x, int y, int w, int h)
     uk_save(0, 200);
     if (bg != UI_BG_MENU && !(uk_pic_box(bg, &pw, &ph) && pw == 320 && ph == 200))
         bg = UI_BG_MENU;
-    if (uk_pic_clean(bg) || uk_pic_clean(UI_BG_MENU))
-        uk_restore(x, y, w, h);
-    else
-        uk_fill(x, y, w, h, 0);
-    uk_window(x, y, w, h);
-    snd_window();
+    uk_popup(x, y, w, h, kind, uk_pic_clean(bg) || uk_pic_clean(UI_BG_MENU) ? -1 : 0);
 }
 
 static void btn(Hit *b, int x, int y, int w, int h, unsigned key, unsigned key2, const char *s)
@@ -49,6 +45,8 @@ static void btn(Hit *b, int x, int y, int w, int h, unsigned key, unsigned key2,
     b->h = h;
     b->key = key;
     b->key2 = key2;
+    strncpy(b->s, s, sizeof b->s - 1);
+    b->s[sizeof b->s - 1] = 0;
     uk_button(x, y, w, h, s, 0);
 }
 
@@ -74,8 +72,7 @@ static int wait_btn(const Hit *b, int n)
             for (i = 0; i < n; i++)
                 if (g_mouse_x >= b[i].x && g_mouse_x < b[i].x + b[i].w && g_mouse_y >= b[i].y
                     && g_mouse_y < b[i].y + b[i].h) {
-                    snd_button();
-                    uk_button(b[i].x, b[i].y, b[i].w, b[i].h, "", 1);
+                    uk_press(b[i].x, b[i].y, b[i].w, b[i].h, b[i].s);
                     return i;
                 }
             continue;
@@ -131,7 +128,7 @@ int gw_pick(const GeoTarget *t, int n)
     char name[24];
     int i, h = n * 20 - 4 + 20, y = (200 - h) / 2;
 
-    win_open(UI_BG_UFOINFO, 64, y, 136, h);
+    win_open(UI_BG_UFOINFO, 64, y, 136, h, UK_POP_V);
     for (i = 0; i < n; i++) {
         btn(&b[i], 74, y + 10 + i * 20, 116, 16, '1' + i, i ? 0 : 13, gw_name_buf(&t[i], name));
         log_printf("WIN target %d: %s", i + 1, name);
@@ -203,7 +200,7 @@ int gw_intercept(int base, int *craft)
     for (i = 0; i < MAX_CRAFT; i++)
         if (g_craft[i].state != CS_EMPTY && (base < 0 || g_craft[i].base == base))
             map[n++] = i;
-    win_open(UI_BG_INTERCEPT, 0, 30, 320, 140);
+    win_open(UI_BG_INTERCEPT, 0, 30, 320, 140, UK_POP_H);
     uk_center(0, 320, 46, UK_BIG, g_uk->title, "LAUNCH INTERCEPTION");
     uk_text(14, 70, UK_SMALL, g_uk->text, "CRAFT");
     uk_text(100, 70, UK_SMALL, g_uk->text, "STATUS");
@@ -322,7 +319,7 @@ int gw_craft(int k, int status, const GeoTarget *dest, int alt, int knots)
     int i, nb = 0;
     static const unsigned char res[4] = { GW_RETURN, GW_TARGET, GW_PATROL, GW_CANCEL };
 
-    win_open(UI_BG_INTERCEPT, 8, 8, 240, 184);
+    win_open(UI_BG_INTERCEPT, 8, 8, 240, 184, UK_POP_BOTH);
     uk_text(32, 20, UK_BIG, g_uk->title, craft_name(c));
     switch (status) {
     case GWS_RETURN: strcpy(s, "RETURNING TO BASE"); break;
@@ -406,7 +403,7 @@ int gw_ufo(const GwUfo *u)
     int y = u->decoded ? 10 : 44, ly = u->decoded ? 60 : 80, by = u->decoded ? 136 : 118, i;
     static const unsigned char res[3] = { GW_INTERCEPT, GW_CENTRE, GW_CANCEL };
 
-    win_open(UI_BG_UFOINFO, 16, y, 224, u->decoded ? 180 : 128);
+    win_open(UI_BG_UFOINFO, 16, y, 224, u->decoded ? 180 : 128, UK_POP_BOTH);
     uk_text(28, u->decoded ? 20 : 53, UK_BIG, g_uk->title, gw_name_buf(&u->t, name));
     log_printf("WIN %s%s: %s, %s, %d knots", name, u->detected ? " detected" : "",
                size_names[u->size], alt_names[u->alt], u->knots);
@@ -444,7 +441,7 @@ int gw_site(const GeoTarget *t, const char *place, const int *craft, int n)
     char name[24];
     int i;
 
-    win_open(UI_BG_MENU, 32, 40, 192, 120);
+    win_open(UI_BG_MENU, 32, 40, 192, 120, UK_POP_BOTH);
     uk_center(37, 182, 50, UK_BIG, g_uk->title, gw_name_buf(t, name));
     log_printf("WIN %s: %s, %d craft on the way", name, place, n);
     uk_center(37, 182, 67, UK_SMALL, g_uk->title, place);
@@ -467,7 +464,7 @@ int gw_confirm(const GeoTarget *t)
     char s[40], name[24];
     int i;
 
-    win_open(UI_BG_INTERCEPT, 8, 64, 240, 72);
+    win_open(UI_BG_INTERCEPT, 8, 64, 240, 72, UK_POP_NONE);
     sprintf(s, "TARGET: %s", gw_name_buf(t, name));
     uk_center(12, 232, 80, UK_BIG, g_uk->title, s);
     btn(&b[0], 68, 104, 50, 12, 13, 'y', "OK");
@@ -522,7 +519,7 @@ int gw_cydonia(void)
     char s[80];
     int i;
 
-    win_open(UI_BG_INTERCEPT, 32, 20, 256, 160);
+    win_open(UI_BG_INTERCEPT, 32, 20, 256, 160, UK_POP_NONE);
     ui_text(UI_MSG, s, sizeof s, MSG_CYDONIA);
     lines(48, 224, 76, 16, UK_BIG, g_uk->title, s);
     btn(&b[0], 70, 142, 80, 20, 13, 'y', "YES");
@@ -560,7 +557,7 @@ void gw_lost(int id)
     Hit b;
     char s[32];
 
-    win_open(UI_BG_UFOINFO, 32, 48, 192, 104);
+    win_open(UI_BG_UFOINFO, 32, 48, 192, 104, UK_POP_BOTH);
     sprintf(s, "UFO-%d\nTRACKING LOST", id);
     lines(48, 160, 72, 16, UK_BIG, g_uk->title, s);
     log_printf("WIN UFO-%d: Tracking Lost", id);
@@ -576,7 +573,7 @@ int gw_patrol(int craft, const GeoTarget *dest)
     char s[64], name[24];
     int i;
 
-    win_open(UI_BG_INTERCEPT, 16, 16, 224, 168);
+    win_open(UI_BG_INTERCEPT, 16, 16, 224, 168, UK_POP_BOTH);
     sprintf(s, "%s\nhas reached\n%s", craft_name(&g_craft[craft]), gw_name_buf(dest, name));
     lines(16, 224, 56, 16, UK_BIG, g_uk->title, s);
     uk_center(16, 224, 120, UK_BIG, g_uk->title, "Now patrolling");
@@ -596,7 +593,7 @@ int gw_low_fuel(int craft)
     char s[40];
     int i;
 
-    win_open(UI_BG_INTERCEPT, 16, 40, 224, 120);
+    win_open(UI_BG_INTERCEPT, 16, 40, 224, 120, UK_POP_BOTH);
     uk_center(21, 214, 60, UK_BIG, g_uk->title, craft_name(&g_craft[craft]));
     ui_text(UI_MSG, s, sizeof s, MSG_LOW_FUEL);
     lines(21, 214, 90, 9, UK_SMALL, g_uk->text, s);
@@ -617,7 +614,7 @@ int gw_craft_error(int craft, int item)
     const char *p = msg;
     int i, n = 0;
 
-    win_open(UI_BG_INTERCEPT, 32, 20, 256, 160);
+    win_open(UI_BG_INTERCEPT, 32, 20, 256, 160, UK_POP_BOTH);
     sprintf(msg, "Not enough %s to %s %s at %.16s", g_items[item].name,
             item == IT_ELERIUM ? "refuel" : "rearm", craft_name(&g_craft[craft]),
             g_bhdr[g_craft[craft].base].name);
@@ -655,7 +652,7 @@ int gw_terror(const char *city)
     int i;
     static const unsigned char res[3] = { GW_INTERCEPT, GW_CENTRE, GW_CANCEL };
 
-    win_open(UI_BG_TERROR, 0, 0, 256, 200);    /* BACK03 (BACK01 in older packs) */
+    win_open(UI_BG_TERROR, 0, 0, 256, 200, UK_POP_BOTH);    /* BACK03 (BACK01 in older packs) */
     uk_center(5, 246, 56, UK_BIG, g_uk->title, "ALIENS TERRORISE");
     uk_center(5, 246, 80, UK_BIG, g_uk->title, city);
     btn(&b[0], 28, 130, 200, 16, 'i', 0, "INTERCEPT");
@@ -675,7 +672,7 @@ void gw_base_found(const char *region)
     Hit b;
     char s[96], t[48];
 
-    win_open(UI_BG_REPORT, 0, 0, 320, 200);   /* AlienBaseState: BACK13, pink */
+    win_open(UI_BG_REPORT, 0, 0, 320, 200, UK_POP_NONE);   /* AlienBaseState: BACK13, pink */
     ui_text(UI_MSG, t, sizeof t, MSG_BASE_FOUND);
     sprintf(s, "%s\n%s", t, region);
     lines(0, 320, 64, 16, UK_BIG, g_uk->title, s);
@@ -692,7 +689,7 @@ int gw_landing(int craft, const GeoTarget *dest)
     char s[96], name[24], t[24];
     int i;
 
-    win_open(UI_BG_UFOINFO, 16, 20, 224, 160);
+    win_open(UI_BG_UFOINFO, 16, 20, 224, 160, UK_POP_BOTH);
     ui_text(UI_MSG, t, sizeof t, MSG_LAND_NEAR);
     sprintf(s, "%s\n%s\n%s", craft_name(&g_craft[craft]), t, gw_name_buf(dest, name));
     lines(16, 224, 44, 16, UK_BIG, g_uk->title, s);

@@ -119,7 +119,7 @@ found:
     if (un->tu >= cost + (bt_reserve ? unit_shot_tu(un, bt_reserve - 1) : 0)) {
         if (!door_swap(x, y, z, p))
             return -1;
-        snd_door();
+        snd_door((m->flags & MCD_UFO_DOOR) != 0);
         if (m->flags & MCD_UFO_DOOR) {
             /* checkAdjacentDoors (2158-2182): the UFO door parts in line
                (a west wall south and north, a north wall east and west)

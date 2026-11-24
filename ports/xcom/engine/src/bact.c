@@ -129,6 +129,7 @@ void fx_reload(int s)
     u->load = (unsigned char)(c == std ? 0 : c);
     sprintf(line, "Reloaded: %s", g_items[c].name);
     msg(COL_INFO, line);
+    snd_reload();               /* ITEM_RELOAD (BattlescapeState::btnReloadClick) */
 }
 
 /* ------------------------------------------------------------------ */

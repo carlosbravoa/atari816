@@ -164,9 +164,14 @@ int base_info_screen(void)
         else if (key == KEY_LCLICK) {
             int mx = g_mouse_x, my = g_mouse_y;
             if (my >= 180 && my < 194) {
-                if ((mx >= 10 && mx < 40) || (mx >= 46 && mx < 126) || (mx >= 132 && mx < 212)
-                    || (mx >= 218 && mx < 310))
-                    snd_button();
+                if (mx >= 10 && mx < 40)
+                    uk_press(10, 180, 30, 14, "OK");
+                else if (mx >= 46 && mx < 126)
+                    uk_press(46, 180, 80, 14, "TRANSFERS");
+                else if (mx >= 132 && mx < 212)
+                    uk_press(132, 180, 80, 14, "STORES");
+                else if (mx >= 218 && mx < 310)
+                    uk_press(218, 180, 92, 14, "Monthly Costs");
                 if (mx >= 10 && mx < 40)
                     ret = 0;
                 else if (mx >= 46 && mx < 126)

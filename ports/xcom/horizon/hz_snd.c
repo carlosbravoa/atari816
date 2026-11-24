@@ -157,7 +157,7 @@ void plat_mus_sound(int on)
 
 /* ---------------------------------------------------------------- effects */
 
-#define NCACHE 32
+#define NCACHE 48              /* (pack format 6: 42 effects, decoded once each) */
 #define NBANK  3
 
 static struct {

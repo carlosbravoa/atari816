@@ -145,7 +145,7 @@ void bv_fallen(int u)
    disk for the time being when 12 KB stay free, else only the sound. Then what
    it covered comes back; the blast takes effect after it, as in DOS. Returns 1
    if no picture took the time. */
-int bv_blast(int cx, int cy, int cz)
+int bv_blast(int cx, int cy, int cz, int power)
 {
     unsigned char hd[8];
     unsigned char *b;
@@ -170,7 +170,7 @@ int bv_blast(int cx, int cy, int cz)
     }
     if (!shown) {
         log_printf("blast picture: none (%u bytes)", size);
-        snd_explode();
+        snd_blast(power);
         hold(4);
         return 1;
     }
@@ -188,7 +188,7 @@ int bv_blast(int cx, int cy, int cz)
     r1 = y + BLAST_H > VIEW_H ? VIEW_H : y + BLAST_H;
     if (c0 < c1 && r0 < r1)
         gfx_present_cells(c0, r0, c1 - c0, r1 - r0);
-    snd_explode();
+    snd_blast(power);
     t0 = timer_read();
     log_printf("T%d: blast picture", bt_turn);
     hold(4);

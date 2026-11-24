@@ -63,6 +63,8 @@ typedef struct {
 /* Record r's Flammable (DOS MCD byte 45: 255 = never burns; "XFM1"),
    after the HE blockages in Pack.he. Record 0 (nothing) has 255. */
 #define MCD_FLAM(r)     (g_pak.he[MAX_HE_VALUES + (r)])
+/* Its Footstep (MCD byte 52, "XFS1"): the walking sound (sound.h snd_footstep). */
+#define MCD_STEP(r)     (g_pak.he[MAX_HE_VALUES + g_pak.n_mcd + (r)])
 /* The big wall kind (OpenXcom's bigWall with its MCD patches, how a big
    wall blocks blasts by side: 0 none, 1 block, 2 NE-SW and 3 NW-SE
    diagonals, 4-7 west, north, east, south, 8 east and south, 9 west and
@@ -180,7 +182,7 @@ typedef struct {
     unsigned char lights[MAX_LIGHTS][2];
     unsigned char n_lights, relight;
     /* The battle's HE blockages (MAX_HE_VALUES, MCD_HE), then every
-       record's Flammable (MCD_FLAM). */
+       record's Flammable (MCD_FLAM), then their Footstep (MCD_STEP). */
     unsigned char *he;
     /* "XEX1": the records that explode when destroyed (MCD_EXPL; MCD
        HE_Strength, Tile::destroy) and their strength, record 0 = the end

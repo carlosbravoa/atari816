@@ -412,7 +412,8 @@ const char *pak_vox(void)
 
 /* The trailer (tools/convert.py): "XHB1", each MCD record's HE blockage
    (its index in g_pak.he into the high bits of its tile_type, MCD_HE),
-   "XFM1" their Flammable (MCD_FLAM), "XLT1", "XEX1", the place of "XLF1".
+   "XFM1" their Flammable (MCD_FLAM), "XFS1" their Footstep (MCD_STEP), "XLT1",
+   "XEX1", the place of "XLF1".
    Leaves the file position anywhere. */
 static void load_he_blocks(FILE *f)
 {
@@ -425,6 +426,7 @@ static void load_he_blocks(FILE *f)
     g_pak.n_lights = 0;
     memset(he, 0, MAX_HE_VALUES);   /* he[0] = 0: no blockage */
     memset(he + MAX_HE_VALUES, 255, g_pak.n_mcd);       /* never burns */
+    memset(he + MAX_HE_VALUES + g_pak.n_mcd, 2, g_pak.n_mcd);   /* the ground's step */
     for (pos = data_end(f); pos < tr_end;) {
         if (fseek(f, pos, SEEK_SET) || !read_into(f, m, 4))
             return;
@@ -436,7 +438,7 @@ static void load_he_blocks(FILE *f)
             return;
         if (!memcmp(m, "XMM1", 4))
             pos += 6 + (long)n * (g_pak.video ? 6 : 10);
-        else if (!memcmp(m, "XHB1", 4) || !memcmp(m, "XFM1", 4)) {
+        else if (!memcmp(m, "XHB1", 4) || !memcmp(m, "XFM1", 4) || !memcmp(m, "XFS1", 4)) {
             /* By the pack's record table: the common records, then the
                landing craft's (Pack.craft_rec0). */
             unsigned c0 = g_pak.craft_rec0, cd = g_pak.craft_rec_disk, r;
@@ -445,7 +447,7 @@ static void load_he_blocks(FILE *f)
                 if (!(i < c0 || (i >= cd && r < g_pak.n_mcd)))
                     continue;
                 if (m[1] == 'F') {
-                    he[MAX_HE_VALUES + r] = b;
+                    he[MAX_HE_VALUES + (m[2] == 'S' ? g_pak.n_mcd : 0) + r] = b;
                     continue;
                 }
                 /* the HE blockage's index: a new value, the last one when
@@ -627,7 +629,7 @@ const char *pak_load(const char *path)
     g_pak.landing = xalloc(h.n_landing);
     g_pak.big = xalloc(h.n_big);
     g_pak.block = xalloc((unsigned long)h.n_blocks * sizeof(Block));
-    g_pak.he = xalloc(MAX_HE_VALUES + g_pak.n_mcd);
+    g_pak.he = xalloc(MAX_HE_VALUES + 2 * g_pak.n_mcd);
     if (!g_pak.mcd || !g_pak.fill || !g_pak.landing || !g_pak.big || !g_pak.block || !g_pak.he) {
         err = "out of memory (tables)";
         goto out;

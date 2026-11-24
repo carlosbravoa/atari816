@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include "uipak.h"           /* BRIEF_* */
 #include "input.h"
 #include "inv.h"
 #include "items.h"
@@ -388,8 +389,18 @@ static const unsigned char prio[N_SFX] = {
     2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2,  /* shots, hits, explosion, deaths */
     1, 0, 1,                                /* door, step, throw */
     2, 2, 2, 2, 2, 2, 2,                    /* geoscape */
-    1, 1, 1                                 /* the interface: never over an alert or a
+    1, 1, 1,                                /* the interface: never over an alert or a
                                                battle's effect; a click cuts a pop-up's tail */
+    0, 0, 0, 0, 0, 0, 0, 0,                 /* footsteps, as the step */
+    0, 2, 1, 1, 1, 2, 2, 2                  /* fly, big explosion, UFO door, drop, reload,
+                                               machine's death, rocket, blaster */
+};
+
+/* Pack format 6's effects where no sample of theirs is loaded: an older
+   effect's FM or speaker stand-in (-1: none). */
+static const signed char stand_in[N_SFX - SFX_STEP1A] = {
+    SFX_STEP, SFX_STEP, SFX_STEP, SFX_STEP, SFX_STEP, SFX_STEP, SFX_STEP, SFX_STEP,
+    -1, SFX_EXPLOSION, SFX_DOOR, -1, -1, SFX_EXPLOSION, SFX_CRAFT_MISSILE, SFX_PLASMA
 };
 
 void __cdecl xms_call(unsigned __far *r);
@@ -711,8 +722,12 @@ static int add(unsigned char *list, int n, int sfx)
 static int fire_sfx(int weapon)
 {
     switch (weapon) {
-    case IT_HCANNON:
+    case IT_HCANNON: case IT_ACANNON:
         return SFX_CANNON;
+    case IT_RLAUNCHER:
+        return SFX_ROCKET;              /* items.rul fireSound 52 */
+    case IT_BLASTER: case IT_LAUNCHER:
+        return SFX_BLASTER;             /* 53 */
     case IT_LPISTOL: case IT_LRIFLE: case IT_HLASER:
         return SFX_LASER;
     case IT_PPISTOL: case IT_PRIFLE: case IT_HPLASMA:
@@ -739,29 +754,32 @@ void snd_free(void)
 /* The screen's track: in the UMB when it fits there (leaving room for the
    effects when they load per screen), else in conventional memory only
    when the game keeps RESERVE free (sound gives way first). */
-static void start_music(int track, int loop)
+static int start_music(int track, int loop)
 {
     unsigned m = mus_size(track);
     unsigned long room = umb_seg ? (unsigned long)umb_paras * 16 - fixed_end : 0;
 
     if (!m)
-        return;
+        return 0;
     if (umb_seg && room >= m + (per_screen ? UMB_MIN : 0)) {
         if (mus_play_at(track, loop, (unsigned char __far *)MK_FP(umb_seg, 0) + fixed_end) == 0) {
             music_umb = 1;
             umb_music_end = (fixed_end + m + 15) & ~15u;
             log_printf("music: track %d in the UMB, %u bytes", track, m);
-            return;
+            return 1;
         }
     }
     if (track == g_hma_track && !mus_play_at(track, loop, (unsigned char __far *)MK_FP(0xFFFF, g_hma_lo)))
-        return;
+        return 1;
     if (dos_free() - (long)m >= RESERVE) {
-        if (mus_play(track, loop) == 0)
+        if (mus_play(track, loop) == 0) {
             log_printf("music: track %d, %u bytes, %ld KB free", track, m, dos_free() / 1024);
+            return 1;
+        }
     } else {
         log_printf("music: track %d (%u bytes) left out: %ld KB free", track, m, dos_free() / 1024);
     }
+    return 0;
 }
 
 void snd_set_battle(int race)
@@ -779,7 +797,7 @@ void snd_set_battle(int race)
     case 'E': case 'X': race_death = SFX_DIE_ETHEREAL; break;
     default: race_death = SFX_DIE_SECTOID;
     }
-    start_music(race == 'X' ? MUS_MARS : MUS_TACTIC, 1);
+    start_music(MUS_TACTIC, 1);         /* (every battle: Cydonia too, as OpenXcom's) */
     /* Priority: shots of the weapons present, deaths, impacts, the rest. */
     for (i = 0; i < g_nunits; i++) {
         if (g_units[i].weapon != NO_ITEM)
@@ -802,24 +820,31 @@ void snd_set_battle(int race)
     for (i = 0; i < g_nunits; i++)
         if (g_units[i].weapon != NO_ITEM)
             n = add(list, n, hit_sfx(g_units[i].weapon));
-    if (grenades)
+    if (grenades) {
         n = add(list, n, SFX_EXPLOSION);
+        n = add(list, n, SFX_THROW);
+    }
     n = add(list, n, SFX_DIE_FEMALE);
     n = add(list, n, SFX_DOOR);
     n = add(list, n, SFX_STEP);
+    /* (pack format 6) the steps' second halves, the other terrains' steps, the
+       rest; what does not fit plays its stand-in */
+    n = add(list, n, SFX_STEP2B);
+    n = add(list, n, SFX_UFO_DOOR);
+    n = add(list, n, SFX_DROP);
+    n = add(list, n, SFX_RELOAD);
+    if (grenades)
+        n = add(list, n, SFX_EXPLOSION_BIG);
+    for (i = SFX_STEP1A; i <= SFX_STEP6B; i++)
+        n = add(list, n, i);
+    n = add(list, n, SFX_FLY);
+    n = add(list, n, SFX_DIE_MECH);
     load_effects(list, n);
-}
-
-void snd_result(int res)
-{
-    snd_free();
-    if (!quiet)
-        start_music(res == 1 ? MUS_WIN : MUS_LOSE, 0);
 }
 
 static int geo_track;            /* the geoscape's track: MUS_GEO1 or MUS_INTER */
 
-static void geo_load(int track)
+static void geo_load(int track, int loop)
 {
     static const unsigned char list[] = {
         SFX_GEO_POPUP, SFX_BUTTON, SFX_CRAFT_CANNON, SFX_UFO_HIT, SFX_UFO_CRASH,
@@ -831,13 +856,34 @@ static void geo_load(int track)
     geo_track = track;
     if (quiet)
         return;
-    start_music(track, 1);
+    /* (GMGEO2 is 23 KB: where it does not fit, GMGEO1) */
+    if (!start_music(track, loop) && track == MUS_GEO2)
+        start_music(MUS_GEO1, loop);
     load_effects(list, sizeof list);
 }
 
 void snd_set_geo(void)
 {
-    geo_load(MUS_GEO1);
+    /* the second track at random but in the first month (own random numbers:
+       the game's rnd() sequence stays as it is) */
+    geo_load(g_months_played > 0 && noise_rnd(2) ? MUS_GEO2 : MUS_GEO1, 1);
+}
+
+void snd_result(int res)
+{
+    (void)res;
+    geo_load(MUS_MARS, 1);
+}
+
+void snd_story(void)
+{
+    geo_load(MUS_STORY, 0);
+}
+
+void snd_brief(int kind)
+{
+    geo_load(kind == BRIEF_TERROR || kind == BRIEF_BASE ? MUS_ENBASE
+             : kind == BRIEF_MARS || kind == BRIEF_FINAL ? MUS_NEWMAR : MUS_DEFEND, 1);
 }
 
 /* GeoscapeState: GMINTER while a dogfight is on (minimised ones too),
@@ -845,10 +891,12 @@ void snd_set_geo(void)
    which may take the UMB room they had. */
 void snd_dogfight(int on)
 {
-    int track = on ? MUS_INTER : MUS_GEO1;
-
-    if (ctx == 1 && track != geo_track)
-        geo_load(track);
+    if (ctx == 1 && on != (geo_track == MUS_INTER)) {
+        if (on)
+            geo_load(MUS_INTER, 1);
+        else
+            snd_set_geo();
+    }
 }
 
 /* ------------------------------------------------------------------ */
@@ -911,6 +959,12 @@ static void play(int sfx, int pr)
 
     if (!g_sound_on || sfx < 0 || sfx >= N_SFX)
         return;
+    if (!sfx_len[sfx] && sfx >= SFX_STEP1A) {
+        sfx = stand_in[sfx - SFX_STEP1A];
+        if (sfx < 0)
+            return;
+        pr = prio[sfx];
+    }
     if (!sfx_len[sfx]) {
         if (fm_sfx)
             /* (no LOG line: with LOG on, each line reopens the file, about
@@ -1020,14 +1074,65 @@ void snd_explode(void)
     snd_play(ctx == 1 ? SFX_UFO_CRASH : SFX_EXPLOSION);
 }
 
-void snd_door(void)
+void snd_blast(int power)
 {
-    snd_play(SFX_DOOR);
+    snd_play(power <= 80 ? SFX_EXPLOSION : SFX_EXPLOSION_BIG);
+}
+
+/* UnitWalkBState: DOOR_OPEN, SLIDING_DOOR_OPEN. */
+void snd_door(int ufo)
+{
+    snd_play(ufo ? SFX_UFO_DOOR : SFX_DOOR);
 }
 
 void snd_step(void)
 {
     snd_play(SFX_STEP);
+}
+
+/* WALK_OFFSET 22 + 2 f (+ 1 for the second half). Without its sample a step
+   is one stand-in, at its first half. */
+void snd_footstep(int f, int second)
+{
+    static const signed char a[7] = { -1, SFX_STEP1A, SFX_STEP, -1, -1, SFX_STEP5A, SFX_STEP6A };
+    static const signed char b[7] = { -1, SFX_STEP1B, SFX_STEP2B, SFX_STEP3B, -1, SFX_STEP5B,
+                                      SFX_STEP6B };
+    int s;
+
+    if (f < 0 || f > 6)
+        return;
+    s = second ? b[f] : a[f];
+    if (s < 0 || (!sfx_len[s] && (second || f == 3)))
+        return;
+    snd_play(s);
+}
+
+void snd_fly(void)
+{
+    snd_play(SFX_FLY);
+}
+
+void snd_throw(void)
+{
+    snd_play(SFX_THROW);
+}
+
+void snd_drop(void)
+{
+    snd_play(SFX_DROP);
+}
+
+void snd_reload(void)
+{
+    snd_play(SFX_RELOAD);
+}
+
+void snd_die(int alien, int mech)
+{
+    if (mech)
+        snd_play(SFX_DIE_MECH);
+    else
+        snd_kill(alien);
 }
 
 /* The interface's sounds (sound.h): only the loaded samples (a stand-in

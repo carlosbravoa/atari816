@@ -43,22 +43,21 @@ static int okcancel(int x, const char *l1, const char *l2)
 {
     int ok = 0;
 
-    uk_fill(x, 60, 152, 80, 0);
-    uk_window(x, 60, 152, 80);
+    uk_popup(x, 60, 152, 80, UK_POP_NONE, 0);      /* (it does not pop up: no sound) */
     uk_center(x, 152, 75, UK_SMALL, 9, l1);
     uk_center(x, 152, 85, UK_SMALL, 9, l2);
     uk_button(x + 16, 115, 44, 16, "OK", 0);
     uk_button(x + 92, 115, 44, 16, "CANCEL", 0);
-    snd_window();
     for (;;) {
         unsigned key = input_key();
         if (key == KEY_LCLICK && g_mouse_y >= 115 && g_mouse_y < 131) {
-            if (g_mouse_x >= x + 16 && g_mouse_x < x + 60)
+            if (g_mouse_x >= x + 16 && g_mouse_x < x + 60) {
+                uk_press(x + 16, 115, 44, 16, "OK");
                 key = 13;
-            else if (g_mouse_x >= x + 92 && g_mouse_x < x + 136)
+            } else if (g_mouse_x >= x + 92 && g_mouse_x < x + 136) {
+                uk_press(x + 92, 115, 44, 16, "CANCEL");
                 key = 27;
-            if (key != KEY_LCLICK)
-                snd_button();
+            }
         }
         if ((key & 0xFF) == 13) {
             ok = 1;
@@ -396,7 +395,7 @@ void costs_screen(void)
     for (;;) {
         unsigned key = input_key();
         if (key == KEY_LCLICK && g_mouse_y >= 170 && g_mouse_y < 190)
-            snd_button();
+            uk_press(10, 170, 300, 20, "OK");
         if (key == KEY_RCLICK || (key & 0xFF) == 27 || (key & 0xFF) == 13
             || (key == KEY_LCLICK && g_mouse_y >= 170 && g_mouse_y < 190))
             break;

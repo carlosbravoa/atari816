@@ -397,7 +397,7 @@ static int click_act(unsigned key)
     } else if (my >= BTN_Y && (my - BTN_Y) / BTN_PITCH < N_BTN && (my - BTN_Y) % BTN_PITCH < 12) {
         i = (my - BTN_Y) / BTN_PITCH;
         if (i != BM_NEW || g_nbases < MAX_BASES) {
-            snd_button();
+            uk_press(RX, BTN_Y + i * BTN_PITCH, 128, 12, btn_label(i));
             return i;
         }
     }

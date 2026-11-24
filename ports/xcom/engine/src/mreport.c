@@ -249,7 +249,7 @@ int alien_month_report(int months, long funds, long costs, int month, int year)
     for (;;) {
         unsigned k = input_key();
         if (k == KEY_LCLICK && g_mouse_y >= 180 && g_mouse_y < 192)
-            snd_button();
+            uk_press(135, 180, 50, 12, "OK");
         if ((k & 0xFF) == 13 || (k & 0xFF) == 27 || (k & 0xFF) == ' '
             || (k == KEY_LCLICK && g_mouse_y >= 180 && g_mouse_y < 192))
             break;

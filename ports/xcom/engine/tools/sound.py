@@ -28,7 +28,9 @@ import argparse
 import os
 import struct
 
-# Effects in the order of the SFX_* enum in src/sound.h:
+# Effects in the order of the SFX_* enum in src/sound.h (SOUND1.CAT's entry
+# 0 is the snakeman's slither, not an explosion: OpenXcom's SMALL_EXPLOSION
+# is entry 2, LARGE_EXPLOSION 5):
 # (name, cat, index, longest ms or None, rate[, gain])
 # The interface's three at the end (OpenXcom's Mod::BUTTON_PRESS = 0 and
 # WINDOW_POPUP = 1, 2, 3 of GEO.CAT, which is SOUND2.CAT in DOS; the third
@@ -44,7 +46,7 @@ EFFECTS = [
     ("plasma",       1, 18, 500, 8000),
     ("hit bullet",   1, 22, 300, 8000),
     ("hit beam",     1, 19, 350, 8000),
-    ("explosion",    1, 0,  900, 6000),
+    ("explosion",    1, 2,  900, 6000),
     ("die sectoid",  1, 10, 800, 6000),
     ("die snakeman", 1, 8,  700, 6000),
     ("die muton",    1, 6,  800, 6000),
@@ -64,6 +66,27 @@ EFFECTS = [
     ("button",       2, 0,  200, 8000, 0.5),
     ("window 1",     2, 1,  650, 8000, 0.47),
     ("window 2",     2, 2,  550, 8000, 0.6),
+    # Pack format 6: the battle's other samples (OpenXcom's Mod constants and
+    # rules, the DOS SOUND1.CAT indices, ufopaedia.org's SOUND list). The
+    # footsteps: WALK_OFFSET 22 + 2 x the MCD's footstep value (the first
+    # half-step), + 1 (the second); the DOS terrains use values 1, 2, 3, 5
+    # and 6 (3's first, entry 28, is silent; 2's first is "step" above).
+    ("step 1a",      1, 24, 120, 8000),     # metal
+    ("step 1b",      1, 25, 120, 8000),
+    ("step 2b",      1, 27, 120, 8000),     # ground
+    ("step 3b",      1, 29, 120, 8000),
+    ("step 5a",      1, 32, 120, 8000),     # sand
+    ("step 5b",      1, 33, 120, 8000),
+    ("step 6a",      1, 34, 120, 8000),     # UFO, Mars
+    ("step 6b",      1, 35, 120, 8000),
+    ("fly",          1, 15, 400, 6000),     # FLYING_SOUND
+    ("explosion big", 1, 5, 700, 6000),     # LARGE_EXPLOSION (power over 80)
+    ("ufo door",     1, 20, 400, 6000),     # SLIDING_DOOR_OPEN
+    ("drop",         1, 38, 120, 8000),     # ITEM_DROP
+    ("reload",       1, 17, 300, 6000),     # ITEM_RELOAD
+    ("die mech",     1, 23, 600, 6000),     # cyberdisc, sectopod, tanks
+    ("rocket",       1, 52, 400, 6000),     # rocket launcher, tank rocket launcher
+    ("blaster",      1, 53, 400, 6000),     # blaster and small launchers
 ]
 
 # MUSIC.PAK tracks in the order of the MUS_* enum (ADLIB.CAT entries, as in
@@ -73,7 +96,11 @@ EFFECTS = [
 # UFOINTRO/ADLIB.CAT).
 TRACKS = [("geo1", 0), ("geo2", 18), ("tactic", 17), ("inter", 2),
           ("win", 11), ("lose", 10), ("mars", 9),
-          ("intro1", 19), ("intro2", 20), ("intro3", 21)]
+          ("intro1", 19), ("intro2", 20), ("intro3", 21),
+          # pack format 6: GMSTORY (the start menu), GMDEFEND, GMENBASE and
+          # GMNEWMAR (the briefings: OpenXcom's interfaces.rul mainMenu,
+          # AlienDeployment's BriefingData, alienDeployments.rul)
+          ("story", 12), ("defend", 3), ("enbase", 6), ("newmar", 8)]
 
 FADE_MS = 30
 
