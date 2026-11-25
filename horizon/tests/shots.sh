@@ -5,6 +5,8 @@
 # the script's "wait" lines)
 #   build/NAMEn.ppm, build/NAME.md5 (their md5), build/NAME.out (console),
 #   build/NAME.err (emu816's own log, e.g. the classic-machine ops).
+# (0.31) MASK=FILE: parts of the pictures painted over before their md5 (tests/maskshot.py):
+# what moves with the clock, not with the session's state (a song's meters).
 set -e
 emu=$1 sd=$2 name=$3 secs=$4
 shift 4
@@ -26,6 +28,8 @@ $emu --headless --sd build/run-pic --max-seconds "$secs" \
     --keys "$ks" \
     --mouse "$(python3 tests/keyscript.py --mouse "$keys")" \
     $args "$sd/SYSTEM/HORIZON.SYS" > "build/$name.out" 2> "build/$name.err" || true
+# (0.31) MASK=FILE: the parts that move with the clock painted over first (tests/maskshot.py)
+[ -z "$MASK" ] || python3 tests/maskshot.py "$MASK" "build/$name" $n
 files=$(i=0; while [ $i -lt $n ]; do i=$((i + 1)); echo "$name$i.ppm"; done | LC_ALL=C sort)
 (cd build && md5sum $files) > "build/$name.md5"   # (exactly these: desk14*.ppm are not desk1*)
 # SHOTPNG=1 (where disk space is short): keep PNG copies (build/NAMEn.png) instead of the

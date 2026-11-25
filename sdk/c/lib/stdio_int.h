@@ -14,7 +14,8 @@
 
 #define FILEBUF  1024           /* a file's buffer */
 #define FILESMALL 128           /* ... when the heap has not 1 KB free */
-#define CONBUF   128            /* the console's */
+#define CONBUF   128            /* the console's output buffers (stdout, stderr) */
+#define CONIN    256            /* stdin's: a typed line of at most 255 characters + '\n' */
 
 extern FILE *__hz_files;
 int __hz_flushw(FILE *f);

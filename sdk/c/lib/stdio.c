@@ -29,8 +29,10 @@
 
 int __hz_seterrno(void);
 
-static unsigned char ibuf[CONBUF + 2], obuf[CONBUF + 1], ebuf[CONBUF + 1];
-static FILE sin_ = {ibuf, ibuf, 0, CONBUF + 1, F_READ | F_CON | F_STATIC, -1, EOF, 0, 0, 0};
+void __hz_concount(const char *s);     /* (console.c) */
+
+static unsigned char ibuf[CONIN + 2], obuf[CONBUF + 1], ebuf[CONBUF + 1];
+static FILE sin_ = {ibuf, ibuf, 0, CONIN + 1, F_READ | F_CON | F_STATIC, -1, EOF, 0, 0, 0};
 static FILE sout_ = {obuf, obuf, 0, CONBUF, F_WRITE | F_LINE | F_CON | F_STATIC, -1, EOF, 0, 0, 0};
 static FILE serr_ = {ebuf, ebuf, 0, CONBUF, F_WRITE | F_LINE | F_CON | F_STATIC, -1, EOF, 0, 0, 0};
 FILE *stdin = &sin_, *stdout = &sout_, *stderr = &serr_;
@@ -46,6 +48,7 @@ static int put_out(FILE *f, unsigned n)
     int r;
     if (f->flags & F_CON) {
         f->base[n] = 0;                 /* (console buffers have room for the 0) */
+        __hz_concount((char *)f->base); /* (the column: hz_getline starts there) */
         hz_puts((char *)f->base);
         return 0;
     }
@@ -80,7 +83,7 @@ static int con_in(FILE *f)
     int r;
     fflush(stdout);
     fflush(stderr);
-    r = hz_getline((char *)f->base, CONBUF);
+    r = hz_getline((char *)f->base, CONIN);    /* <= CONIN - 1 characters, then '\n' */
     if (r < 0)
         return 0;                       /* ctrl-C or ctrl-D: the end of input */
     f->base[r] = '\n';

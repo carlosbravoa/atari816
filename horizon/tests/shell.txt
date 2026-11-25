@@ -62,7 +62,7 @@ kill: no such task
 Hello from task 10, Horizon user mode, args "there"
 > hello there
 Hello from task 11, Horizon user mode, args "there"
-> hello there           hello there           kill 99       hello there
+> hello therehello therekill 99    hello there
 Hello from task 12, Horizon user mode, args "there"
 > 
 > hello there

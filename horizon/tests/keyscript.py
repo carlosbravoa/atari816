@@ -11,8 +11,17 @@ A line whose text is "M dx:dy:wheel:buttons" is a mouse event at that time.
 (0.29) "wait TEXT": nothing more until the console shows a line holding TEXT (at once if one
 came since the input line before it began), then every later time moves by as long as the
 wait took; it starts after every key and mouse event of the lines before it (emu816's
-t:W:HEX, with a step mark t:M: at each input line). "shot": a screenshot that moves with the
+t:W:HEX, with a step mark t:M: at each input line). (0.31) "still N": nothing more until
+the picture on the monitor stayed the same for N frames in a row (60 a second), then every
+later time moves by as long as the wait took; it starts after every key and mouse event
+of the lines before it (emu816's t:Q:HEX). "change": the same until a frame differs from
+the one before it (t:C:; it ends at a frame's start, so what follows keeps its place in the
+frames: a picture of an animation N frames after its first). "sound": the same until a voice
+of Lau, the sample player, is started (t:A:; to the cycle: a song's first note).
+"shot": a screenshot that moves with the
 waits (PREFIX + its number .ppm, numbered from N + 1 in the script's order; shots.sh).
+A picture taken at a state ("wait TEXT" or "still N", then "+0 shot") does not depend on
+how fast the CPU or the kernel is; one taken at a time (shots.sh's T1 ...) may.
 Lines starting with # are comments."""
 import sys
 
@@ -63,6 +72,14 @@ for ln in open(sys.argv[-1]):
     if text.startswith('wait '):
         t = max(t, last + 1)
         out.append(f'{t}:W:{text[5:].encode("latin-1").hex()}')
+        continue
+    if text.startswith('still ') and text[6:].strip().isdigit():
+        t = max(t, last + 1)
+        out.append(f'{t}:Q:{text[6:].strip().encode("latin-1").hex()}')
+        continue
+    if text in ('change', 'sound'):
+        t = max(t, last + 1)
+        out.append(f'{t}:{"C" if text == "change" else "A"}:')
         continue
     if text == 'shot':
         if not prefix and not mouse: raise SystemExit('a shot line needs --shots PREFIX N')

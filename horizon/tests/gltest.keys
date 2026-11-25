@@ -1,0 +1,45 @@
+# (0.31) the line editor (ulib getline) with lines longer than the screen line: GLTEST
+# (user/gltest.s, copied to the card as /GLTEST.PRG) on the text shell. tests/gltest.py
+# checks the lines it received (tests/gltest.txt) and the echo (a screen line simulated from
+# the console's bytes: no backspace at column 0, nothing written into the last column, what
+# is left on the screen line a piece of the line received).
+# INIT starts the shell with the file browser: Esc leaves it
+1500 {esc}
++1500 /gltest.prg\n
++0 wait gltest: type lines
+# 1: 135 characters (the room right of "? " is 75), 60 backspaces back over the view's
+# start, 3 more, 10 to the left, 2 inserted there, 3 to the right, Enter: 80 characters
++300 000-abcdefghij.001-abcdefghij.002-abcdefghij.003-abcdefghij.004-abcdefghij.005-abcdefghij.006-abcdefghij.007-abcdefghij.008-abcdefghij.\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\bXYZ{left}{left}{left}{left}{left}{left}{left}{left}{left}{left}<>{right}{right}{right}\n
++0 wait gltest: 80:
+# 2: 279 characters typed: the 24 past 255 are dropped; 3 to the left, 2 backspaces, 2
+# inserted: 255 again
++300 000-ABCDEFGHIJKLMNOPQRSTUVWXYZ.001-ABCDEFGHIJKLMNOPQRSTUVWXYZ.002-ABCDEFGHIJKLMNOPQRSTUVWXYZ.003-ABCDEFGHIJKLMNOPQRSTUVWXYZ.004-ABCDEFGHIJKLMNOPQRSTUVWXYZ.005-ABCDEFGHIJKLMNOPQRSTUVWXYZ.006-ABCDEFGHIJKLMNOPQRSTUVWXYZ.007-ABCDEFGHIJKLMNOPQRSTUVWXYZ.008-ABCDEFGHIJKLMNOPQRSTUVWXYZ.{left}{left}{left}\b\bok\n
++0 wait gltest: 255:
+# the history (1 KB, the oldest lines dropped while a new one does not fit; line 1 takes 81
+# bytes, line 2 256): line 1 again (Up twice: 418 bytes), line 2 again (Up twice: 674),
+# line 2 again (Up three times: 930), line 2 again (Up: 1,186 would not fit: the two oldest
+# go, 849 bytes: 1 2 2 2), then Up five times (one more than the lines kept): the oldest
+# is line 1 (it would be line 2 if nothing had been dropped)
++300 {up}{up}\n
++0 wait gltest: 80:
++300 {up}{up}\n
++0 wait gltest: 255:
++300 {up}{up}{up}\n
++0 wait gltest: 255:
++300 {up}\n
++0 wait gltest: 255:
++300 {up}{up}{up}{up}{up}\n
++0 wait gltest: 80:
+# an empty line ends GLTEST
++300 \n
++0 wait gltest: done
+# the shell's own line editor: a program's arguments of 105 characters (a line of 111),
+# arguments of 130 (the kernel takes 127: the shell says so), ctrl-C on a long line (the
+# keyboard is the shell's: the line is dropped), then a last short line
++300 hello 000-abcdefghij.001-abcdefghij.002-abcdefghij.003-abcdefghij.004-abcdefghij.005-abcdefghij.006-abcdefghij.\n
++0 wait Hello from
++300 hello 000-abcdefghij.001-abcdefghij.002-abcdefghij.003-abcdefghij.004-abcdefghij.005-abcdefghij.006-abcdefghij.007-abcdefghij.008-abcdef\n
++0 wait sh: the arguments
++300 00-zyxwvu.01-zyxwvu.02-zyxwvu.03-zyxwvu.04-zyxwvu.05-zyxwvu.06-zyxwvu.07-zyxwvu.08-zyxwvu.09-zyxwvu.^C
++5600 hello end\n
++0 wait args "end"

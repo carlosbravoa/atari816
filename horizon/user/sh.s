@@ -26,8 +26,10 @@
         .include "horizon.inc"
         .include "ui.inc"
 
-LINEMAX = 128                           ; (0.22: 80 before; getline still stops at the
-                                        ; screen's width - 3: it does not wrap)
+LINEMAX = 256                           ; (0.31: getline takes 255 characters, scrolling the
+                                        ; line sideways; 0.22-0.30: 128, cut at the screen's
+                                        ; width - 3; 80 before)
+ARGMAX  = 127                           ; a program's argument string (the kernel's spawn)
 NJOBS   = 8
 
         .segment "CODE"
@@ -258,15 +260,25 @@ external:
 @spawn2:
         lda     [u_p]                   ; arguments: the rest of the line, if any
         and     #$00FF
-        beq     :+
+        beq     @noarg
         lda     z:u_p
         sta     z:u_arg
         lda     z:u_p+2
         sta     z:u_arg+2
-        bra     :++
-:       stz     z:u_arg
+        ldy     #0                      ; (0.31) the line may be longer than the kernel
+:       lda     [u_p],y                 ; takes for arguments: say so (spawn: EINVAL)
+        and     #$00FF
+        beq     :+
+        iny
+        bra     :-
+:       cpy     #ARGMAX + 1
+        bcc     @spawn3
+        print   "sh: the arguments are too long (at most 127 characters)\n"
+        rts
+@noarg: stz     z:u_arg
         stz     z:u_arg+2
-:       ldx     #.loword(path)
+@spawn3:
+        ldx     #.loword(path)
         ldy     #^path
         lda     #2
         jsr     spawn

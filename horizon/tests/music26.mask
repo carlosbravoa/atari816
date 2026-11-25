@@ -1,0 +1,11 @@
+# (0.31) tests/maskshot.py: the parts of the Music session's pictures that move with the
+# clock, not with the session's steps. A song plays from the moment its file is loaded, which
+# depends on how fast the CPU and the kernel are; the window redraws at each frame while
+# the song's position moves at its own ticks, so the meters, the row, the time and the
+# position bar at a given frame cannot be fixed. The rest of each picture is compared.
+# the menu bar's free memory and uptime (sampled every 5 s)
+*  1030 0 1280 28
+# the Music window: its level meters
+*  798 156 1026 212
+# its position line (order, pattern, row, time), the position bar and the meters' bottom
+*  250 212 1030 290

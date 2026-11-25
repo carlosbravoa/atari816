@@ -1215,6 +1215,30 @@ answers SR_APPS with EINVAL, an older TERM opens a shell).
   files; progok about 260); Files 26,029 -> 23,201 (its 2 KB READDIR buffer); TERM and
   INSTALL have room.
 - `kpath` is exported (`build/horizon.lbl`, the kernel's labels, for `tests/cardreq.py`).
+- **The line editor** (ulib `getline`, the shell's, and the C library's `hz_getline`) takes
+  255 characters (was the console's width - 3: 75 in the text shell): a line longer than the
+  room right of the prompt scrolls sideways by half that room (it never wraps, so Backspace
+  and the arrows never cross a screen line's start, where the console's BS stops). The
+  prompt's end is the column `out_char` counts (`u_col`); the history keeps up to 8 lines
+  packed in 1 KB (the oldest go first). The shell's line is 256 bytes (LINEMAX); arguments
+  over the kernel's 127 characters are refused with a sentence ("sh: the arguments are too
+  long") instead of spawn's EINVAL. Type-ahead (`key_keep`) stays at 80 characters. Every
+  program is 227 bytes bigger (DESK 664 -> 437 bytes left in its bank). `make test-31`:
+  `tests/gltest.keys` (GLTEST, `user/gltest.s`: 80- and 255-character lines edited across
+  the view's start, the history, the echo checked on a simulated screen line by
+  `tests/gltest.py`). The C library's stdin takes lines of 255 characters (CONIN).
+- **Pictures at states, not at moments** (emu816 `--cpu-slow`, `--kernel-slow`: the CPU's or
+  the kernel's speed moved by a percentage; keyscript.py `still N`, `change`, `sound`; a
+  shots.sh `MASK`). Edit's six pictures are taken when the screen has stayed still for 30
+  frames (REV $07's sixth now shows the alert: at 19.6 s its CPU had not drawn it yet); BASIC
+  2.0's ten from `tests/basic2s-prep.py`'s copies of SPRITES, DRIFT and SCROLLER (a fixed
+  seed, the animation held at a step, DRIFT steered by its step count); Music's ten with the
+  meters, the position line and bar and the menu bar's free memory painted over
+  (`tests/music26.mask`). They pass unchanged with `--cpu-slow` +-3 and +-8 and
+  `--kernel-slow` +-10. One weak spot: SCROLLER's raster bands. Their edges land a line
+  late in a frame now and then even at the normal speed (a still wait forgives a frame that
+  differs alone), and in most frames with `--kernel-slow 10`, where a still wait for its
+  pictures came in one run of two (the kernel's raster changes run close to their time).
 - **Nothing polled** (ABI.md, "Background card requests"). The I/O processor serves one
   request at a time; behind a full-screen game the Desktop still asked STAT `/PRN:` every
   second, STAT `/PC:` and a READDIR of /Desktop every 5 s, Printer STAT `/PRN:` every second
@@ -1768,7 +1792,8 @@ E_NOSVC ... E_NET ($CA-$D3) and E_NSTREAM in horizon.inc.
   ($C2). The command line holds 128 characters (LINEMAX; 80 before), but the line editor
   still stops at the screen's width - 3 (75 in the text shell, 73 in the Terminal): it does
   not wrap, so a longer URL can only come through a program's argument (the shell's own,
-  `SH get ...`) for now.
+  `SH get ...`) for now. (0.31: the line editor takes 255 characters, scrolling the line
+  sideways; LINEMAX 256.)
 - **The controls library:** `uicopy.s` reads a file until a short read, never only to its
   STAT size (a URL's size may be unknown: 0); `ui_cpblk` (the piece, 16 KB by default; the
   Downloader and `get` use 4 KB: a URL's read waits until the piece is full); `ui_cpx` (X of a

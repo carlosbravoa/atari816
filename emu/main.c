@@ -48,6 +48,24 @@ static uint8_t *prof_op;            /* the opcode seen there */
 static uint64_t prof_sys[256], prof_sysn[256], prof_k, prof_i;
 static int prof_insys = -1;
 
+/* --cpu-slow PCT, --kernel-slow PCT: every instruction (--kernel-slow: every one run in
+ * supervisor mode) takes PCT % more cycles (negative: fewer, down to -50). A test aid: it
+ * moves the timing of all the CPU does, to show which tests depend on it; waiting (WAI),
+ * the devices and the scripted input keep their times */
+static int cpu_slow, kernel_slow;
+static int64_t slow_acc;
+
+static void slow_adjust(Cpu65816 *c, uint64_t c0, int user)
+{
+    int pct = cpu_slow + (user ? 0 : kernel_slow);
+    if (!pct || c->cycles <= c0) return;
+    slow_acc += (int64_t)(c->cycles - c0) * pct;
+    int64_t q = slow_acc / 100;
+    slow_acc -= q * 100;
+    if (q < 0 && (uint64_t)-q >= c->cycles - c0) q = -(int64_t)(c->cycles - c0 - 1);
+    c->cycles += q;
+}
+
 static void prof_write(void)
 {
     FILE *f = fopen(prof_path, "w");
@@ -79,19 +97,31 @@ static void host_key(int usage, int down)
     mailbox_key(usage, down);
 }
 
-/* scripted input (--keys, --mouse), sorted by time. Three more kinds in --keys: a wait
- * ("t:W:HEX": from t on, nothing more until the program prints a console line holding that
- * text; then the rest comes as late as the wait took), a screenshot ("t:S:HEX": that file,
- * two vertical blanks later) and a step mark ("t:M:": an input script's line starts here),
- * so a script can follow the program's progress */
-enum { K_KEY, K_MOUSE, K_WAIT, K_SHOT, K_MARK };
+/* scripted input (--keys, --mouse), sorted by time. More kinds in --keys, so a script can
+ * follow the program's progress instead of the clock:
+ *   t:W:HEX  a wait: from t on, nothing more until the program prints a console line
+ *            holding that text; then the rest comes as late as the wait took
+ *   t:Q:HEX  a wait for a still screen (HEX = a frame count N in decimal, as text): from t
+ *            on, nothing more until the picture sent to the monitor stayed the same for N
+ *            frames in a row; the rest as late as the wait took
+ *   t:C:     a wait for a change: from t on, until a frame differs from the one before it
+ *            (it ends at that frame's start: the rest keeps its place in the frames)
+ *   t:A:     a wait for a sound: from t on, until a voice of Lau, the sample player, is
+ *            started (KEYON); the rest as late as the wait took (to the cycle)
+ *   t:S:HEX  a screenshot (that file, two vertical blanks later)
+ *   t:M:     a step mark: an input script's line starts here */
+enum { K_KEY, K_MOUSE, K_WAIT, K_SHOT, K_MARK, K_STILL, K_CHANGE, K_SOUND };
 typedef struct { uint64_t cycle; int seq; uint8_t mouse, usage, down, btn; int16_t dx, dy, wheel; uint8_t kind; char *text; } KeyAt;
 static KeyAt *keys;
 static int nkeys, nextkey;
 static const char *key_wait;            /* the text being waited for, NULL: none */
 static uint64_t key_wait_at;
 static const char *key_shot;            /* a screenshot due (its file), in key_shot_req frames */
-static int key_shot_req;
+static int key_shot_req, key_shot_tries;
+static int key_still, key_still_n;      /* a still-screen wait: its frames (0: none), met so far */
+static uint64_t key_still_hash;         /* the last frame's hash */
+static int key_change;                  /* a wait for a changed frame */
+static int key_sound;                   /* a wait for a Lau KEYON */
 /* the console's lines since the script's last step mark (the start of the last input line
  * before a wait): a wait is also met by a line that came before its own time (the program
  * may be quicker than the script thought, or answer while that line's keys are still being
@@ -113,18 +143,102 @@ static int key_hist_take(const char *text)
     return 0;
 }
 
+/* a wait is over: the rest of the script moves on by as long as it took */
+static void keys_wait_over(void)
+{
+    uint64_t d = M.cpu.cycles > key_wait_at ? M.cpu.cycles - key_wait_at : 0;
+    for (int i = nextkey; i < nkeys; i++) keys[i].cycle += d;
+    key_wait = NULL;
+    key_still = key_change = key_sound = 0;
+    machine_reschedule();
+}
+
+#define KEYS_WAITING (key_wait || key_still || key_change || key_sound)
+
+/* (each frame of a still-screen or change wait) the picture as the monitor gets it,
+ * compared with the frame before by a 64-bit FNV-1a hash of its pixels */
+static uint64_t frame_hash(void)
+{
+    uint64_t h = 1469598103934665603ULL;
+    nvc_render();
+    const uint32_t *p = M.nvc.out;
+    for (int i = 0; i < NV_OUT_W * NV_OUT_H; i++) h = (h ^ p[i]) * 1099511628211ULL;
+    return h;
+}
+
+/* A still-screen wait forgives a frame that differs alone (the next one is the picture again:
+ * a raster colour change landing a line late, now and then): it neither counts nor restarts
+ * the count. The picture it settled on is kept (still_ref) for the screenshot that follows
+ * it: that one is taken from a frame showing that picture. */
+static uint64_t key_odd_hash;           /* a frame that differed, not yet known to be a glitch */
+static int key_odd;
+static int still_ref_ok;                /* still_ref: the picture of the last still-screen wait */
+static uint64_t still_ref;
+
+static void keys_still_frame(void)
+{
+    uint64_t h = frame_hash();
+    if (key_still_n < 0) {                  /* the first two frames only set the hash (the */
+        key_still_n++;                      /* first may be fetched in part, when nobody */
+        key_still_hash = h;                 /* looked at the output before) */
+        key_odd = 0;
+        return;
+    }
+    int same = h == key_still_hash;
+    if (key_change) {
+        key_still_hash = h;
+        if (!same) keys_wait_over();
+        return;
+    }
+    if (same) {                             /* (a frame that differed alone: forgiven) */
+        key_odd = 0;
+        if (++key_still_n >= key_still) {
+            still_ref = h;
+            still_ref_ok = 1;
+            keys_wait_over();
+        }
+    } else if (key_odd && h == key_odd_hash) {  /* a new picture, two frames: start again */
+        key_still_hash = h;
+        key_still_n = 1;
+        key_odd = 0;
+    } else {
+        key_odd = 1;
+        key_odd_hash = h;
+    }
+}
+
+/* (audio.c) a Lau voice was started */
+void emu_lau_keyon(void)
+{
+    if (key_sound) keys_wait_over();
+}
+
 static void keys_due(uint64_t now)
 {
-    while (!key_wait && nextkey < nkeys && keys[nextkey].cycle <= now) {
+    while (!KEYS_WAITING && nextkey < nkeys && keys[nextkey].cycle <= now) {
         KeyAt *k = &keys[nextkey++];
         if (k->kind == K_MARK) { key_hist_n = 0; continue; }
+        if (k->kind == K_STILL || k->kind == K_CHANGE) {
+            if (k->kind == K_STILL) key_still = atoi(k->text) > 0 ? atoi(k->text) : 1;
+            else key_change = 1;
+            key_still_n = -2;                           /* (two frames only start the count) */
+            key_wait_at = k->cycle;
+            M.nvc.want = 1;                             /* the next frames fetched whole */
+            continue;
+        }
+        if (k->kind == K_SOUND) {
+            key_sound = 1;
+            key_wait_at = k->cycle;
+            continue;
+        }
         if (k->kind == K_WAIT) {
             if (key_hist_take(k->text)) continue;       /* met already */
             key_wait = k->text; key_wait_at = k->cycle;
             continue;
         }
-        if (k->kind == K_SHOT) { key_shot = k->text; key_shot_req = 3; }
-        else if (k->mouse) mailbox_mouse(k->btn, k->dx, k->dy, k->wheel);
+        if (k->kind == K_SHOT) { key_shot = k->text; key_shot_req = 3; key_shot_tries = 0; continue; }
+        still_ref_ok = 0;                               /* (input: the picture may change) */
+        if (k->mouse) mailbox_mouse(k->btn, k->dx, k->dy, k->wheel);
         else host_key(k->usage, k->down);
     }
 }
@@ -138,10 +252,7 @@ static void keys_wait_line(const char *line)
         snprintf(key_hist[key_hist_n++], sizeof key_hist[0], "%s", line);
         return;
     }
-    uint64_t d = M.cpu.cycles > key_wait_at ? M.cpu.cycles - key_wait_at : 0;
-    for (int i = nextkey; i < nkeys; i++) keys[i].cycle += d;
-    key_wait = NULL;
-    machine_reschedule();
+    keys_wait_over();
 }
 
 static char *unhex(const char *s, int n)
@@ -165,11 +276,12 @@ static void parse_keys(const char *s)
     while (*s) {
         double ms; unsigned u, d; int n = 0;
         char kind;
-        if (sscanf(s, "%lf:%c:%n", &ms, &kind, &n) == 2 && n && (kind == 'W' || kind == 'S' || kind == 'M')) {
+        if (sscanf(s, "%lf:%c:%n", &ms, &kind, &n) == 2 && n && (kind == 'W' || kind == 'S' || kind == 'M' || kind == 'Q' || kind == 'C' || kind == 'A')) {
             int h = (int)strspn(s + n, "0123456789abcdefABCDEF");
             keys = realloc(keys, (nkeys + 1) * sizeof *keys);
             keys[nkeys] = (KeyAt){ .cycle = (uint64_t)(ms * CPU_HZ / 1000.0), .seq = nkeys,
-                                   .kind = kind == 'W' ? K_WAIT : kind == 'S' ? K_SHOT : K_MARK,
+                                   .kind = kind == 'W' ? K_WAIT : kind == 'S' ? K_SHOT : kind == 'Q' ? K_STILL :
+                                           kind == 'C' ? K_CHANGE : kind == 'A' ? K_SOUND : K_MARK,
                                    .text = unhex(s + n, h) };
             nkeys++;
             s += n + h;
@@ -219,7 +331,7 @@ void machine_reschedule(void)
     if (se < n) n = se;
     se = opl_next_event();
     if (se < n) n = se;
-    if (!key_wait && nextkey < nkeys && keys[nextkey].cycle < n) n = keys[nextkey].cycle;
+    if (!KEYS_WAITING && nextkey < nkeys && keys[nextkey].cycle < n) n = keys[nextkey].cycle;
     if (kbd_release && kbd_last && kbd_last + kbd_release < n) n = kbd_last + kbd_release;
     if (stop_hit >= 0 && run_limit < n) n = run_limit;  /* (a WAI ends the run on time) */
     M.next_event = n;
@@ -409,11 +521,21 @@ static void on_frame(void)
 {
     /* Marga only fetches and keeps lines when someone will look at them */
     double now = M.cpu.cycles / CPU_HZ;
+    if (key_still || key_change) {
+        M.nvc.want = 1;
+        keys_still_frame();
+    }
     if (key_shot_req) {
         M.nvc.want = 1;
         if (--key_shot_req == 0) {
-            nvc_render();
-            if (nvc_write_ppm(key_shot)) fprintf(stderr, "emu816: cannot write %s\n", key_shot);
+            /* after a still-screen wait: from a frame that shows the picture it settled on
+             * (not one a glitch touched; 60 frames at most) */
+            if (still_ref_ok && frame_hash() != still_ref && ++key_shot_tries < 60)
+                key_shot_req = 1;
+            else {
+                nvc_render();
+                if (nvc_write_ppm(key_shot)) fprintf(stderr, "emu816: cannot write %s\n", key_shot);
+            }
         }
     }
     if (shoton_req) {
@@ -585,11 +707,17 @@ static void usage(void)
         "  --pc-kbps R:W        slow PC volume: the same, + 6 ms a request (the board: about 100:55)\n"
         "  --ideal-timing       every CPU cycle ideal: no cache misses, SDRAM write or sweep stalls,\n"
         "                       the blitter's older speed model (the timing before Horizon 0.19)\n"
+        "  --cpu-slow PCT       (test aid) every instruction takes PCT %% more cycles (-50 .. 1000; negative:\n"
+        "                       fewer): the CPU's timing moved, the devices' and the script's kept\n"
+        "  --kernel-slow PCT    the same for the instructions run in supervisor mode (the kernel) only\n"
         "  --console-us N       DBG_OUT busy for N us after each byte; bytes written while busy are dropped\n"
         "  --keys LIST          inject keys: \"t_ms:usage:down,...\" (usage in hex, e.g. 100:04:1,150:04:0)\n"
         "                       (also t_ms:W:HEX: wait until the console shows a line holding that text,\n"
         "                       the rest later by as long, or at once if one came since the last\n"
-        "                       t_ms:M: (a step mark: an input line starts); t_ms:S:HEX: a screenshot)\n"
+        "                       t_ms:M: (a step mark: an input line starts); t_ms:Q:HEX: wait until the\n"
+        "                       picture stayed the same for N frames (HEX: N in decimal, as text), the\n"
+        "                       rest later by as long; t_ms:C: wait until a frame differs from the one\n"
+        "                       before; t_ms:A: wait until a Lau voice starts; t_ms:S:HEX: a screenshot)\n"
         "  --mouse LIST         inject mouse: \"t_ms:dx:dy:wheel:buttons,...\" (e.g. 100:5:-3:0:1)\n"
         "  --rev N              SYS_REV to report: 6 (no sound, no blitter), 7 (sound), 8 (+ blitter),\n"
         "                       9 (+ blitter lists, raster events at the beam, NV_FRAME),\n"
@@ -664,6 +792,11 @@ int main(int argc, char **argv)
         else if (!strcmp(a, "--ram-random") && i + 1 < argc) { ram_fill = -2; ram_seed = (uint32_t)strtoul(argv[++i], NULL, 0); }
         else if (!strcmp(a, "--watch-max") && i + 1 < argc) watch_max = strtoul(argv[++i], NULL, 0);
         else if (!strcmp(a, "--ideal-timing")) M.fr.ideal = 1;
+        else if ((!strcmp(a, "--cpu-slow") || !strcmp(a, "--kernel-slow")) && i + 1 < argc) {
+            int v = atoi(argv[++i]);
+            if (v < -50 || v > 1000) usage();
+            if (a[2] == 'c') cpu_slow = v; else kernel_slow = v;
+        }
         else if (!strcmp(a, "--boot-cart") && i + 1 < argc) mailbox_boot_cart = argv[++i];
         else if ((!strcmp(a, "--card-date") || !strcmp(a, "--pc-time")) && i + 1 < argc) {
             struct tm tm = { 0 };
@@ -875,6 +1008,11 @@ int main(int argc, char **argv)
                 prof_insys = bus_peek((pa & 0xFF0000) | ((pa + 1) & 0xFFFF));
                 if (p0 >= prof_c0 && p0 < prof_c1) prof_sysn[prof_insys]++;
             }
+        } else if (cpu_slow || kernel_slow) {
+            uint64_t s0 = c->cycles;
+            int user = M.fr.mode_user;
+            cpu_step(c);
+            slow_adjust(c, s0, user);
         } else
             cpu_step(c);
         if (M.trace && c->n_abort != na)
@@ -893,6 +1031,12 @@ int main(int argc, char **argv)
     if (prof_u) prof_write();
     if (key_wait)                                       /* (run816.py looks for this line) */
         fprintf(stderr, "emu816: the script still waits for \"%s\"\n", key_wait);
+    if (key_still)
+        fprintf(stderr, "emu816: the script still waits for a still screen (%d frames)\n", key_still);
+    if (key_change)
+        fprintf(stderr, "emu816: the script still waits for the screen to change\n");
+    if (key_sound)
+        fprintf(stderr, "emu816: the script still waits for a sound (a Lau KEYON)\n");
 
     for (int i = 0; i < nshots; i++) if (!shot_done[i] && (rc != 4 || shot_at[i] > 1e29)) {
         nvc_render();

@@ -45,7 +45,7 @@ the buffer is full, or at `out_flush`), so a line is never mixed with another pr
 | --- | --- |
 | `key_ascii` | A = HID usage, X = modifiers \| down << 8 (an input_read event, or a WE_KEY's a and b) -> A = ASCII, 0 if none. US layout, shift, caps lock; ctrl + letter = 1-26; arrows `KEY_RIGHT` $80, `KEY_LEFT` $81, `KEY_DOWN` $82, `KEY_UP` $83, `KEY_HOME` $84, `KEY_PGUP` $85, `KEY_DEL` $86, `KEY_END` $87, `KEY_PGDN` $88 |
 | `read_char` | -> A = the next character typed (waits; SYS_IREAD) |
-| `getline` | X, Y = buffer, A = its size -> A = length; echo, Backspace, Left / Right, Up / Down history (8 lines); C set on ctrl-C |
+| `getline` | X, Y = buffer, A = its size -> A = length; at most A - 1 characters and 255; echo, Backspace, Left / Right, Up / Down history (8 lines, 1 KB); C set on ctrl-C. (Horizon 0.31) A line longer than the room right of the prompt scrolls sideways in that room (it never wraps); the prompt's end is the column `out_char` counted, so print the prompt through ulib (`print`, `out_str`). Before 0.31: at most the console's width - 3 |
 
 `key_ascii` works for window programs too: pass a WE_KEY event's a in A and b in X.
 

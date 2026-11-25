@@ -30,16 +30,19 @@ Options:
                   to the SDK). Build it with `make -C DIR`.
   --emu FILE      emu816 (default: $EMU, else DIR/../emu/emu816)
   --dest PATH     where the program goes on the card (default /APPS/NAME.PRG)
-  --args TEXT     argument string (shell mode); the line typed (the program's path, a
-                  space and TEXT) may be at most 77 characters: the shell's line editor
-                  takes no more (the 80-column console less the prompt), so a longer one
-                  is refused here (before, the program got it cut short)
+  --args TEXT     argument string (shell mode), at most 127 characters (the kernel's spawn
+                  takes no more; the shell says so); the line typed (the program's path, a
+                  space and TEXT) may be at most 255 characters, what the shell's line
+                  editor takes (Horizon 0.31; before, 77, the console less the prompt): a
+                  longer one is refused here (the program would get it cut short)
   --cd DIR        (shell mode) type "cd DIR" first; the program's path is then typed
                   relative to DIR when it lies in it (--dest /GAMES/MINE/X.PRG --cd /GAMES
                   types "MINE/X.PRG")
   --script FILE   input script (see inputscript.py; 'T shot' lines add screenshots; 'T wait
                   TEXT' waits until the program prints a line holding TEXT: a script that
-                  follows the program's progress instead of the clock, as a test should)
+                  follows the program's progress instead of the clock, as a test should;
+                  (0.31) 'T still N' waits until the screen has not changed for N frames:
+                  "+0 still 30" then "+0 shot" is a picture of a state, not of a moment)
   --shot SECONDS  a screenshot at that time (repeatable; at most 16 in all)
   --seconds N     how long to run after the start (default: the last event + 2 s)
   --out DIR       output folder (default: run-NAME)
@@ -122,8 +125,11 @@ DESK_BOOT_MS = 4000      # F10 at 4.0 s (the Desktop and Files are up by then)
 SHELL_ESC_MS = 1500      # the shell starts in the file browser: Esc
 SHELL_TYPE_MS = 2500
 # the longest line the shell takes from the keyboard: its line editor (Horizon's ulib
-# getline) stops at the console's width (80) - 3 and drops the keys after that
-SHELL_LINE_MAX = 77
+# getline) takes 255 characters (scrolling the line sideways) and drops the keys after
+# that (Horizon 0.30 and before: the console's width - 3, 77 here); the longest argument
+# string the kernel passes to a program (spawn: 127; the shell refuses a longer one)
+SHELL_LINE_MAX = 255
+ARGS_MAX = 127
 
 
 def die(msg):
@@ -242,15 +248,19 @@ def main():
         cmd = run + (' ' + opt['args'] if opt['args'] else '')
         if any(c in cmd + (cd or '') for c in '{}^') or '\\' in cmd + (cd or ''):
             die('the command line may not contain { } ^ or backslashes')
+        if opt['args'] and len(opt['args']) > ARGS_MAX:
+            # (the kernel's spawn passes at most 127 characters; the shell refuses more)
+            die(f'--args is {len(opt["args"])} characters; a program gets at most '
+                f'{ARGS_MAX} (the kernel\'s spawn): shorter arguments, or an options file')
         for line in ([f'cd {cd}'] if cd else []) + [cmd]:
             if len(line) > SHELL_LINE_MAX:
-                # (the shell's line editor, ulib's getline, takes at most the console's
-                # width - 3 characters and drops the rest of the keys: the program got its
-                # last argument cut short, without a word)
+                # (the shell's line editor, ulib's getline, takes at most 255 characters
+                # and drops the rest of the keys: the program would get its last argument
+                # cut short, without a word)
                 die(f'the shell line "{line}" is {len(line)} characters; the shell takes '
-                    f'{SHELL_LINE_MAX} (its 80-column console less the prompt and the '
-                    f'cursor): use --cd DIR (the program\'s path is then typed relative to '
-                    f'it), a shorter --dest, or shorter arguments')
+                    f'{SHELL_LINE_MAX} (its line editor\'s limit): use --cd DIR (the '
+                    f'program\'s path is then typed relative to it), a shorter --dest, or '
+                    f'shorter arguments')
         boot = [f'{SHELL_ESC_MS} {{esc}}']
         t = SHELL_TYPE_MS
         if cd:
@@ -278,7 +288,7 @@ def main():
     for k, i in enumerate(later, len(shots) + 1):
         p = os.path.join(out, f'shot{k}.ppm')
         keys = [x.replace(f'@SHOT{i}@', p.encode('latin-1').hex()) for x in keys]
-    nwait = sum(1 for x in keys if ':W:' in x)
+    nwait = sum(1 for x in keys if ':W:' in x or ':Q:' in x)
     if 'seconds' in opt:
         secs = t0 / 1000.0 + float(opt['seconds'])
     else:

@@ -7,7 +7,9 @@ SRC lines: '#...' copied; 'T key TEXT'; 'T move X Y'; 'T click'; 'T dclick'; 'T 
 while the pointer is still on its way waits for it (it would land wherever the pointer
 happened to be, which depends on the kernel's timing).
 (0.29) 'T wait TEXT' and 'T shot' are passed on (tests/keyscript.py: a wait for a console
-line, a screenshot that moves with the waits); T may be '+MS', after the line before."""
+line, a screenshot that moves with the waits); T may be '+MS', after the line before.
+(0.31) 'T still N', 'T change', 'T sound' are passed on too (keyscript.py's waits for a
+still screen, a changed frame, a Lau note)."""
 import sys
 x, y = 320, 180
 out = []
@@ -30,6 +32,8 @@ for ln in open(sys.argv[1]):
     if cmd == 'key': out.append(f'{t} {rest[0]}')
     elif cmd == 'wait': out.append(f'{t} wait {rest[0]}')
     elif cmd == 'shot': out.append(f'{t} shot')
+    elif cmd == 'still': out.append(f'{t} still {rest[0]}')       # (0.31) keyscript.py's
+    elif cmd in ('change', 'sound'): out.append(f'{t} {cmd}')
     elif cmd == 'move': a = rest[0].split(); busy = mv(t, int(a[0]), int(a[1]), 100, 50, 0)
     elif cmd == 'drag': a = rest[0].split(); busy = mv(t, int(a[0]), int(a[1]), 30, 60, 1)
     elif cmd == 'rdrag': a = rest[0].split(); busy = mv(t, int(a[0]), int(a[1]), 30, 60, 2)

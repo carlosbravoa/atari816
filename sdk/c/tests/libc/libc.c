@@ -459,6 +459,31 @@ static void t_errno(void)
     check(hz_errno_to_errno(HZ_ENOFILE) == ENOENT, "hz_errno_to_errno");
 }
 
+/* (0.31) lines longer than the screen line from the keyboard (input.script): hz_getline
+ * scrolls the line sideways, stdin takes 255 characters and the '\n' */
+static void t_longlines(void)
+{
+    static char got[300], want[300], typed[300];
+    unsigned i;
+    /* typed: 120 characters, 50 backspaces, XYZ, 5 to the left, <> there, Enter */
+    for (i = 0; i < 8; ++i)
+        sprintf(typed + 15 * i, "%03u-abcdefghij.", i);
+    strcpy(want, typed);
+    strcpy(want + 70, "XYZ");
+    memmove(want + 70, want + 68, 6);
+    memcpy(want + 68, "<>", 2);
+    strcat(want, "\n");
+    printf("type a long line: ");
+    check(fgets(got, sizeof got, stdin) && !strcmp(got, want), "a 75-character line, edited across the view");
+    /* typed: 279 characters: the 24 past 255 are dropped */
+    for (i = 0; i < 9; ++i)
+        sprintf(typed + 31 * i, "%03u-ABCDEFGHIJKLMNOPQRSTUVWXYZ.", i);
+    memcpy(want, typed, 255);
+    strcpy(want + 255, "\n");
+    printf("type 279 characters: ");
+    check(fgets(got, sizeof got, stdin) && !strcmp(got, want), "a line of 255 characters (the limit)");
+}
+
 static void bye(void)
 {
     printf("atexit ran\n");
@@ -466,11 +491,15 @@ static void bye(void)
 
 int main(int argc, char **argv)
 {
-    char line[80];
+    char line[80], word[90];
     int n;
     atexit(bye);
-    check(argc == 4 && !strcmp(argv[1], "one") && !strcmp(argv[2], "two words")
-          && !strcmp(argv[3], "3") && argv[4] == 0, "argc, argv");
+    /* (0.31) the fourth argument makes the line run816 types at the shell 126 characters
+     * long: more than the shell took before 0.31 (77) */
+    for (n = 0; n < 8; ++n)
+        sprintf(word + 11 * n, "%02d-abcdefg.", n);
+    check(argc == 5 && !strcmp(argv[1], "one") && !strcmp(argv[2], "two words")
+          && !strcmp(argv[3], "3") && !strcmp(argv[4], word) && argv[5] == 0, "argc, argv");
     t_printf();
     t_string();
     t_stdlib();
@@ -487,6 +516,7 @@ int main(int argc, char **argv)
     check(fgets(line, sizeof(line), stdin) && !strcmp(line, " apples\n"), "rest of the line");
     printf("type a line: ");
     check(fgets(line, sizeof(line), stdin) && !strcmp(line, "a line\n"), "fgets(stdin)");
+    t_longlines();
     printf("stack free now: %u\n", hz_stack_free());
     printf("libc: %u checks, %u failures\n", checks, fails);
     printf(fails ? "LIBC FAIL\n" : "LIBC PASS\n");

@@ -1,21 +1,30 @@
-# Edit (EDIT.PRG) session on the text shell (NODESK): sh tests/shots.sh EMU SD edit 22 T1 ...
-# Good shot times (s): 8.9 9.9 12.3 14.2 16.4 19.6
-#   8.9  fixed font: an edited line, a new line, a 3-line selection (Shift + arrows)
-#   9.9  the selection copied (ctrl-C) and pasted at the end (ctrl-End, ctrl-V)
-#   12.3 View > Proportional font (0.31: was 12.0, which on REV $07 caught the CPU redraw
-#        half done, at a time that moved with the kernel's code layout)
-#   14.2 File > Save as...: the file dialog (the name field holds LONG.TXT, selected)
-#   16.4 the dialog inside "docs" (double click), the name typed after Tab
-#   19.6 saved as docs/edited.txt, one more key, File > Close: the Save / Discard / Cancel alert
+# Edit (EDIT.PRG) session on the text shell (NODESK): sh tests/shots.sh EMU SD edit 30
+# (0.31) The six pictures are taken at states, not at times: each "still 30" waits until the
+# screen has not changed for 30 frames (the input before it handled, the drawing done), then
+# "shot" (keyscript.py); the later times move by as long as the wait took. So the pictures
+# do not depend on how fast the CPU or the kernel is (they were at 8.9 9.9 12.0 14.2 16.4
+# 19.6 s; 12.0 caught REV $07's CPU redraw half done once the kernel's code moved).
+#   1  fixed font: an edited line, a new line, a 3-line selection (Shift + arrows)
+#   2  the selection copied (ctrl-C) and pasted at the end (ctrl-End, ctrl-V)
+#   3  View > Proportional font
+#   4  File > Save as...: the file dialog (the name field holds LONG.TXT, selected)
+#   5  the dialog inside "docs" (double click), the name typed after Tab
+#   6  saved as docs/edited.txt, one more key, File > Close: the Save / Discard / Cancel alert
 # Then Esc (Cancel): Edit stays open. The pointer starts at (320, 180); moves of at most 100.
 1500 {esc}
 +1500 edit LONG.TXT\n
+# Edit up and waiting (its window drawn)
+5000 still 30
 # line 5: append, a new line after it
 6000 {down}{down}{down}{down}{end} -- edited\nA new line.
 # select 3 lines from the start of line 3 (Shift held), copy
 8000 {up}{up}{up}{home}{dE1}{down}{down}{down}{uE1}{dE0}c{uE0}
+8700 still 30
++0 shot
 # paste at the end of the text
 9200 {dE0}{end}{uE0}{dE0}v{uE0}
+9500 still 30
++0 shot
 # View (105, 6) > Proportional font (second item, y 38)
 10500 M -100:-100:0:0
 +50 M -100:-74:0:0
@@ -25,6 +34,8 @@
 +300 M 0:32:0:0
 +200 M 0:0:0:1
 +100 M 0:0:0:0
+11700 still 30
++0 shot
 # File (25, 6) > Save as... (fourth item, y 66)
 12500 M -80:-32:0:0
 +300 M 0:0:0:1
@@ -32,6 +43,8 @@
 +300 M 0:60:0:0
 +200 M 0:0:0:1
 +100 M 0:0:0:0
+13500 still 30
++0 shot
 # the dialog's content is at (130, 53): double click "docs" (row 4, y 127)
 14400 M 100:61:0:0
 +50 M 65:0:0:0
@@ -41,7 +54,9 @@
 +80 M 0:0:0:0
 # Tab to the name field, a new name
 15300 {d2B}{u2B}edited.txt
-# shot at 16.4; Enter saves
+16000 still 30
++0 shot
+# Enter saves
 16700 \n
 # a change, then File > Close: the alert ((0.23) Close is 28 lines lower, below Print and
 # a separator; the pointer goes back up after the click, where the picture had it)
@@ -55,5 +70,7 @@
 +150 M 0:0:0:1
 +100 M 0:0:0:0
 +50 M 0:-28:0:0
-# shot at 19.6; Esc = Cancel
+19500 still 30
++0 shot
+# Esc = Cancel
 20500 {esc}

@@ -1,3 +1,11 @@
 # typed input for libc.c (time 0 = the program started)
 1500 42 apples\n
 +800 a line\n
+# (0.31) lines longer than the screen line (t_longlines): 120 characters, 50 backspaces
+# back over the view's start, XYZ, 5 to the left, <> there; then 279 characters (the 24
+# past 255 are dropped)
++0 wait type a line:
++300 000-abcdefghij.001-abcdefghij.002-abcdefghij.003-abcdefghij.004-abcdefghij.005-abcdefghij.006-abcdefghij.007-abcdefghij.\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\bXYZ{left}{left}{left}{left}{left}<>\n
++0 wait type a long line:
++300 000-ABCDEFGHIJKLMNOPQRSTUVWXYZ.001-ABCDEFGHIJKLMNOPQRSTUVWXYZ.002-ABCDEFGHIJKLMNOPQRSTUVWXYZ.003-ABCDEFGHIJKLMNOPQRSTUVWXYZ.004-ABCDEFGHIJKLMNOPQRSTUVWXYZ.005-ABCDEFGHIJKLMNOPQRSTUVWXYZ.006-ABCDEFGHIJKLMNOPQRSTUVWXYZ.007-ABCDEFGHIJKLMNOPQRSTUVWXYZ.008-ABCDEFGHIJKLMNOPQRSTUVWXYZ.\n
++0 wait type 279 characters:

@@ -15,7 +15,8 @@
         .i16
 
 ; ---------------------------------------------------------------- output
-; append character A
+; append character A. (0.31) u_col counts the column the console's cursor will be at
+; (printable +1, BS -1, CR LF 0; escapes are not followed): getline starts there
 out_char:
 put_char:
         pha
@@ -29,11 +30,28 @@ put_char:
         stx     z:u_olen
         pla
         and     #$00FF
+        cmp     #' '
+        bcs     @prt
         cmp     #10
-        beq     out_flush
-        cpx     #OUTMAX
+        beq     @nl
+        cmp     #13
+        beq     @cr
+        cmp     #8
+        bne     @full
+        ldy     z:u_col
+        beq     @full
+        dec     z:u_col
+        bra     @full
+@prt:   cmp     #$7F
+        bcs     @full
+        inc     z:u_col
+@full:  cpx     #OUTMAX
         bcs     out_flush
         rts
+@nl:    stz     z:u_col
+        bra     out_flush
+@cr:    stz     z:u_col
+        bra     @full
 
 ; send the buffered characters (one puts)
 out_flush:
@@ -255,7 +273,7 @@ read_char:
         rep     #$20
         .a16
         inx
-        cpx     #KEEPMAX - 1
+        cpx     u_nkeep                 ; (the ones kept, not the whole buffer)
         bcc     :-
         dec     u_nkeep
         pla
@@ -271,29 +289,59 @@ read_char:
         lda     #3
         rts
 
-; read a line into X (offset), Y (bank), at most A - 1 characters (and at most HISTLEN and
-; the console width - 3),
-; echoing it. Editing: backspace, left/right to move inside the line (inserting there),
-; up/down to walk through the last 8 lines entered. Returns A = length (the line is
-; zero-terminated), C set on ctrl-C.
+; read a line into X (offset), Y (bank), at most A - 1 characters (and at most LINEMAX,
+; 255), echoing it. Editing: backspace, left/right to move inside the line (inserting there),
+; up/down to walk through the last lines entered (8 at most, HISTSIZE bytes in all). Returns
+; A = length (the line is zero-terminated), C set on ctrl-C.
+; (0.31) The line may be longer than the screen line: it is shown in the room right of the
+; prompt (the column out_char counted, u_col) less one column, scrolled sideways by half
+; that room when the cursor would leave it. So it never wraps, and Backspace and the
+; arrows never have to cross a screen line's start (the console's BS stops at column 0).
+; Less than MINROOM columns right of the prompt: the line starts on the next screen line.
+u_vs    = u_d                           ; the first character shown
+u_scr   = u_d + 2                       ; the cursor's column, from the line's first one
+u_dend  = u_r                           ; the columns that show characters (or the line's
+                                        ; old ones, until cleared)
+u_room  = u_r + 2                       ; the columns the line may use
 getline:
         dec     a
-        cmp     #HISTLEN
+        cmp     #LINEMAX
         bcc     :+
-        lda     #HISTLEN
+        lda     #LINEMAX
 :       sta     z:u_max
         stx     z:u_s
         tya
         sta     z:u_s+2
         stz     z:u_len
         stz     z:u_pos
-        cop     SYS_CSIZE               ; never longer than the screen line (prompt + cursor)
-        sec
-        sbc     #3
-        cmp     z:u_max
+        stz     z:u_vs
+        stz     z:u_scr
+        stz     z:u_dend
+        jsr     out_flush               ; (the prompt)
+        jsr     @cols                   ; the room: the columns right of the prompt, less one
+        sta     z:u_room                ; (the cursor's, at the end)
+        lda     z:u_col                 ; the prompt's end: u_col mod columns
+:       cmp     z:u_room
+        bcc     :+
+        sbc     z:u_room
+        bra     :-
+:       sta     z:u_t
+        lda     z:u_room
+        clc
+        sbc     z:u_t                   ; columns - prompt - 1
+        sta     z:u_room
+        cmp     #MINROOM
+        bcs     @roomok
+        jsr     put_nl                  ; too little: the line starts on the next one
+        jsr     out_flush
+        jsr     @cols
+        dec     a
+        cmp     #MINROOM
         bcs     :+
-        sta     z:u_max
-:       lda     z:u_hcnt
+        lda     #MINROOM
+:       sta     z:u_room
+@roomok:
+        lda     z:u_hcnt
         sta     z:u_hsel                ; browsing position: hcnt = the new line
 @key:   jsr     out_flush
         jsr     read_char
@@ -334,22 +382,16 @@ getline:
 :       lda     z:u_t
         jsr     @putc
         inc     z:u_len
-        jsr     @tail                   ; echo from u_pos, then back to u_pos + 1
+        lda     z:u_pos                 ; shown again from the old cursor on
         inc     z:u_pos
-        lda     z:u_len
-        sec
-        sbc     z:u_pos
-        jsr     @bsn
+        jsr     @show
         jmp     @key
 @bs:    lda     z:u_pos
         beq     @key0
         dec     z:u_pos
-        lda     #8
-        jsr     out_char
         ldy     z:u_pos                 ; shift the tail left
 :       iny
         cpy     z:u_len
-        beq     :+
         bcs     :+
         jsr     @getc
         dey
@@ -357,27 +399,19 @@ getline:
         iny
         bra     :-
 :       dec     z:u_len
-        jsr     @tail
-        lda     #' '
-        jsr     out_char
-        lda     z:u_len
-        sec
-        sbc     z:u_pos
-        inc     a
-        jsr     @bsn
+        lda     z:u_pos
+        jsr     @show
 @key0:  jmp     @key
 @left:  lda     z:u_pos
         beq     @key0
         dec     z:u_pos
-        lda     #8
-        jsr     out_char
-        jmp     @key
-@right: ldy     z:u_pos
-        cpy     z:u_len
+        bra     @moved
+@right: lda     z:u_pos
+        cmp     z:u_len
         bcs     @key0
-        jsr     @getc
-        jsr     out_char
         inc     z:u_pos
+@moved: lda     #NONE                   ; nothing changed but the cursor
+        jsr     @show
         jmp     @key
 @up:    lda     z:u_hsel
         beq     @key0
@@ -389,40 +423,44 @@ getline:
         inc     a
 @recall:
         sta     z:u_hsel
-        jsr     @erase
-        lda     z:u_hsel                ; hcnt = an empty new line
-        cmp     z:u_hcnt
+        stz     z:u_len                 ; (@show clears what the old line showed)
+        cmp     z:u_hcnt                ; hcnt = an empty new line
         bcs     @rdone
         jsr     @hptr                   ; Y = history entry offset
         ldx     #0
 :       lda     hist,y
         and     #$00FF
         beq     @rdone
-        phx
+        cpx     z:u_max                 ; (a buffer shorter than the entry: cut)
+        bcs     @rdone
         phy
         txy
         jsr     @putc
-        jsr     out_char
         ply
-        plx
         inx
         iny
         stx     z:u_len
         bra     :-
 @rdone: lda     z:u_len
         sta     z:u_pos
+        lda     #0
+        jsr     @show
         jmp     @key
 @enter: jsr     @term
         jsr     put_nl
-        lda     z:u_len                 ; into the history (not empty lines)
-        beq     @hdone
-        lda     z:u_hcnt
+        lda     z:u_len                 ; into the history (not empty lines): the oldest
+        beq     @hdone                  ; entries go while there are NHIST or the line
+@hroom: lda     z:u_hcnt                ; does not fit
         cmp     #NHIST
-        bcc     :+
-        jsr     @hshift
-        lda     #NHIST - 1
-:       jsr     @hptr
-        tyx
+        bcs     @hdrop
+        lda     u_hused
+        sec
+        adc     z:u_len                 ; + the line and its 0
+        cmp     #HISTSIZE + 1
+        bcc     @hadd
+@hdrop: jsr     @hshift
+        bra     @hroom
+@hadd:  ldx     u_hused
         ldy     #0
 :       jsr     @getc
         sep     #$20
@@ -434,6 +472,7 @@ getline:
         iny
         cmp     #0
         bne     :-
+        stx     u_hused
         inc     z:u_hcnt
 @hdone: lda     z:u_len
         clc
@@ -461,58 +500,141 @@ getline:
 @term:  ldy     z:u_len
         lda     #0
         bra     @putc
-; echo buf[u_pos .. u_len)
-@tail:  ldy     z:u_pos
-:       cpy     z:u_len
+; A = the console's columns (80 when it does not answer)
+@cols:  cop     SYS_CSIZE
         bcs     :+
-        jsr     @getc
+        cmp     #2
+        bcs     :++
+:       lda     #80
+:       rts
+; the screen after a change: A = the first index whose character changed (NONE: none, only
+; u_pos moved). The view (u_vs) follows the cursor; what changed and is in view is written,
+; the columns the line no longer fills are cleared, the cursor goes to u_pos
+@show:  sta     z:u_t                   ; u_t = from
+        lda     z:u_pos                 ; the cursor in view: u_vs <= u_pos < u_vs + u_room
+        cmp     z:u_vs
+        bcc     @view
+        sec
+        sbc     z:u_vs
+        cmp     z:u_room
+        bcc     @inview
+@view:  lda     z:u_room                ; else the view is moved: the cursor in its middle
+        lsr     a
+        sta     z:u_w
+        lda     z:u_pos
+        sec
+        sbc     z:u_w
+        bcs     :+
+        lda     #0
+:       sta     z:u_vs
+        sta     z:u_t                   ; all of it written
+@inview:
+        lda     z:u_t                   ; from: at least u_vs
+        cmp     z:u_vs
+        bcs     :+
+        lda     z:u_vs
+        sta     z:u_t
+:       lda     z:u_vs                  ; u_w = the end shown: min(u_len, u_vs + u_room)
+        clc
+        adc     z:u_room
+        cmp     z:u_len
+        bcc     :+
+        lda     z:u_len
+:       sta     z:u_w
+        lda     z:u_t                   ; write from .. end (NONE: nothing)
+        cmp     z:u_w
+        bcs     @clear
+        sec
+        sbc     z:u_vs
+        jsr     @moveto
+        ldy     z:u_t
+:       jsr     @getc
         phy
         jsr     out_char
         ply
         iny
-        bra     :-
-:       rts
-; A backspaces
-@bsn:   tax
-        beq     :++
-:       phx
+        cpy     z:u_w
+        bcc     :-
+        tya
+        sec
+        sbc     z:u_vs
+        sta     z:u_scr
+@clear: lda     z:u_w                   ; the columns shown before past the new end: blank
+        sec
+        sbc     z:u_vs
+        sta     z:u_w
+        cmp     z:u_dend
+        bcs     @cdone
+        jsr     @moveto
+:       lda     #' '
+        jsr     out_char
+        inc     z:u_scr
+        lda     z:u_scr
+        cmp     z:u_dend
+        bcc     :-
+@cdone: lda     z:u_w
+        sta     z:u_dend
+        lda     z:u_pos
+        sec
+        sbc     z:u_vs
+; the cursor to column A of the view: backspaces, or the characters shown there again
+@moveto:
+        tax
+@mloop: cpx     z:u_scr
+        beq     @mdone
+        bcs     @mfwd
+        phx
         lda     #8
         jsr     out_char
         plx
-        dex
-        bne     :-
-:       rts
-; erase the line on screen, cursor to its start; the line becomes empty
-@erase: lda     z:u_pos
-        jsr     @bsn
-        lda     z:u_len
-        tax
-        beq     :++
-:       phx
-        lda     #' '
-        jsr     out_char
-        plx
-        dex
-        bne     :-
-:       lda     z:u_len
-        jsr     @bsn
-        stz     z:u_len
-        stz     z:u_pos
-        rts
-; Y = offset of history entry A
-@hptr:  xba                             ; * 128 (HISTLEN + 1 <= 128)
-        lsr     a
+        dec     z:u_scr
+        bra     @mloop
+@mfwd:  phx
+        lda     z:u_vs
+        clc
+        adc     z:u_scr
         tay
-        rts
+        lda     #' '
+        cpy     z:u_len
+        bcs     :+
+        jsr     @getc
+:       jsr     out_char
+        plx
+        inc     z:u_scr
+        bra     @mloop
+@mdone: rts
+; Y = offset of history entry A (the entries are packed, each ends with its 0)
+@hptr:  tax
+        ldy     #0
+@hp1:   cpx     #0
+        beq     @hp2
+:       lda     hist,y
+        iny
+        and     #$00FF
+        bne     :-
+        dex
+        bra     @hp1
+@hp2:   rts
 ; drop the oldest entry
 @hshift:
+        ldy     #0                      ; Y = its length with its 0
+:       lda     hist,y
+        iny
+        and     #$00FF
+        bne     :-
         ldx     #0
-:       lda     hist + 128,x
+:       cpy     u_hused
+        bcs     :+
+        lda     hist,y
+        sep     #$20
+        .a8
         sta     hist,x
+        rep     #$20
+        .a16
         inx
-        inx
-        cpx     #(NHIST - 1) * 128
-        bcc     :-
+        iny
+        bra     :-
+:       stx     u_hused
         dec     z:u_hcnt
         rts
 
@@ -766,11 +888,18 @@ ext_tab: .byte  "ATR", 1, "XFD", 1, "XEX", 2, "COM", 2, "EXE", 2, "CAR", 3, "ROM
         .byte   "BAS", 4, "LST", 4      ; (0.23) atari_rkind only: CK_BASRUN
 
         .segment "BSS"
-NHIST   = 8
-HISTLEN = 127
-hist:   .res    NHIST * 128
+LINEMAX = 255                           ; (0.31) getline's longest line (was the screen's
+                                        ; width - 3: 75 in the text shell)
+MINROOM = 12                            ; getline: fewer columns right of the prompt: the
+                                        ; line starts on the next screen line
+NONE    = $FFFF
+NHIST   = 8                             ; getline's history: at most NHIST lines, packed
+HISTSIZE = 1024                         ; (each ends with its 0) in HISTSIZE bytes
+hist:   .res    HISTSIZE + 1            ; (+ 1: 16-bit reads of the last byte)
+u_hused: .res   2                       ; the bytes in use
 spblk:  .res    8
-KEEPMAX = 80                            ; a shell line
+KEEPMAX = 80                            ; type-ahead (0.31: not a whole line any more: 256
+                                        ; would cost every program 176 bytes; DESK has few)
 u_keep: .res    KEEPMAX + 1                     ; (0.21) key_keep's characters
 u_nkeep: .res   2
 OUTMAX = 120
@@ -793,3 +922,4 @@ u_r:    .res    4
 u_pos:  .res    2
 u_hcnt: .res    2
 u_hsel: .res    2
+u_col:  .res    2                       ; (0.31) out_char's console column

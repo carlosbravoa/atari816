@@ -91,8 +91,9 @@ FSHOTS := 5.4 10.6 11.2 15.8 17.6 19.0 19.8 22 26.6 29.5 32.5 35.5 39.5 42.2 43.
 # (tests/basic.keys) shot times. Its pictures are the same with and without the blitter.
 BASSECS := 160
 BASSHOTS := 16.2 18.6 31.0 36.0 38.5
-# Edit pictures: shot times in the tests/edit.keys session
-ESHOTS := 8.9 9.9 12.3 14.2 16.4 19.6
+# Edit pictures: (0.31) no shot times: tests/edit.keys takes its pictures at states (each
+# after the screen stayed still for 30 frames), not at times
+ESHOTS :=
 # Sheet: the -t script run (tests/sheet-t.keys, tests/sheet.sht), emulated seconds; the picture
 # session (tests/sheet.keys) shot times. Its pictures are the same with and without the blitter.
 SHTSECS := 24
@@ -464,7 +465,7 @@ test: all $(EMU)
 	@DESK=1 sh tests/shots.sh "$(EMU) $(EMUFLAGS) $(CARDDATE)" $(SD) kmenu 33 $(KMSHOTS)
 	@if diff -u tests/pictures/$(call REV7,kmenu) $(B)/kmenu.md5; then echo "PASS  keyboard menus, Alt+Tab, ctrl+W, Alt+F4, menu states and shortcuts"; \
 	else echo "FAIL  keyboard menu pictures (look at $(B)/kmenu*.ppm, then make pictures)"; exit 1; fi
-	@sh tests/shots.sh "$(EMU) $(EMUFLAGS) $(CARDDATE)" $(SD) edit 22 $(ESHOTS)
+	@sh tests/shots.sh "$(EMU) $(EMUFLAGS) $(CARDDATE)" $(SD) edit 32 $(ESHOTS)
 	@if diff -u tests/pictures/$(EMD5) $(B)/edit.md5; then echo "PASS  Edit pictures"; \
 	else echo "FAIL  Edit pictures (look at $(B)/edit*.ppm, then make pictures)"; exit 1; fi
 	@sh tests/shots.sh "$(EMU) $(EMUFLAGS) $(CARDDATE)" $(SD) editw 34 $(EWSHOTS)
@@ -952,6 +953,9 @@ test-music: all $(EMU)
 # pictures-26 freezes the pictures.
 M26SHOTS := 9 15 16.5 21.5 23.5 26.5 29 32 40 42
 M26PREP := echo "Music Player=/BIN/MUSIC.PRG" >> SYSTEM/PROGRAMS
+# (0.31) with Lau (a song plays): the meters, the row, the time, the position bar and the
+# menu bar's free memory painted over (tests/music26.mask): they move with the clock
+M26MASK = $(if $(NOLAU),,tests/music26.mask)
 # (0.27) REV $0A: the meters and rows of a few shots differ by a moment: $(1)-rev10.md5 if it
 # exists; REV $07: the refusal with that board's free memory on the status line: $(1)-rev7.md5
 M26MD5  = $(if $(findstring --rev 7,$(EMUFLAGS)),$(1)-rev7.md5,$(if $(NOLAU),$(1)-nolau.md5,$(call REV10,$(1),$(1).md5)))
@@ -963,7 +967,7 @@ test-26: all $(EMU)
 	@python3 -c "L = open('$(B)/music-t.out', encoding='latin-1').read().split('\n'); i = [k for k, l in enumerate(L) if '> music -t' in l][0]; open('$(B)/music-t.txt', 'w', encoding='latin-1').write('\n'.join(L[i + 1:]))"
 	@if python3 tests/compare.py tests/music-t.txt $(B)/music-t.txt; then echo "PASS  0.26 Music: self test (names, arguments, folder songs, times, error texts, the settings file, sorting)"; \
 	else echo "FAIL  0.26 Music self test ($(B)/music-t.out)"; exit 1; fi
-	@PREP='$(M26PREP)' KEEPMUSIC=1 DESK=1 sh tests/shots.sh "$(EMU) $(EMUFLAGS) $(CARDDATE) --log-lau-us" $(SD) music26 43 $(M26SHOTS)
+	@PREP='$(M26PREP)' KEEPMUSIC=1 DESK=1 MASK=$(M26MASK) sh tests/shots.sh "$(EMU) $(EMUFLAGS) $(CARDDATE) --log-lau-us" $(SD) music26 43 $(M26SHOTS)
 	@if diff -u tests/pictures/$(call M26MD5,music26) $(B)/music26.md5; \
 	then echo "PASS  0.26 Music on the Desktop: Programs > Music, files from Files reach it, the meters, two songs, Pause, a seek, the samples, playing on behind Edit"; \
 	else echo "FAIL  0.26 Music pictures (look at $(B)/music26*.ppm, then make pictures-26)"; exit 1; fi
@@ -1142,7 +1146,7 @@ test-29: all $(EMU) $(APP29PRGS)
 # of tests/mkapps.py desk31). emu816 --watch logs the mailbox's requests and the kernel's path
 # buffer (tests/cardreq.py): the second opening of the menu and its Games pop-up make no card
 # request, and the menu is read twice in the run (the start, the install).
-test-31: all $(EMU) $(APP29PRGS)
+test-31: all $(EMU) $(APP29PRGS) $(B)/gltest.prg
 	@PREP='python3 ../../tests/mkapps.py desk31 ../../$(B) .' DESK=1 sh tests/shots.sh "$(EMU) $(EMUFLAGS) $(CARDDATE) $$(python3 tests/cardreq.py --watch $(B)/horizon.lbl)" $(SD) menu31 60
 	@python3 tests/apppic.py menu31
 	@if diff -u tests/pictures/menu31.md5 $(B)/menu31.pic; then echo "PASS  0.31 the Desktop: the Programs menu, a console=yes app in a Terminal window, Files' Run with..., an install seen by the menu"; \
@@ -1156,6 +1160,21 @@ test-31: all $(EMU) $(APP29PRGS)
 	  python3 tests/cardreq.py --count $(B)/horizon.lbl $(B)/quiet31.err 85 115 "idle, 4 windows") > $(B)/quiet31.txt
 	@if python3 tests/compare.py tests/quiet31.txt $(B)/quiet31.txt; then echo "PASS  0.31 the card left alone: no request of any task behind a full-screen program for 20 s; none of an idle Desktop in 30 s, alone or with Files, Music and Printer open"; \
 	else echo "FAIL  0.31 the card requests of an idle Desktop or behind a full screen ($(B)/quiet31.txt; tests/cardreq.py $(B)/horizon.lbl $(B)/quiet31.err)"; exit 1; fi
+	@# (0.31) the line editor (ulib getline): lines longer than the screen line, up to 255
+	@# characters, scrolled sideways; Backspace and the arrows across the view's start, the
+	@# history; the shell: a line of 111, arguments over 127, ctrl-C (tests/gltest.keys;
+	@# tests/gltest.py: the lines received, the echo)
+	@rm -rf build/run-sd; cp -r $(SD) build/run-sd; rm -rf build/run-sd/Music; touch build/run-sd/SYSTEM/NODESK; cp $(B)/gltest.prg build/run-sd/GLTEST.PRG
+	@$(EMU) $(EMUFLAGS) $(CARDDATE) --headless --sd build/run-sd --max-seconds 90 --stop-on 'args "end"' \
+	    --keys "$$(python3 tests/keyscript.py tests/gltest.keys)" \
+	    $(SD)/SYSTEM/HORIZON.SYS > $(B)/gltest.out 2> $(B)/gltest.err || true
+	@if python3 tests/gltest.py $(B)/gltest.out tests/gltest.txt; then echo "PASS  0.31 the line editor: 80- and 255-character lines, Backspace and arrows across the view's start, the 1 KB history, the echo; the shell: a 111-character line, arguments over 127 refused, ctrl-C"; \
+	else echo "FAIL  0.31 the line editor ($(B)/gltest.out)"; exit 1; fi
+
+# (0.31) GLTEST, the line editor's test program (not on the card: test-31 copies it there)
+$(B)/gltest.prg: user/gltest.s user/horizon.inc user/version.inc user/prog.cfg $(B)/ulib.o | $(B)
+	$(CA65) -I user -o $(B)/gltest.o $<
+	$(LD65) -C user/prog.cfg -o $@ $(B)/gltest.o $(B)/ulib.o
 
 pictures-29:
 	cp $(B)/menu31.pic tests/pictures/menu31.md5
@@ -1325,7 +1344,10 @@ write-pictures:
 # (tests/basic2s.keys: sprites, the game, full screen with a panel and raster bands, Break,
 # Alt+Tab, CONT).
 BAS2SECS := 75
-BAS2SHOTS := 7.0 9.0 13.0 17.5 19.5 26.5 28.5 31.0 33.5 36.5
+# (0.31) no shot times: tests/basic2s.keys takes its pictures at states (a still screen);
+# tests/basic2s-prep.py makes the card copies of the three programs hold still at given steps
+# (and gives them a fixed seed): the pictures do not depend on the CPU's or the kernel's speed
+BAS2PREP := python3 ../../tests/basic2s-prep.py .
 BREV10  = $(findstring --rev 10,$(EMUFLAGS))
 BREV9   = $(findstring --rev 9,$(EMUFLAGS))
 BAS2TXT = $(if $(OLD8),basic2-r8.txt,$(if $(BREV9),basic2-r9.txt,$(if $(BREV10),basic2-r10.txt,basic2.txt)))
@@ -1343,7 +1365,7 @@ basic2-test: all $(EMU)
 	@if grep lau $(B)/basic2-t.err | diff -u $(BAS2ERR) -; then echo "PASS  BASIC 2.0 Lau writes: WAVE and file samples played, voices, pitch, volume and pan, PLAY OFF, END"; \
 	else echo "FAIL  BASIC 2.0 Lau log ($(B)/basic2-t.err)"; exit 1; fi
 	@if [ -z "$(NOSPR)$(OLD8)" ]; then \
-	  sh tests/shots.sh "$(EMU) $(EMUFLAGS) $(CARDDATE)" $(SD) basic2s 38 $(BAS2SHOTS); \
+	  PREP="$(BAS2PREP)" sh tests/shots.sh "$(EMU) $(EMUFLAGS) $(CARDDATE)" $(SD) basic2s 50 $(BAS2SHOTS); \
 	  if diff -u tests/pictures/basic2s.md5 $(B)/basic2s.md5; then echo "PASS  BASIC 2.0 pictures: SPRITES.BAS, DRIFT.BAS, SCROLLER.BAS, Break, Alt+Tab, CONT, the BASIC window back"; \
 	  else echo "FAIL  BASIC 2.0 pictures (look at $(B)/basic2s*.ppm, then make basic2-pictures)"; exit 1; fi; \
 	else echo "SKIP  BASIC 2.0 pictures (REV \$$0B only)"; fi

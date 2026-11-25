@@ -161,6 +161,7 @@ void audio_write(uint32_t a, uint8_t v)
         A.playing |= v; A.keyon |= v; A.n_keyon++;
         if (A.next == UINT64_MAX && v) { A.k = M.cpu.cycles * 40 / 11953 + 1; A.next = smp_cycle(A.k); }
         machine_reschedule();
+        if (v) emu_lau_keyon();                         /* (main.c) a script's sound wait */
         break;
     case 0x21: A.playing &= ~v; A.keyon &= ~v; break;
     case 0x23: A.end &= ~v; break;

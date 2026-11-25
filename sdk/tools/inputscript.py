@@ -45,6 +45,13 @@ given to run816.py, 0 is the moment the program was started.
                       key enter 100".) Screenshots after a wait move with it too. run816.py
                       gives each wait 20 s more run time and fails the run when a wait never
                       ended
+    T still N         (Horizon 0.31's emu816) wait for a still screen: from T on nothing more
+                      happens until the picture on the monitor has not changed for N frames
+                      (60 a second; a frame that differs alone, a raster glitch, is forgiven);
+                      then as after a wait. "+0 still 30" then "+0 shot": a picture of a
+                      state (the drawing done, the program waiting), not of a moment, so it
+                      does not depend on how fast the CPU or the kernel is. The shot is taken
+                      from a frame that shows the picture the wait settled on
 """
 import sys
 
@@ -164,7 +171,8 @@ def parse(lines, offset=0):
             raise ScriptError(f'line {no}: bad time {when!r}')
         words = rest.split()
         cmd = words[0] if words else ''
-        if not ((cmd == 'shot' and len(words) == 1) or (cmd == 'wait' and len(words) >= 2)):
+        if not ((cmd == 'shot' and len(words) == 1) or (cmd == 'wait' and len(words) >= 2)
+                or (cmd == 'still' and len(words) == 2)):
             keys.append((t, 'M', None))     # (an input line: the console's lines from here on
         try:                                # count for the next wait)
             if rest.startswith('M '):
@@ -181,9 +189,17 @@ def parse(lines, offset=0):
                 # (after every key and mouse event of the lines before: a key held from that
                 # line's time on is let go first, so "+0 wait" after "key x 100" means "then
                 # wait"; the same for a click's release, 80 ms after its press)
-                last = max([k[0] for k in keys if k[1] not in ('W', 'S', 'M')] + mtimes + [t - 1])
+                last = max([k[0] for k in keys if k[1] not in ('W', 'Q', 'S', 'M')] + mtimes + [t - 1])
                 t = max(t, last + 1)
                 keys.append((t, 'W', rest.split(None, 1)[1]))
+                waited = True
+            elif cmd == 'still' and len(words) == 2:
+                # (0.31) as a wait, for a still screen: N frames without a change
+                if not words[1].isdigit() or int(words[1]) < 1:
+                    raise ScriptError('still needs a number of frames')
+                last = max([k[0] for k in keys if k[1] not in ('W', 'Q', 'S', 'M')] + mtimes + [t - 1])
+                t = max(t, last + 1)
+                keys.append((t, 'Q', words[1]))
                 waited = True
             elif cmd == 'move' and len(words) == 3:
                 mv(t, int(words[1]), int(words[2]), 100, 20, held)
@@ -237,8 +253,8 @@ def parse(lines, offset=0):
     keys.sort(key=lambda e: e[0])
     klist = []
     for k, u, d in keys:
-        if u == 'W':
-            klist.append(f'{k + offset}:W:{d.encode("latin-1").hex()}')
+        if u in ('W', 'Q'):
+            klist.append(f'{k + offset}:{u}:{d.encode("latin-1").hex()}')
         elif u == 'M':                  # (a step mark)
             klist.append(f'{k + offset}:M:')
         elif u == 'S':                  # (run816.py puts the file's name in: @SHOTn@)

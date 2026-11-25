@@ -15,7 +15,10 @@ and the emulator's runs: sdk/c/build/tests/<small|large|largefar>/.
 Tests (in tests/):
   libc     the C library: printf formats, string.h, stdlib, malloc, files (create, write,
            seek, read back, append, delete, the 5th handle), folders, time, far memory,
-           errno, argv, keyboard input (scanf, fgets on stdin), atexit
+           errno, argv, keyboard input (scanf, fgets on stdin; (0.31) lines longer than
+           the screen line, edited across the view's start, and one of 255), atexit; a
+           typed shell line of 126 characters (the arguments); run816 (small) refuses
+           --args longer than the 127 characters the kernel passes
   bigio    read and write of 40,000 bytes (tests/libc/bigio.c): one call moves at most
            32,767 (ssize_t is a 16-bit int: a short count, never a negative one), a loop
            gets the rest; a near buffer (small, large) and a far one (largefar)
@@ -287,11 +290,21 @@ def run_model(model, horizon, only):
         if rc:
             report("libc", model, False, "build: " + out.strip().splitlines()[-1])
         else:
-            rc, con, _ = emu(prg, os.path.join(b, "run-libc"), horizon, args='one "two words" 3',
-                             script=T("libc", "input.script"), seconds=8)
+            # (0.31) a typed line of 126 characters ("/APPS/LIBC.PRG" and these): the
+            # shell's line editor took 77 before Horizon 0.31
+            longarg = "".join("%02d-abcdefg." % i for i in range(8))
+            rc, con, _ = emu(prg, os.path.join(b, "run-libc"), horizon,
+                             args='one "two words" 3 ' + longarg,
+                             script=T("libc", "input.script"), seconds=30)
             ok = "LIBC PASS" in con and "atexit ran" in con and "[kill]" not in con
             report("libc", model, ok, grab(con, r"libc: \d+ checks, \d+ failures") +
                    ("" if ok else " " + " | ".join(l for l in con.splitlines() if "FAIL" in l)))
+            if model == "small":
+                # run816 refuses arguments the kernel would not pass (more than 127)
+                rc, out = sh([sys.executable, RUN816, prg, "--horizon", horizon, "--mode", "shell",
+                              "--out", os.path.join(b, "run-libc-long"), "--args", "x" * 128])
+                ok = rc != 0 and "at most 127" in out
+                report("run816", model, ok, "--args of 128 characters refused" if ok else out.strip()[-200:])
 
     if want("bigio"):
         prg = os.path.join(b, "BIGIO.PRG")

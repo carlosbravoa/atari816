@@ -11,7 +11,7 @@ install: installed /APPS/GOOD
 > ls /APPS/GOOD
   APP.INF                                                102  2026-11-01 12:00
   DATA.TXT                                                12  2026-11-01 12:00
-  GOOD.PRG                                              2420  2026-11-01 12:00
+  GOOD.PRG                                              2760  2026-11-01 12:00
   LEVELS                                               <DIR>  2026-11-01 12:00
 > cat /APPS/GOOD/DATA.TXT
 version one
@@ -26,7 +26,7 @@ install: replaced /APPS/GOOD
 > ls /APPS/GOOD
   APP.INF                                                102  2026-11-01 12:00
   DATA.TXT                                                12  2026-11-01 12:00
-  GOOD.PRG                                              2420  2026-11-01 12:00
+  GOOD.PRG                                              2760  2026-11-01 12:00
   LEVELS                                               <DIR>  2026-11-01 12:00
   NEW.TXT                                                 11  2026-11-01 12:00
   SAVE.DAT                                                16  2026-01-01 00:00

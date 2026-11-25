@@ -1,30 +1,63 @@
-# (BASIC 2.0) pictures on the text shell: sh tests/shots.sh EMU SD basic2s SECONDS T1 ...
-# (BAS2SHOTS in the Makefile; REV $0B only):
-#   1  SPRITES.BAS: balls (sprites from text art) bouncing in the graphics window
-#   2  Esc: "Break in ...", the sprites gone, the window's picture stays
+# (BASIC 2.0) pictures on the text shell: sh tests/shots.sh EMU SD basic2s SECONDS (REV $0B+),
+# with PREP = tests/basic2s-prep.py on the card copy.
+# (0.31) Taken at states, not at times (they were at 7.0 9.0 13.0 17.5 19.5 26.5 28.5 31.0 33.5
+# 36.5 s, and moved whenever the kernel or BASIC got faster or slower): basic2s-prep.py gives
+# the three programs a fixed seed and makes their animations hold still after a number of
+# steps; DRIFT steers by its step count. Each picture: "still 90" (the screen has not
+# changed for 90 frames: the step reached, a picture drawn, BASIC waiting), then "shot".
+#   1  SPRITES.BAS: balls (sprites from text art) in the graphics window, at step 110
+#   2  Esc: "Break in 185", the sprites gone, the window's picture stays
 #   3  DRIFT.BAS (full screen 320 x 180): its title
-#   4  Space starts it; the boat moved right and down, sprites on the river
+#   4  Space starts it; at step 150 the boat moved right and down, sprites on the river
 #   5  Esc: back to the desktop, the graphics window shows the last picture
-#   6  SCROLLER.BAS: full screen over a 640 x 360 world, the panel at the top, raster bands
+#   6  SCROLLER.BAS: full screen over a 640 x 360 world, the panel at the top, raster bands,
+#      at step 120
 #   7  Alt+Tab: the desktop, the program still running (its window shows the top left)
 #   8  Esc (the console has the focus): Break, the BASIC window as it was
-#   9  CONT: the full screen again, scrolled on
+#   9  CONT, a key: the full screen again, scrolled on to step 240
 #  10  Esc, SCREEN 0: the window closed, the console alone
 1500 {esc}
 +1500 basic -r /programs/SPRITES.BAS\n
-+5000 {esc}
-+1500 run /programs/drift.bas\n
-+4500 {d2C}
++0 still 90
++0 shot
++100 {esc}
++0 still 90
++0 shot
++300 run /programs/drift.bas\n
+# (the full screen is black, and still, for about 0.8 s while DRIFT reads its pictures;
+# then the title: 90 frames)
++0 still 90
++0 shot
++300 {d2C}
 +200 {u2C}
-+800 {d4F}{d51}
-+1500 {u4F}{u51}
-+1500 {esc}
-+1500 run /programs/scroller.bas\n
-+7500 {dE2}
++0 still 90
++0 shot
++100 {esc}
++0 still 90
++0 shot
++300 run /programs/scroller.bas\n
+# the world drawn (in sight), the panel: SCROLLER waits for a key; then the bands, and
+# it scrolls to step 120 and holds (the raster bands' edges move by a line in a frame now and
+# then, at random: 20 frames)
++0 still 90
++300 x
++0 still 20
++0 shot
++100 {dE2}
 +100 {d2B}
 +100 {u2B}
 +100 {uE2}
-+2000 {esc}
-+1500 cont\n
-+2500 {esc}
++0 still 90
++0 shot
++300 {esc}
++0 still 90
++0 shot
++300 cont\n
++1000 x
+# (the raster bands' edges move by a line in a frame now and then, at random: 20 frames)
++0 still 20
++0 shot
++100 {esc}
 +1000 screen 0\n
++0 still 90
++0 shot

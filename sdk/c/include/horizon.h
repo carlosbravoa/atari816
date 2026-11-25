@@ -362,7 +362,10 @@ unsigned hz_heap_peak(void);
 /* ---- console */
 /* read a line from the keyboard with echo and editing (Backspace, Left, Right): at most
  * size - 1 characters, zero-terminated, no newline -> its length; -1 on ctrl-C, -2 on
- * ctrl-D at the start of the line (stdin's end of input) */
+ * ctrl-D at the start of the line (stdin's end of input). A line longer than the room
+ * right of the prompt scrolls sideways (it never wraps); the prompt's end is the column
+ * stdout and stderr counted (a prompt sent with hz_puts directly is not counted). stdin
+ * reads lines of up to 255 characters */
 int hz_getline(char *buf, unsigned size);
 /* a key event (input_read's A, X) as ASCII (US layout; KEY_* for arrows), 0 for none */
 unsigned hz_key_ascii(unsigned usage, unsigned mods);
