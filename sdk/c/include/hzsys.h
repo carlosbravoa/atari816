@@ -448,7 +448,7 @@ int hz_task_single(void);
 /** task_path (SYS_TPATH, $35): The absolute path of the file the program was loaded from (zero-terminated) into buf -> its length. A 128-byte buffer always fits; EINVAL if buf is too small. Horizon 0.28 and later (before: ENOSYS). See hz_prog_dir.
  *  [buf: XY, size: A] */
 int hz_task_path(char *buf, unsigned size);
-/** sys_info (SYS_INFO, $36): Horizon's version: major * 256 + minor (0x001D = 0.29, 0x001E = 0.30); hz_x = the hardware revision (SYS_REV: 0x0C the OPL2, 0x0B sprites, 0x0A Lau, 0x08 the blitter). Horizon 0.29 and later (before: ENOSYS, 0xFFFF). hcc --needs checks a program's needs with it at its start.
+/** sys_info (SYS_INFO, $36): Horizon's version: major * 256 + minor (0x001D = 0.29, 0x001E = 0.30, 0x001F = 0.31); hz_x = the hardware revision (SYS_REV: 0x0C the OPL2, 0x0B sprites, 0x0A Lau, 0x08 the blitter). Horizon 0.29 and later (before: ENOSYS, 0xFFFF). hcc --needs checks a program's needs with it at its start.
  *  [no arguments; out: hz_x] */
 unsigned hz_sys_info(void);
 /** port_create (SYS_PCREATE, $40): A message port owned by the caller -> its number (0-15).

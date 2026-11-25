@@ -1081,7 +1081,7 @@ def run_apps(horizon, only, models):
         con = open(p, encoding="latin-1").read() if os.path.exists(p) else ""
         exp = ["C App is installed", "Assembly App is installed",
                "install: installed /APPS/CWIN", "install: installed /APPS/ASMAPP",
-               "cwin: in /APPS/CWIN/, current folder /, Horizon 0.30", "cwin: done",
+               "cwin: in /APPS/CWIN/, current folder /, Horizon 0.31", "cwin: done",
                "asmapp: running"]
         miss = [e for e in exp if e not in con]
         report("apps", m, not miss and os.path.isdir(os.path.join(d, "run-install", "card",
@@ -1093,12 +1093,12 @@ def run_apps(horizon, only, models):
             "--out", os.path.join(d, "run-desk")])
         p = os.path.join(d, "run-desk", "console.txt")
         con = open(p, encoding="latin-1").read() if os.path.exists(p) else ""
-        report("apps", m, "cwin: done" in con and "Horizon 0.30" in con,
+        report("apps", m, "cwin: done" in con and "Horizon 0.31" in con,
                "CWIN on the Desktop (its window, then its end)")
         # the needs refused (console; the Desktop: the message window too)
         for prg, rev, want, mode in (
-                ("CNEEDV.PRG", None, "CNEEDV needs Horizon 0.99 or later (this is 0.30).", "shell"),
-                ("CNEEDV.PRG", None, "CNEEDV needs Horizon 0.99 or later (this is 0.30).", "desktop"),
+                ("CNEEDV.PRG", None, "CNEEDV needs Horizon 0.99 or later (this is 0.31).", "shell"),
+                ("CNEEDV.PRG", None, "CNEEDV needs Horizon 0.99 or later (this is 0.31).", "desktop"),
                 ("CNEEDO.PRG", "11", "CNEEDO needs the OPL2 sound chip (hardware revision $0C).", "shell"),
                 ("CNEEDO.PRG", None, "cwin: in", "shell")):
             out_dir = os.path.join(d, f"run-{prg[:-4].lower()}-{mode}-{rev or 'def'}")

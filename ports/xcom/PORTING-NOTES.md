@@ -1660,7 +1660,7 @@ Risks:
 | the voxel line's tile crossing (about 1,300 cycles) and checked voxels (250-400); a search skipped when the same one was just done (a world version) | a first turn of a small battle 5-7 s (section 4f, "What limits it now"); 1-3 s needs about twice that | 1-2 days |
 | the sight fan's rays and levels (`plat/losfan.c`) in assembly (its walk is: section 4h) | 20-40 ms a fan left | 0.5 day |
 | the start-up's CPU part (3 s: the palette and picture loaders read through stdio byte by byte) | the start menu sooner | 0.5 day |
-| the main bank: `hgame`'s queues (the `.s` code moved: done, section 4) | room for the next changes | with the SDK |
+| ~~the main bank: `hgame`'s queues~~ (the `.s` code moved: done, section 4; the queues: done in the SDK, far memory, 4.5 KB back) | room for the next changes | with the SDK |
 | ~~per-cell night lights~~ | done (section 4k): flares, fires, the soldiers' own light and the terrain's lamps light their area | |
 | the night's scroll (section 4k, "What is left"): the records of the view kept and moved with a scroll, the kernel's cost of a sheet record (about 85 us measured, the fast path's 21 us expected) | 12 scrolls a second at night against 21 by day | 1 day (+ the kernel's owner) |
 | the FLI's runs in assembly | the intro's explosion scene (1.1 s behind at worst) | 0.5 day |

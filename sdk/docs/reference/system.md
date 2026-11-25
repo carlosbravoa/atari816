@@ -147,11 +147,11 @@ o65 and ignores the rest, in a file of any size (before 0.28: files below 64 KB 
 program opens its own file with this path and reads the data from there.
 
 ### $36 sys_info (SYS_INFO)
-(Horizon 0.29.) Out: A = Horizon's version, major x 256 + minor ($001D for 0.29, $001E for 0.30); X = the
+(Horizon 0.29.) Out: A = Horizon's version, major x 256 + minor ($001D for 0.29, $001E for 0.30, $001F for 0.31); X = the
 hardware revision (SYS_REV: $0C the OPL2, $0B sprites and scrolling, $0A Lau, $08 the
 blitter, $07 POKEY's sound). No side effects. Before 0.29 the call does not exist (ENOSYS).
 ```asm
-        sys     SYS_INFO        ; A = $001E (0.30), X = $0C (REV $0C)
+        sys     SYS_INFO        ; A = $001F (0.31), X = $0C (REV $0C)
         bcs     @old            ; ENOSYS: Horizon before 0.29
         cpx     #$0A
         bcc     @nolau          ; REV below $0A: no Lau

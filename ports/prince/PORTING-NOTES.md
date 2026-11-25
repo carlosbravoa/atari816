@@ -158,7 +158,7 @@ first frame and one through the ten rooms, the title and the demo.
 | # | What | Case |
 | --- | --- | --- |
 | 1 | hcc's large-model trial link reports every function whose address is taken (`__T_` thunks) as "undefined" whenever one real name is missing: 34 names listed for one missing `load_sound_names` | `sdk/c/tools/hzlarge.py` `link()`: when `und` has names not starting `__T_`, report only those |
-| 2 | hgame takes 7.1 KB of the main bank for its draw queues even when a game draws with its own records (both Xargon and this port) | `hg_draw.c`: `hg__dq`, `hg__sq` (used at fixed addresses by `hg_fast.s`), the arena |
+| 2 | (done: the record queues, 4.5 KB, are in far memory since; games.md, "Limits and known faults") hgame takes 7.1 KB of the main bank for its draw queues even when a game draws with its own records (both Xargon and this port) | `hg_draw.c`: `hg__dq`, `hg__sq` (used at fixed addresses by `hg_fast.s`), the arena |
 | 3 | `int`-typed `switch` on key codes with bit 15 set warns `-Woverflow` for every case (SDLPoP's `WITH_SHIFT` = 0x8000): correct code, 16 lines of noise | a `case` whose value fits `unsigned int` of the same width could be quiet |
 | 4 | `sheet_draw` refuses the whole call for one bad record: a game sees its whole frame vanish; it would help if the kernel drew the valid ones and said which was refused (or hgame checked records in a debug build) | fault 7 |
 | 5 | (done) `hg_key_next`'s events had no modifier state (`hg_mods` is the state at the last event read): a game could not tell Ctrl+G from G when Ctrl went up in the same frame (fault 15). hgame now sets `hg_key_mods` with each press (`sdk/c/game/tests/gt_keymods.c`) | `sdk/c/game/hg_core.c` `events()` |

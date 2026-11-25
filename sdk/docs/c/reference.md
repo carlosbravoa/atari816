@@ -1286,7 +1286,7 @@ hz_close(h);
   before `main`: where something is missing the program prints one line ("GAME needs the
   OPL2 sound chip (hardware revision $0C).", also in a small window when the window system
   runs) and exits with code 1. It works on older Horizons too. Without `--needs` nothing is
-  added. `hz_sys_info()` returns Horizon's version (major x 256 + minor, 0x001D for 0.29, 0x001E for 0.30)
+  added. `hz_sys_info()` returns Horizon's version (major x 256 + minor, 0x001D for 0.29, 0x001E for 0.30, 0x001F for 0.31)
   and sets `hz_x` to the hardware revision (-1 / 0xFFFF and `HZ_ENOSYS` before 0.29). An
   app (a program in its own folder, installed from an `.HZA` archive):
   [../apps.md](../apps.md).

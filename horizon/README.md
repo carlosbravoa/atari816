@@ -1160,10 +1160,90 @@ bus time (see emu/README.md, "Memory timing"). Expect the same factor on the CPU
   `user/uidate.s`), shortcuts (ui_lnkread, ui_mklink), program and file icons (ui_prog,
   ui_ficon). See ABI.md and ui.inc.
 
+## Version 0.31 (the colour remap, palettes kept behind, long lines)
+
+What is new since the v0.30 release. `sys_info` answers $001F; programs of 0.30 run unchanged.
+
+- **Ali's colour remap (hardware REV $0D)**: a 256-entry table inside the blitter and three
+  ops, 5 TABLE (a copy into the table), 6 COPY_REMAP and 7 COPY_KEY_REMAP (the key tested on
+  the source pixel). A 320 x 200 remapped copy costs about 12 % more than a plain one (115 ms
+  by the CPU). In the kernel: `sheet_draw`'s SH_TABLE (op 3) loads the table from a row of a
+  sheet, SH_COPY | SH_REMAP and SH_KEY | SH_REMAP draw through it (ENODEV before REV $0D or
+  with the blitter off; records that do not remap cost what they did). ABI.md, "Colour
+  remap". hgame: `hg_remap_new`, `hg_remap_set`, `hg_draw_remap`, `hg_remap_rect`, with the
+  same picture drawn by the CPU on older boards. emu816's default `--rev` is 13.
+- **sheet_draw's fast path** takes what left it before: records beyond 16 x 16 (a 16 x 8 run
+  of cells is one), every SH_TABLE, every fill and every copy cut at an edge. On the board's
+  timing those cost 68, 67, 142 and 176 us a record, now 35, 25, 27 and 51; a call of one
+  record 528 -> 565 us. GTEST t (`tests/gtestt.keys`) holds each kind under a limit in `make
+  test`. K3 has 122 bytes left (was 1,041).
+- **A program's own colours stay when another window is in front**: palette entries in the
+  spare ranges 76-113 and 136-175 (which `pal_alloc` gives out first) always show their
+  holder's colour; elsewhere the 0.18 rule is as before (ABI.md, "Palette entries"). FreeCell
+  and Quabricks no longer turn green while another window has the focus. A program that draws
+  with the system's colours of those ranges (Settings' swatches 95, 96, 101, 137; Paint) may
+  show another program's there; it can claim them at their place as Solitaire does.
+  `make test-freecell` (`tests/fcback.src`): FreeCell, a click on Files, Settings.
+- **The line editor** (ulib `getline`, the shell's, and the C library's `hz_getline`) takes
+  255 characters (was the console's width - 3: 75 in the text shell): a line longer than the
+  room right of the prompt scrolls sideways by half that room (it never wraps, so Backspace
+  and the arrows never cross a screen line's start, where the console's BS stops). The
+  prompt's end is the column `out_char` counts (`u_col`); the history keeps up to 8 lines
+  packed in 1 KB (the oldest go first). The shell's line is 256 bytes (LINEMAX); arguments
+  over the kernel's 127 characters are refused with a sentence ("sh: the arguments are too
+  long") instead of spawn's EINVAL. Type-ahead (`key_keep`) stays at 80 characters. Every
+  program is 227 bytes bigger (DESK 664 -> 437 bytes left in its bank). `make test-31`:
+  `tests/gltest.keys` (GLTEST, `user/gltest.s`: 80- and 255-character lines edited across
+  the view's start, the history, the echo checked on a simulated screen line by
+  `tests/gltest.py`). The C library's stdin takes lines of 255 characters (CONIN).
+- **Pictures at states, not at moments** (emu816 `--cpu-slow`, `--kernel-slow`: the CPU's or
+  the kernel's speed moved by a percentage; keyscript.py `still N`, `change`, `sound`; a
+  shots.sh `MASK`). Edit's six pictures are taken when the screen has stayed still for 30
+  frames (REV $07's sixth now shows the alert: at 19.6 s its CPU had not drawn it yet); BASIC
+  2.0's ten from `tests/basic2s-prep.py`'s copies of SPRITES, DRIFT and SCROLLER (a fixed
+  seed, the animation held at a step, DRIFT steered by its step count); Music's ten with the
+  meters, the position line and bar and the menu bar's free memory painted over
+  (`tests/music26.mask`). They pass unchanged with `--cpu-slow` +-3 and +-8 and
+  `--kernel-slow` +-10. One weak spot: SCROLLER's raster bands. Their edges land a line
+  late in a frame now and then even at the normal speed (a still wait forgives a frame that
+  differs alone), and in most frames with `--kernel-slow 10`, where a still wait for its
+  pictures came in one run of two (the kernel's raster changes run close to their time).
+- **Nothing polled** (ABI.md, "Background card requests"). The I/O processor serves one
+  request at a time; behind a full-screen game the Desktop still asked STAT `/PRN:` every
+  second, STAT `/PC:` and a READDIR of /Desktop every 5 s, Printer STAT `/PRN:` every second
+  and Music opened `/SYSTEM/OPEN.REQ` every second: 68 requests in 20 s with those windows
+  open, each one a possible wait for the game's own. Now an idle Desktop makes none, alone
+  or with those windows open, and none is made behind a full screen. The kernel counts the
+  requests that change the card (`setting` 8: an open to write and its close, mkdir,
+  delete, rename) and says whether the desktop is on the screen (`setting` 7); the Desktop,
+  Printer and Music look at those once a second and ask the card only when the count moved
+  (a print job is a file written: its close moves it).
+  **What the user notices**: the **PC icon is always there**; opening it with the link down
+  says "The PC link is not connected." (Auto connect in its menu, off by default, kept in
+  `/SYSTEM/PCAUTO`, brings the old automatic look back, every 5 s, never behind a full
+  screen); a PC that connects later no longer sets the clock by itself (opening the icon
+  does). A print job of the **classic Atari** is noticed when the desktop comes back from it
+  (Printer's window, while in front, still looks every second), not while the Atari runs
+  hidden behind the desktop. A file the PC
+  link's developer upload puts in /Desktop shows at the next change on the card or F5.
+  Files' footer date waits until the selection rests (0.25 s) when it moves fast. The rest
+  is as before: a file saved to the desktop shows within a second (was: up to 5 s).
+  Kernel bank $01: 488 -> 413 bytes left (BSS2: 4 + 8 bytes); DESK 1,049 -> 664.
+- **hgame** (`sdk/docs/c/games.md`): `hg_map16` (16-bit tiles from one wide sheet, drawn only
+  as they come into view), `hg_scroll_wrap` / `hg_split_wrap` (the framebuffer as a ring, with
+  a split), `hg_sprite_pal` (palette banks for 4 bpp sprites); the draw queues are in far
+  memory, 4.5 KB of the main bank back for every game.
+- **HDMI diagnostics** in the bitstream (`core/src/hdmi_diag.sv`, `core/KNOWN_ISSUES.md`):
+  sticky counters of the two PLLs' lock drops, `hdmi_rst_n` pulses, frames of the wrong length
+  and genlock jumps, read by `core/tools/atari.py hdmidiag` and shown on LED2-LED4. The output
+  is unchanged; it is there to find why some monitors lose the picture now and then.
+
 ## Version 0.30, second part (the Programs menu kept, arguments and a console from the Desktop)
 
 Written as "0.31" in this file and in the test names (`make test-31`), but released as part
-of 0.30: 0.30 had not been released when it was done (sys_info answers $001E). Nothing here
+of 0.30: 0.30 had not been released when it was done (sys_info answers $001E). In ABI.md the
+"(0.31)" marks on sysreq SR_APPS, `args=`, `console=`, PROG.ARG and TERM's program mean this
+part of 0.30; the rest of ABI.md's "(0.31)" is the real 0.31 (above). Nothing here
 needs a program to tell (an older Desktop ignores the new APP.INF keys, an older kernel
 answers SR_APPS with EINVAL, an older TERM opens a shell).
 
@@ -1215,51 +1295,6 @@ answers SR_APPS with EINVAL, an older TERM opens a shell).
   files; progok about 260); Files 26,029 -> 23,201 (its 2 KB READDIR buffer); TERM and
   INSTALL have room.
 - `kpath` is exported (`build/horizon.lbl`, the kernel's labels, for `tests/cardreq.py`).
-- **The line editor** (ulib `getline`, the shell's, and the C library's `hz_getline`) takes
-  255 characters (was the console's width - 3: 75 in the text shell): a line longer than the
-  room right of the prompt scrolls sideways by half that room (it never wraps, so Backspace
-  and the arrows never cross a screen line's start, where the console's BS stops). The
-  prompt's end is the column `out_char` counts (`u_col`); the history keeps up to 8 lines
-  packed in 1 KB (the oldest go first). The shell's line is 256 bytes (LINEMAX); arguments
-  over the kernel's 127 characters are refused with a sentence ("sh: the arguments are too
-  long") instead of spawn's EINVAL. Type-ahead (`key_keep`) stays at 80 characters. Every
-  program is 227 bytes bigger (DESK 664 -> 437 bytes left in its bank). `make test-31`:
-  `tests/gltest.keys` (GLTEST, `user/gltest.s`: 80- and 255-character lines edited across
-  the view's start, the history, the echo checked on a simulated screen line by
-  `tests/gltest.py`). The C library's stdin takes lines of 255 characters (CONIN).
-- **Pictures at states, not at moments** (emu816 `--cpu-slow`, `--kernel-slow`: the CPU's or
-  the kernel's speed moved by a percentage; keyscript.py `still N`, `change`, `sound`; a
-  shots.sh `MASK`). Edit's six pictures are taken when the screen has stayed still for 30
-  frames (REV $07's sixth now shows the alert: at 19.6 s its CPU had not drawn it yet); BASIC
-  2.0's ten from `tests/basic2s-prep.py`'s copies of SPRITES, DRIFT and SCROLLER (a fixed
-  seed, the animation held at a step, DRIFT steered by its step count); Music's ten with the
-  meters, the position line and bar and the menu bar's free memory painted over
-  (`tests/music26.mask`). They pass unchanged with `--cpu-slow` +-3 and +-8 and
-  `--kernel-slow` +-10. One weak spot: SCROLLER's raster bands. Their edges land a line
-  late in a frame now and then even at the normal speed (a still wait forgives a frame that
-  differs alone), and in most frames with `--kernel-slow 10`, where a still wait for its
-  pictures came in one run of two (the kernel's raster changes run close to their time).
-- **Nothing polled** (ABI.md, "Background card requests"). The I/O processor serves one
-  request at a time; behind a full-screen game the Desktop still asked STAT `/PRN:` every
-  second, STAT `/PC:` and a READDIR of /Desktop every 5 s, Printer STAT `/PRN:` every second
-  and Music opened `/SYSTEM/OPEN.REQ` every second: 68 requests in 20 s with those windows
-  open, each one a possible wait for the game's own. Now an idle Desktop makes none, alone
-  or with those windows open, and none is made behind a full screen. The kernel counts the
-  requests that change the card (`setting` 8: an open to write and its close, mkdir,
-  delete, rename) and says whether the desktop is on the screen (`setting` 7); the Desktop,
-  Printer and Music look at those once a second and ask the card only when the count moved
-  (a print job is a file written: its close moves it).
-  **What the user notices**: the **PC icon is always there**; opening it with the link down
-  says "The PC link is not connected." (Auto connect in its menu, off by default, kept in
-  `/SYSTEM/PCAUTO`, brings the old automatic look back, every 5 s, never behind a full
-  screen); a PC that connects later no longer sets the clock by itself (opening the icon
-  does). A print job of the **classic Atari** is noticed when the desktop comes back from it
-  (Printer's window, while in front, still looks every second), not while the Atari runs
-  hidden behind the desktop. A file the PC
-  link's developer upload puts in /Desktop shows at the next change on the card or F5.
-  Files' footer date waits until the selection rests (0.25 s) when it moves fast. The rest
-  is as before: a file saved to the desktop shows within a second (was: up to 5 s).
-  Kernel bank $01: 488 -> 413 bytes left (BSS2: 4 + 8 bytes); DESK 1,049 -> 664.
 
 ## Version 0.30 (many small fills)
 

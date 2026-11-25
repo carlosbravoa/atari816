@@ -56,7 +56,7 @@ kill          | ok       | unsigned task:A | | End a task (it exits with $FF80).
 task_info     | ok       | unsigned slot:A, hz_taskinfo *rec:XY | | The task in slot 0-15 into rec (id 0 = a free slot).
 task_single   | ok       | | x | One instance of this program only: when one runs already, -1 with hz_errno ERUNNING and hz_x = its id (the program should exit).
 task_path     | int      | char *buf:XY, unsigned size:A | | The absolute path of the file the program was loaded from (zero-terminated) into buf -> its length. A 128-byte buffer always fits; EINVAL if buf is too small. Horizon 0.28 and later (before: ENOSYS). See hz_prog_dir.
-sys_info      | unsigned | | x | Horizon's version: major * 256 + minor (0x001D = 0.29, 0x001E = 0.30); hz_x = the hardware revision (SYS_REV: 0x0C the OPL2, 0x0B sprites, 0x0A Lau, 0x08 the blitter). Horizon 0.29 and later (before: ENOSYS, 0xFFFF). hcc --needs checks a program's needs with it at its start.
+sys_info      | unsigned | | x | Horizon's version: major * 256 + minor (0x001D = 0.29, 0x001E = 0.30, 0x001F = 0.31); hz_x = the hardware revision (SYS_REV: 0x0C the OPL2, 0x0B sprites, 0x0A Lau, 0x08 the blitter). Horizon 0.29 and later (before: ENOSYS, 0xFFFF). hcc --needs checks a program's needs with it at its start.
 port_create   | int      | | | A message port owned by the caller -> its number (0-15).
 send          | ok       | unsigned port:A, const hz_msg *msg:XY | | Send a 16-byte message (EAGAIN: the queue is full).
 recv          | ok       | unsigned port:A, hz_msg *msg:XY | | Receive a 16-byte message; blocks unless port | RV_POLL (then EAGAIN when empty).

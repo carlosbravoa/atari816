@@ -63,7 +63,7 @@ of 24 November 2026).
    ```
    `hcc -c kr.c`: `error: the function 'foo' has no return type: write 'int foo(...)' (C99
    has no implicit int)`. Wish: `-fimplicit-int` (or `-std=c89`) for old code, as gcc's
-   warning.
+   warning. **Done since**: `-fimplicit-int`, `-std=c89` (as warnings).
 2. **hgame's scrolling map takes byte tiles only** (`hg_map`: at most 256 tiles, tiles as an
    image's frames one under the other: at most 64 tiles of 16 x 16 within a sheet's 1,024
    rows). Micropolis has 960 tiles in 16-bit map words. The port has its own ring
@@ -72,6 +72,8 @@ of 24 November 2026).
    the framebuffer's edge). Wishes: `hg_map16(map, mw, mh, img, tw, th, panel)` with tiles
    drawn by `hg_draw_part` from a wide sheet, and `hg_scroll_wrap(x, y, vheight)` with the
    split; or a tile callback.
+   **Done since** (hgame, `sdk/docs/c/games.md`): `hg_map16`, `hg_map_cells` (the callback),
+   `hg_scroll_wrap` / `hg_split_wrap`; the port still uses its own `view.c`.
    Reproducer: `hg_image_from(px, 16, 16, 960, HG_NONE)` makes an image without a sheet
    (960 x 16 rows > 1,024: every blit from it the slow `draw_list` path), and
    `hg_map(m, 120, 100, tiles, 48)` reads `m` as bytes: tiles 256-959 cannot be named.
@@ -79,13 +81,15 @@ of 24 November 2026).
    `tab[n].pal = 0`): eight kinds of moving things with their own 15 colours each need
    banks 8-15. The port uses `hz_spr_alloc`/`hz_spr_set` directly. Wish:
    `hg_sprite_pal(n, bank)`. Reproducer: a 4 bpp image whose colours are 129-143 shows
-   entries 1-15.
+   entries 1-15. **Done since**: `hg_sprite_pal(n, bank)`.
 4. **The main bank is the limit** (as for every big port): MICROPOL.PRG's fixed part is
    54.5 KB (code that must stay 10.4 KB, constants 14.1 KB, data 5.2 KB, bss 24.9 KB) with a
    heap of 5 KB and a software stack of 5 KB. hgame's record queues are 4.6 KB of it
    (`hg__dq` 2,560, `hg__sq` 2,048). Wishes: hgame's queues in far memory or sized by the
    program; `hcc --sizes` printed also when the link fails (now it says only "does not fit
    ... by N bytes"; one has to link with `--stack 512 --heap 512` to see the list).
+   **Done since**: the queues are in far memory (4.5 KB of the main bank back), and `hcc
+   --sizes` also prints when the link fails for size.
 5. **The shell cuts a long argument line**: `run816.py --mode shell --args` with a line of
    about 80 characters gave the program a last argument cut short
    (`... save /APPS/OUT.CTY` arrived as `/APPS/OUT`). Reproducer:
