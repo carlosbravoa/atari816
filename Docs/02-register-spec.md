@@ -2,7 +2,7 @@
 
 Nov 16, 2026 · @Carlos
 
-Every register a Horizon driver or the FPGA needs, following the decisions in [Atari816: System Architecture Design](https://claude.ai/artifact/2m27W3DQiW3NNPuqpLi2Tu).
+Every register a Horizon driver or the FPGA needs, following the decisions in [Atari816: System Architecture Design](01-architecture-design.md).
 
 ## Conventions and I/O page map
 

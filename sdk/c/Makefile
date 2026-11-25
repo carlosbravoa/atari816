@@ -6,8 +6,11 @@
 #   make gen        include/hzsys.h again from horizon.inc, ABI.md, tools/syscalls.tab;
 #                   include/huigen.h from ui.inc, icons.inc and ui/hui.tab
 #   make check      include/hzsys.h against horizon.inc and ABI.md (count, numbers, names);
-#                   the controls library's binding against ui.inc and ulib (genhui.py)
-#   make test       make check, then every test in the emulator (tests/run.py: PASS or
+#                   the controls library's binding against ui.inc and ulib (genhui.py);
+#                   the manual is complete (sdk/tools/doccheck.py: every public function,
+#                   header, tool and option is in sdk/docs) and its web site builds with
+#                   every link resolved (sdk/tools/mkmanual.py --check, into build/manual)
+#   make test      make check, then every test in the emulator (tests/run.py: PASS or
 #                   FAIL per test and code model: small, large; the controls library's
 #                   tests and the c-window-app template), the examples and the c-console
 #                   template, the game library's tests (game/Makefile), the large code
@@ -49,6 +52,8 @@ gen:
 check:
 	$(PYTHON) tools/gensys.py --check --horizon $(HORIZON)
 	$(PYTHON) tools/genhui.py --check --horizon $(HORIZON)
+	$(PYTHON) ../tools/doccheck.py
+	$(PYTHON) ../tools/mkmanual.py -o build/manual --check
 
 test: check
 	$(PYTHON) tests/host16/check.py

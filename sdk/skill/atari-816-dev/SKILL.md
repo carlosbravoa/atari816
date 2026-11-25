@@ -16,12 +16,14 @@ description: Write, port, build, test and package software for the Atari816 (a 6
 | Sound | POKEY (4 voices), Lau (8-voice sample player), OPL2 (YM3812 FM, hardware REV $0C) |
 | Storage | SD card, FAT32. 4 open files in the whole system; paths at most 127 characters |
 | OS | Horizon: preemptive, memory-protected, a window system. Programs run in user mode and reach all hardware through syscalls (`COP #n`): touching $00:Dxxx kills the task |
-| Emulator | emu816 (`emu/emu816`), board speed, REV $0C by default (`--rev 7..11` for older boards). Driven by `sdk/tools/run816.py` |
+| Emulator | emu816 (`emu/emu816`), board speed, REV $0D by default (`--rev 7..12` for older boards). Driven by `sdk/tools/run816.py` |
 
 ## Where things are
 
 The repository: `sdk/` (the SDK), `horizon/` (the OS; its card is `horizon/build/sd`),
-`emu/` (the emulator), `ports/` (two finished ports: `ports/digger`, `ports/xargon`).
+`emu/` (the emulator), `ports/` (worked examples: `ports/digger`, `ports/xargon`,
+`ports/prince`, `ports/simcity` (Micropolis), `ports/xcom`, and the `ports/skyroads`
+experiment; all but Digger and Micropolis need the user's own game files).
 Requirements: Python 3 (Pillow for screenshots as PNG), cc65's `ca65`, `ld65`, `ar65`,
 make and a PC C compiler. Before the first build: `make -C emu` and `make -C horizon -j8`.
 If other people use the tree, build in a copy of `horizon/` and `emu/` and pass
@@ -134,5 +136,9 @@ click. `references/packaging.md`.
 | `references/look-and-feel.md` | any window app: grid, fonts, colours, menus, shortcuts, dialogs |
 | `references/pixel-art.md` | drawing art for the screen: the palette, text art, img2c.py / img2inc.py |
 
-The full documentation: `sdk/docs/c/` (C: reference, apps, games, porting),
-`sdk/docs/reference/` (assembly: one page per topic), `sdk/docs/apps.md` (apps).
+This skill is the short form. The full form is the SDK manual, `sdk/docs/README.md` (its
+front page: every component and a reading path for each task): `sdk/docs/c/` (C: reference,
+library, syscalls, compiler, apps, games, porting), `sdk/docs/tools.md` (every tool and
+option), `sdk/docs/testing.md`, `sdk/docs/reference/` (assembly: one page per topic),
+`sdk/docs/apps.md` (apps). When the two disagree, the manual and the code win: fix the
+skill.

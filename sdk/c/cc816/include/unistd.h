@@ -18,7 +18,8 @@
 typedef long off_t;
 typedef int ssize_t;
 
-/* bytes read (0 at the end of the file), or -1 and errno. At most 65,535 a call (size_t) */
+/* bytes read (0 at the end of the file), or -1 and errno. At most 32,767 a call (ssize_t
+ * is a 16-bit int): a call that asks for more moves 32,767 and returns that count */
 ssize_t read(int fd, void *buf, size_t n);
 /* bytes written, or -1 and errno */
 ssize_t write(int fd, const void *buf, size_t n);

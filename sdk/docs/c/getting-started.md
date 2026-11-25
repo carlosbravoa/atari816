@@ -56,7 +56,7 @@ int main(int argc, char **argv)
 $ sdk/c/bin/hcc -o HELLO.PRG hello.c
 hcc: building the C library for the small code model (/.../sdk/c/build/lib/small)
 $ ls -l HELLO.PRG
--rw-rw-r-- 1 carlos carlos 8561 Nov 22 21:52 HELLO.PRG
+-rw-rw-r-- 1 user user 8561 Nov 22 21:52 HELLO.PRG
 ```
 
 The first build also builds the SDK's C library (a few seconds); after that `hcc`
@@ -236,4 +236,8 @@ point".
 - [../apps.md](../apps.md) (Horizon 0.29): your program as an app that users install
   with a double click: one folder in `/APPS` with APP.INF, an `.HZA` archive made with
   `sdk/tools/hzapp.py`, and `hcc --needs` (the program checks what it needs at its start).
+- [compiler.md](compiler.md): cc816 itself, its options by purpose, reading its output;
+  [library.md](library.md): every header and function; [../tools.md](../tools.md) and
+  [../testing.md](../testing.md): the tools and how to test; [../README.md](../README.md):
+  the whole manual's map.
 - `make -C sdk/c test`: the SDK's own tests in the emulator.

@@ -8,6 +8,13 @@ keys, Marga, the video chip, for a text console on screen and for a desktop of w
 a mouse pointer, and Ali, the blitter, to draw them (the CPU draws where there is none).
 It boots into the Desktop (or, with `/SYSTEM/NODESK` on the card, into the text shell).
 
+**Where to read what.** This file is the card's layout, how to build and run Horizon, and
+the history of every version (most of it, newest last), with the current limits at its
+end. The interface for programs is [`ABI.md`](ABI.md); programming Horizon in C or
+assembly is the SDK manual, [`sdk/docs/README.md`](../sdk/docs/README.md); how Horizon fits
+into the whole machine: [`Docs/architecture/horizon.md`](../Docs/architecture/horizon.md).
+BASIC: [`BASIC.md`](BASIC.md); the spreadsheet: [`SHEET.md`](SHEET.md).
+
 ## The card (0.17)
 
 | Folder | Contents |
@@ -2487,7 +2494,8 @@ FreeCell asks for the vertical blank only on REV $09+ (where WE_VBL exists), as 
 - Programs:
   - text + data + bss up to 65,280 bytes in one bank;
   - zp up to 256 bytes;
-  - the file must be smaller than 64 KB;
+  - the o65 must be smaller than 64 KB (since 0.28 the file may be longer: what follows the
+    o65, such as the large code model's other banks, is the program's to read);
   - no imports, so no shared libraries yet.
 - Arguments: one string of at most 127 characters.
 - Paths: at most 127 characters after the kernel made them absolute, the I/O processor's

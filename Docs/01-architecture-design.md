@@ -2,6 +2,11 @@
 
 Nov 16, 2026 · @Carlos
 
+> **A historical document.** This is the design written before the machine was built. Some
+> of it was built differently or not at all (for example the 16 MB option and other
+> candidates it weighs). What the machine is now: [architecture/](architecture/README.md)
+> and the register specification, [02-register-spec.md](02-register-spec.md).
+
 ## Summary and goals
 
 The Atari816 is two machines in one box: a 65C816 desktop computer with 16 MB of RAM, and a complete Atari 8-bit that lives inside it as a sandboxed "classic session". The recommended design gives the classic side its own cycle-exact 6502 core and the original chipset, so 8-bit software keeps exact timing and illegal opcodes, while the 65C816 desktop keeps running next to it.

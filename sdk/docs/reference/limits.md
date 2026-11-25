@@ -1,6 +1,7 @@
-# Limits (Horizon 0.18)
+# Limits (Horizon 0.31)
 
-From horizon/README.md ("Current limits"), ABI.md and the sources.
+From horizon/README.md ("Current limits"), ABI.md and the sources. (Written for Horizon
+0.18; the rows marked with a version came later.)
 
 | | |
 | --- | --- |
@@ -10,10 +11,11 @@ From horizon/README.md ("Current limits"), ABI.md and the sources.
 | Files | 4 open files in the whole system; paths at most 127 characters (absolute, after `.`/`..` are resolved) |
 | Internet (0.22) | 4 URLs or connections in the whole system (handles 4-7); a URL at most 127 characters with its scheme; needs the PC link's gateway |
 | Arguments | one string, 127 characters |
+| Shell line (0.31) | 255 characters (the line scrolls sideways; 77 before 0.31) |
 | Message ports | 16, 8 messages of 16 bytes each |
 | Keyboard | 128 queued key events (console); 4 keys held at once plus modifiers (the I/O processor) |
 | Windows | 16, counting the menu bar and an open menu; 32 queued events each |
-| Menus | 254 bytes per window; 12 titles in the bar; the Desktop's Programs menu 16 entries |
+| Menus | 2045 bytes per window; 12 titles in the bar; the Desktop's Programs menu 16 entries |
 | Window titles | 31 characters |
 | Clipboard | 64 KB |
 | Drag and drop strings | 127 characters |
@@ -24,12 +26,12 @@ From horizon/README.md ("Current limits"), ABI.md and the sources.
 | Palette entries (0.18) | 16-255 for programs (240), each held by one program at a time; 0-15 global |
 | Terminal windows | at most 128 x 40 cells |
 | Console | 78 x 29 characters; no colour escapes; lines longer than 78 wrap |
-| Time | milliseconds since start; no wall clock (the board has none) |
+| Time | milliseconds since reset (`uptime`), microseconds (0.30, `uptime_us`); the clock (`time_get`) counts from the last time it was set (by the Desktop or the shell from /SYSTEM/CLOCK, or from the PC link): no battery clock |
 | Shared libraries | none: link everything into the program |
 
 Not available to programs (no syscall): interrupt code of their own (the raster table is the
 kernel's), video modes other than the three above, sprite collision detection, the DACs at a
-sample rate (Lau plays samples), hiding the pointer in a window or giving it a custom shape,
-sockets / networking. (Horizon 0.15 added the joystick ports, SYS_JOY, and the focus events
+sample rate (Lau plays samples), hiding the pointer in a window or giving it a custom shape. (Horizon 0.15 added the joystick ports, SYS_JOY, and the focus events
 WE_FOCUS / WE_UNFOCUS; 0.17 Lau; 0.18 full-screen mode, sprites, scrolling, raster tables,
-draw lists, palette entries of programs and frame sync.)
+draw lists, palette entries of programs and frame sync; 0.22 the internet through the PC
+link: URLs and `tcp://` connections, [internet.md](internet.md).)

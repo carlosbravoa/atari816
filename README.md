@@ -42,8 +42,19 @@ More detail: [`Docs/01-architecture-design.md`](Docs/01-architecture-design.md) 
 
 ## Status
 
-Work in progress. The hardware, Horizon, the emulator and the SDK all work and are under
-active development; interfaces can still change.
+Release 0.31 (November 2026). Work in progress: everything below works and is under active
+development; interfaces can still change.
+
+| Part | What there is | Status |
+| --- | --- | --- |
+| Hardware (`core/`) | the 65C816 machine and its chips beside a cycle-exact Atari 8-bit, on a Tang Nano 20K | runs on the board; known faults in [`core/KNOWN_ISSUES.md`](core/KNOWN_ISSUES.md) |
+| OS and apps (`horizon/`) | Horizon: a preemptive, memory-protected kernel with 115 syscalls, a desktop and its programs | runs on the board and in the emulator; tested in the emulator (`make -C horizon test`) |
+| Emulator (`emu/`) | emu816: the native machine with the board's timing (memory stalls, the card), headless or in a window | the base of every test; its timing model was measured against the board ([`emu/README.md`](emu/README.md)) |
+| SDK and compiler (`sdk/`) | cc816 (the SDK's own C compiler), the C library, the game and window libraries, the tools, the test framework, app packaging | tested in the emulator (`make -C sdk test`); [the SDK manual](sdk/docs/README.md) |
+| Ports (`ports/`) | Digger, Xargon, Prince of Persia, Micropolis, X-COM (XCOM-XT), and a SkyRoads experiment | each with its tests; all but Digger and Micropolis need the user's own game files |
+
+How everything fits together, and how each part is tested:
+[`Docs/architecture/`](Docs/architecture/README.md).
 
 ## What is where
 
@@ -52,13 +63,14 @@ active development; interfaces can still change.
 | [`core/`](core/) | The hardware: the FPGA design for the Tang Nano 20K (the Atari 8-bit core, the 65C816 native machine in `core/src/a816/`), the I/O processor firmware and PC-side tools |
 | [`horizon/`](horizon/) | Horizon, the operating system, and its programs (65816 assembly, ca65/ld65) |
 | [`emu/`](emu/) | emu816, a C emulator of the native machine, for developing on a PC |
-| [`sdk/`](sdk/) | The SDK: getting-started guide, programmer's reference, templates, examples, tools; the C SDK with its own compiler, cc816 ([`sdk/c/`](sdk/c/)); apps that users install from one `.HZA` file ([`sdk/docs/apps.md`](sdk/docs/apps.md)) |
-| [`ports/`](ports/) | Games ported to Horizon in C with the SDK: Digger and Xargon (each with its porting notes and tests) |
+| [`sdk/`](sdk/) | The SDK ([its manual](sdk/docs/README.md)): getting-started guide, programmer's reference, templates, examples, tools; the C SDK with its own compiler, cc816 ([`sdk/c/`](sdk/c/)); apps that users install from one `.HZA` file ([`sdk/docs/apps.md`](sdk/docs/apps.md)) |
+| [`ports/`](ports/) | Programs ported to Horizon in C with the SDK, each with its porting notes and tests: Digger, Xargon, Prince of Persia, Micropolis (`ports/simcity`), X-COM (XCOM-XT), and the SkyRoads experiment |
 | [`tools/`](tools/) | `atari816-link`, the PC side of the PC link (shares a folder of the PC with the Atari816, and connects it to the internet) |
-| [`Docs/`](Docs/) | Design documents: architecture, register specification, bring-up log, the PC link |
+| [`Docs/`](Docs/) | Design documents: the architecture and components ([`Docs/architecture/`](Docs/architecture/README.md)), the architecture design, register specification, bring-up log, the PC link |
 
 ## How to try it
 
+- To write programs: [the SDK manual](sdk/docs/README.md).
 - In the emulator, no board needed: [`sdk/docs/getting-started.md`](sdk/docs/getting-started.md)
   (build `emu/` and `horizon/`, then run Horizon).
 - On a Tang Nano 20K: build and flash the hardware as described in

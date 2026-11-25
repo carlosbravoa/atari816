@@ -1,6 +1,6 @@
 /* hcc --check-calls a.c b.c: the files of a program read together (nothing built): a call
  * without a prototype in one file, or a prototype, that disagrees with the definition in
- * another (Civilization's picture_target(0): 2 bytes pushed where a far pointer's 4 are
+ * another (a DOS port's picture_target(0): 2 bytes pushed where a far pointer's 4 are
  * read; a prototype in one header that says int for a pointer). Exit 1 when one is found.
  * A static function of the other file is not this file's (hidden). (make check also runs
  * it with $HZ_DATA=far, where the far pointer is spelt "char *": the EXPECTs stop before) */

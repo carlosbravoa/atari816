@@ -2,7 +2,9 @@
 
 Purpose: how to run, drive and check a Horizon program in emu816 (`sdk/tools/run816.py`),
 and how to write a `make test` whose PASS means something. `SDK` = the `sdk` folder,
-`HORIZON` = the Horizon tree (`SDK/../horizon`) with a built card.
+`HORIZON` = the Horizon tree (`SDK/../horizon`) with a built card. The full form of this
+page is the manual's `sdk/docs/testing.md`; every run816.py and emu816 option:
+`sdk/docs/tools.md`.
 
 ## run816.py
 
@@ -44,7 +46,7 @@ Options worth knowing (all from `run816.py --help`):
 | `--log-sound` / `--log-sound-us` | POKEY writes in `emu.err`: `sound $DB08 = $78` / `sound 149861 $DB01 = $00` (µs) |
 | `--log-lau` / `--log-lau-us` | Lau writes: `lau $DBxx = $yy` / `lau 3785939 $DBxx = $yy` (µs) |
 | `--wav FILE` | record Lau + OPL2 (48 kHz stereo, as the board mixes; no POKEY) |
-| `--rev N` | hardware: 12 default (OPL2), 11 no OPL2, 10 no sprites/scrolling, 9 no Lau, 8 no command lists, 7 no blitter |
+| `--rev N` | hardware: 13 default (REV $0D: the colour remap), 12 no remap, 11 no OPL2, 10 no sprites/scrolling, 9 no Lau, 8 no command lists, 7 no blitter |
 | `--kbd-release MS` | release held keys MS ms after the last key change (the board's old firmware: 1000) |
 | `--prof FILE --prof-from S --prof-to S` | cycle profile (`references/performance.md`) |
 | `--net`, `--net-root DIR` | internet through an emulated PC link |
@@ -226,8 +228,8 @@ exit code (both ports), called from `TESTCHECK` or a `test` target.
   emerald two rows short: 7 of 9 pictures failed) and see it fail.
 - **Self-tests**: zero PASS lines is a failure, not a pass.
 - **Report honestly** what was verified by running and what was not (sound on the board,
-  joysticks, the real card's speed: emu816's own `--card-kbps 170:100` models it, but
-  run816.py does not pass it).
+  joysticks; the card's speed is modelled, `--card-board` from the program's start, unless
+  `--fast-card`).
 
 ## Assembly, BASIC, the board
 

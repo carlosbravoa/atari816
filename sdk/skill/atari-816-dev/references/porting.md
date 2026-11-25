@@ -79,7 +79,7 @@ Xargon's compile flags: `--code large -D_HORIZON -I src -I horizon -I horizon/co
   if the game records demos: they replay only with the same numbers.
 - **Absolute DOS include paths** (`#include "\develop\xargon\include\gr.h"`) become
   `"gr.h"` with `-I src`. CP437 bytes and CRLF line ends compile as they are.
-- **C89 / K&R code** (SimCity, Civilization: Unix and MSC 5.1 code): `-std=c89` (or
+- **C89 / K&R code** (SimCity's Unix code, MSC 5.1 code): `-std=c89` (or
   `-fdos-keywords`) takes functions without a return type, `register x;`, and calls with
   more arguments than the prototype, as warnings (`-Wno-implicit-int` once read). Do not
   add `int` to hundreds of functions by hand.
@@ -87,7 +87,7 @@ Xargon's compile flags: `--code large -D_HORIZON -I src -I horizon -I horizon/co
   ones in a file): `-fno-merge-strings` (`-fwritable-strings`: in the data too).
 - **Calls without prototypes**: `hcc --check-calls --code large --data far -I ... *.c`
   before the first run: an `int` passed where a far pointer is read (2 bytes pushed, 4
-  read) shifts every later argument (Civilization's first crash); it checks the results
+  read) shifts every later argument (the first crash of a DOS strategy game port); it checks the results
   too (an implicit `int` taken from a function returning a far pointer or a `long`).
   Files built with different `-D`: `--set -DGAME src/*.c --set port/*.c`. Within a file
   the compile warns (`-Wunprototyped-args`).

@@ -213,4 +213,7 @@ emulator should keep it on the board; still check it there.
   (0.31) A program started from the Desktop gets arguments too (APP.INF's `args=`, the
   user's `NAME.ARG` next to it) and, with `console=yes` (or `error`), a Terminal window for
   what it prints: see "The user's options" there.
+- [README.md](README.md): the manual's front page, every component and a reading path for
+  each kind of program; [tools.md](tools.md) every tool and option, [testing.md](testing.md)
+  testing without a person.
 - `sdk/skill/atari-816-dev/`: the same knowledge as a Claude skill.

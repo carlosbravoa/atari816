@@ -1,8 +1,8 @@
 /* r054_implicit_int.c - C89's implicit int (-std=c89; also -fimplicit-int, -fdos-keywords):
  * functions defined and declared without a return type, K&R parameter lists with and
  * without declarations, 'register x;', 'static n;', 'const k = 5;', a call before any
- * declaration (an implicit one). SimCity's source had 248 such functions, Civilization's
- * several; before, each was an error ("has no return type"). Warnings only
+ * declaration (an implicit one). SimCity's source had 248 such functions, a large DOS
+ * strategy game's several; before, each was an error ("has no return type"). Warnings only
  * (-Wimplicit-int); the code is what 'int' would give. LEVELS: 0 1 2 */
 // FLAGS: -std=c89 -Wno-implicit-int -Wno-implicit-function-declaration
 static bar();

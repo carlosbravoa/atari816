@@ -1,0 +1,141 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 700" width="1000" height="700" font-family="Helvetica, Arial, sans-serif" role="img" aria-labelledby="t d">
+  <title id="t">The Atari816 system in layers</title>
+  <desc id="d">Five layers from bottom to top: the hardware in the FPGA of a Tang Nano 20K (65C816 with cache, FREDDIE II, Marga, Ali, Lau, OPL2, POKEY, the system block, the I/O processor and its mailbox, 8 MB SDRAM, the classic Atari 8-bit core); Horizon, the operating system (kernel, window system, controls library, loader); the SDK (hcc and cc816, the libraries, the tools, app packaging); programs (Horizon's own and those built with the SDK); and the ports. On the right: emu816, which models the hardware layer and runs the same Horizon card; the tests, which drive emu816 through run816.py; and the PC side (the link gateway and the developer tools over USB).</desc>
+  <defs>
+    <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0L10 5L0 10z" fill="#3b4660"/>
+    </marker>
+    <style>
+      .bg{fill:#f7f6f1}
+      .frame{fill:none;stroke:#c9ccd6;stroke-width:1}
+      .hw{fill:#e7ecf6;stroke:#2f4a8a;stroke-width:1.6}
+      .hwc{fill:#ffffff;stroke:#2f4a8a;stroke-width:1.1}
+      .cl{fill:#e2f1df;stroke:#3d7a3a;stroke-width:1.1}
+      .os{fill:#fbeccf;stroke:#a86b12;stroke-width:1.6}
+      .osc{fill:#ffffff;stroke:#a86b12;stroke-width:1.1}
+      .sdk{fill:#efe5f6;stroke:#6b3fa0;stroke-width:1.6}
+      .sdkc{fill:#ffffff;stroke:#6b3fa0;stroke-width:1.1}
+      .pr{fill:#e4f1f3;stroke:#2d7480;stroke-width:1.6}
+      .prc{fill:#ffffff;stroke:#2d7480;stroke-width:1.1}
+      .side{fill:#ffffff;stroke:#3b4660;stroke-width:1.6}
+      .w{stroke:#3b4660;stroke-width:1.5;fill:none}
+      .wd{stroke:#3b4660;stroke-width:1.5;fill:none;stroke-dasharray:5 4}
+      .L{font-size:15px;font-weight:700;fill:#1c2333;text-anchor:start}
+      .h{font-size:13px;font-weight:700;fill:#1c2333;text-anchor:middle}
+      .s{font-size:11px;fill:#38415a;text-anchor:middle}
+      .n{font-size:11px;fill:#38415a;font-style:italic;text-anchor:start}
+      .T{font-size:19px;font-weight:700;fill:#1c2333;text-anchor:start}
+    </style>
+  </defs>
+
+  <rect class="bg" x="0" y="0" width="1000" height="700" rx="10"/>
+  <text class="T" x="24" y="34">The Atari816: one machine, five layers</text>
+  <text class="n" x="24" y="54">Each layer uses only the one below it. emu816 stands in for the bottom layer on a PC.</text>
+
+  <!-- layer 5: ports -->
+  <rect class="pr" x="20" y="70" width="690" height="78" rx="8"/>
+  <text class="L" x="32" y="90">Ports: C programs of other machines, built with the SDK</text>
+  <rect class="prc" x="32" y="100" width="100" height="38" rx="5"/><text class="h" x="82" y="124">Digger</text>
+  <rect class="prc" x="142" y="100" width="100" height="38" rx="5"/><text class="h" x="192" y="124">Xargon</text>
+  <rect class="prc" x="252" y="100" width="120" height="38" rx="5"/><text class="h" x="312" y="118">Prince of</text><text class="h" x="312" y="132">Persia</text>
+  <rect class="prc" x="382" y="100" width="100" height="38" rx="5"/><text class="h" x="432" y="124">Micropolis</text>
+  <rect class="prc" x="492" y="100" width="100" height="38" rx="5"/><text class="h" x="542" y="124">X-COM</text>
+  <rect class="prc" x="602" y="100" width="98" height="38" rx="5"/><text class="h" x="651" y="118">SkyRoads</text><text class="s" x="651" y="132">(experiment)</text>
+
+  <!-- layer 4: programs -->
+  <rect class="pr" x="20" y="158" width="690" height="78" rx="8"/>
+  <text class="L" x="32" y="178">Programs</text>
+  <rect class="prc" x="32" y="188" width="400" height="38" rx="5"/>
+  <text class="h" x="232" y="204">Horizon's own (65816 assembly)</text>
+  <text class="s" x="232" y="219">Desktop, Files, Terminal, Edit, Sheet, Paint, BASIC, Music, games</text>
+  <rect class="prc" x="442" y="188" width="258" height="38" rx="5"/>
+  <text class="h" x="571" y="204">Your programs (C or assembly)</text>
+  <text class="s" x="571" y="219">console tools, window apps, games</text>
+
+  <!-- layer 3: SDK -->
+  <rect class="sdk" x="20" y="246" width="690" height="100" rx="8"/>
+  <text class="L" x="32" y="266">SDK (sdk/)</text>
+  <rect class="sdkc" x="32" y="276" width="160" height="60" rx="5"/>
+  <text class="h" x="112" y="296">hcc + cc816</text><text class="s" x="112" y="312">the C compiler (Python),</text><text class="s" x="112" y="326">ca65 / ld65 behind it</text>
+  <rect class="sdkc" x="202" y="276" width="170" height="60" rx="5"/>
+  <text class="h" x="287" y="296">Libraries</text><text class="s" x="287" y="312">C library, horizon.h,</text><text class="s" x="287" y="326">hgame, hui, ulib</text>
+  <rect class="sdkc" x="382" y="276" width="170" height="60" rx="5"/>
+  <text class="h" x="467" y="296">Tools</text><text class="s" x="467" y="312">run816, host16, profiler,</text><text class="s" x="467" y="326">art converters, doccheck</text>
+  <rect class="sdkc" x="562" y="276" width="138" height="60" rx="5"/>
+  <text class="h" x="631" y="296">Packaging</text><text class="s" x="631" y="312">APP.INF, .HZA,</text><text class="s" x="631" y="326">hzapp.py</text>
+
+  <!-- layer 2: Horizon -->
+  <rect class="os" x="20" y="356" width="690" height="100" rx="8"/>
+  <text class="L" x="32" y="376">Horizon, the operating system (horizon/)</text>
+  <rect class="osc" x="32" y="386" width="200" height="60" rx="5"/>
+  <text class="h" x="132" y="406">Kernel</text><text class="s" x="132" y="422">tasks, protection, memory,</text><text class="s" x="132" y="436">files, sound, 115 syscalls</text>
+  <rect class="osc" x="242" y="386" width="170" height="60" rx="5"/>
+  <text class="h" x="327" y="406">Window system</text><text class="s" x="327" y="422">compositor, menus,</text><text class="s" x="327" y="436">full screen, sprites</text>
+  <rect class="osc" x="422" y="386" width="140" height="60" rx="5"/>
+  <text class="h" x="492" y="406">ui.lib</text><text class="s" x="492" y="422">controls, dialogs,</text><text class="s" x="492" y="436">the house style</text>
+  <rect class="osc" x="572" y="386" width="128" height="60" rx="5"/>
+  <text class="h" x="636" y="406">Loader</text><text class="s" x="636" y="422">o65 programs,</text><text class="s" x="636" y="436">COP #n calls</text>
+
+  <!-- layer 1: hardware -->
+  <rect class="hw" x="20" y="466" width="690" height="214" rx="8"/>
+  <text class="L" x="32" y="486">Hardware: one Gowin FPGA on a Tang Nano 20K (core/)</text>
+  <rect class="hwc" x="32" y="496" width="130" height="52" rx="5"/>
+  <text class="h" x="97" y="516">65C816</text><text class="s" x="97" y="532">14.34 MHz, 4 KB cache</text>
+  <rect class="hwc" x="172" y="496" width="130" height="52" rx="5"/>
+  <text class="h" x="237" y="516">FREDDIE II</text><text class="s" x="237" y="532">protection, ABORT</text>
+  <rect class="hwc" x="312" y="496" width="125" height="52" rx="5"/>
+  <text class="h" x="374" y="516">Marga</text><text class="s" x="374" y="532">video, 16 sprites</text>
+  <rect class="hwc" x="447" y="496" width="125" height="52" rx="5"/>
+  <text class="h" x="509" y="516">Ali</text><text class="s" x="509" y="532">blitter, colour remap</text>
+  <rect class="hwc" x="582" y="496" width="118" height="52" rx="5"/>
+  <text class="h" x="641" y="516">Lau</text><text class="s" x="641" y="532">8 sample voices</text>
+
+  <rect class="hwc" x="32" y="558" width="130" height="52" rx="5"/>
+  <text class="h" x="97" y="578">OPL2 + POKEY</text><text class="s" x="97" y="594">FM, classic sound</text>
+  <rect class="hwc" x="172" y="558" width="130" height="52" rx="5"/>
+  <text class="h" x="237" y="578">System block</text><text class="s" x="237" y="594">IRQs, timers, input</text>
+  <rect class="hwc" x="312" y="558" width="260" height="52" rx="5"/>
+  <text class="h" x="442" y="578">I/O processor (PicoRV32) + mailbox</text><text class="s" x="442" y="594">SD card, keyboard, mouse, PC link</text>
+  <rect class="hwc" x="582" y="558" width="118" height="52" rx="5"/>
+  <text class="h" x="641" y="578">8 MB SDRAM</text><text class="s" x="641" y="594">shared by all</text>
+
+  <rect class="cl" x="32" y="620" width="540" height="50" rx="5"/>
+  <text class="h" x="302" y="640">Classic Atari 8-bit (XL/XE, NTSC): 6502, ANTIC, GTIA, POKEY, PIA</text>
+  <text class="s" x="302" y="656">frozen while the desktop is shown; F12 switches the HDMI picture</text>
+  <rect class="hwc" x="582" y="620" width="118" height="50" rx="5"/>
+  <text class="h" x="641" y="640">HDMI</text><text class="s" x="641" y="656">1280 x 720, 60 Hz</text>
+
+  <!-- side column -->
+  <rect class="side" x="740" y="466" width="240" height="214" rx="8"/>
+  <text class="L" x="752" y="486">emu816 (emu/)</text>
+  <text class="s" x="860" y="510">a C model of the native machine:</text>
+  <text class="s" x="860" y="526">65C816, FREDDIE II, Marga, Ali,</text>
+  <text class="s" x="860" y="542">Lau, OPL2, mailbox, SD card</text>
+  <text class="s" x="860" y="566">memory stalls and card costs</text>
+  <text class="s" x="860" y="582">fitted to board measurements</text>
+  <text class="s" x="860" y="606">runs the same Horizon card;</text>
+  <text class="s" x="860" y="622">no classic machine inside</text>
+  <path class="wd" d="M738 573 L712 573" marker-end="url(#ar)"/>
+  <text class="n" x="742" y="664">models the hardware layer</text>
+
+  <rect class="side" x="740" y="246" width="240" height="200" rx="8"/>
+  <text class="L" x="752" y="266">Tests</text>
+  <text class="s" x="860" y="290">run816.py: input scripts,</text>
+  <text class="s" x="860" y="306">screenshots, console checks</text>
+  <text class="s" x="860" y="330">emu816 self tests, Horizon's</text>
+  <text class="s" x="860" y="346">sessions and pictures, cc816's</text>
+  <text class="s" x="860" y="362">suites, SDK and port tests</text>
+  <text class="s" x="860" y="386">host twins: the same C built</text>
+  <text class="s" x="860" y="402">on the PC, results compared</text>
+  <path class="w" d="M860 448 L860 464" marker-end="url(#ar)"/>
+  <text class="n" x="752" y="436">drive emu816 headless</text>
+
+  <rect class="side" x="740" y="70" width="240" height="166" rx="8"/>
+  <text class="L" x="752" y="90">The PC side (tools/)</text>
+  <text class="s" x="860" y="114">atari816-link: a shared folder,</text>
+  <text class="s" x="860" y="130">the clock, the internet, printing</text>
+  <text class="s" x="860" y="154">atari.py: send files, screenshots,</text>
+  <text class="s" x="860" y="170">logs, memory reads</text>
+  <text class="s" x="860" y="194">all over the board's USB cable</text>
+  <text class="s" x="860" y="210">(the I/O processor's serial port)</text>
+</svg>

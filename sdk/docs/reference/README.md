@@ -1,7 +1,9 @@
 # Programmer's reference
 
-The interface between Horizon 0.18 (and 0.22's internet, 0.23's printing, 0.24's idle time) and its programs, reorganised by topic with an example
-for each call. The source of truth is `horizon/ABI.md` (and the sources it names);
+The interface between Horizon and its programs for assembly (written for Horizon 0.18,
+brought up to 0.31: every syscall the kernel has is here, `make -C sdk check` makes sure),
+reorganised by topic with an example for each call. The same calls from C:
+[../c/syscalls.md](../c/syscalls.md); the manual's front page: [../README.md](../README.md). The source of truth is `horizon/ABI.md` (and the sources it names);
 `make -C sdk check` compares this reference with `horizon/user/horizon.inc`, `ui.inc` and
 the kernel's syscall table, and assembles every example.
 
@@ -18,7 +20,7 @@ the kernel's syscall table, and assembles every example.
 | [sound.md](sound.md) | beep, sound_write, POKEY and the DACs; samples on Lau; FM on the OPL2; the sound volume |
 | [classic.md](classic.md) | The classic Atari: mount, eject, boot, show; (0.23) Run in Atari, the folder disk |
 | [printing.md](printing.md) | (0.23) Printing: `/PRN:NAME` jobs, watching for new ones, PDFs on the PC |
-| [games.md](games.md) | Horizon 0.18, the games round: frame sync (vsync, frame, WE_VBL), palette entries, Marga's sprites, full-screen mode (own framebuffer, scrolling with wrap and split, raster table), draw lists |
+| [games.md](games.md) | Horizon 0.18, the games round: frame sync (vsync, frame, WE_VBL), palette entries, Marga's sprites, full-screen mode (own framebuffer, scrolling with wrap and split, raster table), draw lists; (0.19) sheets, (0.30) fill runs |
 | [hardware.md](hardware.md) | The hardware (video, blitter, sound, input, timers) and what programs can reach of it |
 | [performance.md](performance.md) | Measured costs: CPU, syscalls, drawing, board against emulator |
 | [game-patterns.md](game-patterns.md) | The game loop (frame-synchronous or timer), full screen with scrolling and sprites, windowed games with draw lists and sprites, input, art, sound effects |

@@ -326,6 +326,7 @@ Every function is described in `hgame.h`. In short:
 | `hg_tone(v, pitch, vol, ticks)`, `hg_sfx(v, pitch, dpitch, vol, dvol, ticks, dist)`, `hg_pitch(hz)` | POKEY, voices 0-3, envelopes stepped every 20 ms (by the clock) |
 | `hg_note(v, hz, vol)` | POKEY's two 16-bit voices (channels joined in pairs at 1.79 MHz): a square tone at any pitch from 14 Hz, exact (music; a PC speaker's tones, hz = 1193182 / the PIT divisor), until changed |
 | `hg_has_lau()`, `hg_sound_make(wave, hz, ms, fade)`, `hg_sound_from(data, len, rate, bits)`, `hg_sound_load(path)` | samples: made here, from memory (a C array, or far memory: a `__far` pointer into a bank of `hz_far_alloc` / `hg_banks`), from a `.WAV` (PCM 8/16-bit mono) or raw file |
+| `hg_sound_free(s)` | free a sound's descriptor (its far memory stays until `hg_close`, as images' does) |
 | `hg_play(s, vol)`, `hg_play_ex(s, vol, pan, semitones)`, `hg_stop(voice)`, `hg_sound_off()` | on Lau's free voices |
 | `hg_music_play(path, loop)`, `hg_music_stop`, `hg_music_pause`, `hg_music_volume`, `hg_music_state` | MOD, WAV or (REV $0C) MIDI files by Horizon's music engine; `hg_music_play` returns once it plays |
 | `hg_has_opl()`, `hg_opl_write(reg, val)`, `hg_opl_reset()` | the OPL2 (REV $0C, a YM3812: AdLib and Sound Blaster FM) by the game itself: its registers (one owner at a time; `hg_close` gives it up) |
@@ -333,7 +334,7 @@ Every function is described in `hgame.h`. In short:
 
 | Helpers | |
 | --- | --- |
-| `HG_FIX8(n)`, `HG_FIX8_MUL`, `HG_FIX8_DIV`, `HG_FIX16(n)`, `hg_fix16_mul`, `hg_fix16_div` | 8.8 and 16.16 fixed point (no 64-bit type here: the 16.16 multiply and divide are functions) |
+| `HG_FIX8(n)`, `HG_FIX8_INT(f)`, `HG_FIX8_MUL`, `HG_FIX8_DIV`, `HG_FIX16(n)`, `HG_FIX16_INT(f)`, `hg_fix16_mul`, `hg_fix16_div` | 8.8 and 16.16 fixed point (`_INT`: the whole part, rounded down; the 16.16 multiply and divide are functions) |
 | `hg_rand()`, `hg_rand_n(n)`, `hg_srand(seed)` | xorshift, 16 bits (seeded from the clock) |
 | `hg_sin(a)`, `hg_cos(a)`, `hg_atan2(dy, dx)` | angles in 256ths of a turn, results in 8.8 |
 | `hg_overlap(...)`, `hg_ms()`, `HG_MIN`, `HG_MAX`, `HG_ABS`, `HG_CLAMP` | rectangles, milliseconds (10 ms steps) |
@@ -607,8 +608,11 @@ assembly takes 66-80 us, of which about 15 us is the C call itself.
 
 `conio.h` and `joystick.h` follow cc65's: `clrscr`, `gotoxy`, `wherex`, `cputc`, `cputs`,
 `cprintf`, `cgetc`, `kbhit`, `textcolor`, `bgcolor`, `revers`, `cursor`, `chline`, `cvline`,
-`cclear` (and their `xy` forms), `screensize`, `waitvsync`; `joy_install`, `joy_read`, the
-`JOY_*` macros. `sdk/c/examples/catch` is a game written against `conio.h` alone. The
+`cclear`, their `xy` forms (`cputcxy`, `cputsxy`, `chlinexy`, `cvlinexy`, `cclearxy`),
+`gotox`, `gotoy`, `wherey`, `vcprintf`, `bordercolor` (does nothing), `screensize`,
+`waitvsync`; `joy_install`, `joy_read`, `joy_count` (2), `joy_load_driver`,
+`joy_uninstall`, `joy_unload` (there is no driver: they return `JOY_ERR_OK`), the `JOY_*`
+macros. `sdk/c/examples/catch` is a game written against `conio.h` alone. The
 differences:
 
 - The screen is a window of 40 x 25 cells (8 x 10 pixels each) unless `conio_screen(cols,

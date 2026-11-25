@@ -1,7 +1,7 @@
 /* -Wunprototyped-args: a call without a prototype (an old declaration, an implicit one, a
  * K&R definition) whose arguments' sizes differ from the definition's parameters in the
  * same file: an int pushed (2 bytes) where a far pointer (4) or a long is read shifts
- * every later parameter (Civilization's picture_target(0)); fewer arguments than
+ * every later parameter (a DOS port's picture_target(0)); fewer arguments than
  * parameters. A pointer or an int of one size agree (the 65816 passes them alike).
  * hcc --check-calls does the same across files (tests/diag/check_calls_*.c) */
 // FLAGS: -Wno-implicit-function-declaration
