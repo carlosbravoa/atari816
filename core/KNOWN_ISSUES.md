@@ -1,6 +1,19 @@
 # Known issues
 
-## OPEN: the picture is lost now and then (the monitor shows "no signal", then its HDMI banner)
+## FIXED (2026-11-25): the picture was lost now and then (the monitor showed "no signal", then its HDMI banner)
+
+Cause: `hdmi_audio_out` pulses the HDMI core's `reset` at the start of every video frame, to
+align its pixel counters with the incoming video. That reset also cleared the IEC 60958 frame
+counter in `hdmi2/packet_picker.sv`, so the 192-frame audio block was cut short once a video
+frame (about 800 samples: four blocks of 192, then one of 32). The monitor lost the audio
+stream's block structure and re-synchronised the whole link, more often while sound played.
+Fix: the frame counter is no longer reset by that pulse.
+
+How it was found: no counter below moved during losses (the PLLs, the reset and the frame
+lengths were correct); a DVI build (`DVI_OUTPUT(1'b1)`: no packets) had no losses in a night
+and in a game session that lost the picture many times a minute with the HDMI build; the
+fixed HDMI build had none in the same session. The notes below are the investigation as it
+was written before the fix, and the diagnostic counters remain in the bitstream.
 
 Reported 2026-11-24, "it has always happened": while playing, in FreeCell, and once seen with
 the Desktop idle and nobody using the serial link. Right after a loss the board responds to

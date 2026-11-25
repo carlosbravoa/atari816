@@ -121,11 +121,10 @@ logic [7:0] frame_counter = 8'd0;
 int k;
 always_ff @(posedge clk_pixel)
 begin
-    if (reset)
-    begin
-        frame_counter <= 8'd0;
-    end
-    else if (packet_pixel_counter == 5'd31 && packet_type == 8'h02) // Keep track of current IEC 60958 frame
+    // Atari816: no reset here. hdmi_audio_out pulses `reset` at the start of every video
+    // frame (to align cx/cy with the incoming video); resetting this counter there cut the
+    // IEC 60958 block of 192 frames short once a video frame. It starts at 0 (initial value).
+    if (packet_pixel_counter == 5'd31 && packet_type == 8'h02) // Keep track of current IEC 60958 frame
     begin
         frame_counter = frame_counter + 8'd4;
         if (frame_counter >= 8'd192)
