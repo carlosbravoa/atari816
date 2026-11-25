@@ -247,6 +247,7 @@ Every function is described in `hgame.h`. In short:
 | `hg_screen_fb(mode, title, stride, rows)` | full screen on a framebuffer of another shape: taller than the screen (a 320 x 200 game at 320 x 180, 640 x 400 at 640 x 360), or with a stride of 512 / 1024 so that no row crosses a bank (drawing by the CPU) |
 | `hg_scroll(x, y)`, `hg_split(line, x2, y2)` | the view on such a framebuffer: from (x, y); from screen line `line` on from (x2, y2): a fixed panel above a part that scrolls (full screen, one page, not with `hg_map`). Sent at `hg_end`, shown from the blank after the frame's drawing; a program without frames (it keeps its own time and calls only `hg_poll`) has it sent by `hg_poll` |
 | `hg_view_send()` | the view set by `hg_scroll` / `hg_split` to the screen now, without a frame (taken at the next vertical blank): a DOS port that draws straight into the framebuffer moves its view at once |
+| `hg_scroll_wrap(x, y, vheight)`, `hg_split_wrap(line, x2, y2)` | the framebuffer as a ring, for a world larger than it that the game draws itself a column or row at a time (as `hg_map` does for tiles): every row wraps at its end, rows 0 .. vheight - 1 wrap (0: no vertical wrap); the view from (x, y), any values, taken modulo the row's width and vheight (pass the camera's world position). Rows from vheight on are outside the ring (a panel), named as they are by `hg_scroll` / `hg_split`. Panel at the top: `hg_scroll_wrap(0, 0, vh)`, `hg_split_wrap(line, cx, cy)`, then `hg_scroll(0, panel_row)`; at the bottom: `hg_scroll_wrap(cx, cy, vh)`, `hg_split(line, 0, panel_row)`. See "A world larger than the framebuffer" |
 | `hg_window(w, h, title)`, `hg_window_menu(menus)` | a game in a window on the desktop (centred); its menus (`hg_menu()` reports picks) |
 | `hg_close()` | back to the desktop, everything freed (also at exit) |
 | `hg_w`, `hg_h`, `hg_win`, `hg_fb_bank`, `hg_fb_stride`, `hg_fb_rows` | the screen's size, the window, the framebuffer |
@@ -297,6 +298,7 @@ Every function is described in `hgame.h`. In short:
 | --- | --- |
 | `hg_sprites(n)` | take n of Marga's 16 sprites |
 | `hg_sprite_set(n, img, frame, flags)`, `hg_sprite_pos`, `hg_sprite_show` | image and flags (`HG_HFLIP`, `HG_VFLIP`, `HG_MAG`, `HG_BEHIND`, `HG_HIDE`), place; sent together at `hg_end` (one `spr_set`, one `spr_move` of many) |
+| `hg_sprite_pal(n, bank)` | a 4 bpp sprite's palette bank 0-15: its pixel p (1-15) shows entry bank x 16 + p (an image drawn in entries 129-143: bank 8). Kept across `hg_sprite_set`; 0 at `hg_sprites` |
 | `hg_sprite_hit(a, b, margin)` | the boxes overlap (the hardware reports no collisions) |
 | `hg_bob_background(img, x, y)`, `hg_bob(n, img, frame, x, y)`, `hg_bob_hide`, `hg_bob_redraw` | blitter sprites (32), over a background image |
 
@@ -304,7 +306,10 @@ Every function is described in `hgame.h`. In short:
 | --- | --- |
 | `hg_map_draw(map, mw, mh, tiles, x, y)` | a map drawn whole (a record a tile) |
 | `hg_map(map, mw, mh, tiles, panel)`, `hg_camera(x, y)` | scrolling (full screen): the ring of slots, the camera; panel > 0 rows at the top, < 0 at the bottom |
-| `hg_map_set(c, r, t)`, `hg_map_get`, `hg_map_border(t)` | change a tile (drawn if in view); the tile outside the world |
+| `hg_map16(map, mw, mh, sheet, tw, th, panel)` | the same with 16-bit tile numbers: `map` is the game's (not copied; a near array or far memory, one bank, at most 32,768 cells), each tile a tw x th rectangle of one wide sheet image (tile k at column k mod (sheet->w / tw), row k / (sheet->w / tw)); `hg_camera` and the rest as for `hg_map`. 4096 x 64 holds 1,024 tiles of 16 x 16 |
+| `hg_map_cells(fn)` | `hg_map16`'s cells from the game's function `unsigned fn(c, r)` (map NULL): another layout (column after column), flags masked off, animation; called once a tile drawn |
+| `hg_map_refresh(rows)` | for a game that writes its map itself: the tiles in view that differ from those drawn are drawn again, `rows` rows of the view a call (0: all), going on from there the next call -> tiles drawn |
+| `hg_map_set(c, r, t)`, `hg_map_get`, `hg_map_border(t)` | change a tile (drawn if in view; `hg_map16`: written into the game's map); the tile outside the world |
 | `hg_cam_x`, `hg_cam_y`, `hg_play_y`, `hg_panel_y`, `hg_screen_x(wx)`, `hg_screen_y(wy)` | the camera, the playfield's top, the panel's rows, world to screen |
 
 | Input | |
@@ -337,6 +342,47 @@ Every function is described in `hgame.h`. In short:
 past 255, drawing before a screen) prints `hgame: function: what` on the console, the first
 16 times, and the call does nothing. The library is always built so (the checks cost little
 beside the calls they guard).
+
+## A world larger than the framebuffer
+
+Three ways, from the least work to the most control:
+
+- **A tile map**: `hg_map` (byte tiles: frames of an image, up to 256) or `hg_map16` (16-bit
+  tile numbers from one wide sheet: Micropolis's 960 tiles of 16 x 16 fit a 4096 x 64
+  image). The library keeps the ring, draws the tiles that come into view and sets the
+  scroll registers; the game calls `hg_camera(x, y)` each frame.
+
+  ```c
+  static unsigned __far *map;                 /* 120 x 100 tile numbers, the game's */
+  map = (unsigned __far *)hz_far_alloc();     /* (or a near array if it fits) */
+  sheet = hg_image_load("/GAME/TILES.HGI");   /* 4096 x 64: tile k at ((k & 255) * 16, (k >> 8) * 16) */
+  if (hg_map16(map, 120, 100, sheet, 16, 16, 48) < 0)    /* a panel of 48 rows on top */
+      return 1;
+  while (hg_frame()) {
+      hg_camera(cam_x, cam_y);                /* any step: columns / rows drawn as needed */
+      hg_map_refresh(5);                      /* if the game wrote map[] itself */
+  }
+  ```
+
+  A map of another layout, or tile numbers with flags in them: `hg_map_cells(fn)` before
+  `hg_map16(NULL, ...)`, and `fn(c, r)` returns the tile. Test: `tests/gt_map16.c`.
+- **A ring of the game's own drawing**: `hg_screen_fb` with the ring's shape (one column and
+  one row of tiles more than the screen shows, plus the panel's rows below), the game draws
+  what comes into view at `x mod width`, `y mod vheight`, and `hg_scroll_wrap` /
+  `hg_split_wrap` take the camera's world position as it is (Marga wraps). For things that
+  are not tiles, or a renderer of its own. Test: `tests/gt_wrap.c` (a panel at the top and at
+  the bottom).
+
+  ```c
+  hg_screen_fb(HG_640X360, "City", 41 * 16, 21 * 16 + 48);   /* the ring, then the panel */
+  hg_scroll_wrap(0, 0, 21 * 16);              /* rows 0-335 wrap */
+  hg_split_wrap(48, cam_x, cam_y);            /* from line 48 on: the ring */
+  hg_scroll(0, 21 * 16);                      /* lines 0-47: the panel's rows */
+  ...
+  hg_split_wrap(48, cam_x, cam_y);            /* each frame, after drawing what came in */
+  ```
+- **A framebuffer taller than the screen** with `hg_scroll` / `hg_split` (no wrap): a
+  320 x 200 game at 320 x 180 (Digger).
 
 ## Colour remapping
 
@@ -458,13 +504,31 @@ some room):
 - a few **lines of text** (each line about 0.9 ms): redraw text only when it changes;
 - **sprites**: all 16 moved for well under 1 ms (one call);
 - **scrolling**: a camera move is one `fs_scroll` and, every 8 frames at 2 pixels a frame, a
-  column of 12 tiles (about 2 ms in that frame);
+  column of 12 tiles (about 2 ms in that frame); `hg_map16` below;
 - a frame's fixed cost (`hg_frame`: the wait, one event poll, the joystick when asked, the
   sound envelopes, the send) is about 1 ms;
 - with `HG_DOUBLE` the blitter's own time counts too: the page is shown only when it is
   drawn, so a frame that clears the whole 320 x 180 screen (5.6 ms of Ali) has about 11 ms
   left for everything else; at 640 x 360 a full clear takes four times as long. Clear only
   the part that changes, or use one page and sprites.
+
+**Scrolling a map of 16-bit tiles** (`hg_map16`, tiles of 16 x 16 from a 4096 x 64 sheet,
+a world of 120 x 100 tiles; `tests/gt_mapbench.c`, its lines in console.txt). "CPU" is the
+time until `hg_camera` returns (the tiles queued), "done" until Ali has drawn them; both
+include about 0.2 / 0.3 ms of measuring:
+
+| a frame's step | 640 x 360: CPU, done | 320 x 180: CPU, done |
+| --- | --- | --- |
+| 16 pixels right (a column: 21 / 12 tiles) | 2.2 ms, 4.8 ms | 1.4 ms, 3.0 ms |
+| 8 pixels right (a column every other frame) | 1.4 ms, 2.8 ms (5.4 ms the frames with one) | 1.0 ms, 1.8 ms |
+| 16 pixels right and down (a column and a row) | 5.7 ms, 11.4 ms | 3.3 ms, 6.4 ms |
+| `hg_map_refresh(0)` of a view that did not move | 19 ms | 6.4 ms |
+| the same scroll by hand, every tile in view compared with what was drawn (the Micropolis port's `view_update`) | 36 ms, 39 ms | 9.2 ms, 10.8 ms |
+
+A tile coming into view costs about 70 us of CPU (`hg_mapw.s`) and about 60 us of the
+kernel's. A game that changes many tiles itself (a simulation, animated water) compares a
+share of the view a frame: `hg_map_refresh(rows / 4)` checks it all every 4 frames for about
+5 ms a frame at 640 x 360.
 
 Measured programs (emulator, the scripted runs of their tests; "hg_stats"
 is the program's own line at the end, "busy" emu816 --stats over the whole run against
@@ -601,7 +665,11 @@ where the game allows.
   belong in files and far memory anyway, since constants and data stay in the main bank.
 - At most 32 bobs, 16 hardware sprites, 128 records a send (more are sent
   in pieces), 460,800 pixels a send (the kernel's limit; hgame splits), 2 KB of text a frame
-  before it is sent early.
+  before it is sent early. The record queues (4.5 KB) are in far memory, taken at
+  `hg_screen` / `hg_window`, not in the main bank (they were bss there before: the
+  Digger, Xargon, Prince of Persia and Micropolis ports all ran out of main bank).
+- `hg_map16`'s framebuffer is the ring and the panel only (no rows of its own for a game's
+  windows or a second page), as `hg_map`'s.
 - Images are frames one under the other, at most 4096 wide and 1024 rows in all (the sheet
   limit); far memory for images and sounds is given back by `hg_close` (exit), not by
   `hg_image_free` (which frees the sheet).
@@ -619,10 +687,14 @@ make -C sdk/c/game test
 
 runs `sdk/c/game/tests/run.py` in both code models (`small`, `large`), then the scripted
 tests of Glimmer, Catch, the tutorial and Gem Run in C. run.py
-builds eleven test programs (`tests/gt_*.c`: drawing, the screen modes and the pause,
+builds the test programs (`tests/gt_*.c`: drawing, the screen modes and the pause,
 a framebuffer taller than the screen with a split view, the key queue and the 16-bit voices,
 a window with bobs and its menu, hardware sprites, scrolling maps, input, sound and music,
-the helpers and `.HGI` files with bad arguments, (0.30) runs and groups by the blitter
+the helpers and `.HGI` files with bad arguments, `gt_map16` (16-bit tiles from a wide sheet,
+scrolled across the ring's edges both ways and by 2.5 tiles a frame, only the tiles that come
+into view drawn, `hg_map_refresh`, `hg_map_cells`), `gt_wrap` (the ring of a game's own
+drawing: `hg_scroll_wrap` / `hg_split_wrap`, panels at the top and the bottom), `gt_sprpal`
+(4 bpp sprites in palette banks 0, 3, 8, 15), `gt_mapbench` (the table above), (0.30) runs and groups by the blitter
 against the CPU's, page flipping with three pages and `hg_us`, `gt_runbench`, the
 measurement of a run by every way of filling it, its table in console.txt, and (REV $0D)
 `gt_remap`, colour remapping: run twice, by the blitter and with `--rev 12` by the CPU, both

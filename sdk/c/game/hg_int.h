@@ -22,16 +22,22 @@ void hg__fail(const char *fn, const char *msg);
 
 /* the frame's draw records, in order: draw_list records (hg__dq) and sheet records
  * (hg__sq) at the same indexes; runs of one kind (hg__runs: first index | 0x8000 for a
- * sheet run) are sent with one call each */
+ * sheet run) are sent with one call each. The two arrays are in far memory (4.5 KB that
+ * the main bank does not hold: hg__queue_new, at hg_screen / hg_window) */
 #define HG__Q 128
-extern hz_drawrec hg__dq[HG__Q];
-extern hz_sheetrec hg__sq[HG__Q];
+extern hz_drawrec __far *hg__dq;
+extern hz_sheetrec __far *hg__sq;
+int hg__queue_new(void);
 extern unsigned hg__runs[HG__Q], hg__nruns, hg__runkind;
 extern unsigned hg__qn;
 /* a new record (in screen coordinates: the origin and the page are added here) -> NULL if
  * it is wholly outside the target */
-hz_drawrec *hg__rec(unsigned op, int x, int y, unsigned w, unsigned h);   /* hg_fast.s */
+hz_drawrec __far *hg__rec(unsigned op, int x, int y, unsigned w, unsigned h); /* hg_fast.s */
 extern int hg__cutx, hg__cuty;          /* what hg__rec cut at the left and the top */
+/* a sheet record: op (SH_*), sheet, colour c, the source (sx, sy), w x h to (x, y) (screen
+ * coordinates: cut to the target as hg__rec does) (hg_rmp.s) */
+void hg__sheetq(unsigned op, unsigned sheet, unsigned c, unsigned sx, unsigned sy,
+                unsigned w, unsigned h, int x, int y);
 extern unsigned long hg__qpix;          /* the pixels of the records queued (a bound) */
 /* the clip rectangle and offset of hg__rec, after the screen, page or origin changed */
 void hg__clip_update(void);

@@ -82,7 +82,7 @@ void hg_palette_black(void);
 /* raster table (full screen): count changes {line, entry, r, g, b}; 0 = off (hz_fs_raster) */
 int hg_raster(unsigned count, const hz_raster *changes);
 
-/* The view (full screen, one page, not with hg_map; REV $0B): the screen shows the
+/* The view (full screen, one page, not with hg_map / hg_map16; REV $0B): the screen shows the
  * framebuffer from pixel (x, y) (in 4 bpp x even); hg_split(line, x2, y2): from that
  * screen line on (1 .. 359, or 179 in 320 x 180) from (x2, y2) instead: a fixed panel
  * above a part of the framebuffer that scrolls (line 0: no split). Both views must stay
@@ -94,6 +94,20 @@ void hg_split(unsigned line, int x2, int y2);
 /* the view set by hg_scroll / hg_split to the screen now, without a frame: taken at the
  * next vertical blank (a program that draws straight into the framebuffer) */
 void hg_view_send(void);
+/* The ring (REV $0B): a framebuffer that wraps, for a world larger than it drawn by the
+ * game a column or row at a time (as hg_map does for tiles). hg_scroll_wrap: every row
+ * wraps at its end (a line that runs past the stride goes on at the row's start) and rows
+ * 0 .. vheight - 1 wrap (after row vheight - 1 comes row 0; 0: no vertical wrap); the view
+ * from (x, y) of the ring: any values, taken modulo the row's width and vheight (a world
+ * position: (cam_x, cam_y) itself). Rows from vheight on are outside the ring (a panel):
+ * hg_scroll / hg_split name them as they are, and also take ring rows (no modulo).
+ * hg_split_wrap(line, x2, y2): from that line on the ring from (x2, y2), taken modulo as
+ * hg_scroll_wrap's. A panel at the top: hg_scroll_wrap(0, 0, vh), hg_split_wrap(line, cx,
+ * cy), then hg_scroll(0, panel_row) (the split first: set 1 then shows only the panel's
+ * rows); at the bottom: hg_scroll_wrap(cx, cy, vh) and hg_split(line, 0, panel_row). The
+ * ring stays until the next hg_screen / hg_screen_fb. */
+void hg_scroll_wrap(int x, int y, unsigned vheight);
+void hg_split_wrap(unsigned line, int x2, int y2);
 
 /* n consecutive 64 KB banks (for a buffer larger than a bank) -> the first, or 0 */
 unsigned hg_banks(unsigned n);
@@ -315,6 +329,9 @@ int hg_remap_hw(const hg_image *t);
 int hg_sprites(unsigned count);
 /* image frame and flags (HG_HFLIP | HG_VFLIP | HG_MAG | HG_BEHIND | HG_HIDE); shows it */
 void hg_sprite_set(unsigned n, const hg_image *img, unsigned frame, unsigned flags);
+/* a 4 bpp sprite's palette bank 0-15: its pixel p (1-15) shows entry bank * 16 + p (an
+ * image whose colours are 129-143: bank 8). Kept across hg_sprite_set; 0 at hg_sprites */
+void hg_sprite_pal(unsigned n, unsigned bank);
 void hg_sprite_pos(unsigned n, int x, int y);
 void hg_sprite_show(unsigned n, int on);
 /* the boxes of two shown sprites overlap (inset by margin pixels on every side) */
@@ -355,6 +372,26 @@ void hg_camera(int x, int y);
 void hg_map_set(unsigned c, unsigned r, unsigned t);
 unsigned hg_map_get(unsigned c, unsigned r);     /* outside: the border tile */
 void hg_map_border(unsigned t);                  /* the tile outside the world (0) */
+/* The same ring for 16-bit tile numbers (REV $0B; full screen, 256 colours, not
+ * HG_DOUBLE): map is mw x mh tile numbers (row after row) in the game's memory, NOT copied
+ * (keep it; at most 32,768 cells, in one bank: a near array, or far memory), each tile a
+ * tw x th rectangle of the 8 bpp sheet image (one wide image: tile k at column k mod
+ * (sheet->w / tw), row k / (sheet->w / tw); up to 4096 x 1024 pixels: 256 x 64 tiles of
+ * 16 x 16), drawn by hg_draw_part. A number past the sheet's tiles draws tile 0. hg_camera,
+ * hg_map_set (writes the map), hg_map_get, hg_map_border and the hg_cam / hg_play /
+ * hg_panel values work as for hg_map; only the column or row of tiles coming into view
+ * is drawn (any number of them a frame: a jump of a screen or more draws the ring anew). */
+int hg_map16(unsigned __far *map, unsigned mw, unsigned mh, const hg_image *sheet,
+             unsigned tw, unsigned th, int panel);
+/* hg_map16's cells from the game's function instead of a map (map NULL; set before
+ * hg_map16; NULL: back to the map): a map of another layout (column after column), tile
+ * numbers with flags to mask off, an animation. Called once a tile drawn */
+void hg_map_cells(unsigned (*fn)(unsigned c, unsigned r));
+/* A game that changes its map itself (not by hg_map_set: a simulation, animated tiles):
+ * the tiles in view that differ from those drawn are drawn again; rows: how many rows of
+ * the view are compared this call (0: all), the next call going on from there (a share
+ * a frame: the view's rows / 4 checks it all every 4 frames) -> the tiles drawn */
+unsigned hg_map_refresh(unsigned rows);
 extern int hg_cam_x, hg_cam_y;  /* the camera (after the clamp) */
 extern int hg_play_y;           /* the playfield's top on the screen (the panel above it) */
 extern int hg_panel_y;          /* the panel's first row in the framebuffer: hg_origin(0,

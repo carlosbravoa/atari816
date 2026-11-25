@@ -209,7 +209,7 @@ bad:
 static void blit(const hg_image *img, unsigned sx, unsigned sy, unsigned w, unsigned h,
                  int x, int y)
 {
-    hz_drawrec *r;
+    hz_drawrec __far *r;
     unsigned char four = hg__mode == FS_640X4 && hg__kind == HG__FULL;
 
     if ((img->bpp == 4) != four) {
@@ -227,7 +227,7 @@ static void blit(const hg_image *img, unsigned sx, unsigned sy, unsigned w, unsi
         sx >>= 1;
     } else
         r->c2 = (unsigned char)img->key;
-    *(unsigned long *)&r->u.s = img->addr + hg__umul(sy, img->stride) + sx;
+    *(unsigned long __far *)&r->u.s = img->addr + hg__umul(sy, img->stride) + sx;
     r->stride = img->stride;
 }
 

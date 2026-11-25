@@ -12,7 +12,9 @@
 ; bytes, a long or __far pointer 4); data pointers are 16-bit offsets in the code bank;
 ; the result in A (32 bits: A low, X high). __rg+0..+47, __h0-__h3, __rv may be changed.
 ;
-; The names r0-r15 and r28-r31 below are scratch words: __rg+0..+30 and __rg+32..+38.
+; The names r0-r15 and r28-r31 below are scratch words: __rg+0..+30 and __rg+32..+38; rq
+; (__rg+40, its bank at +42) points at the record being written: the queues (hg__dq,
+; hg__sq) are in far memory, written with [rq],y.
 	.p816
 	.smart	-
 	.a16
@@ -48,6 +50,7 @@
 .define r28 __rg+32
 .define r29 __rg+34
 .define r30 __rg+36
+.define rq  __rg+40
 
 LS_FILL	= 0
 QMAX	= 128		; HG__Q
@@ -258,9 +261,10 @@ mul32:	stz	r6
 	bra	@loop
 @done:	rts
 
-; the draw_list record Y (r8 op, r9-r12): X = its offset in _hg__dq, the rest 0. Uses A r0.
+; the draw_list record Y (r8 op, r9-r12): rq = its address (hg__dq + Y * 20), the rest 0.
+; Uses A Y r0.
 listrec:
-	tya				; _hg__dq + Y * 20
+	tya				; hg__dq + Y * 20
 	asl	a
 	asl	a
 	sta	r0
@@ -268,60 +272,84 @@ listrec:
 	asl	a
 	clc
 	adc	r0
-	tax
+	adc	_hg__dq			; (the queue lies in one bank: no carry)
+	sta	rq
+	lda	_hg__dq+2
+	sta	rq+2
 	lda	r8
 	and	#$00FF			; op, flags 0
-	sta	_hg__dq+0,x
-	stz	_hg__dq+2,x		; c1, c2
+	sta	[rq]
+	ldy	#2
+	lda	#0
+	sta	[rq],y			; c1, c2
+	ldy	#12
+	sta	[rq],y			; source
+	ldy	#14
+	sta	[rq],y
+	ldy	#16
+	sta	[rq],y			; stride
+	ldy	#18
+	sta	[rq],y
 	lda	r9
-	sta	_hg__dq+4,x
+	ldy	#4
+	sta	[rq],y
 	lda	r10
-	sta	_hg__dq+6,x
+	ldy	#6
+	sta	[rq],y
 	lda	r11
-	sta	_hg__dq+8,x
+	ldy	#8
+	sta	[rq],y
 	lda	r12
-	sta	_hg__dq+10,x
-	stz	_hg__dq+12,x		; source
-	stz	_hg__dq+14,x
-	stz	_hg__dq+16,x		; stride
-	stz	_hg__dq+18,x
+	ldy	#10
+	sta	[rq],y
 	rts
 
 ; the sheet record Y: A = op (SH_*), sheet r29 (0: a fill), colour r28, (sx, sy) = (r13,
-; r30 + r14), r9-r12. Uses A X.
+; r30 + r14), r9-r12. rq = its address (hg__sq + Y * 16). Uses A X Y.
 hgf_sheetrec:
-	pha
-	tya				; _hg__sq + Y * 16
-	asl	a
-	asl	a
-	asl	a
-	asl	a
 	tax
-	pla
+	tya				; hg__sq + Y * 16
+	asl	a
+	asl	a
+	asl	a
+	asl	a
+	clc
+	adc	_hg__sq			; (the queue lies in one bank: no carry)
+	sta	rq
+	lda	_hg__sq+2
+	sta	rq+2
+	txa
 	xba				; sheet | op << 8
 	and	#$FF00
 	ora	r29
-	sta	_hg__sq+0,x
+	sta	[rq]
 	lda	r28			; colour, 0
 	and	#$00FF
-	sta	_hg__sq+2,x
+	ldy	#2
+	sta	[rq],y
 	lda	r13
-	sta	_hg__sq+4,x
+	ldy	#4
+	sta	[rq],y
 	lda	r30
 	clc
 	adc	r14
-	sta	_hg__sq+6,x
+	ldy	#6
+	sta	[rq],y
 	lda	r11
-	sta	_hg__sq+8,x
+	ldy	#8
+	sta	[rq],y
 	lda	r12
-	sta	_hg__sq+10,x
+	ldy	#10
+	sta	[rq],y
 	lda	r9
-	sta	_hg__sq+12,x
+	ldy	#12
+	sta	[rq],y
 	lda	r10
-	sta	_hg__sq+14,x
+	ldy	#14
+	sta	[rq],y
 	rts
 
-; ------------------------------------------------------------------ hz_drawrec *hg__rec
+; ------------------------------------------------------------------ hz_drawrec __far *hg__rec
 ; (unsigned op, int x, int y, unsigned w, unsigned h): 3,s op, 5,s x, 7,s y, 9,s w, 11,s h
 _hg__rec:
 	lda	ARGS,s
@@ -348,13 +376,10 @@ _hg__rec:
 	sta	_hg__cutx
 	lda	r14
 	sta	_hg__cuty
-.if FARDATA
-	ldy	__cbank			; (far data: a far pointer, X its bank)
-	txa
-	clc
-	adc	#_hg__dq
-	tyx
+	lda	rq			; the record: a far pointer (A, X its bank)
+	ldx	rq+2
 	RET
+.if FARDATA
 @none:	pei	(__cbank)		; (far pointers: the main bank)
 	pea	s_msg
 	pei	(__cbank)
@@ -368,16 +393,13 @@ _hg__rec:
 	tax
 	RET
 .else
-	txa				; &hg__dq[Y] (a near pointer)
-	clc
-	adc	#_hg__dq
-	RET
 @none:	pea	s_msg
 	pea	s_fn
 	CALL	_hg__fail
 	pla
 	pla
 @null:	lda	#0
+	tax
 	RET
 .endif
 
@@ -426,9 +448,10 @@ _hg_fill:
 	asl	a
 	asl	a
 	ora	r28
+	ldy	#2
 	sep	#$20
 	.a8
-	sta	_hg__dq+2,x		; c1
+	sta	[rq],y			; c1
 	rep	#$20
 	.a16
 	RET

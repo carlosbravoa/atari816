@@ -183,6 +183,14 @@ static int ws_and_window(unsigned w, unsigned h, int x, int y, const char *title
             hz_ws_stop();
         return -1;
     }
+    if (hg__queue_new()) {
+        hg__fail("hg_screen", "no memory for the draw queue");
+        hz_win_close((unsigned)win);
+        hg__farmem_reset();
+        if (ws_own)
+            hz_ws_stop();
+        return -1;
+    }
     hg_win = (unsigned)win;
     if (!atexit_set) {
         atexit(hg_close);
@@ -413,6 +421,8 @@ void hg_close(void)
         hz_win_close(hg_win);
     free_fb();
     hg__farmem_reset();
+    hg__dq = 0;
+    hg__sq = 0;
     if (ws_own)
         hz_ws_stop();
     ws_own = 0;
@@ -479,16 +489,54 @@ static int view_fits(int x, int y, unsigned n)
            bx + line <= hg_fb_stride;
 }
 
-void hg_scroll(int x, int y)
+/* the ring (hg_scroll_wrap): a set's view checked and reduced. ring: (x, y) is a position
+ * in the ring (x modulo the row's width, y modulo vheight); else y is a framebuffer row
+ * as it is (rows from vheight on do not wrap: they must hold the n rows shown). 0: refused */
+static int wrap_set(int *x, int *y, unsigned n, int ring)
 {
-    unsigned n;
-    if (!view_ok("hg_scroll"))
-        return;
-    n = (hg__scr.ctrl & FSC_SPLIT) ? hg__scr.split : 360;
-    if (hg__mode == FS_320X8)
-        n /= 2;
-    if (!view_fits(x, y, n)) {
-        hg__fail("hg_scroll", "the view must stay inside the framebuffer");
+    long w = (long)(hg__mode == FS_640X4 ? hg_fb_stride * 2 : hg_fb_stride);
+    long vh = (long)hg__scr.vheight, v;
+    v = (long)*x % w;
+    if (v < 0)
+        v += w;
+    if (hg__mode == FS_640X4 && (v & 1))
+        return 0;
+    *x = (int)v;
+    v = *y;
+    if (ring && vh) {
+        v %= vh;
+        if (v < 0)
+            v += vh;
+    } else if (v < 0 || v >= (long)hg_fb_rows || ((!vh || v >= vh) &&
+                                                   v + (long)n > (long)hg_fb_rows))
+        return 0;
+    *y = (int)v;
+    return 1;
+}
+
+/* the rows set 1 shows (up to the split) and set 2 (from it on) */
+static unsigned rows1(void)
+{
+    unsigned n = (hg__scr.ctrl & FSC_SPLIT) ? hg__scr.split : 360;
+    return hg__mode == FS_320X8 ? n / 2 : n;
+}
+
+static unsigned rows2(void)
+{
+    unsigned n = 360 - hg__scr.split;
+    return hg__mode == FS_320X8 ? n / 2 : n;
+}
+
+static void set1(int x, int y, int ring, const char *fn)
+{
+    if (hg__scr.ctrl & FSC_HWRAP) {
+        if (!wrap_set(&x, &y, rows1(), ring)) {
+            hg__fail(fn, "the view: a ring row (hg_scroll_wrap), or rows that fit below it"
+                     " (in 16 colours x even)");
+            return;
+        }
+    } else if (!view_fits(x, y, rows1())) {
+        hg__fail(fn, "the view must stay inside the framebuffer");
         return;
     }
     hg__scr.x = (unsigned)x;
@@ -496,10 +544,31 @@ void hg_scroll(int x, int y)
     hg__scr_dirty = 1;
 }
 
-void hg_split(unsigned line, int x2, int y2)
+void hg_scroll(int x, int y)
 {
-    unsigned n;
-    if (!view_ok("hg_split"))
+    if (view_ok("hg_scroll"))
+        set1(x, y, 0, "hg_scroll");
+}
+
+void hg_scroll_wrap(int x, int y, unsigned vheight)
+{
+    if (!view_ok("hg_scroll_wrap"))
+        return;
+    if (vheight > hg_fb_rows || vheight > 1023) {
+        hg__fail("hg_scroll_wrap", "vheight: 0 (no vertical wrap) to the framebuffer's rows"
+                 " (at most 1023)");
+        return;
+    }
+    hg__scr.ctrl |= FSC_HWRAP;
+    hg__scr.vheight = vheight;
+    set1(x, y, 1, "hg_scroll_wrap");
+}
+
+static void split(unsigned line, int x2, int y2, int ring, const char *fn)
+{
+    unsigned old;
+    int x1, y1;
+    if (!view_ok(fn))
         return;
     if (line == 0) {
         hg__scr.ctrl &= (unsigned char)~FSC_SPLIT;
@@ -510,22 +579,46 @@ void hg_split(unsigned line, int x2, int y2)
     if (hg__mode == FS_320X8)
         line *= 2;                              /* (Marga counts 360 lines) */
     if (line > 359) {
-        hg__fail("hg_split", "line: 1 to the screen's last");
+        hg__fail(fn, "line: 1 to the screen's last");
         return;
     }
-    n = 360 - line;
-    if (hg__mode == FS_320X8)
-        n /= 2;
-    if (!view_fits(x2, y2, n) ||
-        !view_fits((int)hg__scr.x, (int)hg__scr.y, hg__mode == FS_320X8 ? line / 2 : line)) {
-        hg__fail("hg_split", "both views must stay inside the framebuffer");
+    old = hg__scr.split;
+    hg__scr.split = line;                       /* (rows1, rows2: the new line) */
+    x1 = (int)hg__scr.x;
+    y1 = (int)hg__scr.y;
+    if (hg__scr.ctrl & FSC_HWRAP) {
+        if (!wrap_set(&x2, &y2, rows2(), ring) ||
+            !wrap_set(&x1, &y1, hg__mode == FS_320X8 ? line / 2 : line, 0)) {
+            hg__scr.split = old;
+            hg__fail(fn, "a view: a ring row, or rows that fit below the ring");
+            return;
+        }
+    } else if (!view_fits(x2, y2, rows2()) ||
+               !view_fits(x1, y1, hg__mode == FS_320X8 ? line / 2 : line)) {
+        hg__scr.split = old;
+        hg__fail(fn, "both views must stay inside the framebuffer");
         return;
     }
-    hg__scr.split = line;
     hg__scr.x2 = (unsigned)x2;
     hg__scr.y2 = (unsigned)y2;
     hg__scr.ctrl |= FSC_SPLIT;
     hg__scr_dirty = 1;
+}
+
+void hg_split(unsigned line, int x2, int y2)
+{
+    split(line, x2, y2, 0, "hg_split");
+}
+
+void hg_split_wrap(unsigned line, int x2, int y2)
+{
+    if (!view_ok("hg_split_wrap"))
+        return;
+    if (!(hg__scr.ctrl & FSC_HWRAP)) {
+        hg__fail("hg_split_wrap", "hg_scroll_wrap first (the ring)");
+        return;
+    }
+    split(line, x2, y2, 1, "hg_split_wrap");
 }
 
 /* the view set by hg_scroll / hg_split, if changed, to the kernel now: Marga takes it at

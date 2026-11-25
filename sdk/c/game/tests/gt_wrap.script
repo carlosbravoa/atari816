@@ -1,0 +1,7 @@
+# gt_wrap: pictures at the states the program prints (not by the clock)
+0 wait gt_wrap: shot 1
++300 shot
++0 wait gt_wrap: shot 2
++300 shot
++0 wait gt_wrap: shot 3
++300 shot

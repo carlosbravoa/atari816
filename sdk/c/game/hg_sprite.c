@@ -123,9 +123,23 @@ void hg_sprite_set(unsigned n, const hg_image *img, unsigned frame, unsigned fla
     tab[n].ctrl = (unsigned char)ctrl;
     tab[n].image.off = (unsigned short)a;
     tab[n].image.bank = (unsigned char)(a >> 16);
-    tab[n].pal = 0;
     hasimg[n] = 1;
     dset[n] = 1;
+}
+
+void hg_sprite_pal(unsigned n, unsigned bank)
+{
+    if (!ok("hg_sprite_pal", n))
+        return;
+    if (bank > 15) {
+        hg__fail("hg_sprite_pal", "the bank: 0-15 (entries bank * 16 + 1 .. + 15)");
+        return;
+    }
+    if (tab[n].pal != (unsigned char)bank) {
+        tab[n].pal = (unsigned char)bank;
+        if (hasimg[n])
+            dset[n] = 1;                /* (else sent with its image) */
+    }
 }
 
 void hg_sprite_pos(unsigned n, int x, int y)

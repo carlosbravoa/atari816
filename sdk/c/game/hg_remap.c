@@ -9,9 +9,7 @@
 #include <string.h>
 #include "hg_int.h"
 
-/* hg_rmp.s */
-void hg__sheetq(unsigned op, unsigned sheet, unsigned c, unsigned sx, unsigned sy,
-                unsigned w, unsigned h, int x, int y);
+/* hg_rmp.s (hg__sheetq: hg_int.h) */
 void hg__remapmem(unsigned long dst, unsigned dstride, unsigned long src, unsigned sstride,
                   unsigned w, unsigned h, unsigned key, unsigned long tab);
 
@@ -101,7 +99,7 @@ static void room(unsigned w, unsigned h)
 static void table(const hg_image *t, unsigned k)
 {
     unsigned run;
-    hz_sheetrec *r;
+    hz_sheetrec __far *r;
 
     if (hg__nruns && tab_at < hg__qn) {
         run = hg__runs[hg__nruns - 1];
@@ -118,7 +116,7 @@ static void table(const hg_image *t, unsigned k)
     tab_sheet = t->sheet;
     tab_row = k;
     r = &hg__sq[hg__qn++];
-    memset(r, 0, sizeof *r);
+    hz_far_set(r, 0, sizeof *r);
     r->sheet = t->sheet;
     r->op = SH_TABLE;
     r->sy = k;

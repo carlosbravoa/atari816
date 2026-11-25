@@ -135,7 +135,12 @@ and the wait, `hg_flush(1)` around each batch):
 SDK/docs/c/games.md splits these into library and kernel time (sheet blit 80 + 62 us, fill
 66 + 200 us, a send 500 us, a 16 x 16 `hg_image_draw` by the CPU 650 us, `hg_map_image` of
 20 x 12 tiles 112 ms) and budgets a frame at about **50 sheet blits or 25 fills**, a few text
-lines, 16 sprites for under 1 ms, scrolling nearly free.
+lines, 16 sprites for under 1 ms, scrolling nearly free. A scrolling map of 16-bit tiles
+(`hg_map16`, 16 x 16 tiles): a column coming into view costs 2.2 ms of CPU at 640 x 360 (21
+tiles), 1.4 ms at 320 x 180 (12), about 70 us of CPU and 60 us of the kernel's a tile; a
+column and a row in one frame 5.7 / 3.3 ms; comparing every tile in view with what was drawn
+(`hg_map_refresh(0)`) 19 / 6.4 ms, so do a share of the rows a frame
+(`sdk/c/game/tests/gt_mapbench.c`).
 
 Window drawing, measured here (a 400 x 200 window on the Desktop):
 

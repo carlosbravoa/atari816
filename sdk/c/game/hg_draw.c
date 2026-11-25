@@ -5,8 +5,8 @@
 #include <string.h>
 #include "hg_int.h"
 
-hz_drawrec hg__dq[HG__Q];
-hz_sheetrec hg__sq[HG__Q];
+hz_drawrec __far *hg__dq;
+hz_sheetrec __far *hg__sq;
 unsigned hg__runs[HG__Q], hg__nruns, hg__runkind;
 unsigned hg__qn, hg__flushes;
 unsigned char hg__listrun, hg__vblsent;
@@ -44,6 +44,26 @@ void hg__clip_update(void)
     }
 }
 
+int hg__queue_new(void)
+{
+    unsigned long a = hg__farmem((unsigned long)HG__Q * (sizeof(hz_drawrec) +
+                                                         sizeof(hz_sheetrec)));
+    if (!a)
+        return -1;
+    hg__dq = (hz_drawrec __far *)HG__PTR(a);
+    hg__sq = (hz_sheetrec __far *)HG__PTR(a + HG__Q * sizeof(hz_drawrec));
+    hg__qn = 0;
+    hg__qpix = 0;
+    hg__nruns = 0;
+    return 0;
+}
+
+/* draw_list / sheet_draw of n records at the far address a (the C stubs take near ones) */
+static unsigned sys(unsigned n, unsigned count, unsigned long a)
+{
+    return hz_syscall(n, (hg_win & 0xFF) | count << 8, (unsigned)a, (unsigned)(a >> 16));
+}
+
 void hg__submit(int vbl)
 {
     unsigned k, start, n;
@@ -66,12 +86,12 @@ void hg__submit(int vbl)
         if (hg__runs[k] & 0x8000) {
             if (first)
                 hg__sq[start].op |= SH_VBL;
-            if (hz_sheet_draw(hg_win, n, &hg__sq[start]) < 0)
+            if (sys(SYS_SHEETDRAW, n, (unsigned long)(hg__sq + start)) == 0xFFFF)
                 hg__fail("hg_end", "sheet_draw refused (a bad sheet?)");
         } else {
             if (first)
                 hg__dq[start].flags |= LS_VBL;
-            if (hz_draw_list(hg_win, n, &hg__dq[start]) < 0)
+            if (sys(SYS_DRAWLIST, n, (unsigned long)(hg__dq + start)) == 0xFFFF)
                 hg__fail("hg_end", hz_errno == HZ_EFAULT ? "draw_list: a source is not the"
                          " game's memory" : "draw_list refused");
         }
@@ -173,7 +193,7 @@ void hg_rect(int x, int y, unsigned w, unsigned h, unsigned c)
 
 void hg_move(int sx, int sy, unsigned w, unsigned h, int x, int y)
 {
-    hz_drawrec *r;
+    hz_drawrec __far *r;
     sx += hg__ox;
     sy += hg__oy + (int)hg__pagey;
     r = hg__rec(LS_MOVE, x, y, w, h);
@@ -360,7 +380,7 @@ static void text(int x, int y, const char *s, unsigned ink, unsigned paper)
 {
     unsigned n, max;
     unsigned char *buf;
-    hz_drawrec *r;
+    hz_drawrec __far *r;
     unsigned long a;
 
     if (!s)
@@ -385,7 +405,7 @@ static void text(int x, int y, const char *s, unsigned ink, unsigned paper)
     r->c1 = (unsigned char)ink;
     r->c2 = (unsigned char)paper;
     a = (unsigned long)buf + (unsigned)hg__cuty * n + ((unsigned)hg__cutx >> 3);
-    *(unsigned long *)&r->u.s = a;
+    *(unsigned long __far *)&r->u.s = a;
     r->flags = (unsigned char)((hg__cutx & 7) << 4);
     r->stride = n;
 }

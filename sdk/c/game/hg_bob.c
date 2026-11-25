@@ -50,7 +50,7 @@ static void restore(int x, int y, unsigned w, unsigned h)
 /* an empty sheet record (the kernel leaves it out) */
 static void empty(unsigned i)
 {
-    hz_sheetrec *r = &hg__sq[i];
+    hz_sheetrec __far *r = &hg__sq[i];
     r->sheet = 0;
     r->op = SH_FILL;
     r->c = 0;

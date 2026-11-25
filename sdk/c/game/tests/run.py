@@ -94,6 +94,21 @@ TESTS = [
      ["gt_sprites: 0 failed"], []),
     ("map", ["gt_map.c"], ["--script", "gt_map.script"],
      ["gt_map: 0 failed"], []),
+    # (the ports' wishes) 16-bit tile numbers from a wide sheet; the ring for a game's own
+    # drawing; the palette bank of 4 bpp sprites. Pictures at the states the programs print
+    ("map16", ["gt_map16.c"], ["--script", "gt_map16.script", "--seconds", "60",
+                           "--stop-on", "gt_map16: 0 failed"],
+     ["gt_map16: 0 failed"], []),
+    ("wrap", ["gt_wrap.c"], ["--script", "gt_wrap.script", "--seconds", "40",
+                         "--stop-on", "gt_wrap: 0 failed"],
+     ["gt_wrap: 0 failed"], []),
+    ("sprpal", ["gt_sprpal.c"], ["--script", "gt_sprpal.script", "--seconds", "10",
+                                 "--file", "{run}/SPRPAL.HGI:/SPRPAL.HGI"],
+     ["gt_sprpal: 0 failed"], []),
+    # what scrolling a map16 costs a frame, and the Micropolis port's way by hand (its lines
+    # in console.txt)
+    ("mapbench", ["gt_mapbench.c"], ["--seconds", "40", "--stop-on", "gt_mapbench: 0 failed"],
+     ["gt_mapbench: 0 failed"], []),
     ("input", ["gt_input.c"], ["--script", "gt_input.script"],
      ["gt_input: 0 failed"], []),
     # each key event's modifiers: a modifier and a key changed in one batch of events
@@ -144,6 +159,14 @@ def make_files(name, run):
             w.setframerate(22050)
             w.writeframes(b"".join(struct.pack("<h", 8000 if (i // 25) & 1 else -8000)
                                    for i in range(2205)))
+    if name == "sprpal":                        # a 4 bpp image of 16 x 16: stripes 1-15
+        px = bytearray()
+        for y in range(16):
+            for x in range(0, 16, 2):
+                a, b = 1 + (x + y) % 15, 1 + (x + 1 + y) % 15
+                px.append(a << 4 | b)
+        hd = b"HGI1" + struct.pack("<HHHHBBHH", 16, 16, 1, 0, 4, 0, 0, 0) + bytes(14)
+        open(os.path.join(run, "SPRPAL.HGI"), "wb").write(hd + bytes(px))
     if name == "util":                          # an .HGI file from text art, by img2c.py
         art = os.path.join(run, "test.txt")
         open(art, "w").write(". = key\na = 40\nb = 41\n\naab.\nabb.\n\nbbaa\n.ab.\n")

@@ -4,7 +4,8 @@
  * one row more than the screen shows; Marga's scroll registers (horizontal and vertical
  * wrap) put the slots in place, and only the column or row of tiles coming into view is
  * drawn, in the frame's list (the vertical blank, with the scroll values). A panel above
- * or below the ring is shown by the split, never scrolling. */
+ * or below the ring is shown by the split, never scrolling. hg_map16: the same ring for
+ * 16-bit tile numbers (the game's map, not copied, or its function) drawn from a sheet. */
 #include <string.h>
 #include "hg_int.h"
 
@@ -78,35 +79,190 @@ void hg_map_image(hg_image *dst, const unsigned char *m, unsigned w, unsigned h,
 
 /* ---------------------------------------------------------------- scrolling */
 
-static unsigned cell(unsigned c, unsigned r)
+/* map16: 16-bit tile numbers in the game's far memory (not copied), each tile a tw x th
+ * rectangle of a sheet image (tile k at column k mod tcols, row k / tcols), drawn with
+ * hg_draw_part; or the cells from the game's function (hg_map_cells) */
+static unsigned char kind16;
+static unsigned __far *map16;
+static unsigned (*cellfn)(unsigned c, unsigned r);
+static unsigned ntiles, tcols;
+static unsigned char tsh = 0xFF, wsh = 0xFF, hsh = 0xFF;    /* log2 of tcols, tw, th */
+static unsigned __far *shown;   /* the tile each slot holds (hg_map_refresh) */
+static unsigned shown_cap;      /* its slots */
+static unsigned refresh_row;    /* the row of the view hg_map_refresh goes on from */
+static unsigned char recop;     /* SH_COPY or SH_KEY (hg__mapwalk) */
+static unsigned char fast;      /* hg__mapwalk can draw this map's tiles */
+
+/* a run of cells for hg__mapwalk (hg_mapw.s: the offsets are its) */
+struct hg__walk {
+    unsigned p, pbank, pstep;           /* the first cell's map word, to the next one */
+    unsigned sh, shbank, shstep;        /* its slot's word in shown */
+    unsigned n, x, y, dx, dy;           /* cells; the first slot's place, to the next */
+    unsigned ntiles, tmask, tsh, wsh, hsh, w, h, op, sheet, key;
+    unsigned long px;                   /* a record's pixels in the count */
+    unsigned diff, drawn;               /* only the changed tiles; tiles queued */
+} hg__mw;
+void hg__mapwalk(void);
+
+static unsigned char log2of(unsigned v)
+{
+    unsigned char k = 0;
+    if (!v || (v & (v - 1)))
+        return 0xFF;
+    while (v > 1) {
+        v >>= 1;
+        ++k;
+    }
+    return k;
+}
+
+/* the tile of cell (c, r), its index mi in the map (r * mw + c: kept by the callers, no
+ * multiply a cell) */
+static unsigned fetch(unsigned c, unsigned r, unsigned mi)
 {
     unsigned t;
     if (c >= mw || r >= mh)
-        return border;
-    t = map[r * mw + c];
-    return t < tiles->n ? t : 0;
+        t = border;
+    else if (!kind16)
+        t = map[mi];
+    else if (cellfn)
+        t = cellfn(c, r);
+    else
+        t = map16[mi];
+    return t < ntiles ? t : 0;
 }
 
-static void slot(unsigned c, unsigned r)
+static unsigned cell(unsigned c, unsigned r)
 {
-    int ox = hg__ox, oy = hg__oy;
-    hg_origin(0, 0);
-    hg_draw(tiles, cell(c, r), (int)((c % rc) * tw), (int)((r % rr) * th));
-    hg_origin(ox, oy);
+    return fetch(c, r, c < mw && r < mh ? r * mw + c : 0);
+}
+
+/* the tile t into the slot at (x, y) of the ring's framebuffer (the origin at 0, 0), slot
+ * index si */
+static void put(unsigned x, unsigned y, unsigned si, unsigned t)
+{
+    unsigned sx, sy;
+    shown[si] = t;
+    if (!kind16) {
+        hg_draw(tiles, t, (int)x, (int)y);
+        return;
+    }
+    if (tsh != 0xFF) {
+        sx = t & (tcols - 1);
+        sy = t >> tsh;
+    } else {
+        sx = t % tcols;
+        sy = t / tcols;
+    }
+    sx = wsh != 0xFF ? sx << wsh : sx * tw;
+    sy = hsh != 0xFF ? sy << hsh : sy * th;
+    hg_draw_part(tiles, sx, sy, tw, th, (int)x, (int)y);
+}
+
+/* n cells from (c, r) into their slots: down a column (down 1) or along a row (0); diff:
+ * only those whose tile differs from the slot's. -> the tiles drawn */
+static unsigned cells(unsigned c, unsigned r, unsigned n, unsigned char down,
+                      unsigned char diff)
+{
+    unsigned sc = c % rc, sr = r % rr, si = sr * rc + sc, x = sc * tw, y = sr * th;
+    unsigned mi = c < mw && r < mh ? r * mw + c : 0, k, lim, t, drawn = 0;
+    unsigned long a;
+    hg__mw.diff = diff;
+    hg__mw.drawn = 0;
+    /* the common case (the map's words, a sheet, power-of-two sizes): runs of cells inside
+     * the map and inside the ring by hg__mapwalk (hg_mapw.s); the cells outside the map
+     * (the border) below */
+    while (n && fast && !cellfn && c < mw && r < mh) {
+        k = n;
+        lim = down ? mh - r : mw - c;
+        if (k > lim)
+            k = lim;
+        lim = down ? rr - sr : rc - sc;
+        if (k > lim)
+            k = lim;
+        a = (unsigned long)(map16 + mi);
+        hg__mw.p = (unsigned)a;
+        hg__mw.pbank = (unsigned)(a >> 16);
+        a = (unsigned long)(shown + si);
+        hg__mw.sh = (unsigned)a;
+        hg__mw.shbank = (unsigned)(a >> 16);
+        hg__mw.n = k;
+        hg__mw.x = x;
+        hg__mw.y = y;
+        n -= k;
+        if (down) {
+            hg__mw.pstep = mw * 2;
+            hg__mw.shstep = rc * 2;
+            hg__mw.dx = 0;
+            hg__mw.dy = th;
+            hg__mapwalk();
+            r += k;
+            mi += k * mw;
+            sr += k;
+            si += k * rc;
+            y += k * th;
+            if (sr == rr) {
+                sr = 0;
+                si = sc;
+                y = 0;
+            }
+        } else {
+            hg__mw.pstep = 2;
+            hg__mw.shstep = 2;
+            hg__mw.dx = tw;
+            hg__mw.dy = 0;
+            hg__mapwalk();
+            c += k;
+            mi += k;
+            sc += k;
+            si += k;
+            x += k * tw;
+            if (sc == rc) {
+                sc = 0;
+                si -= rc;
+                x = 0;
+            }
+        }
+    }
+    for (; n; n--) {
+        t = fetch(c, r, mi);
+        if (!diff || shown[si] != t) {
+            put(x, y, si, t);
+            ++drawn;
+        }
+        if (down) {
+            ++r;
+            mi += mw;
+            si += rc;
+            y += th;
+            if (++sr == rr) {
+                sr = 0;
+                si = sc;
+                y = 0;
+            }
+        } else {
+            ++c;
+            ++mi;
+            ++si;
+            x += tw;
+            if (++sc == rc) {
+                sc = 0;
+                si -= rc;
+                x = 0;
+            }
+        }
+    }
+    return drawn + hg__mw.drawn;
 }
 
 static void loadcol(unsigned c)
 {
-    unsigned r;
-    for (r = lty; r < lty + rr; r++)
-        slot(c, r);
+    cells(c, lty, rr, 1, 0);
 }
 
 static void loadrow(unsigned r)
 {
-    unsigned c;
-    for (c = ltx; c < ltx + rc; c++)
-        slot(c, r);
+    cells(ltx, r, rc, 0, 0);
 }
 
 static void ringall(void)
@@ -120,29 +276,23 @@ static void close_map(void)
 {
     hg__scroll = 0;
     map = 0;
+    map16 = 0;
+    shown = 0;
+    shown_cap = 0;
 }
 
-int hg_map(const unsigned char *m, unsigned w, unsigned h, const hg_image *t, int panel)
+/* the ring and its framebuffer for tiles of tw x th (hg_map, hg_map16) */
+static int ring(const char *fn, int panel)
 {
-    unsigned ph, stride, cols, rows, split, size;
+    unsigned ph, stride, cols, rows, split;
     unsigned long a;
 
-    if (hg__kind != HG__FULL || hg__double || hg__mode == FS_640X4) {
-        hg__fail("hg_map", "full screen at 256 colours, not HG_DOUBLE");
-        return -1;
-    }
-    if (!m || !t || w == 0 || h == 0 || t->bpp != 8 || t->w < 8 || t->h < 8 ||
-        (unsigned long)w * h > 65280UL) {
-        hg__fail("hg_map", "a map (at most 65,280 cells) and 8 bpp tiles of 8 x 8 or more");
-        return -1;
-    }
+    hg__scroll = 0;                     /* (until the new ring is made: no map on failure) */
     ph = panel < 0 ? (unsigned)-panel : (unsigned)panel;
     if (ph >= hg_h / 2 || (hg__mode == FS_320X8 && (ph & 1))) {
-        hg__fail("hg_map", "the panel: less than half the screen (320 x 180: even rows)");
+        hg__fail(fn, "the panel: less than half the screen (320 x 180: even rows)");
         return -1;
     }
-    tw = t->w;
-    th = t->h;
     playh = hg_h - ph;
     cols = (hg_w + tw - 1) / tw + 1;                /* one column more than the screen */
     while ((cols * tw) & 15)
@@ -150,14 +300,17 @@ int hg_map(const unsigned char *m, unsigned w, unsigned h, const hg_image *t, in
     stride = cols * tw;
     rows = (playh + th - 1) / th + 1;
     if (stride > 4096 || rows * th + ph > 1024) {
-        hg__fail("hg_map", "tiles too large for the ring");
+        hg__fail(fn, "tiles too large for the ring");
         return -1;
     }
-    size = w * h;
-    a = hg__farmem(size);
-    if (!a) {
-        hg__fail("hg_map", "no far memory for the map");
-        return -1;
+    if (cols * rows > shown_cap) {
+        a = hg__farmem((unsigned long)cols * rows * 2);
+        if (!a) {
+            hg__fail(fn, "no far memory for the ring");
+            return -1;
+        }
+        shown = (unsigned __far *)HG__PTR(a);
+        shown_cap = cols * rows;
     }
     if (hg__listrun) {
         hz_list_wait(0);
@@ -168,11 +321,8 @@ int hg_map(const unsigned char *m, unsigned w, unsigned h, const hg_image *t, in
     hg__nruns = 0;
     if (hg__fb_new(stride, rows * th + ph))
         return -1;
-    map = HG__PTR(a);
-    hz_far_copy(map, m, size);
-    mw = w;
-    mh = h;
-    tiles = t;
+    wsh = log2of(tw);
+    hsh = log2of(th);
     rc = cols;
     rr = rows;
     top = (unsigned char)(panel > 0);
@@ -180,6 +330,7 @@ int hg_map(const unsigned char *m, unsigned w, unsigned h, const hg_image *t, in
     hg_play_y = top ? (int)ph : 0;
     hg_cam_x = hg_cam_y = 0;
     ltx = lty = 0;
+    refresh_row = 0;
     split = top ? ph : playh;
     if (hg__mode == FS_320X8)
         split *= 2;                             /* Marga counts 360 lines */
@@ -203,9 +354,9 @@ int hg_map(const unsigned char *m, unsigned w, unsigned h, const hg_image *t, in
         hg_origin(0, 0);
         if (ph)
             hg_fill(0, (int)(rows * th), stride, ph, 0);
+        ringall();
         hg_origin(ox, oy);
     }
-    ringall();
     if (!hg__began) {
         hz_fs_scroll(&hg__scr);
         hg__scr_dirty = 0;
@@ -214,9 +365,130 @@ int hg_map(const unsigned char *m, unsigned w, unsigned h, const hg_image *t, in
     return 0;
 }
 
+static int full_ok(const char *fn)
+{
+    if (hg__kind != HG__FULL || hg__double || hg__mode == FS_640X4) {
+        hg__fail(fn, "full screen at 256 colours, not HG_DOUBLE");
+        return 0;
+    }
+    return 1;
+}
+
+int hg_map(const unsigned char *m, unsigned w, unsigned h, const hg_image *t, int panel)
+{
+    unsigned size;
+    unsigned long a;
+
+    if (!full_ok("hg_map"))
+        return -1;
+    if (!m || !t || w == 0 || h == 0 || t->bpp != 8 || t->w < 8 || t->h < 8 ||
+        (unsigned long)w * h > 65280UL) {
+        hg__fail("hg_map", "a map (at most 65,280 cells) and 8 bpp tiles of 8 x 8 or more");
+        return -1;
+    }
+    size = w * h;
+    a = hg__farmem(size);
+    if (!a) {
+        hg__fail("hg_map", "no far memory for the map");
+        return -1;
+    }
+    map = HG__PTR(a);
+    hz_far_copy(map, m, size);
+    kind16 = 0;
+    fast = 0;
+    map16 = 0;
+    mw = w;
+    mh = h;
+    tiles = t;
+    tw = t->w;
+    th = t->h;
+    ntiles = t->n;
+    return ring("hg_map", panel);
+}
+
+int hg_map16(unsigned __far *m, unsigned w, unsigned h, const hg_image *sheet, unsigned tilew,
+             unsigned tileh, int panel)
+{
+    unsigned long rowsall, cols;
+
+    if (!full_ok("hg_map16"))
+        return -1;
+    if ((!m && !cellfn) || !sheet || w == 0 || h == 0 || sheet->bpp != 8 || tilew < 8 ||
+        tileh < 8 || tilew > sheet->w || tileh > (unsigned long)sheet->h * sheet->n ||
+        (unsigned long)w * h > 32768UL ||
+        (unsigned long)w * tilew > 32767UL || (unsigned long)h * tileh > 32767UL ||
+        (m && ((unsigned long)m & 0xFFFFUL) + (unsigned long)w * h * 2 > 65536UL)) {
+        hg__fail("hg_map16", "a map of at most 32,768 cells in one bank (or hg_map_cells),"
+                 " an 8 bpp sheet, tiles of 8 x 8 or more");
+        return -1;
+    }
+    rowsall = (unsigned long)sheet->h * sheet->n;
+    kind16 = 1;
+    map16 = m;
+    map = 0;
+    mw = w;
+    mh = h;
+    tiles = sheet;
+    tw = tilew;
+    th = tileh;
+    tcols = sheet->w / tilew;
+    cols = (unsigned long)tcols * (rowsall / tileh);
+    ntiles = cols > 65535UL ? 65535U : (unsigned)cols;
+    tsh = log2of(tcols);
+    recop = sheet->key == HG_NONE ? SH_COPY : SH_KEY;
+    fast = sheet->sheet && tsh != 0xFF && log2of(tilew) != 0xFF && log2of(tileh) != 0xFF;
+    hg__mw.ntiles = ntiles;
+    hg__mw.tmask = tcols - 1;
+    hg__mw.tsh = tsh;
+    hg__mw.wsh = log2of(tilew);
+    hg__mw.hsh = log2of(tileh);
+    hg__mw.w = tilew;
+    hg__mw.h = tileh;
+    hg__mw.op = recop;
+    hg__mw.sheet = sheet->sheet;
+    hg__mw.key = sheet->key & 255;
+    hg__mw.px = tilew < 60 && tileh < 60 ? 3481UL : (unsigned long)tilew * tileh;
+    return ring("hg_map16", panel);
+}
+
+void hg_map_cells(unsigned (*fn)(unsigned c, unsigned r))
+{
+    cellfn = fn;
+}
+
+unsigned hg_map_refresh(unsigned rows)
+{
+    unsigned c0, c1, r0, r1, nr, n = 0;
+    int ox, oy;
+
+    if (!hg__scroll) {
+        hg__fail("hg_map_refresh", "hg_map or hg_map16 first");
+        return 0;
+    }
+    c0 = (unsigned)hg_cam_x / tw;
+    c1 = ((unsigned)hg_cam_x + hg_w - 1) / tw;
+    r0 = (unsigned)hg_cam_y / th;
+    r1 = ((unsigned)hg_cam_y + playh - 1) / th;
+    nr = r1 - r0 + 1;
+    if (!rows || rows > nr)
+        rows = nr;
+    if (refresh_row >= nr)
+        refresh_row = 0;
+    ox = hg__ox;
+    oy = hg__oy;
+    hg_origin(0, 0);
+    while (rows--) {
+        n += cells(c0, r0 + refresh_row, c1 - c0 + 1, 0, 1);
+        if (++refresh_row >= nr)
+            refresh_row = 0;
+    }
+    hg_origin(ox, oy);
+    return n;
+}
+
 void hg_camera(int x, int y)
 {
-    int maxx, maxy;
+    int maxx, maxy, ox, oy;
     unsigned tcx, tcy;
 
     if (!hg__scroll) {
@@ -239,6 +511,9 @@ void hg_camera(int x, int y)
     hg_cam_y = y;
     tcx = (unsigned)x / tw;
     tcy = (unsigned)y / th;
+    ox = hg__ox;
+    oy = hg__oy;
+    hg_origin(0, 0);
     if (tcx + rc <= ltx || ltx + rc <= tcx || tcy + rr <= lty || lty + rr <= tcy) {
         ltx = tcx;                              /* a jump: the whole ring again */
         lty = tcy;
@@ -261,6 +536,7 @@ void hg_camera(int x, int y)
             loadrow(lty);
         }
     }
+    hg_origin(ox, oy);
     if (top || !(hg__scr.ctrl & FSC_SPLIT)) {
         if (top) {
             hg__scr.x2 = (unsigned)x % (rc * tw);
@@ -284,9 +560,16 @@ void hg_map_set(unsigned c, unsigned r, unsigned t)
     }
     if (c >= mw || r >= mh)
         return;
-    map[r * mw + c] = (unsigned char)t;
-    if (c >= ltx && c < ltx + rc && r >= lty && r < lty + rr)
-        slot(c, r);
+    if (!kind16)
+        map[r * mw + c] = (unsigned char)t;
+    else if (!cellfn)
+        map16[r * mw + c] = t;
+    if (c >= ltx && c < ltx + rc && r >= lty && r < lty + rr) {
+        int ox = hg__ox, oy = hg__oy;
+        hg_origin(0, 0);
+        cells(c, r, 1, 1, 0);
+        hg_origin(ox, oy);
+    }
 }
 
 unsigned hg_map_get(unsigned c, unsigned r)

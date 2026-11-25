@@ -1,0 +1,7 @@
+# gt_map16: pictures at the states the program prints (not by the clock)
+0 wait gt_map16: shot 1
++300 shot
++0 wait gt_map16: shot 2
++300 shot
++0 wait gt_map16: shot 3
++300 shot

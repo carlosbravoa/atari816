@@ -266,6 +266,10 @@ hg_sprite_pos(0, hg_screen_x(x), hg_screen_y(y));
 ```
 
 `hg_sprite_show(n, on)`; `hg_sprite_hit(a, b, margin)` compares boxes (no hardware collision).
+A 4 bpp sprite's pixel p (1-15) shows palette entry bank x 16 + p: `hg_sprite_pal(n, bank)`
+(0-15; kept across `hg_sprite_set`, 0 at first): eight kinds of 15-colour things each in a
+bank of its own (an image drawn in entries 129-143 is bank 8). `.HGI` files of 4 bpp come
+from `img2c.py --bpp 4` (indices 0-15).
 Changes go out together at `hg_end`. Lower numbers are in front. In a window, sprites show only
 while it has the focus and nothing covers it.
 
@@ -288,12 +292,31 @@ windows (Gem Run in C does it).
   `hg_cam_y`, `hg_play_y`; world to screen `hg_screen_x(wx)`, `hg_screen_y(wy)`.
   Draw into the panel with `hg_origin(0, hg_panel_y)` and back with `hg_origin(0, 0)`.
   The tutorial's `step4.c` does exactly this (13 sprites, panel: 4.2 ms CPU a frame).
+- More than 256 tiles: `hg_map16(map, mw, mh, sheet, tw, th, panel)`: 16-bit tile numbers
+  in the game's own map (`unsigned __far *`, not copied: one bank, at most 32,768 cells),
+  each tile a `tw x th` rectangle of one wide 8 bpp sheet (tile k at column k mod
+  (sheet->w / tw), row k / (sheet->w / tw): a 4096 x 64 image holds 1,024 tiles of 16 x 16).
+  `hg_camera`, `hg_map_set` (writes the map), `hg_map_get`, `hg_map_border` as above; any
+  step a frame (only the tiles coming in are drawn: a column of 21 at 640 x 360 is 2.2 ms of
+  CPU). The game writes its map itself (a simulation, animation)? `hg_map_refresh(rows)`
+  draws the tiles in view that differ from those drawn, `rows` rows of the view a call (0:
+  all; going on from there next call). Another layout (column after column) or flags in the
+  numbers: `hg_map_cells(fn)` then `hg_map16(NULL, ...)`, `fn(c, r)` gives the tile.
+  Tests: `sdk/c/game/tests/gt_map16.c`, cost: `gt_mapbench.c`.
 - A taller framebuffer with a fixed panel (no map), as in `gt_view.c`:
   `hg_screen_fb(HG_320X180, "Game", 512, 400)`, then `hg_scroll(x, y)` and
   `hg_split(line, x2, y2)` (from screen `line` on, show from (x2, y2)). Views must stay
   inside the framebuffer (else refused). ports/digger uses this for its 320 x 200 screen.
   The view is sent at `hg_end` (shown after the frame's drawing); without frames by
   `hg_poll` or `hg_view_send()` (`gt_poll.c`).
+- A ring of your own drawing (a world larger than the framebuffer that is not tiles, or
+  your own tile cache): `hg_screen_fb` with the ring's shape plus the panel's rows below it,
+  then `hg_scroll_wrap(x, y, vheight)`: every row wraps at its end, rows 0 .. vheight - 1
+  wrap, and (x, y) is any value (pass the world position: taken modulo the row's width and
+  vheight). Draw what comes into view at `(wx mod width, wy mod vheight)`. Panel at the top:
+  `hg_scroll_wrap(0, 0, vh)`, `hg_split_wrap(line, cx, cy)`, then `hg_scroll(0, vh)` (the
+  split first); at the bottom: `hg_scroll_wrap(cx, cy, vh)`, `hg_split(line, 0, vh)`.
+  `sdk/c/game/tests/gt_wrap.c`; sdk/docs/c/games.md, "A world larger than the framebuffer".
 
 ## Input
 
