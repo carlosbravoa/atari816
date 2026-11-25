@@ -178,23 +178,29 @@ def compile_c(src, obj, opt="2", incs=(), defs=(), asm_out=None, opts=None, code
             assemble(path, obj, src_name=src, code=config(code, data))
 
 
-def check_calls(srcs, incs=(), defs=(), opts=None, code=None, data=None):
+def check_calls(srcs, incs=(), defs=(), opts=None, code=None, data=None, sets=None):
     """hcc --check-calls: every C file read (not compiled) and the calls compared across
     them (cc816 driver.cross_check): a call without a prototype, or a prototype, that
-    disagrees with the definition in another file. Prints those (and each file's own
-    -Wunprototyped-args warnings) -> how many were found; errors raise HccError"""
+    disagrees with the definition in another file (its arguments, its result). Prints
+    those (and each file's own -Wunprototyped-args warnings) -> how many were found;
+    errors raise HccError. sets: for each file None or its own options (hcc --set:
+    {defs, incs, includes}, after the common ones)"""
     from cc816.ctypes816 import CError
     units = []
     n = 0
-    for src in srcs:
+    for k, src in enumerate(srcs):
+        st = (sets[k] if sets and k < len(sets) else None) or {}
         o = dict(opts or {}, sigs=units, front_only=True)
+        if st.get("includes"):
+            o["includes"] = list(o.get("includes") or []) + list(st["includes"])
         if is_large(code):
             o["large"] = True
         if is_far(code, data):
             o["far_data"] = True
         try:
-            _, warns = cc().compile_c(src, list(incs) + [os.path.join(SDKC, "include")],
-                                      defs, 2, opts=o)
+            _, warns = cc().compile_c(src, list(incs) + list(st.get("incs") or ()) +
+                                      [os.path.join(SDKC, "include")],
+                                      list(defs) + list(st.get("defs") or ()), 2, opts=o)
         except CError as e:
             raise HccError(_where(str(e), src))
         for w in warns:

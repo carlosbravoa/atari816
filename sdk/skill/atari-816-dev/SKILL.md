@@ -112,7 +112,9 @@ click. `references/packaging.md`.
 - Never write to hardware addresses: every device is a syscall (or hgame / hui call).
 - Old C (K&R, DOS compilers): `-std=c89` takes implicit int and extra arguments as
   warnings; run `hcc --check-calls *.c` (the build's options) before the first run of a
-  port: an `int` passed where a far pointer is read shifts every later argument.
+  port: an `int` passed where a far pointer is read shifts every later argument, an
+  implicit `int` result of a far-pointer function loses the bank (`--set` gives files
+  their own `-D`).
 
 ## References: read when
 

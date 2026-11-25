@@ -138,6 +138,38 @@ def sig_mismatch(name, sig, params, variadic, defplace):
     return out
 
 
+def retsig(t):
+    """a function's result as the caller reads it: (bytes, kind, C type); void: (0, 'void',
+    'void'); a structure: its size (it comes back through a hidden pointer the caller
+    passes first)"""
+    if t.is_void:
+        return (0, 'void', 'void')
+    if t.is_struct:
+        return (t.size, 'struct', cname(t))
+    return argsig(promote(t) if t.is_int else t)
+
+
+def ret_mismatch(caller, defn):
+    """what goes wrong when a caller that takes the result as caller (a retsig) calls a
+    definition that returns defn, or None when they agree (sizes, and float or not; a
+    pointer and an integer of one size agree; a caller that drops the value: always)"""
+    if caller is None or defn is None or caller[1] == 'void':
+        return None
+    if defn[1] == 'void':
+        return 'returns nothing (void): the value read is whatever the register held'
+    if (caller[1] == 'struct') != (defn[1] == 'struct') or \
+            (caller[1] == 'struct' and caller[0] != defn[0]):
+        return (f"returns {_article(defn[2])} ({defn[0]} bytes): a structure comes back "
+                f"through a hidden pointer that the other side does not pass or expect")
+    if caller[0] != defn[0]:
+        return (f"returns {_article(defn[2])} ({defn[0]} bytes): " +
+                ("the upper half is lost (a far pointer's bank, a long's high word)"
+                 if caller[0] < defn[0] else "the upper half read is garbage"))
+    if (caller[1] == 'float') != (defn[1] == 'float'):
+        return f"returns {_article(defn[2])} ({defn[0]} bytes): the bits are not converted"
+    return None
+
+
 def short_place(p, other):
     """'line N' when p ('file:line:col') is in other's file, else 'file:line'"""
     if not p:
@@ -177,6 +209,8 @@ class Front:
         # [(name, place, [argsig])], the definitions {name: (place, [argsig], proto,
         # variadic, static)}
         self.unproto_calls = []
+        self.falls_off = {}         # non-void functions that can reach their end: place
+        self.value_used = {}        # functions called for their value: the first place
         self.defsigs = {}
         self.nstatic = 0
         self.fn = None
@@ -1158,7 +1192,7 @@ class Front:
         where a far pointer, 4, is read) shifts every later parameter; fewer arguments
         than parameters leave the last ones unset. The unit keeps what hcc --check-calls
         compares across files (unit.sigs)"""
-        for name, place, sig in self.unproto_calls:
+        for name, place, sig, *_ in self.unproto_calls:
             d = self.defsigs.get(name)
             if d is None:
                 continue
@@ -1170,9 +1204,10 @@ class Front:
                     not getattr(sy, 'defined', False) and sy.t.proto:
                 protos[name] = (where(getattr(sy, 'coord', None)),
                                 [argsig(self.param_adjust(pt)) for _, pt in sy.t.params],
-                                bool(sy.t.variadic))
+                                bool(sy.t.variadic), retsig(sy.t.ret))
         self.unit.sigs = {'calls': self.unproto_calls, 'defs': self.defsigs,
-                          'protos': protos}
+                          'protos': protos, 'falls_off': self.falls_off,
+                          'value_used': self.value_used}
 
     def static_assert(self, d):
         v = self.const_eval(d.cond)
@@ -1737,7 +1772,7 @@ class Front:
         self.bind(name, sy)
         self.defsigs[name] = (where(d.coord), [argsig(self.param_adjust(pt))
                                                for _, pt in ft.params],
-                              bool(ft.proto), bool(ft.variadic), static)
+                              bool(ft.proto), bool(ft.variadic), static, retsig(ft.ret))
         self.unit.defined.add(asm)
         if not static:
             self.unit.exports.add(asm)
@@ -1819,6 +1854,9 @@ class Front:
                 if c is not None else None
             self.diag.warning(end or self.filename, f"control reaches the end of the non-void "
                               f"function '{name}' (a return is missing)", 'return-type')
+            if not static:
+                # (hcc --check-calls: a caller in another file that uses its value)
+                self.falls_off[name] = where(end) if end is not None else self.filename
         if self.cur is not None and not (self.cur.term):
             if name == 'main':
                 self.emit(Ins('ret', a=Imm(0)))
@@ -2441,6 +2479,8 @@ class Front:
             self.expr_stmt(e.right)
             self.place(le)
             return
+        if isinstance(e, c_ast.FuncCall):
+            self.dropped_call = e           # (its value is not used: hcc --check-calls)
         self.rv(e)
 
     # ================================================================== expressions
@@ -3810,9 +3850,15 @@ class Front:
         ops = [sret] if sret is not None else []
         for i in range(len(args)):
             ops += parts[i]
+        used = getattr(self, 'dropped_call', None) is not e
+        if name is not None and used and not ft.ret.is_void:
+            self.value_used.setdefault(name, where(self.place_of(e)))
         if unsig is not None and len(unsig) == len(args):
+            # (and how the caller takes the result: hcc --check-calls compares it with the
+            # definition's; a call whose value is dropped reads none)
             self.unproto_calls.append((name, where(self.place_of(e)),
-                                       [unsig[i] for i in range(len(args))]))
+                                       [unsig[i] for i in range(len(args))], retsig(ft.ret),
+                                       used))
         rt = ft.ret
         d = None
         if not rt.is_void and not rt.is_struct:

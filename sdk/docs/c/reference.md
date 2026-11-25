@@ -1262,7 +1262,9 @@ hz_close(h);
   `HZ_O_CREATE`): their plain names belong to errno.h. Card errors: `HZ_ENOFILE`,
   `HZ_ENOPATH`, `HZ_EDENIED`, `HZ_EEXIST`, `HZ_ENFILE`.
 - **Helpers**: `hz_spawn_path(path, args, prio)`, `hz_stat_path(path, &info)`,
-  `hz_getline(buf, size)` (a line with editing), `hz_key_ascii(usage, mods)` (a key event
+  `hz_getline(buf, size)` (a line with editing: at most size - 1 characters; a line
+  longer than the room right of the prompt scrolls sideways, as the shell's does; stdin
+  reads lines of up to 255 characters through it), `hz_key_ascii(usage, mods)` (a key event
   to ASCII, KEY_* for arrows), `hz_prog_dir(buf, size)` (the program's own folder, below).
 - **The program's own file** (Horizon 0.28): `hz_task_path(buf, size)` gives the absolute
   path of the file the program was loaded from, such as `/GAMES/MINE/GAME.PRG`, and returns
@@ -1530,6 +1532,7 @@ a port built with `-w` hid the fault of `p + 4 * T`: "The far data model", "Poin
 | `implicit-int` | (`-fimplicit-int`, `-std=c89`, `-fdos-keywords`) a function defined without a return type, an object declared without a type (`register x;`, `static n;`): taken as `int` ("Old C") |
 | `extra-args` | (`-fextra-args`, `-std=c89`, `-fdos-keywords`) a call with more arguments than the prototype: they are evaluated and pushed, never read (without the option: an error) |
 | `unprototyped-args` | a call made without a prototype (an old declaration `int f();`, an implicit one, a K&R definition) to a function the same file defines, whose arguments do not match its parameters: a size that differs (an `int` pushed, 2 bytes, where a far pointer or a `long`, 4, is read: every later parameter is read from the wrong place), a `float` against an integer, fewer arguments than parameters. A pointer and an integer of one size agree (the 65816 passes them alike). `hcc --check-calls` does the same across files |
+| `prototype-mismatch`, `return-mismatch` | (`hcc --check-calls` only, across files) a prototype whose parameters differ from the definition's; a call without a prototype that uses the value, or a prototype, whose result type differs from the definition's (an implicit `int` where a far pointer comes back), or the value of a function that can end without a `return` ("Old C") |
 | `unknown-pragmas` | a `#pragma` cc816 does not know, ignored: Watcom's `#pragma aux name = "..."` (inline machine code: the function needs a C body) and `#pragma aux name parm ...`, `pack(n)` with n above 1; `once`, `pack(1)`, `GCC`, `STDC` and Watcom's message pragmas are silent |
 | `far-function` | `__far` on a function pointer (`void (__far *f)(void)`), ignored: a function pointer is the main-bank entry in every model |
 | `unused-variable` (-Wall) | a local or static variable that is never used |
@@ -1597,6 +1600,7 @@ code C89 gives:
 | more arguments than the prototype (`f(1, 2, 3)` of `int f(int, int)`; MSC's C4020) | `-fextra-args` | a warning `-Wextra-args`; the extra ones are evaluated and pushed after the others. The caller takes its arguments off the stack, and the callee reads its parameters from the top, so the extra ones are never read: harmless in every code and data model and with `-fargs-right-to-left` (only the order of evaluation changes there, not the layout); a structure returned by value keeps its hidden pointer first (`r055_extra_args.c`) |
 | writing into string literals; equal literals meant as separate buffers | `-fno-merge-strings`, `-fwritable-strings` | each literal its own object (and, with the second, in the data) |
 | a call through an old declaration whose argument does not fit the definition (`picture_target(0)` where the definition takes a `char far *`) | none | `-Wunprototyped-args` within one file; `hcc --check-calls` across files |
+| a result taken as another type than the definition returns (an implicit `int` for a function that returns a far pointer or a `long`; the value of a `void` function) | none | `hcc --check-calls` across files (`-Wreturn-mismatch`) |
 
 `-std=c89` (`c90`, `gnu89`, `-ansi`) turns on `-fimplicit-int` and `-fextra-args`;
 `-fdos-keywords` does too (a DOS program is C89 code): neither changes a program that
@@ -1615,12 +1619,32 @@ warnings in gcc's form:
   (`-Wunprototyped-args`, as within one file);
 - a prototype in one file that differs from the definition in another (the number of
   parameters, or a parameter's size or kind: `-Wprototype-mismatch`): every caller that
-  sees that prototype pushes the wrong thing.
+  sees that prototype pushes the wrong thing;
+- the results (`-Wreturn-mismatch`): a call without a prototype that uses the value, or
+  a prototype, that takes the result as another type than the definition returns. The
+  result comes back in registers of the size the definition says, and the caller reads
+  the size its declaration says: an implicit `int` (2 bytes) where a far pointer or a
+  `long` (4) comes back loses the bank or the high word, a `long` read where an `int`
+  comes back gets a garbage high word, a `float` read as a `long` is not converted, and
+  the value of a `void` function is whatever the register held. A call that drops the
+  value reads nothing and is not reported (`int f();` declared for a `void f(void)` and
+  called as a statement is harmless); an `int` and a near pointer agree. Also a function
+  that can reach its end without a `return` (its own file's `-Wreturn-type`) whose value
+  a caller in another file uses.
 
 It exits with 1 when it found one: an audit for a port's whole source (both the
 Civilization and the SimCity ports needed one by hand). In the near data model a pointer
 and an `int` are both 2 bytes and agree; with `--data far` a plain pointer is 4 and every
 `int` given for one is found.
+
+Files of one program built with different options (the game's files with `-DGAME`, the
+port's own without) are read together with **`--set`**: the `-D`, `-U`, `-I` and
+`-include` options after a `--set`, up to the next one, are those of the files after it;
+the ones before the first `--set` are every file's. The calls between the sets are
+compared as any others:
+
+    hcc --check-calls --code large --data far -I src -I port \
+        --set -DGAME src/*.c --set port/*.c
 
 **Big functions.** A function whose values live across calls need more hardware-stack
 slots than `n,s` reaches (its offset is 8 bits: 255 bytes with the saved registers, the

@@ -52,8 +52,14 @@ Options:
                     the same, and the literals in the data (not the constants)
   --check-calls     read the C files together, build nothing: every call without a
                     prototype, and every prototype, against the definition in another file
-                    (sizes of the arguments: an int pushed where a far pointer is read);
-                    exit 1 when one disagrees (docs/c/reference.md, "Old C")
+                    (sizes of the arguments: an int pushed where a far pointer is read; the
+                    result: an implicit int where a far pointer or a long comes back, a
+                    void function's value, one that can end without a return); exit 1
+                    when one disagrees (docs/c/reference.md, "Old C")
+  --set             (--check-calls) the -D, -U, -I and -include options after it, up to
+                    the next --set, are those of the files after it only (the ones before
+                    the first --set: every file's): 'hcc --check-calls -I src --set
+                    -DGAME src/*.c --set port/*.c'
   -fargs-right-to-left
                     a call's arguments are evaluated right to left, as DOS's compilers
                     (Watcom, Microsoft, Borland) and gcc on x86 do; the default is left to
@@ -150,7 +156,7 @@ def main(argv):
          "code": os.environ.get("HZ_CODE") or "small", "heap": None,
          "data": os.environ.get("HZ_DATA") or "near", "sizes": False,
          "bank_room": _env_int("HZ_BANK_ROOM"), "main_room": _env_int("HZ_MAIN_ROOM"),
-         "spread": _env_int("HZ_SPREAD"), "needs": [],
+         "spread": _env_int("HZ_SPREAD"), "needs": [], "sets": [], "srcset": [],
          "ccopts": {"w": False, "wall": False, "werror": False, "wflags": {},
                     "signed_char": False, "undefs": [], "includes": []}}
     i = 0
@@ -171,13 +177,18 @@ def main(argv):
         elif a == "-S":
             o["asm_too"] = True
         elif a.startswith("-I"):
-            o["incs"].append(a[2:] or val("-I"))
+            (o["sets"][-1] if o["sets"] else o)["incs"].append(a[2:] or val("-I"))
         elif a.startswith("-D"):
-            o["defs"].append(a[2:] or val("-D"))
+            (o["sets"][-1] if o["sets"] else o)["defs"].append(a[2:] or val("-D"))
         elif a == "-include":
-            o["ccopts"]["includes"].append(val("-include"))
+            (o["sets"][-1] if o["sets"] else o["ccopts"])["includes"].append(val("-include"))
         elif a.startswith("-U"):
-            o["defs"].append("-U" + (a[2:] or val("-U")))   # (cc816: in order with -D)
+            # (cc816: in order with -D)
+            (o["sets"][-1] if o["sets"] else o)["defs"].append("-U" + (a[2:] or val("-U")))
+        elif a == "--set":
+            # (--check-calls: the -D, -U, -I and -include options after it, up to the next
+            # --set, are the files' after it)
+            o["sets"].append({"defs": [], "incs": [], "includes": []})
         elif (a.startswith("-f") or a.startswith("-std=") or a == "-ansi") and \
                 _f_flag(a, o["ccopts"]):
             pass
@@ -239,6 +250,7 @@ def main(argv):
             die(f"unknown option {a} (hcc -h lists them)")
         else:
             o["srcs"].append(a)
+            o["srcset"].append(o["sets"][-1] if o["sets"] else None)
         i += 1
 
     if o["code"] not in hzc816.CODES:
@@ -266,6 +278,9 @@ def main(argv):
             die(f"--needs: {e}")
     if o.get("check_calls"):
         return check_calls(o)
+    if o["sets"]:
+        die("--set is for --check-calls (a build gives each file's options in its own "
+            "hcc -c)")
     return build(o)
 
 
@@ -301,10 +316,12 @@ def measure_sizes(o, objs, out, libs, ui, code):
 def check_calls(o):
     """--check-calls: the program's C files read together, nothing built: exit 1 when a
     call or a prototype disagrees with a definition (docs/c/reference.md, "Old C")"""
-    srcs = [s for s in o["srcs"] if s.lower().endswith(".c")]
+    pairs = [(s, st) for s, st in zip(o["srcs"], o["srcset"]) if s.lower().endswith(".c")]
+    srcs = [s for s, _ in pairs]
     try:
         n = hzc816.check_calls(srcs, incs=o["incs"], defs=o["defs"], opts=o["ccopts"],
-                               code=hzc816.config(o["code"], o["data"]))
+                               code=hzc816.config(o["code"], o["data"]),
+                               sets=[st for _, st in pairs])
     except HccError as e:
         die(str(e))
     print(f"hcc --check-calls: {len(srcs)} file(s), "

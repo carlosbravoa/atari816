@@ -42,6 +42,9 @@ WARNINGS = {
                                         # sizes differ from the definition's parameters
     'prototype-mismatch': True,         # (hcc --check-calls) a prototype in one file that
                                         # differs from the definition in another
+    'return-mismatch': True,            # (hcc --check-calls) a call without a prototype
+                                        # that uses the value, or a prototype, whose return
+                                        # type differs from the definition's in another file
     'unused-variable': False,
     'unused-label': False,
     'parentheses': False,               # if (a = b)

@@ -390,7 +390,8 @@ Build a port once with `-Wall` and read every warning.
 | `-fdos-keywords` | `far`, `near`, `huge` are keywords (`__far`, `__near`, `__far`); also `-fimplicit-int` and `-fextra-args` (DOS code is C89) |
 | `-std=c89` (`gnu89`, `-ansi`) | C89: `-fimplicit-int` (`f(a) int a; {...}`, `register x;` are `int`, warning `-Wimplicit-int`) and `-fextra-args` (more arguments than the prototype: warning `-Wextra-args`, pushed and never read). `-std=c99`/`c11`/... accepted, no change |
 | `-fno-merge-strings`, `-fwritable-strings` | each string literal its own object (default: equal literals in a file are one); the second also puts them in the data. For programs that write into literals |
-| `--check-calls` | read the C files together, build nothing: calls without prototypes and prototypes against the definitions in the other files (argument sizes); exit 1 on a mismatch |
+| `--check-calls` | read the C files together, build nothing: calls without prototypes and prototypes against the definitions in the other files (argument sizes; results: an implicit `int` where a far pointer or `long` comes back, a `void` function's value, one that can end without `return`); exit 1 on a mismatch |
+| `--set` | (`--check-calls`) the `-D`/`-U`/`-I`/`-include` after it, up to the next `--set`, are the following files' only: `hcc --check-calls -I src --set -DGAME src/*.c --set port/*.c` |
 | `--sizes` | every object and function of the link, its size and where it went (main bank, code bank k, far data bank k), biggest first; also when the program does not fit (a link at the smallest stack to measure it, or each file's segments from the failed map) |
 | `--stack N` | software stack bytes (512-32,768, even; default 8,192) |
 | `--heap N` | large model: main-bank bytes kept free for malloc (default 4,096) |

@@ -87,8 +87,10 @@ Xargon's compile flags: `--code large -D_HORIZON -I src -I horizon -I horizon/co
   ones in a file): `-fno-merge-strings` (`-fwritable-strings`: in the data too).
 - **Calls without prototypes**: `hcc --check-calls --code large --data far -I ... *.c`
   before the first run: an `int` passed where a far pointer is read (2 bytes pushed, 4
-  read) shifts every later argument (Civilization's first crash). Within a file the
-  compile warns (`-Wunprototyped-args`).
+  read) shifts every later argument (Civilization's first crash); it checks the results
+  too (an implicit `int` taken from a function returning a far pointer or a `long`).
+  Files built with different `-D`: `--set -DGAME src/*.c --set port/*.c`. Within a file
+  the compile warns (`-Wunprototyped-args`).
 - **Huge functions** (spills over 255 bytes of hardware stack, code over 32 KB) compile
   as they are now: no `-O1` or sed over the assembly.
 - `stricmp`/`strnicmp` → `strcasecmp`/`strncasecmp` (`<strings.h>`).
@@ -171,7 +173,7 @@ What overflowed and what fixed it:
 | Digger | 256 KB recording buffer | 64 KB: one bank from `hz_far_alloc` (upstream's `farmalloc`) |
 | Xargon | `int bd[128][64]` (16 KB) | `int far bd[128][64]`: a `__far` object, a bank of its own |
 | Xargon | `init_info` malloc'd 900 tile names (8.5 KB, the whole heap): every later malloc failed, text objects drawn from address 0 | names read past, not kept |
-| Xargon | hgame's record queues, 7 KB of bss | still open (SDK limit) |
+| Xargon | hgame's record queues, 7 KB of bss | fixed in the SDK since: the queues are in far memory (taken at `hg_screen` / `hg_window`) |
 
 The cures, in order:
 

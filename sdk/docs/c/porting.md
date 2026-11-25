@@ -298,7 +298,11 @@ scrolling in 256 colours with FM music; its `PORTING-NOTES.md` has the same list
   later parameter is wrong (Civilization's first crash: `picture_target(0)`).
   `-Wunprototyped-args` finds the calls within a file; **`hcc --check-calls *.c`** (the
   build's `-I`, `-D`, `--code`, `--data`) compares every file's calls and prototypes
-  with the definitions in the others, before the first run.
+  with the definitions in the others, before the first run: the arguments, and the
+  results (an implicit `int` taken from a function that returns a far pointer keeps 2
+  of its 4 bytes; a `void` function's value). Files built with different `-D` are read
+  together with `--set` (`hcc --check-calls -I src --set -DGAME src/*.c --set
+  port/*.c`).
 - [ ] **Huge functions** compile as they are: a function whose values need more than 255
   bytes of hardware stack keeps the rest in its software-stack frame, and one over 32 KB
   of code gets `JMP` where `BRL` does not reach (before, the Civilization port needed
@@ -444,14 +448,28 @@ calls the same functions as before.
   src/*.c`): run it and the Atari816's build with the same input and compare what they
   print. The source is preprocessed first, so `unsigned QUAD` with a macro `QUAD` is
   read as the compiler reads it. A callback the C library calls (`qsort`'s comparison)
-  keeps the PC's `int` with `--native NAME`. What it cannot give: 16-bit arithmetic
-  before a value is stored (the PC adds two shorts in 32 bits). The SimCity, X-COM and
+  keeps the PC's `int` with `--native NAME`. A DOS program's old C goes through as
+  well: `FILE.C` names, K&R definitions without a type (`f(a) int a; {`), `static n;`,
+  functions called before their declaration, a C library function the program declares
+  again (`extern int abs(int);`), a prototype that names a structure before it is
+  declared, and functions declared `f();` but defined with `short` or `char` parameters
+  (made K&R definitions, as C's promotions need); `--report` lists each place mended.
+  What it cannot give: 16-bit arithmetic before a value is stored (the PC adds two
+  shorts in 32 bits: a 16-bit `unsigned` compared with `-1` is equal on the Atari816,
+  never on the PC), nor the Atari816's layout of the globals. Those places are the
+  port's: write them in a fix-up file and give it with `--fixups FILE` (sections
+  `[FILE.C]` or `[FILE.H]`, lines `OLD => NEW`; each OLD must be in its file once, so a
+  fix-up that no longer applies stops the build). gcc's `-Wsign-compare` and
+  `-Wtype-limits` on the twin's build list most of them. The SimCity, X-COM and
   Civilization ports each carried a copy of an older textual rewriter.
 - [ ] **Arguments typed at the shell**: `run816.py --mode shell --args` types the
-  program's path and the arguments at the prompt; the shell's line editor takes 77
-  characters (the 80-column console less the prompt) and dropped the rest, so a long
-  line reached the program cut short. run816.py now refuses such a line: use `--cd DIR`
-  (the path typed relative to it), a shorter `--dest`, or shorter names.
+  program's path and the arguments at the prompt. Before Horizon 0.31 the shell's line
+  editor took 77 characters (the 80-column console less the prompt) and dropped the rest,
+  so a long line reached the program cut short; since 0.31 it takes 255 (the line scrolls
+  sideways), and a program gets at most 127 characters of arguments (the kernel's spawn;
+  the shell says so when there are more). run816.py refuses `--args` over 127 and a
+  typed line over 255: use `--cd DIR` (the path typed relative to it), a shorter
+  `--dest`, shorter names, or an options file.
 - [ ] **Check the files it writes**: the high-score file on the emulated card
   (`build/test/card/`), a saved recording played back to the same score.
 - [ ] **Sound**: POKEY is silent in the emulator. Check its register writes

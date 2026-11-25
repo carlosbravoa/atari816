@@ -1,0 +1,8 @@
+# host16.py --fixups: the places where the PC computes what the Atari816 does not
+# (h16old.C's test). OLD => NEW, OLD once in the file's lines as the preprocessor writes them.
+[h16old.C]
+if (u == -1) => if (u == (unsigned) -1)
+
+# a header's: every source that includes it
+[h16old.h]
+case 0x9000: => case (int) 0x9000:

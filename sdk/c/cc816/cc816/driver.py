@@ -486,8 +486,11 @@ def cross_check(units):
     (its arguments against the definition's parameters: front.sig_mismatch), and a
     prototype in one file that differs from the definition in another (the number of
     parameters, or one's size or kind): both read the arguments from the wrong place,
-    and neither compile sees the other file"""
-    from .front import sig_mismatch, short_place
+    and neither compile sees the other file. The results too (-Wreturn-mismatch): a call
+    without a prototype whose value is used, or a prototype, that takes the result as
+    another type than the definition returns (an implicit int where a far pointer or a
+    long comes back: 2 bytes of 4; a void function's value)"""
+    from .front import sig_mismatch, short_place, ret_mismatch, _article
     defs = {}
     for path, sg in units:
         for name, d in (sg.get('defs') or {}).items():
@@ -496,17 +499,30 @@ def cross_check(units):
     out = []
     for path, sg in units:
         own = sg.get('defs') or {}
-        for name, place, sig in sg.get('calls') or ():
+        for call in sg.get('calls') or ():
+            name, place, sig = call[:3]
             d = defs.get(name)
             if name in own or d is None:
                 continue
             for msg in sig_mismatch(name, sig, d[1], d[3], short_place(d[0], place)):
                 out.append(f'{place}: warning: {msg} [-Wunprototyped-args]')
-        for name, (place, params, variadic) in (sg.get('protos') or {}).items():
+            why = ret_mismatch(call[3], d[5]) if len(call) > 4 and call[4] else None
+            if why:
+                out.append(f"{place}: warning: the call of '{name}' has no prototype: its "
+                           f"result is read as {_article(call[3][2])} ({call[3][0]} bytes), "
+                           f"but the definition ({short_place(d[0], place)}) {why}; declare "
+                           f"'{name}' with a prototype [-Wreturn-mismatch]")
+        for name, (place, params, variadic, *ret) in (sg.get('protos') or {}).items():
             d = defs.get(name)
             if name in own or d is None:
                 continue
             dp = short_place(d[0], place)
+            why = ret_mismatch(ret[0], d[5]) if ret else None
+            if why:
+                out.append(f"{place}: warning: the prototype of '{name}' says it returns "
+                           f"{ret[0][2]} ({ret[0][0]} bytes), but its definition ({dp}) "
+                           f"{why}: the callers that see this prototype read the wrong "
+                           f"value [-Wreturn-mismatch]")
             if len(params) != len(d[1]) or variadic != d[3]:
                 out.append(f"{place}: warning: the prototype of '{name}' takes "
                            f"{len(params)} parameter{'s' if len(params) != 1 else ''}"
@@ -520,6 +536,21 @@ def cross_check(units):
                                f"reads {p[2]} ({p[0]} bytes): the callers that see this "
                                f"prototype push the wrong thing [-Wprototype-mismatch]")
                     break
+    # a non-void function that can reach its end without a return (its own file says so:
+    # -Wreturn-type), whose value a caller in another file uses
+    for path, sg in units:
+        for name, place in (sg.get('falls_off') or {}).items():
+            if defs.get(name) is None or defs[name] is not (sg.get('defs') or {}).get(name):
+                continue                        # (another file's definition is the one)
+            for p2, s2 in units:
+                use = (s2.get('value_used') or {}).get(name)
+                if p2 == path or not use or name in (s2.get('defs') or {}):
+                    continue
+                out.append(f"{place}: warning: the function '{name}' can reach its end "
+                           f"without a return, and a caller uses its value "
+                           f"({short_place(use, place)}): it reads whatever the register "
+                           f"held [-Wreturn-mismatch]")
+                break
     return out
 
 
