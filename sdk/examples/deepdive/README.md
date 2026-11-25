@@ -34,7 +34,7 @@ log and ends. Verified in the emulator (REV $0B); not run on the board.
 | Part | Where (main.s) | Reference |
 | --- | --- | --- |
 | Full-screen mode, 320 x 180 x 8 bpp, a framebuffer in its own memory | `start`, `fsblk`, `getfb` | [games.md: full-screen mode](../../docs/reference/games.md#full-screen-mode) |
-| Two consecutive banks from `bank_alloc` | `getfb` | [games.md: the framebuffer](../../docs/reference/games.md#the-framebuffer) |
+| Two consecutive banks from `bank_alloc` | `getfb` | [games.md: the framebuffer](../../docs/reference/games.md#framebuffer) |
 | Fine scrolling in both directions with wrap, a fixed panel by the split | `setscroll`, `scroll`, `scrolltiles` | [games.md: scrolling](../../docs/reference/games.md#98-fs_scroll-sys_fsscroll) |
 | One draw list a frame, LS_VBL on its first record | `rec_tile`, `rec_glyph`, `flush` | [games.md: draw lists](../../docs/reference/games.md#draw-lists) |
 | (Horizon 0.19) The tiles as a sheet: a frame of tiles is one `sheet_draw` (SH_VBL on its first record); a frame that also changes the panel one `draw_list` | `tsblk`, `rec_tile`, `rec_snew`, `flush`, `sflush`, `s2l` | [games.md: sheets](../../docs/reference/games.md#sheets-horizon-019) |

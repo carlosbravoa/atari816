@@ -6,9 +6,9 @@ screen: scrolling, sprites, one draw list a frame, Horizon 0.18), `sdk/templates
 Run: a window, a timer loop, dirty rectangles with win_draw) and `sdk/examples/lantern` (a
 finished arcade game in a window).
 
-## What you have and what you do not
+## Capabilities and limits
 
-- **You have** (Horizon 0.18 on REV $0B, the emulator's default):
+- **Available** (Horizon 0.18 on REV $0B, the emulator's default):
   - a window (framed, or WF_PLAIN up to 640 x 344 under the menu bar), or **the whole screen**
     (`fs_enter`): 640 x 360 x 8, 640 x 360 x 4 or 320 x 180 x 8 from a framebuffer in your
     own memory, with **fine scrolling** (horizontal and vertical wrap, a split for a fixed
@@ -19,13 +19,13 @@ finished arcade game in a window).
     covered;
   - **frame sync**: `vsync` returns the frame counter (missed frames show), `frame`, WE_VBL;
   - **draw lists**: up to 128 fills / copies / keyed copies / 1 bpp expands / moves in one
-    syscall, started by Ali in the vertical blank if you ask (LS_VBL);
+    syscall, started by Ali in the vertical blank if requested (LS_VBL);
   - colours: the system palette, palette entries of your own (`pal_alloc`, `pal_set`; shown
     while you have the focus), all 256 in full-screen mode;
   - win_draw for a window's few operations; key down / up events, the mouse, the joysticks
     (`joystick`), a 10 ms window timer, focus events; POKEY, **Lau** (8 sample voices) and the OPL2 (REV $0C);
     64 KB banks of memory; files.
-- **You do not have**: other video modes than these three, raster code of your own (no
+- **Not available**: other video modes than these three, raster code of your own (no
   interrupts in programs: the raster table is the kernel's), sprite collision detection,
   reading pixels back from a window (a full-screen framebuffer is your memory: read it after
   `list_wait`), scaling or rotation. Each syscall costs about 50 us and up (emulator; about
@@ -36,16 +36,31 @@ command lists, the raster table and WE_VBL REV $09; Lau REV $0A. Full-screen mod
 `draw_list` work on every revision (lists drawn more slowly without command lists or the
 blitter).
 
-## Three ways to build a game
+## Game structures
 
-| | Full screen (`examples/deepdive`) | A window with lists and sprites | A window with win_draw (`templates/game`) |
-| --- | --- | --- | --- |
-| Screen | the whole screen, your framebuffer, your palette | your window, on the desktop | your window |
-| Loop | `vsync` | `vsync` (or WE_VBL) | WE_TICK every 20 ms |
-| Moving things | sprites (`spr_set` once a frame) | sprites (shown while focused and not covered) | erase + keyed blit per sprite |
-| Background | tiles drawn once; scrolling by Marga, new tiles by one list | one list a frame | WD_SBLIT from a picture in a bank |
-| Syscalls a frame | about 6 | about 5 + the events | 2 per moving sprite + the events |
-| Needs | REV $0B for sprites and scrolling | REV $0B for sprites | anything |
+Full screen (`examples/deepdive`):
+- Screen: the whole screen, your framebuffer, your palette.
+- Loop: `vsync`.
+- Moving things: sprites (`spr_set` once a frame).
+- Background: tiles drawn once; scrolling by Marga, new tiles by one list.
+- Syscalls a frame: about 6.
+- Requires REV $0B for sprites and scrolling.
+
+Window with lists and sprites:
+- Screen: your window, on the desktop.
+- Loop: `vsync` (or WE_VBL).
+- Moving things: sprites (shown while focused and not covered).
+- Background: one list a frame.
+- Syscalls a frame: about 5 + the events.
+- Requires REV $0B for sprites.
+
+Window with win_draw (`templates/game`):
+- Screen: your window.
+- Loop: WE_TICK every 20 ms.
+- Moving things: erase + keyed blit per sprite.
+- Background: WD_SBLIT from a picture in a bank.
+- Syscalls a frame: 2 per moving sprite + the events.
+- Runs on any revision.
 
 ### Full screen: vsync, one draw list, sprites
 
@@ -76,12 +91,12 @@ frame:  sys     SYS_VSYNC       ; a new frame (and the last list is done)
 - **The palette**: black (`pal_set` of 256 zero entries) while the first screen is drawn, then
   your colours. Effects per line (a sky gradient, a panel in other colours): `fs_raster`.
 - **Pause** on WE_UNFOCUS: the kernel has given the screen back to the desktop (Alt+Tab,
-  Alt+Esc, F12, another window). Stop the samples, wait for events (`win_event` with A = 0)
+  Alt+Esc, F12, another window). Stop the samples, block on events (`win_event` with A = 0)
   until WE_FOCUS, read `frame` again. Esc / WE_CLOSE: `fs_leave`, exit.
 - **Measured** (`deepdive`, emulator): about 1.8 ms of CPU a frame with every syscall, 0
   missed frames; (Horizon 0.19) 1.7 ms with its tiles as a sheet (`sheet_draw`, games.md).
 
-### A window with draw lists and sprites
+### Window with draw lists and sprites
 
 The same loop in a window: the background in your window (drawn once, by lists), sprites for
 what moves. Sprites show only while your window has the focus and nothing covers its content,
@@ -91,12 +106,12 @@ list a frame: for each, an LS_COPY of the background under its old place (from a
 bank), then an LS_KEY at its new place, all in one list with LS_VBL on the first record: one
 syscall instead of two per sprite, and no flicker (the list runs in the blank).
 
-### A window with win_draw: dirty rectangles
+### Window with win_draw: dirty rectangles
 
 What `templates/game` does, and what any revision can run. The rest of this page describes
 it: a timer loop, one win_draw per erase and per draw.
 
-## The loop: fixed steps on the window timer
+## Timer loop: fixed steps
 
 ```asm
         lda     z:win
@@ -122,8 +137,8 @@ loop:   lda     #0              ; wait for an event
 - One logic step per tick keeps the game speed the same on the board and in the emulator,
   even when drawing is slow there (it then draws less often: frame skipping).
 - Cap `pending` (the template takes at most 4): after a long stall (a file dialog, the
-  window being dragged) the game should not race.
-- Do not use `SYS_SLEEP` for timing: events would wait.
+  window being dragged) the game should not run many steps at once.
+- Do not use `SYS_SLEEP` for timing: events would queue up meanwhile.
 - 10 ms is the tick; 2 ticks (50 Hz) or 3 (33 Hz) are good game rates. 60 Hz is not
   possible with the timer (and the video frame is 60.03 Hz, so motion always beats a little
   against it): for one step a frame use `vsync` or WE_VBL.
@@ -160,7 +175,7 @@ KEYTABN = (* - keytab) / 4
 
 - Use the joystick port's bit layout (1 up, 2 down, 4 left, 8 right, 16 fire), and OR
   joystick 1 into it in `read_joy` (SYS_JOY, Horizon 0.15: A bits 0-3 are port 1 in this
-  very layout, X bit 0 its trigger). On WE_UNFOCUS forget the held keys (the kernel sends
+  very layout, X bit 0 its trigger). On WE_UNFOCUS clear the held keys (the kernel sends
   their releases first anyway).
 - HID usages: arrows $4F right, $50 left, $51 down, $52 up; Space $2C; Enter $28; Esc $29;
   letters $04 (A) to $1D (Z); digits $1E (1) to $27 (0); left ctrl / shift / Alt are
@@ -173,7 +188,7 @@ KEYTABN = (* - keytab) / 4
   while a button is held, or always with WF_HOVER on the window; `SYS_WMOUSE` reads the
   pointer at any time (a paddle that follows the mouse).
 
-## Drawing: a background picture and dirty rectangles
+## Drawing: background picture and dirty rectangles
 
 1. Keep the playfield's background (the tile map drawn once) in a bank of its own
    (`SYS_BALLOC`): a 320 x 192 picture is 61,440 bytes. Draw it with the CPU (tiles are
@@ -214,9 +229,9 @@ KEYTABN = (* - keytab) / 4
 The erase and the draw are separate calls, so for a moment the screen shows the
 background without the sprite. Keep that moment short: **erase and redraw each sprite in
 consecutive calls** (and draw the overlapping ones in a fixed order). Erasing all sprites
-first and drawing them all after made the paddle of `examples/lantern` disappear from
-emulator screenshots now and then (a frame caught between the two): on a monitor that is
-flicker. Where sprites overlap, erase both, then draw both. For no flicker at all, compose:
+first and drawing them all after leaves a gap in which the sprites are missing: emulator
+screenshots of `examples/lantern` caught its paddle missing now and then (a frame between
+the two), and on a monitor this is flicker. Where sprites overlap, erase both, then draw both. For no flicker at all, compose:
 
 **Composing in memory (flicker-free).** Keep the scene in your bank, draw sprites into it
 with the CPU (copy the background rectangle into a small buffer, put the sprite's
@@ -228,7 +243,7 @@ scarcer resource.
 **Scrolling playfields.** `WD_COPY` moves the window's content (overlap-safe, one blitter
 copy), then draw the strip that came into view. A 320 x 192 copy is about 8 ms: possible
 every other frame, not every frame at 50 Hz on the board. In full-screen mode Marga scrolls
-for free (`fs_scroll`): see above.
+without CPU cost (`fs_scroll`): see above.
 
 ## Sprites and art
 
@@ -238,7 +253,7 @@ for free (`fs_scroll`): see above.
 - Use the system palette: the 6 x 6 x 6 cube gives 216 colours (`cube r g b` in
   img2inc's text art), plus 24 greys. Colours of your own (Horizon 0.18): `pal_alloc` a run
   of entries and `pal_set` them; they show while your window has the focus, so other
-  programs are not disturbed. In full-screen mode every entry is yours: name them by number
+  programs' colours are unaffected. In full-screen mode every entry is yours: name them by number
   in img2inc's text art (`a = 5`), as `examples/deepdive` does.
 - Pick one key colour for transparency and never use it for a visible pixel. The SDK
   uses 231 (cube white; use `C_WHITE` = 1 for white pixels). Hardware sprites always take
@@ -252,32 +267,32 @@ for free (`fs_scroll`): see above.
 
 Two `SYS_SNDW` calls per voice per tick (pitch and volume) for an envelope: rising blips,
 falling tones, noise bursts that fade. Voice 0 (POKEY channel 1) is also the UI's beep
-channel; a game that wants its music undisturbed uses channels 2-4. Silence everything
+channel; a game that must keep its music free of UI beeps uses channels 2-4. Silence everything
 before exit (`SYS_BEEP` with X = 0). See [sound.md](sound.md).
 
 With Lau (Horizon 0.17) an effect is one `SYS_SPLAY` of a short sample in your own memory
-(any free voice): no per-tick work. Ask `SYS_SSTAT` once at the start; ENODEV means no Lau,
+(any free voice): no per-tick work. Call `SYS_SSTAT` once at the start; ENODEV: no Lau,
 then use the POKEY envelopes above. See [sound.md](sound.md), "Samples". Samples can be made
 at run time (`examples/deepdive`: a square wave and noise with falling loudness, a few dozen
 lines); stop your voices when the game pauses. The user's sound volume (setting 4) applies
 to all of them.
 
-## A frame-synchronous loop (Horizon 0.15 and later)
+## Frame-synchronous loop (Horizon 0.15 and later)
 
 `horizon/user/quabrick.s` (Quabricks) shows the other way to run a game: in play it calls
 `SYS_VSYNC` (blocks until the vertical blank), then takes every queued event with
-`win_event` polling (no waiting), runs one step of the rules and draws only what changed,
+`win_event` polling (non-blocking), runs one step of the rules and draws only what changed,
 early in the frame, so the picture is updated while the beam is still above it. Screens
-that do not move (menus, the game-over table) wait for events instead, so the program uses
+that do not move (menus, the game-over table) block on events instead, so the program uses
 no CPU there. Colour effects (a flash) change palette entries right after the vertical
 blank. Quabricks measures itself with `quabrick -m`: 0.66 ms of CPU and 4.3 syscalls a
 frame on average in the emulator.
 
 ## States
 
-A state variable (title, play, game over) decides what a tick does and what keys mean.
-The title and game over screens are drawn once (a panel over the playfield, text with the
-fixed font) and only wait for a key or a click.
+A state variable (title, play, game over) selects what a tick does and how keys are
+handled. The title and game over screens are drawn once (a panel over the playfield, text
+with the fixed font); the game then blocks until a key or a click.
 
 ## Testing
 

@@ -5,10 +5,10 @@ folder `/Printouts`, which the user reads in **Printer** (Programs menu) and, wh
 link's gateway is there, gets as a PDF on the PC. The classic Atari prints the same way
 (`LPRINT`, `P:`): its jobs are named `Atari`.
 
-## How a program prints
+## Creating a print job
 
 Open the path `/PRN:NAME` (any open mode: it always makes a new job), write the text, close.
-That is all: the handle is a normal file handle (0-3), and the job is finished at the close
+The handle is a normal file handle (0-3), and the job is finished at the close
 (also when the program ends or crashes with the job open).
 
 ```asm
@@ -53,13 +53,13 @@ s_end:
   Latin-1. Lines longer than about 80 characters are wrapped on the PC; there is no other
   formatting, so lay out columns with spaces.
 - **Errors** are the usual file errors (for example $C2 from a firmware older than 0.23).
-  Say why in an alert; on success a short message is enough: the Desktop shows "Printed: NAME"
+  Show the reason in an alert; on success a short message is enough: the Desktop shows "Printed: NAME"
   for every finished job.
 
-## Watching for new jobs
+## Detecting new jobs
 
-STAT of exactly `/PRN:` answers, as the size, the number of jobs finished since the I/O
-processor started (the classic Atari's too). It is cheap: ask it on a timer and read
+STAT of exactly `/PRN:` returns, as the size, the number of jobs finished since the I/O
+processor started (the classic Atari's too). It is cheap: poll it on a timer and read
 `/Printouts` only when the number changed (the Desktop and Printer do this every second).
 
 ```asm
@@ -80,7 +80,7 @@ s_prn:  .byte   "/PRN:", 0
 
 ## PDFs on the PC
 
-STAT of exactly `/PC:` answers, as the size, the gateway's services: `PCS_FILES` (the PC
+STAT of exactly `/PC:` returns, as the size, the gateway's services: `PCS_FILES` (the PC
 volume), `PCS_DEV`, `PCS_NET`, `PCS_FETCH`, and (0.23) `PCS_PRINT`: it makes PDFs. A file
 created as `/PC:/Printouts/NAME.pdf` whose content starts with the marker below becomes a PDF
 (A4, Courier) when it is closed:

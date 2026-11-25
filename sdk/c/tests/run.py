@@ -993,7 +993,7 @@ def apps_tools(d, hza, app, checkout, horizon):
     blk = blk[:blk.index("        .byte   0\n")]
     desk = re.findall(r'"([a-z]+)", 0, ICO_', blk)
     doc = open(os.path.join(SDK, "docs", "apps.md"), encoding="utf-8").read()
-    row = [ln for ln in doc.splitlines() if ln.startswith("| `icon` |")]
+    row = [ln for ln in doc.splitlines() if ln.startswith("- `icon` (")]
     docnames = re.findall(r"`([a-z]+)`", row[0].split("built-in icon", 1)[1].split(")", 1)[0]) \
         if row else []
     ok = desk == hzapp.BUILTIN_ICONS and sorted(docnames) == sorted(desk)

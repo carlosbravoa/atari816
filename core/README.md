@@ -11,8 +11,8 @@ with original 8-bit Atari compatibility, for the
   the JTOPL core in `src/a816/jtopl/`), the shared
   SDRAM arbiter and HDMI output (`src/tang_top.sv`), and the 8-bit Atari (6502, ANTIC, GTIA, POKEY, PIA) based on
   Mark Watson's atari800core (`rtl/`, `src/address_decoder.vhdl`);
-- the firmware of the PicoRV32 I/O processor (`firmware/`): SD card, the mailbox the 65C816
-  talks to, the 8-bit Atari's disks, executables and cartridges, keyboard and mouse, PC link;
+- the firmware of the PicoRV32 I/O processor (`firmware/`): SD card, the mailbox shared with the 65C816
+  (Horizon), the 8-bit Atari's disks, executables and cartridges, keyboard and mouse, PC link;
 - 65C816 test programs (`sw/a816/`), simulations (`sim_a816/`) and PC-side tools (`tools/`).
 
 The native machine's registers are specified in
@@ -26,7 +26,7 @@ Needs the Gowin EDA (V1.9.x) with a licence, `riscv64-unknown-elf-gcc`, `ca65`/`
 `openFPGALoader`, Verilator 5 (simulations) and Python 3.
 
 ```bash
-export LM_LICENSE_FILE=/path/to/your/gowin_XXXXXXXX.lic   # build.tcl refuses to run without it
+export LM_LICENSE_FILE=/path/to/your/gowin_XXXXXXXX.lic   # build.tcl stops without it
 cd core
 make -C firmware                  # firmware.bin -> src/fw_lane{0..3}.hex, plus firmware/cold.bin
 /path/to/gowin/IDE/bin/gw_sh build.tcl > build.log 2>&1    # about 8 minutes
@@ -38,13 +38,13 @@ needs 28.69 MHz, clk_pix 71.72 MHz, sys_clk 27 MHz; the project keeps clk_core a
 more). The firmware hex files are tracked in git, so a bitstream-only build works without the
 RISC-V toolchain, but always rebuild the firmware before the bitstream when it has changed.
 
-### The firmware is in two parts
+### Firmware: hot and cold parts
 
 - **Hot** (block RAM, 32 KB, inside the bitstream): boot, SD and FatFs I/O, SIO, the mailbox,
   all data and the stack. Functions are made hot by listing them in `firmware/baremetal.ld`.
 - **Cold** (`firmware/cold.bin`): everything else. It is kept in SPI flash at 0x500000 and
   copied to SDRAM at boot. The hot part carries the cold image's CRC-32, so a cold image from
-  another build is refused (message on the serial log).
+  another build is not loaded (a message goes to the serial log).
 
 The firmware is RV32I (no compressed instructions, no multiply/divide). A bitstream and its
 `cold.bin` always go together.
@@ -63,36 +63,38 @@ Stop the PC link gateway (`../tools/atari816-link`) and any `tools/atari.py` com
 
 FAT32. In the root:
 
-| File | |
-| --- | --- |
-| `ATARIXL.ROM` (16384 B), `BASIC.ROM` (8192 B) | The 8-bit Atari's OS and BASIC. **Not included; you supply them.** |
-| `/SYSTEM/HORIZON.SYS` | Horizon (see `../horizon/README.md`); without it the I/O processor runs `/A816.BIN`, without both the 65C816 stays in reset |
-| `/atari.ini` | The 8-bit Atari's settings (below); optional |
-| `HDD.ATR` | Optional: mounted on D4: at every boot |
-| `ASH.CAR` | Optional: the default cartridge when `boot=ash` |
+- `ATARIXL.ROM` (16384 B), `BASIC.ROM` (8192 B): The 8-bit Atari's OS and BASIC. **Not
+  included; you supply them.**
+- `/SYSTEM/HORIZON.SYS`: Horizon (see `../horizon/README.md`); without it the I/O processor
+  runs `/A816.BIN`, without both the 65C816 stays in reset
+- `/atari.ini`: The 8-bit Atari's settings (below); optional
+- `HDD.ATR`: Optional: mounted on D4: at every boot
+- `ASH.CAR`: Optional: the default cartridge when `boot=ash`
 
 ### `/atari.ini`
 
 Read at power-on and at a full restart (mailbox SYS_RESTART 1). Horizon's Settings program
 edits it. One `key=value` per line; `#` starts a comment.
 
-| Key | Values |
-| --- | --- |
-| `ram` | `128` (130XE, the default) or `320` (RAMBO). Any other value gives 320 KB and a line on the serial log |
-| `kbdlayout` | `0` Atari key positions, `1` US PC symbols |
-| `joystick` | `1` = arrow keys are joystick 1, Left Alt is fire |
-| `scanlines` | `0` off, `1` 25%, `2` 50%, `3` 75% |
-| `hpos` | Horizontal picture position, 0 to 48 |
-| `boot` | `ash` = `/ASH.CAR` is the default cartridge |
-| `basic` | `0` = a disk in D1: boots without BASIC (OPTION held for it, what most games need); `1` (the default) = BASIC present, as on the real machine. Executables always boot without it |
-| `fastdisk` | `1` (the default) = the fast disk below; `0` = every disk access over the serial port |
+- `ram`: `128` (130XE, the default) or `320` (RAMBO). Any other value gives 320 KB and a
+  line on the serial log
+- `kbdlayout`: `0` Atari key positions, `1` US PC symbols
+- `joystick`: `1` = arrow keys are joystick 1, Left Alt is fire
+- `scanlines`: `0` off, `1` 25%, `2` 50%, `3` 75%
+- `hpos`: Horizontal picture position, 0 to 48
+- `boot`: `ash` = `/ASH.CAR` is the default cartridge
+- `basic`: `0` = a disk in D1: boots without BASIC (OPTION held for it, what most games
+  need); `1` (the default) = BASIC present, as on the real machine. Executables always boot
+  without it
+- `fastdisk`: `1` (the default) = the fast disk below; `0` = every disk access over the
+  serial port
 
-## The 8-bit Atari
+## 8-bit Atari
 
 XL/XE (NTSC, exact speed) with 128 or 320 KB, BASIC, `.atr`/`.xfd` disks on D1: to D4:,
 `.xex` executables, cartridges (raw `.rom` of 2, 4, 8 or 16 KB; `.car` of the types standard
 8/16 KB, OSS, XEGS and switchable XEGS, Atarimax 1 and 8 Mbit, SIC 128 to 512 KB, MegaCart
-16 KB to 4 MB; other `.car` types are refused), one POKEY (mono; the second POKEY, the `stereo`
+16 KB to 4 MB; other `.car` types are not supported), one POKEY (mono; the second POKEY, the `stereo`
 key of `/atari.ini` and the COVOX DACs made room for the OPL2 in REV $0C), two joysticks, keyboard. No paddles. Horizon
 loads software into it (`run FILE` in the Terminal, mailbox ops $18 to $1A) and switches to it;
 F12 returns to the desktop and freezes it. The 8-bit machine is kept at the level of
@@ -118,7 +120,7 @@ without the OS ROM; those load at the old speed. The device needs an OS with PBI
 (any XL/XE OS). `fastdisk=0` in `/atari.ini` takes it out (the OS then finds no device);
 it is read at the next cold start of the 8-bit machine.
 
-Registers, for the record: $D1FF (W) bit 0 selects the device, as the OS does around each
+Registers: $D1FF (W) bit 0 selects the device, as the OS does around each
 call; $D1FE (W) bit 0 is the request bit, which the ROM sets to the opposite of the "served"
 byte the I/O processor keeps at $DEF0; $DEF1 is the result (0 declined, 1 the bytes are at
 $DF00); the request itself is the caller's DCB at $0300. `atari.py status` counts the
@@ -144,12 +146,22 @@ python3 tools/atari.py --help                    # all commands
 
 ## Tests
 
-| What | How |
-| --- | --- |
-| 65C816 machine in simulation | `sim_a816/run.sh` (self test), `sim_a816/run.sh +prog=NAME.bin` for `bringup1_sim.bin`, `nvtest_sim.bin`, `blitlist_sim.bin`, `sampler_sim.bin`, `sprtest_sim.bin` (`+timeout_ms=3000`), `sprsceneN.bin` (`+ppm2` keeps the last frames for comparing with emu816), `BLITTEST.BIN`; `sim_a816/run_blit.sh` (random blitter test). The testbench compares every pixel of Marga's output with its own model (bitmap, scrolling, pointer, sprites); `+fixlat` gives the SDRAM's own latencies instead of random ones |
-| On the board | `make -C sw/a816`, then `tools/atari.py run816 sw/a816/X.BIN`: `A816.BIN` (self test), `BLITTEST.BIN`, `BLITLIST.BIN`, `SAMPLER.BIN`, `SPRTEST.BIN`, `SYSTEST.BIN`, `FSBENCH.BIN` (SD speed), `PCBENCH.BIN` (the same on the PC volume, needs the gateway), `TIMING.BIN` (CPU and Ali speed by access kind and video mode: emu816's memory model is calibrated against it, emu/README.md "Memory timing"); `PLAYDEMO.BIN`, `SPLIT.BIN`, `SPRDEMO.BIN` and `SCROLLDEMO.BIN` are for ears and eyes. The list is at the top of `sw/a816/Makefile` |
-| The folder disk (host) | `test/fdisk_host/run_tests.sh` |
-| PC link framing (host) | `test/pclink_host/run_tests.py` |
+- 65C816 machine in simulation: `sim_a816/run.sh` (self test), `sim_a816/run.sh
+  +prog=NAME.bin` for `bringup1_sim.bin`, `nvtest_sim.bin`, `blitlist_sim.bin`,
+  `sampler_sim.bin`, `sprtest_sim.bin` (`+timeout_ms=3000`), `sprsceneN.bin` (`+ppm2` keeps
+  the last frames for comparing with emu816), `BLITTEST.BIN`; `sim_a816/run_blit.sh` (random
+  blitter test). The testbench compares every pixel of Marga's output with its own model
+  (bitmap, scrolling, pointer, sprites); `+fixlat` gives the SDRAM's own latencies instead
+  of random ones
+- On the board: `make -C sw/a816`, then `tools/atari.py run816 sw/a816/X.BIN`: `A816.BIN`
+  (self test), `BLITTEST.BIN`, `BLITLIST.BIN`, `SAMPLER.BIN`, `SPRTEST.BIN`, `SYSTEST.BIN`,
+  `FSBENCH.BIN` (SD speed), `PCBENCH.BIN` (the same on the PC volume, needs the gateway),
+  `TIMING.BIN` (CPU and Ali speed by access kind and video mode: emu816's memory model is
+  calibrated against it, emu/README.md "Memory timing"); `PLAYDEMO.BIN`, `SPLIT.BIN`,
+  `SPRDEMO.BIN` and `SCROLLDEMO.BIN` are demonstrations, checked by listening and watching. The list is at the top of
+  `sw/a816/Makefile`
+- The folder disk (host): `test/fdisk_host/run_tests.sh`
+- PC link framing (host): `test/pclink_host/run_tests.py`
 
 ## Pins
 
@@ -174,32 +186,47 @@ Never wire inputs to pins 69-76 and 79 (driven by the BL616) or 51 (PLL clock in
 > **Bitstreams are non-commercial.** The 8-bit Atari core inside is offered by its author for
 > non-commercial use only, so this directory and any bitstream built from it may be used and
 > shared for **non-commercial purposes only**. Commercial use needs permission from Mark Watson
-> (`scrameta@gmail.com`) and from the other copyright holders whose licences do not already
-> allow it. **[`LICENSE`](LICENSE) is the authoritative, per-component map.**
+> and from the other copyright holders whose licences do not already allow it. **[`LICENSE`](LICENSE) is the authoritative, per-component map.**
 
-| Component | Author | Terms |
-|---|---|---|
-| **Atari 8-bit core**, [Atari800_MiSTer](https://github.com/MiSTer-devel/Atari800_MiSTer) / atari800core (`rtl/`) | Mark Watson | Custom **non-commercial** notice ([text](LICENSES/Mark-Watson-NonCommercial.txt)) |
-| **6502 core**, FPGA 64 `cpu_65xx.vhd` | Peter Wendrich | "All Rights Reserved" header, reaches us via the core above |
-| **Cartridge bank switching, freezer, PBI ROM** | Matthias Reichl, Wojciech Mostowski | LGPL v2-or-later |
-| **65C816 CPU core** (`src/a816/P65C816.v` and its parts), SNES_FPGA via [snestang](https://github.com/nand2mario/snestang); `P65C816.v` and `AddrGen.v` modified here | srg320, gyurco, nand2mario | **GPL-3.0** |
-| **OPL2 FM synthesizer** (`src/a816/jtopl/`), [JTOPL](https://github.com/jotego/jtopl) | Jose Tejada Gomez (jotego) | **GPL-3.0-or-later** |
-| **I/O subsystem** (PicoRV32 host, SPI), adapted from [nestang](https://github.com/nand2mario/nestang) | nand2mario | **GPL-3.0** |
-| **Firmware base** (`firmware/`), [firmware-picorv32](https://github.com/nand2mario/firmware-picorv32) | nand2mario | No licence file upstream; ships in NESTang under GPL-3.0 and is treated as such here |
-| **PicoRV32**, [YosysHQ/picorv32](https://github.com/YosysHQ/picorv32) | Claire Xenia Wolf | ISC |
-| **Simple UART** (`src/simpleuart.v`, PicoSoC) | Claire Xenia Wolf | ISC |
-| **SD-card SPI driver** (`firmware/spi_sd.c`), [learn-fpga](https://github.com/BrunoLevy/learn-fpga) | Bruno Levy, nand2mario | BSD 3-Clause ([text](LICENSES/BSD-3-Clause-learn-fpga.txt)) |
-| **FatFs** (`firmware/fatfs/`) | ChaN | 1-clause BSD |
-| **Low-latency SDRAM controller**, [sdram-tang-nano-20k](https://github.com/nand2mario/sdram-tang-nano-20k) | nand2mario | Apache 2.0 |
-| **HDMI library**, [hdl-util/hdmi](https://github.com/hdl-util/hdmi) | Sameer Puri | MIT **or** Apache 2.0 |
-| **Atari palette** (tables in `gtia_palette.vhdl`, `src/nvc_palette.hex`) | Avery Lee (Altirra) | default palettes of the Altirra emulator, credited |
-| **Atari816 hardware and the Tang Nano 20K port**: everything else | Carlos Bravo | **CC BY-NC-SA 4.0 _or_ GPL-3.0-or-later**, your choice ([`LICENSE-PORT`](LICENSE-PORT)) |
+- Atari 8-bit core, [Atari800_MiSTer](https://github.com/MiSTer-devel/Atari800_MiSTer) /
+  atari800core (`rtl/`) (Mark Watson): Custom **non-commercial** notice
+  ([text](LICENSES/Mark-Watson-NonCommercial.txt))
+- 6502 core, FPGA 64 `cpu_65xx.vhd` (Peter Wendrich): "All Rights Reserved" header,
+  included via the core above
+- Cartridge bank switching, freezer, PBI ROM (Matthias Reichl, Wojciech Mostowski): LGPL
+  v2-or-later
+- 65C816 CPU core (`src/a816/P65C816.v` and its parts), SNES_FPGA via
+  [snestang](https://github.com/nand2mario/snestang); `P65C816.v` and `AddrGen.v` modified
+  here (srg320, gyurco, nand2mario): **GPL-3.0**
+- OPL2 FM synthesizer (`src/a816/jtopl/`), [JTOPL](https://github.com/jotego/jtopl)
+  (Jose Tejada Gomez (jotego)): **GPL-3.0-or-later**
+- I/O subsystem (PicoRV32 host, SPI), adapted from
+  [nestang](https://github.com/nand2mario/nestang) (nand2mario): **GPL-3.0**
+- Firmware base (`firmware/`),
+  [firmware-picorv32](https://github.com/nand2mario/firmware-picorv32) (nand2mario): No
+  licence file upstream; ships in NESTang under GPL-3.0 and is treated as such here
+- PicoRV32, [YosysHQ/picorv32](https://github.com/YosysHQ/picorv32) (Claire Xenia Wolf):
+  ISC
+- Simple UART (`src/simpleuart.v`, PicoSoC) (Claire Xenia Wolf): ISC
+- SD-card SPI driver (`firmware/spi_sd.c`),
+  [learn-fpga](https://github.com/BrunoLevy/learn-fpga) (Bruno Levy, nand2mario): BSD
+  3-Clause ([text](LICENSES/BSD-3-Clause-learn-fpga.txt))
+- FatFs (`firmware/fatfs/`) (ChaN): 1-clause BSD
+- Low-latency SDRAM controller,
+  [sdram-tang-nano-20k](https://github.com/nand2mario/sdram-tang-nano-20k) (nand2mario):
+  Apache 2.0
+- HDMI library, [hdl-util/hdmi](https://github.com/hdl-util/hdmi) (Sameer Puri): MIT
+  **or** Apache 2.0
+- Atari palette (tables in `gtia_palette.vhdl`, `src/nvc_palette.hex`) (Avery Lee
+  (Altirra)): default palettes of the Altirra emulator, credited
+- Atari816 hardware and the Tang Nano 20K port: everything else (Carlos Bravo): **CC
+  BY-NC-SA 4.0 _or_ GPL-3.0-or-later**, your choice ([`LICENSE-PORT`](LICENSE-PORT))
 
 `sdram_nestang.v` is nand2mario's controller with a 32-bit masked-write path and half-rate
 BL2 burst reads added. `rtl/common/a8core/antic.vhdl` carries a one-line fix to an upstream
 ANTIC bug (mode-8 HSCROL) and other files under `rtl/` were changed for the Atari816; as
 derived works they stay under Mark Watson's terms.
 
-The user manual of the 8-bit port this hardware grew from lives in that port's own repository.
+The user manual of the 8-bit port this hardware is based on is in that port's own repository.
 Full licence texts are in [`LICENSES/`](LICENSES/). Every source file's own header notice is
 authoritative for that file; please keep them intact.

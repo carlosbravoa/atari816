@@ -11,7 +11,7 @@ void __hui_fatal(const char *msg, unsigned what)
     if (what == 0)
         fprintf(stderr, "hui: %s: not in the code bank: give the controls library a global, "
                 "static or malloc'd object or a string constant, not a local variable "
-                "(sdk/docs/c/apps.md, \"The rule\")\n", msg);
+                "(sdk/docs/c/apps.md, \"Pointers and the code bank\")\n", msg);
     else
         fprintf(stderr, "hui: %s: a control routine called inside a callback (a list's "
                 "row function, the copy callback): a callback may only draw\n", msg);

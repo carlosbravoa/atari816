@@ -55,21 +55,21 @@ CSS = os.path.join(HERE, "manual", "style.css")
 # The first page is the front page (index.html). Add a page here to publish it; read it
 # first: the site may be public while the repository is not.
 MANIFEST = [
-    ("Start here", [
-        ("sdk/docs/README.md", "The SDK manual"),
-        ("README.md", "The project"),
+    ("Introduction", [
+        ("sdk/docs/README.md", "SDK manual"),
+        ("README.md", "Project"),
         ("sdk/docs/getting-started.md", "Getting started"),
     ]),
     ("Architecture and components", [
-        ("Docs/architecture/README.md", "The whole system"),
+        ("Docs/architecture/README.md", "Overview"),
         ("Docs/architecture/hardware.md", "Hardware"),
         ("Docs/architecture/horizon.md", "Horizon"),
-        ("Docs/architecture/emulator.md", "The emulator"),
-        ("Docs/architecture/sdk.md", "The SDK"),
-        ("Docs/architecture/solid.md", "What makes it solid"),
+        ("Docs/architecture/emulator.md", "Emulator"),
+        ("Docs/architecture/sdk.md", "SDK"),
+        ("Docs/architecture/verification.md", "Verification"),
         ("Docs/01-architecture-design.md", "Architecture design"),
         ("Docs/02-register-spec.md", "Register specification"),
-        ("horizon/ABI.md", "Horizon's ABI"),
+        ("horizon/ABI.md", "Horizon ABI"),
     ]),
     ("Programming in C", [
         ("sdk/docs/c/getting-started.md", "Getting started with C"),
@@ -77,8 +77,8 @@ MANIFEST = [
         ("sdk/docs/c/games.md", "Games: hgame"),
         ("sdk/docs/c/porting.md", "Porting C"),
         ("sdk/docs/c/reference.md", "C reference"),
-        ("sdk/docs/c/compiler.md", "The compiler, cc816"),
-        ("sdk/docs/c/library.md", "The C library"),
+        ("sdk/docs/c/compiler.md", "Compiler (cc816)"),
+        ("sdk/docs/c/library.md", "C library"),
         ("sdk/docs/c/syscalls.md", "Syscalls from C"),
     ]),
     ("Programming in assembly", [
@@ -86,16 +86,16 @@ MANIFEST = [
         ("sdk/docs/reference/program.md", "Programs"),
         ("sdk/docs/reference/system.md", "Tasks, time, memory"),
         ("sdk/docs/reference/files.md", "Files and folders"),
-        ("sdk/docs/reference/internet.md", "The internet"),
-        ("sdk/docs/reference/windows.md", "The window system"),
+        ("sdk/docs/reference/internet.md", "Internet"),
+        ("sdk/docs/reference/windows.md", "Window system"),
         ("sdk/docs/reference/drawing.md", "Drawing"),
-        ("sdk/docs/reference/controls.md", "The controls library"),
+        ("sdk/docs/reference/controls.md", "Controls library"),
         ("sdk/docs/reference/ulib.md", "ulib and macros"),
         ("sdk/docs/reference/sound.md", "Sound"),
-        ("sdk/docs/reference/classic.md", "The classic Atari"),
+        ("sdk/docs/reference/classic.md", "Classic Atari"),
         ("sdk/docs/reference/printing.md", "Printing"),
         ("sdk/docs/reference/games.md", "Games calls"),
-        ("sdk/docs/reference/hardware.md", "The hardware"),
+        ("sdk/docs/reference/hardware.md", "Hardware"),
         ("sdk/docs/reference/performance.md", "Performance"),
         ("sdk/docs/reference/game-patterns.md", "Game patterns"),
         ("sdk/docs/reference/limits.md", "Limits"),
@@ -104,7 +104,7 @@ MANIFEST = [
         ("sdk/docs/tools.md", "Tools"),
         ("sdk/docs/testing.md", "Testing"),
         ("sdk/docs/apps.md", "Apps and packaging"),
-        ("emu/README.md", "emu816, the emulator"),
+        ("emu/README.md", "emu816"),
     ]),
     ("Ports", [
         ("ports/digger/README.md", "Digger"),
@@ -117,11 +117,11 @@ MANIFEST = [
         ("ports/xcom/README.md", "X-COM (XCOM-XT)"),
         ("ports/skyroads/README.md", "SkyRoads (experiment)"),
     ]),
-    ("Hardware and the PC link", [
-        ("core/README.md", "The FPGA core"),
+    ("Hardware and PC link", [
+        ("core/README.md", "FPGA core"),
         ("core/KNOWN_ISSUES.md", "Known issues"),
-        ("Docs/04-pc-link.md", "The PC link protocol"),
-        ("tools/README.md", "The PC link gateway"),
+        ("Docs/04-pc-link.md", "PC link protocol"),
+        ("tools/README.md", "PC link gateway"),
     ]),
 ]
 
@@ -646,7 +646,7 @@ class Site:
 PAGE = """<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>%(title)s &mdash; %(brand)s manual</title>
+<title>%(title)s | %(brand)s manual</title>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;600&amp;family=IBM+Plex+Mono:wght@400;500&amp;display=swap">
 <link rel="stylesheet" href="style.css"></head>
 <body>

@@ -384,7 +384,7 @@ Build a port once with `-Wall` and read every warning.
 | `-w`, `-Wall`, `-Werror`, `-Wno-NAME`, `-WNAME` | warnings |
 | `-fsigned-char` | plain `char` signed |
 | `-fargs-right-to-left` | a call's arguments evaluated right to left (DOS's compilers' order; default left to right); the stack layout is the same |
-| `-ffar-wrap` | far pointer arithmetic on the offset alone, the bank never changes (DOS's far pointers; reference.md "The far data model") |
+| `-ffar-wrap` | far pointer arithmetic on the offset alone, the bank never changes (DOS's far pointers; reference.md "Far data model") |
 | `--code small\|large` | the code model (default `$HZ_CODE`, else small) |
 | `--data near\|far` | the data model (default `$HZ_DATA`, else near); far needs `--code large`: plain data pointers 32 bits (DOS's large model, below) |
 | `-fdos-keywords` | `far`, `near`, `huge` are keywords (`__far`, `__near`, `__far`); also `-fimplicit-int` and `-fextra-args` (DOS code is C89) |

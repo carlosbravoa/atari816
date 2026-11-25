@@ -379,7 +379,7 @@ int hz_restart(unsigned full);
 /** sync (SYS_SYNC, $0B): Close every open file and flush the card; flags bit 0: end every other program first.
  *  [flags: A] */
 int hz_sync(unsigned flags);
-/** sysreq (SYS_SYSREQ, $0C): Ask the Desktop to shut down (SR_SHUTDOWN), restart (SR_RESTART) or fully restart (SR_FULLRESTART); (0.31) SR_APPS: the apps changed, the Desktop reads its Programs menu again.
+/** sysreq (SYS_SYSREQ, $0C): Request a shutdown (SR_SHUTDOWN), a restart (SR_RESTART) or a full restart (SR_FULLRESTART) from the Desktop; (0.31) SR_APPS: the apps changed, and the Desktop reads its Programs menu again.
  *  [what: A] */
 int hz_sysreq(unsigned what);
 /** time_get (SYS_TGET, $0D): The clock: seconds since 2000-01-01 00:00; hz_y = CLK_NONE / CLK_SAVED / CLK_SET (how it was set).
@@ -388,7 +388,7 @@ long hz_time_get(void);
 /** time_set (SYS_TSET, $0E): Set the clock (state CLK_SAVED or CLK_SET).
  *  [secs: AX32, state: Y] */
 int hz_time_set(long secs, unsigned state);
-/** vsync (SYS_VSYNC, $0F): Wait for the next vertical blank (60 Hz) -> the frame counter. Also waits for the caller's draw list.
+/** vsync (SYS_VSYNC, $0F): Block until the next vertical blank (60 Hz) -> the frame counter. Also blocks until the caller's draw list is done.
  *  [no arguments] */
 unsigned hz_vsync(void);
 /** bank_alloc (SYS_BALLOC, $10): A fresh 64 KB bank owned by the task -> its number. ENOMEM when none is left.
@@ -433,7 +433,7 @@ int hz_rename(const hz_renameblk *blk);
 /** spawn (SYS_SPAWN, $30): Start a program -> task id. Returns once it is loaded (load errors come here).
  *  [blk: XY] */
 int hz_spawn(const hz_spawnblk *blk);
-/** wait (SYS_WAIT, $31): Wait for a child to end -> its exit code (the low 15 bits; see the docs for $FF80 and $FF00+cause).
+/** wait (SYS_WAIT, $31): Block until a child ends -> its exit code (the low 15 bits; see the docs for $FF80 and $FF00+cause).
  *  [task: A] */
 int hz_wait(unsigned task);
 /** kill (SYS_KILL, $32): End a task (it exits with $FF80).
@@ -466,7 +466,7 @@ int hz_port_close(unsigned port);
 /** input_claim (SYS_ICLAIM, $50): Take the keyboard (EAGAIN if another task holds it).
  *  [no arguments] */
 int hz_input_claim(void);
-/** input_read (SYS_IREAD, $51): Wait for a key or mouse event -> A (key: HID usage; mouse: $0100 | buttons; wheel: $0200); hz_x, hz_y as in ABI.md ("Mouse").
+/** input_read (SYS_IREAD, $51): Block until a key or mouse event arrives -> A (key: HID usage; mouse: $0100 | buttons; wheel: $0200); hz_x, hz_y as in ABI.md ("Mouse").
  *  [no arguments; out: hz_x hz_y] */
 unsigned hz_input_read(void);
 /** input_release (SYS_IRELEASE, $52): Give the keyboard back.
@@ -547,7 +547,7 @@ int hz_win_event(unsigned poll, hz_event *ev);
 /** win_twidth (SYS_WTWIDTH, $76): The width in pixels of s in a font (0 UI, 1 fixed 8x12).
  *  [font: A, s: XY] */
 unsigned hz_win_twidth(unsigned font, const char *s);
-/** ws_sync (SYS_WSSYNC, $77): Wait until the screen shows everything drawn so far.
+/** ws_sync (SYS_WSSYNC, $77): Block until everything drawn so far is on the screen.
  *  [no arguments] */
 int hz_ws_sync(void);
 /** win_move (SYS_WMOVE, $78): Move a window.
@@ -661,7 +661,7 @@ int hz_pal_alloc(unsigned count, unsigned first);
 /** draw_list (SYS_DRAWLIST, $9C): Run count (1-128) draw-list records with the blitter -> records drawn. Returns at once: see list_wait.
  *  [win: A.lo, count: A.hi, r: XY] */
 int hz_draw_list(unsigned win, unsigned count, const hz_drawrec *r);
-/** list_wait (SYS_LISTWAIT, $9D): 0: wait until the caller's draw list is done; 1: ask -> 1 while it runs.
+/** list_wait (SYS_LISTWAIT, $9D): 0: block until the caller's draw list is done; 1: poll -> 1 while it runs.
  *  [ask: A] */
 unsigned hz_list_wait(unsigned ask);
 /** frame (SYS_FRAME, $9E): The frame counter (+1 every vertical blank; REV $09).

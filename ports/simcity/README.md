@@ -62,19 +62,27 @@ meltdown, air crash (and upstream's random ones unless Options > Disasters is of
 options: auto budget, auto bulldoze, disasters, sound, auto go-to (the view jumps to where
 something happens), animation. Starting it with a `.CTY` (a double click in Files) loads it.
 
-## How it is made
+## Implementation
 
-| | |
-| --- | --- |
-| `engine/` | upstream's C (`src/sim`), cities, scenarios, strings, tiles, sprites, sounds; our fork (engine/FORK.md: what was taken, every change) |
-| `src/port.h`, `proto.h`, `hooks.[ch]` | what upstream took from X11 and Tcl; one tick (`port_tick`: upstream's sim_loop once); the state's checksum |
-| `src/simtest.c` | the simulator alone: the same program on the Atari816 and the PC |
-| `src/game.c` | the start, the loop, the mouse and keys, the tools, Tcl's commands from the engine |
-| `src/view.c` | the city: a ring of tile slots in the framebuffer that Marga scrolls (horizontal and vertical wrap, a split for the panel); each frame the slots whose tile changed are drawn from the tile sheet by the blitter. The moving things are 4 bpp hardware sprites (a 48 x 48 one is four), and so is the tool's frame |
-| `src/panel.c`, `dialogs.c` | the panel; the menus and windows, drawn on a page of the framebuffer shown instead of the city (over a copy of it) |
-| `src/data.c`, `tools/mkdata.py` | the art: upstream's XPM pictures made into a sheet of 4096 x 64 (the 960 tiles of 16 x 16), one of 8 x 8 tiles (each 2 x 2 block's commonest colour), the overview's 3 x 3 tiles, the sprites at 4 bpp (full and half size); upstream's 16-bit 22 kHz sounds as 8-bit 11 kHz WAV |
-| `src/fast.s` | the tile animation and the random numbers in assembly |
-| `tools/host16.py` | the host16 twin's sources (int -> short; from ports/xcom) |
+- `engine/`: upstream's C (`src/sim`), cities, scenarios, strings, tiles, sprites, sounds;
+  our fork (engine/FORK.md: what was taken, every change)
+- `src/port.h`, `proto.h`, `hooks.[ch]`: what upstream took from X11 and Tcl; one tick
+  (`port_tick`: upstream's sim_loop once); the state's checksum
+- `src/simtest.c`: the simulator alone: the same program on the Atari816 and the PC
+- `src/game.c`: the start, the loop, the mouse and keys, the tools, Tcl's commands from the
+  engine
+- `src/view.c`: the city: a ring of tile slots in the framebuffer that Marga scrolls
+  (horizontal and vertical wrap, a split for the panel); each frame the slots whose tile
+  changed are drawn from the tile sheet by the blitter. The moving things are 4 bpp
+  hardware sprites (a 48 x 48 one is four), and so is the tool's frame
+- `src/panel.c`, `dialogs.c`: the panel; the menus and windows, drawn on a page of the
+  framebuffer shown instead of the city (over a copy of it)
+- `src/data.c`, `tools/mkdata.py`: the art: upstream's XPM pictures made into a sheet of
+  4096 x 64 (the 960 tiles of 16 x 16), one of 8 x 8 tiles (each 2 x 2 block's commonest
+  colour), the overview's 3 x 3 tiles, the sprites at 4 bpp (full and half size);
+  upstream's 16-bit 22 kHz sounds as 8-bit 11 kHz WAV
+- `src/fast.s`: the tile animation and the random numbers in assembly
+- `tools/host16.py`: the host16 twin's sources (int -> short; from ports/xcom)
 
 Why 640 x 360: the original ran on 640 x 480-class screens with 16-pixel tiles; at 640 x 360
 the text (8 x 10) and the menus are as legible as upstream's, the mouse pointer is the

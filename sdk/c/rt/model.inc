@@ -1,6 +1,6 @@
 ; model.inc - the code model, for the C library's assembly (ca65). hcc builds the library
 ; twice: for the small code model (JSR/RTS, as always) and for the large one (hcc --code
-; large: ca65 -D __CC816_LARGE__; JSL/RTL, sdk/docs/c/reference.md, "The two code models").
+; large: ca65 -D __CC816_LARGE__; JSL/RTL, sdk/docs/c/reference.md, "Code models").
 ;
 ;   ARGS     the first argument's stack offset in a C-callable routine: 3 (JSR's return
 ;            address is 2 bytes), 4 in the large code model (JSL's is 3)

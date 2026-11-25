@@ -2,8 +2,8 @@
 
 Every syscall is `sys NAME` (`COP #n`) with A, X, Y 16-bit. Carry clear = OK; carry set =
 error, A = the error code. X, Y, D, DBR come back unchanged unless listed under "Out".
-Pointers are X = offset, Y = bank (`ptr label`). The source of truth is `horizon/ABI.md`;
-`make check` compares this reference with `horizon/user/horizon.inc` and the kernel.
+Pointers are X = offset, Y = bank (`ptr label`). The authoritative definition is
+`horizon/ABI.md`.
 
 The examples assume the usual `.a16` / `.i16` and these names from your program: `buf`
 (256 bytes), `blk` (16), `ev` (8), `path` (128), `iob` (6) in BSS, `win`, `fh`, `n`, `t0`,
@@ -22,8 +22,15 @@ The examples assume the usual `.a16` / `.i16` and these names from your program:
 | `ENOSYS` | 7 | Unknown syscall |
 | `ERUNNING` | 8 | A single-instance program runs already (its windows were raised) |
 | `ENODEV` | 9 | (0.17) The hardware is not there: the sample calls without Lau (REV < $0A) |
-| `ECANCELED` | 10 | (0.21) User side only (the kernel never returns it): a copy cancelled by the user (the controls library's `ui_cptree` / `ui_mvtree`) |
-| `EIO` | $40 | + the I/O processor's result: $44 no such file, $45 no such path, $46 bad name, $47 denied, $48 exists, $52 too many open files; $C0 + n for the classic ops; (0.20) $C7 no PC link, $C8 the PC link was lost, $C9 not the same volume (the PC volume, `/PC:`); (0.22) $CA-$D3 the internet (`E_NOSVC` ... `E_NET`: [internet.md](internet.md)) |
+| `ECANCELED` | 10 | (0.21) A copy cancelled by the user (below) |
+| `EIO` | $40 | + the I/O processor's result (below) |
+
+- `ECANCELED` is user side only (the kernel never returns it): the controls library's
+  `ui_cptree` / `ui_mvtree` return it.
+- `EIO` + the I/O processor's result: $44 no such file, $45 no such path, $46 bad name,
+  $47 denied, $48 exists, $52 too many open files; $C0 + n for the classic ops; (0.20) $C7
+  no PC link, $C8 the PC link was lost, $C9 not the same volume (the PC volume, `/PC:`);
+  (0.22) $CA-$D3 the internet (`E_NOSVC` ... `E_NET`: [internet.md](internet.md)).
 
 ## Tasks
 
@@ -59,7 +66,7 @@ Out: A = your task id (1-62).
 ### $30 spawn (SYS_SPAWN)
 In: X, Y = block `{u24 path, u24 args, u8 priority}`. Out: A = the child's task id.
 `args` = a zero-terminated string of at most 127 characters (0 = none). Priority 0
-(highest) to 3; normal programs use 1. Bit 7 (`SP_DETACH`) = no parent waits: the child is
+(highest) to 3; normal programs use 1. Bit 7 (`SP_DETACH`) = no parent calls wait: the child is
 freed at its exit. Returns once the program is loaded. Errors: ENOMEM (no banks), EAGAIN
 (no task slot, 16 at most), $44/$45 (no such file), EINVAL (not a Horizon program),
 ERUNNING (single instance, already running). ulib's `spawn` and ui.lib's `ui_launch` wrap it.
@@ -159,8 +166,8 @@ blitter, $07 POKEY's sound). No side effects. Before 0.29 the call does not exis
 @nolau:
 @old:
 ```
-To refuse to run where something is missing, a program puts `HZ_NEEDS` (`needs.inc`) at
-its start instead: it also works on Horizons older than 0.29 and shows the message. See
+To stop a program at its start when something is missing, put `HZ_NEEDS` (`needs.inc`)
+at its start instead: it also works on Horizon before 0.29 and shows the message. See
 [../apps.md](../apps.md), "What a program needs".
 
 ## Time
@@ -196,7 +203,7 @@ sleeping: see [windows.md](windows.md), or `SYS_VSYNC` below.
 ### $0F vsync (SYS_VSYNC)
 Out: A = the frame counter. Blocks until the next vertical blank begins (60.03 a second).
 Horizon 0.18: from REV $09 A is Marga's frame counter (as `SYS_FRAME`: a difference of more
-than 1 between two results is a missed frame), and the call also waits until your draw list
+than 1 between two results is a missed frame), and the call also blocks until your draw list
 is done. A game that calls it, then updates and draws, moves once a frame without tearing.
 Interruptible by kill. The details, `frame` and WE_VBL: [games.md](games.md), "Frame sync".
 ```asm
@@ -323,7 +330,7 @@ so a console program can read keys at once. Key events: A = HID usage ($04 = A .
 $1E-$27 = 1-9 0, $28 Enter, $29 Esc, $2A Backspace, $2B Tab, $2C Space, $4F-$52 Right,
 Left, Down, Up), X = modifiers | down << 8 (modifier bits: 0 left ctrl, 1 left shift, 2
 left Alt, 3 left GUI, 4-7 the right ones). ulib's `key_ascii` turns an event into ASCII
-(US layout), `read_char` waits for a character, `getline` reads a line with editing.
+(US layout), `read_char` blocks until a character is typed, `getline` reads a line with editing.
 
 ### $50 input_claim (SYS_ICLAIM)
 Take the keyboard (the queue is emptied). Nothing changes if you hold it already. EAGAIN if
@@ -419,7 +426,7 @@ In: A = port, X, Y = 16-byte message. EAGAIN if its queue is full, EINVAL if not
 
 ### $42 recv (SYS_RECV)
 In: A = your port, X, Y = 16-byte buffer. Blocks while the queue is empty. EINVAL if the
-port is not yours. Horizon 0.26: A = port | `RV_POLL` ($8000) never waits: EAGAIN when the
+port is not yours. Horizon 0.26: A = port | `RV_POLL` ($8000) never blocks: EAGAIN when the
 queue is empty (a window program reads its port at every event or vertical blank).
 ```asm
         lda     z:n
@@ -447,7 +454,7 @@ In: A = your port. Queued messages are dropped.
 ### $0A restart (SYS_RESTART)
 In: A = 0 restart Horizon, 1 full restart (the classic machine and /atari.ini too). Closes
 every file and flushes the card first. Does not return when it works. Programs should
-ask the Desktop instead (`SYS_SYSREQ`), which lets every program save first.
+use `SYS_SYSREQ` instead: the Desktop then lets every program save first.
 ```asm
         lda     #SR_RESTART
         sys     SYS_SYSREQ      ; ask the Desktop
@@ -457,9 +464,9 @@ ask the Desktop instead (`SYS_SYSREQ`), which lets every program save first.
 :
 ```
 
-(0.31) `SR_APPS` (4) asks nothing of the user: it tells the Desktop that the apps changed
-(an installer, a tool that copies an app folder into `/APPS`); the Desktop reads its
-Programs menu again within a second. EINVAL before 0.31 and without a Desktop: ignore it.
+(0.31) `SR_APPS` (4) shows nothing to the user: it notifies the Desktop that the apps
+changed (an installer, a tool that copies an app folder into `/APPS`). The Desktop reads
+its Programs menu again within a second. EINVAL before 0.31 and without a Desktop: ignore it.
 
 ### $0B sync (SYS_SYNC)
 In: A bit 0 = end every other program first (shut down). Closes every open file and has
@@ -471,8 +478,8 @@ result.
 ```
 
 ### $0C sysreq (SYS_SYSREQ)
-In: A = `SR_SHUTDOWN` 1, `SR_RESTART` 2, `SR_FULLRESTART` 3. Asks the Desktop, which asks
-every program to close (WE_CLOSE) and then restarts or shuts down. EINVAL without the
+In: A = `SR_SHUTDOWN` 1, `SR_RESTART` 2, `SR_FULLRESTART` 3. Passes the request to the
+Desktop, which sends every program WE_CLOSE and then restarts or shuts down. EINVAL without the
 Desktop.
 ```asm
         lda     #SR_SHUTDOWN
@@ -482,24 +489,35 @@ Desktop.
 ### $87 setting (SYS_SETTING)
 In: A = id, X = new value ($FFFF = only read). Out: A = the old value. Ids:
 
-| Id | Setting |
-| --- | --- |
-| 0 | mouse speed 1-4 |
-| 1 | the alert (beep) volume 0-15, 0 silent (POKEY: beeps and chimes) |
-| 2 | key repeat delay in 10 ms ticks (0 = no repeat; default 40) |
-| 3 | key repeat interval in ticks (default 5) |
-| 4 | (Horizon 0.18) the sound volume 0-15: Lau's master volume, volume x 17 (default 8; before 0.18 Lau followed setting 1) |
-| 5 | (Horizon 0.24) the screen saver's delay in seconds (0 = off; default 300) |
-| 6 | (Horizon 0.24) the seconds since the last key, mouse or joystick input, to any program (it stays 0 while the classic Atari is shown, a program is in full-screen mode, a mouse button is held or a menu is open; stops at 65535). Read it only (writing it is a test aid) |
-| 7 | (Horizon 0.31, read only) not 0 while the desktop is not on the screen: a full-screen program's screen or the classic Atari is shown. A program that polls the card on a timer (a status, a folder) skips it while this is set: the card is one queue, and the program in front should not wait behind background requests |
-| 8 | (Horizon 0.31, read only) a count the kernel moves at every request that may change the card or the PC volume (open in a writing mode, the close of a handle opened so, mkdir, delete, rename, by any program; it wraps). A program that shows a folder or a status reads it on its timer and asks the card again only when the count moved (the Desktop does so for /Desktop and the print jobs: a job written to `/PRN:NAME` moves it at its close). Files the I/O processor writes by itself (the PC link's developer upload, the classic Atari's print jobs) do not move it |
+- 0: mouse speed 1-4.
+- 1: the alert (beep) volume 0-15, 0 silent (POKEY: beeps and chimes).
+- 2: key repeat delay in 10 ms ticks (0 = no repeat; default 40).
+- 3: key repeat interval in ticks (default 5).
+- 4: (Horizon 0.18) the sound volume 0-15: Lau's master volume, volume x 17 (default 8;
+  before 0.18 Lau followed setting 1).
+- 5: (Horizon 0.24) the screen saver's delay in seconds (0 = off; default 300).
+- 6: (Horizon 0.24) the seconds since the last key, mouse or joystick input, to any
+  program. It stays 0 while the classic Atari is shown, a program is in full-screen mode,
+  a mouse button is held or a menu is open; it stops at 65535. Read it only (writing it
+  is a test aid).
+- 7: (Horizon 0.31, read only) not 0 while the desktop is not on the screen: a
+  full-screen program's screen or the classic Atari is shown. A program that polls the
+  card on a timer (a status, a folder) skips the poll while this is set: the card has one
+  request queue, and the program in front should not be delayed by background requests.
+- 8: (Horizon 0.31, read only) a count the kernel increments at every request that may
+  change the card or the PC volume (open in a writing mode, the close of a handle opened
+  so, mkdir, delete, rename, by any program; it wraps). A program that shows a folder or
+  a status reads it on its timer and reads the card again only when the count changed
+  (the Desktop does so for /Desktop and the print jobs: a job written to `/PRN:NAME`
+  changes it at its close). Files the I/O processor writes by itself (the PC link's
+  developer upload, the classic Atari's print jobs) do not change it.
 
 These are the user's settings (Settings saves them): change them only in a settings
-program. A game reads setting 4 only if it wants to show it; Lau applies it to every voice.
-A program may read setting 6 to notice that nobody is there (pause a demo, dim its own
-display); the Desktop uses 5 and 6 to start the screen saver (`/SYSTEM/SAVER.PRG`, Horizon
-0.24). A full-screen game never sees the screen saver: while it is in full-screen mode the
-count stays 0. Ids 7 and 8 only read: a value given for them is ignored.
+program. A game reads setting 4 only to display it: Lau applies it to every voice.
+A program may read setting 6 to detect that the machine is idle (pause a demo, dim its own
+display). The Desktop uses 5 and 6 to start the screen saver (`/SYSTEM/SAVER.PRG`, Horizon
+0.24). The screen saver does not start over a full-screen game: in full-screen mode the
+count stays 0. Ids 7 and 8 are read only: a value given for them is ignored.
 ```asm
         lda     #2              ; key repeat delay
         ldx     #$FFFF          ; read only

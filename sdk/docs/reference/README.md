@@ -1,30 +1,41 @@
 # Programmer's reference
 
-The interface between Horizon and its programs for assembly (written for Horizon 0.18,
-brought up to 0.31: every syscall the kernel has is here, `make -C sdk check` makes sure),
-reorganised by topic with an example for each call. The same calls from C:
-[../c/syscalls.md](../c/syscalls.md); the manual's front page: [../README.md](../README.md). The source of truth is `horizon/ABI.md` (and the sources it names);
-`make -C sdk check` compares this reference with `horizon/user/horizon.inc`, `ui.inc` and
-the kernel's syscall table, and assembles every example.
+The interface between Horizon 0.31 and its programs for assembly, by topic, with an
+example for each call. Every syscall of the kernel is here. The same calls from C:
+[../c/syscalls.md](../c/syscalls.md). The manual's front page: [../README.md](../README.md).
+The authoritative definition is `horizon/ABI.md` and the sources it names.
 
-| Page | Contents |
-| --- | --- |
-| [program.md](program.md) | Program format, building, memory model (banks, direct page), register widths, calling convention, start conditions, exit, faults |
-| [system.md](system.md) | Error codes; syscalls for tasks, time, memory, the console, the keyboard (console programs), message ports, restart / shut down, settings |
-| [files.md](files.md) | Files and folders |
-| [internet.md](internet.md) | (0.22) The internet through the PC link: URLs as files, tcp:// and tls:// connections, WE_NET, the error codes |
-| [windows.md](windows.md) | The window system: windows, events (focus, WE_VBL), timer, menus, pointer, clipboard, drag and drop, palette (entries of your own), terminals |
-| [drawing.md](drawing.md) | win_draw: fills, frames, lines, text, blits (plain, keyed, with stride), copy; fonts; the system palette; win_draw or a draw list |
-| [controls.md](controls.md) | The controls library (ui.lib): buttons, fields, lists, scroll bars, alerts, the file dialog |
-| [ulib.md](ulib.md) | The user library and the macros of horizon.inc |
-| [sound.md](sound.md) | beep, sound_write, POKEY and the DACs; samples on Lau; FM on the OPL2; the sound volume |
-| [classic.md](classic.md) | The classic Atari: mount, eject, boot, show; (0.23) Run in Atari, the folder disk |
-| [printing.md](printing.md) | (0.23) Printing: `/PRN:NAME` jobs, watching for new ones, PDFs on the PC |
-| [games.md](games.md) | Horizon 0.18, the games round: frame sync (vsync, frame, WE_VBL), palette entries, Marga's sprites, full-screen mode (own framebuffer, scrolling with wrap and split, raster table), draw lists; (0.19) sheets, (0.30) fill runs |
-| [hardware.md](hardware.md) | The hardware (video, blitter, sound, input, timers) and what programs can reach of it |
-| [performance.md](performance.md) | Measured costs: CPU, syscalls, drawing, board against emulator |
-| [game-patterns.md](game-patterns.md) | The game loop (frame-synchronous or timer), full screen with scrolling and sprites, windowed games with draw lists and sprites, input, art, sound effects |
-| [limits.md](limits.md) | Limits |
+- [program.md](program.md): program format, building, memory model (banks, direct page),
+  register widths, calling convention, start conditions, exit, faults.
+- [system.md](system.md): error codes; syscalls for tasks, time, memory, the console, the
+  keyboard (console programs), message ports, restart and shut down, settings.
+- [files.md](files.md): files and folders.
+- [internet.md](internet.md): (0.22) the internet through the PC link: URLs as files,
+  tcp:// and tls:// connections, WE_NET, the error codes.
+- [windows.md](windows.md): the window system: windows, events (focus, WE_VBL), timer,
+  menus, pointer, clipboard, drag and drop, palette (entries of your own), terminals.
+- [drawing.md](drawing.md): win_draw: fills, frames, lines, text, blits (plain, keyed,
+  with stride), copy; fonts; the system palette; win_draw or a draw list.
+- [controls.md](controls.md): the controls library (ui.lib): buttons, fields, lists,
+  scroll bars, alerts, the file dialog.
+- [ulib.md](ulib.md): the user library and the macros of horizon.inc.
+- [sound.md](sound.md): beep, sound_write, POKEY and the DACs; samples on Lau; FM on the
+  OPL2; the sound volume.
+- [classic.md](classic.md): the classic Atari: mount, eject, boot, show; (0.23) Run in
+  Atari, the folder disk.
+- [printing.md](printing.md): (0.23) `/PRN:NAME` jobs, watching for new ones, PDFs on the
+  PC.
+- [games.md](games.md): (0.18) frame sync (vsync, frame, WE_VBL), palette entries, Marga's
+  sprites, full-screen mode (own framebuffer, scrolling with wrap and split, raster
+  table), draw lists; (0.19) sheets; (0.30) fill runs.
+- [hardware.md](hardware.md): video, blitter, sound, input, timers, and the parts of them
+  programs can reach.
+- [performance.md](performance.md): measured costs: CPU, syscalls, drawing, board against
+  emulator.
+- [game-patterns.md](game-patterns.md): the game loop (frame-synchronous or timer), full
+  screen with scrolling and sprites, windowed games with draw lists and sprites, input,
+  art, sound effects.
+- [limits.md](limits.md): limits.
 
 ## All syscalls
 
@@ -142,6 +153,3 @@ the kernel's syscall table, and assembles every example.
 | $A1 | sheet_new | SYS_SHEETNEW | [games](games.md) |
 | $A2 | sheet_free | SYS_SHEETFREE | [games](games.md) |
 | $A3 | sheet_draw | SYS_SHEETDRAW | [games](games.md) |
-
-This table is checked too: `make check` fails if a number, a name or a constant here
-disagrees with the sources.

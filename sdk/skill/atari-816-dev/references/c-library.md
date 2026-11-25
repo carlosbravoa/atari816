@@ -3,8 +3,8 @@
 Read this when a C program uses the standard library (stdio, files, folders, time, math,
 POSIX descriptors) or calls Horizon directly (`horizon.h`: `hz_*`). The language itself
 (types, far data, stacks, warnings, hcc): references/c-language.md. Full text:
-`sdk/docs/c/reference.md` ("The C library on Horizon", "Syscalls from C", "The heap and
-the stacks"); headers `sdk/c/include/horizon.h`, `hzsys.h` (every syscall with a comment),
+`sdk/docs/c/reference.md` ("C library on Horizon", "Syscalls from C", "Heap and
+stacks"); headers `sdk/c/include/horizon.h`, `hzsys.h` (every syscall with a comment),
 `sdk/c/cc816/include/*.h`.
 
 ## I want X -> call Y

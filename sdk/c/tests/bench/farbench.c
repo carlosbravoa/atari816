@@ -1,5 +1,5 @@
-/* farbench.c - the far data model's costs (docs/c/reference.md, "The far data model":
- * "What it costs"): the same C built with near data and with far data (hcc --data far),
+/* farbench.c - the far data model's costs (docs/c/reference.md, "Far data model":
+ * "Far data costs"): the same C built with near data and with far data (hcc --data far),
  * each loop's time in milliseconds and in cycles of the 14.3 MHz clock a step.
  *   copy     while ((*d++ = *s++)) over 4,000 bytes                          (x 10)
  *   sprite   if (*s) d[k] = *s; a 32 x 40 masked sprite (bench816's shape)    (x 20)

@@ -114,7 +114,7 @@ The 6502 only ever issues 16-bit addresses. FREDDIE II translates each region th
 | $D000 to $D7FF | The real chipset; $D100 to $D1FF also holds a mailbox to the native side |
 | $D800 to $FFFF | OS image or RAM (PORTB bit 0) |
 
-A **machine profile** (800 48K with OS-B, 800XL 64K, 130XE, 1 MB XE) is just a set of values for these registers plus ROM image choices. ROM images live in write-protected banks and are shared by all sessions. ANTIC's DMA fetches go through the same map, so display lists see exactly what the CPU sees.
+A **machine profile** (800 48K with OS-B, 800XL 64K, 130XE, 1 MB XE) is just a set of values for these registers plus ROM image choices. ROM images live in write-protected banks and are shared by all sessions. ANTIC's DMA fetches go through the same map, so display lists read exactly what the CPU reads.
 
 In native mode ANTIC gets a bank register too, so native programs can use classic display lists anywhere in 16 MB.
 
@@ -150,7 +150,7 @@ Everything leaves the machine as one standard 1280x720 at 60 Hz raster. The desk
 
 ## Input, storage and networking
 
-For v1, the I/O processor is the PicoRV32 already inside the Tang Nano 20K core: it already does the SD card, FAT32, USB keyboard, SIO disk emulation, H:, the OSD and the PC Link. Horizon talks to it through a mailbox, the same way the 65C816 would talk to any I/O chip. A FujiNet ESP32 on the SIO pins (already analysed in `docs/fujinet_esp32_bridge.md`) is the planned networking add-on; whether it also takes over USB input is still open (decision 6).
+For v1, the I/O processor is the PicoRV32 already inside the Tang Nano 20K core: it already does the SD card, FAT32, USB keyboard, SIO disk emulation, H:, the OSD and the PC Link. Horizon communicates with it through a mailbox, the same way the 65C816 would drive any I/O chip. A FujiNet ESP32 on the SIO pins (already analysed in `docs/fujinet_esp32_bridge.md`) is the planned networking add-on; whether it also takes over USB input is still open (decision 6).
 
 ### Input
 
@@ -161,7 +161,7 @@ For v1, the I/O processor is the PicoRV32 already inside the Tang Nano 20K core:
 ### Storage
 
 - **Hard disk:** one SD card on the FPGA, owned by Horizon (see Persistence). The "hard disk" holds the OS, apps, documents and the 8-bit library.
-- **Classic disks:** the native side answers SIO commands for D1: to D8: from ATR images on the hard disk, like a built-in SIO2PC, including high-speed SIO. No real drive needed.
+- **Classic disks:** the native side handles SIO commands for D1: to D8: from ATR images on the hard disk, like a built-in SIO2PC, including high-speed SIO. No real drive needed.
 - **Fast host access for classic:** an H: device handler (as in the Atari800 emulator) reaches native files through the $D1xx mailbox, for loading XEX files or saving from classic programs straight to the hard disk.
 - **Real SIO connector** kept on the back, so a real 1050, printer or external FujiNet still works.
 
@@ -206,7 +206,7 @@ Horizon is a small preemptive multitasking kernel with hardware memory protectio
 The desktop is a classic 1980s-style WIMP (menu bar, windows, icons, pointer) with one modern habit that 16 MB allows: every window keeps its own off-screen backing store, so moving or uncovering windows is a blitter copy, not an app redraw.
 
 - **Look:** a Fuji menu at the top left (About, Control Panel, running tasks, Shut down), app menus beside it, a desktop of drive and folder icons, and a task strip listing running apps and classic sessions.
-- **GUI server:** a kernel task that owns the screen, routes input, and composites window surfaces with the blitter. Apps draw into their own surface through the GUI library (lines, rectangles, text, icons, bitmaps) and tell the server which part changed.
+- **GUI server:** a kernel task that owns the screen, routes input, and composites window surfaces with the blitter. Apps draw into their own surface through the GUI library (lines, rectangles, text, icons, bitmaps) and report to the server which part changed.
 - **Cost check:** a full-screen window surface is 225 KB at 8 bpp, so ten large windows use about 2.3 MB of the roughly 6 MB free on the 8 MB machine. That is the trade that GEM and GEOS could not afford.
 - **Toolkit:** buttons, menus, lists, text fields, scroll bars, file dialogs, alerts. Bitmap proportional fonts, with the Atari 8x8 font as the system mono font.
 - **File manager:** browse the SD card and TNFS servers, open documents with their app, show 8-bit files (XEX, ATR, CAR, BAS) as classic icons.
@@ -214,7 +214,7 @@ The desktop is a classic 1980s-style WIMP (menu bar, windows, icons, pointer) wi
 
 ## Launching and closing 8-bit titles
 
-A classic title is launched by double-clicking it, runs on its own hardware with exact timing, and is closed with the System key. The classic program never knows the desktop exists.
+A classic title is launched by double-clicking it, runs on its own hardware with exact timing, and is closed with the System key. The classic program has no access to the desktop and cannot detect it.
 
 ### Launch
 
@@ -236,7 +236,7 @@ A classic title is launched by double-clicking it, runs on its own hardware with
 3. An overlay menu appears over the frozen picture: **Resume**, **Save state**, **Reset**, **Suspend to desktop**, **Quit**.
 4. Quit frees the session's memory, unmounts its images and returns the chipset. The desktop is already there, so return is instant.
 
-The supervisor also steps in when the 6502 hits a jam (KIL) opcode, when a classic program asks to exit through the $D1xx mailbox, or when a breakpoint fires.
+The supervisor also steps in when the 6502 hits a jam (KIL) opcode, when a classic program requests an exit through the $D1xx mailbox, or when a breakpoint fires.
 
 ### Save states and debugging
 
@@ -322,7 +322,7 @@ The Tang Nano 20K is a realistic first target if the Atari816 is built on top of
 | --- | --- | --- | --- |
 | LUTs (20.7 K) | About 11.3 K (build snapshot in `docs/PHASE_AB_TESTING.md`) | 65C816 3 to 5 K, FREDDIE II about 1 K, Marga and a simple blitter 2 to 4 K | Tight but plausible |
 | Block RAM (46 blocks) | 42 in that snapshot; the firmware shrink freed some since | Cache 1 to 2 blocks, Marga's line buffer 1 block | The real squeeze; needs a fresh count |
-| SDRAM transactions | About 4.8 M/s single-word; the Atari uses about 1.8 M/s (37%) | An uncached 65C816 at 14 MHz could ask for up to 14 M/s | Impossible without the cache; fine with the cache and BL4 bursts for video |
+| SDRAM transactions | About 4.8 M/s single-word; the Atari uses about 1.8 M/s (37%) | An uncached 65C816 at 14 MHz could request up to 14 M/s | Impossible without the cache; fine with the cache and BL4 bursts for video |
 | PLLs (2) | Both used | One PLL for the standard 720p HDMI clock (74.25 MHz, as in release v1.1), one for the core; the 65C816 runs on clk\_core ÷ 2. The low-latency option switches the HDMI clock source with a clock mux | OK |
 
 Full screen only helps here: during a game only the classic frame buffer streams run, and on the desktop only Marga's reader runs, so the video clients never stack on the arbiter. LUT and speed figures for new blocks are estimates.

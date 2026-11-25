@@ -111,7 +111,7 @@ int plat_bb_arrow(const unsigned char *px, int x, int y, int qx, int qy, int qw,
 /* the screen shows the battle view (rows 0-143) and its panel (144-199): 1
    when the view is presented, 0 when a picture covers the view (the
    inventory, the geoscape, ...). The Atari816 then shows the panel whole
-   below 124 of the view's rows (PORTING-NOTES.md "The screen") */
+   below 124 of the view's rows (PORTING-NOTES.md "Screen") */
 void plat_view(int on);
 /* before the CPU reads or writes the back buffer: what was sent is drawn */
 void plat_bb_sync(void);

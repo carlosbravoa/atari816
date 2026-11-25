@@ -14,20 +14,34 @@ CRLF line ends. Not released: `GRASM.OBJ`, `GRL.OBJ` (the mode X drawing), `KEYI
 (Mystic Software's WORX Sound Blaster library). The game's data: the freeware release of
 the registered game (`Xargon_Commercial.zip`, all three episodes; `tools/getdata.sh`).
 
-## The numbers
+## Numbers
 
-| | |
-| --- | --- |
-| Upstream C ported | 11 files and 14 headers, 8,350 lines (`xargon.c`, `x_obj*.c`, `x_objman.c`, `x_player.c`, `x_info.c`, `x_vol1-3.c`, `windows.c`, `gamectrl.c`, `graphics.c`); `_xargon.c`, `x_editor.c`, `routines.c` (the level editor's build, dead code) not built |
-| Upstream files replaced | `config.c` (the DOS set-up dialogs), `keyboard.c` (int 9, BIOS), `music.c` (WORX, PC speaker, timer), `shapeman.c` (shapes in near memory): by `horizon/hz_cfg.c`, `hz_kbd.c`, `hz_snd.c`, `hz_shm.c` with the same interface |
-| Game lines changed | `upstream.patch`: 82 `#include` lines (absolute DOS paths `"\develop\xargon\include\x.h"` to `"x.h"`) and 79 other lines in 7 files, all `#if defined(_HORIZON)` |
-| New platform layer | `horizon/`: 9 C files, 2 headers, 1 assembly file, 5 DOS headers: about 2,300 lines; tools and tests 830 lines |
-| Build | `hcc --code large`: `XARGON1.PRG` 190,746 bytes (code 147 KB in 3 other banks; the main bank 52,736 bytes without its movable code: bss 34,617, constants 8,947; heap 7 KB, software stack 4 KB; the board, 16 KB, a `__far` object in a bank of its own) |
-| Data | `XSHAPES.XR1` 1,001,288 bytes (1,976 shapes in 1,923 atlas rows), `XSOUND.XR1` 174,764, 12 songs 2.5-70 KB, the boards and texts as they are: 2.0 MB for the three episodes |
-| Memory at run time | 36 banks (2.3 MB): framebuffer 7, atlas 16, its directory 1, glyph cache 1, effects 3, a song 2, hgame's screen 1, code 4, the board 1; 38 of 92 banks still free |
-| Speed | 18.2 game frames a second as the original on the map and in level 1; 17.3 on average (95 %) over the demo's first 5,000 frames, its busiest scenes (see "Speed") |
-| Determinism | the recorded demo plays exactly as recorded (to its end at frame 5,077: score 15,050, health 5, 14 emeralds) and the same on a machine 30 ms a frame slower |
-| Time | about 11 hours in all (below) |
+- Upstream C ported: 11 files and 14 headers, 8,350 lines (`xargon.c`, `x_obj*.c`,
+  `x_objman.c`, `x_player.c`, `x_info.c`, `x_vol1-3.c`, `windows.c`, `gamectrl.c`,
+  `graphics.c`); `_xargon.c`, `x_editor.c`, `routines.c` (the level editor's build, dead
+  code) not built.
+- Upstream files replaced: `config.c` (the DOS set-up dialogs), `keyboard.c` (int 9, BIOS),
+  `music.c` (WORX, PC speaker, timer), `shapeman.c` (shapes in near memory): by
+  `horizon/hz_cfg.c`, `hz_kbd.c`, `hz_snd.c`, `hz_shm.c` with the same interface.
+- Game lines changed: `upstream.patch`: 82 `#include` lines (absolute DOS paths
+  `"\develop\xargon\include\x.h"` to `"x.h"`) and 79 other lines in 7 files, all
+  `#if defined(_HORIZON)`.
+- New platform layer: `horizon/`: 9 C files, 2 headers, 1 assembly file, 5 DOS headers:
+  about 2,300 lines; tools and tests 830 lines.
+- Build: `hcc --code large`: `XARGON1.PRG` 190,746 bytes (code 147 KB in 3 other banks; the
+  main bank 52,736 bytes without its movable code: bss 34,617, constants 8,947; heap 7 KB,
+  software stack 4 KB; the board, 16 KB, a `__far` object in a bank of its own).
+- Data: `XSHAPES.XR1` 1,001,288 bytes (1,976 shapes in 1,923 atlas rows), `XSOUND.XR1`
+  174,764, 12 songs 2.5-70 KB, the boards and texts as they are: 2.0 MB for the three
+  episodes.
+- Memory at run time: 36 banks (2.3 MB): framebuffer 7, atlas 16, its directory 1, glyph
+  cache 1, effects 3, a song 2, hgame's screen 1, code 4, the board 1; 38 of 92 banks still
+  free.
+- Speed: 18.2 game frames a second as the original on the map and in level 1; 17.3 on
+  average (95 %) over the demo's first 5,000 frames, its busiest scenes (see "Speed").
+- Determinism: the recorded demo plays exactly as recorded (to its end at frame 5,077:
+  score 15,050, health 5, 14 emeralds) and the same on a machine 30 ms a frame slower.
+- Time: about 11 hours in all (below).
 
 ## Changes to the game's code, by kind
 
@@ -56,7 +70,7 @@ texts) failed, and the intro's text objects were drawn from address 0. The names
 read past, not kept.
 
 **The heap (`x_info.c`, `gamectrl.c`, `xargon.c`: 34 lines; `horizon/hz_heap.h`).** See
-"The heap" below: `init_info` closes the tile file it never closed (its 512-byte
+"Heap" below: `init_info` closes the tile file it never closed (its 512-byte
 read-ahead stayed in the heap for good: INSTRUCTIONS on the title then did nothing),
 `recordmac` (the level editor's) records nothing, `loadboard` takes the room for the
 board's texts with the board's file closed and prints the heap.
@@ -75,15 +89,15 @@ cycling), its timing (BIOS ticks), its file I/O (`open`, `read`, `lseek`), its t
 windows. The DOS screens before and after the game (`cputs` text, TheDraw's crunched
 screen) go to the console or nowhere.
 
-## The platform layer (horizon/)
+## Platform layer (horizon/)
 
 The idea: keep upstream's hardware-level calls and make each one a small function of the
 platform, instead of changing the game: the VGA's DAC (`outportb(0x3C8/0x3C9)`) fills a
-shadow palette sent once a frame; the VGA's input status (`inportb(0x3DA)`) tells the
-vertical retrace from the frame counter (the first read after a blank sees it, a read
-in a loop waits for the next blank); the CRTC's start address (`outport(0x3D4)`) is the
+shadow palette sent once a frame; the VGA's input status (`inportb(0x3DA)`) reports the
+vertical retrace from the frame counter (the first read after a blank returns it set, a
+read in a loop blocks until the next blank); the CRTC's start address (`outport(0x3D4)`) is the
 page shown; the BIOS tick at 0040:006C (`*myclock`, read in busy loops) is a macro over a
-function counting the vertical blanks at 18.2065 / 60.03 (and waiting for the next blank
+function counting the vertical blanks at 18.2065 / 60.03 (and blocking until the next blank
 on the third read within one); the game port (`inportb(0x201)`) is emulated from the
 joysticks (the one-shots' counts for left / centre / right, calibrated in `hz_cfg.c`). So
 `graphics.c`, `gamectrl.c` and `windows.c` run unchanged.
@@ -99,12 +113,13 @@ joysticks (the one-shots' counts for left / centre / right, calibrated in `hz_cf
   is one `sheet_draw` record (a copy for the tiles drawn opaque, a keyed copy with 0
   transparent for sprites), queued 64 at a time; Ali draws them while the game runs on.
   `drawshape`'s common case (wholly inside the playfield's rows, not across the wrap) is
-  65816 assembly (`hz_blit.s`), the rest C. The fonts (2-bit shapes in colours that
-  `fontcolor` chooses) are made by the CPU into a cache sheet of 512 glyphs in their
-  colours, then drawn by the blitter too. A flip waits for the blitter, then the game goes
-  on at once: what it draws next waits for the flip's blank only if it is sent before it.
+  65816 assembly (`hz_blit.s`), the rest C. The fonts (2-bit shapes in colours set by
+  `fontcolor`) are made by the CPU into a cache sheet of 512 glyphs in their
+  colours, then drawn by the blitter too. A flip blocks until the blitter is idle, then the
+  game continues at once: what it draws next is held for the flip's blank only if it is
+  sent before it.
 - **Shapes (`hz_shm.c`).** Upstream's `shm_want[]` / `shm_do`: a table is read from
-  `XSHAPES.XRn` into its rows of the atlas when first wanted, and stays (upstream freed
+  `XSHAPES.XRn` into its rows of the atlas when first needed, and stays (upstream freed
   them to fit 640 KB). The palette shape sets the palette as `xlate_table` does.
 - **Keyboard (`hz_kbd.c`).** The BIOS's queue (`k_pressed`, `k_read`: ASCII, or 128 +
   the PC scan code for keys without one, from a table of HID usages) from `hg_key_next`,
@@ -116,10 +131,10 @@ joysticks (the one-shots' counts for left / centre / right, calibrated in `hz_cf
 - **Timing (`hz_frame.c`).** Above; plus `hg_poll` once a vertical blank when the game's
   frames run late (no waiting, so no `hg_frame`): the keys and the music go on (SDK
   problem 12). Statistics (`/STATS`): frames, their spacing, the CPU's share, late frames.
-- **Configuration (`hz_cfg.c`).** The hardware answers upstream's set-up questions: Lau
-  for the effects, the OPL2 for the music, the joystick calibrated for the emulated port.
+- **Configuration (`hz_cfg.c`).** Upstream's set-up questions are answered from the
+  hardware: Lau for the effects, the OPL2 for the music, the joystick calibrated for the emulated port.
 
-## The heap
+## Heap
 
 The main bank's heap is what is left of the bank, at least 7,168 bytes (`--heap 7168`):
 7,817 bytes in `XARGON1.PRG` now (7,618 and 7,665 in episodes 2 and 3), of which 7,500
@@ -132,16 +147,42 @@ wanted, F free, L in one piece` (`hz_dos.c`) instead of returning NULL; none ret
 silently now (checked once with a `malloc(8000)` put in `main`: the line, then the exit).
 Every allocation of the built game:
 
-| Where | What | Size | Can it exceed the heap? |
-| --- | --- | --- | --- |
-| `loadboard` (`xargon.c`) | the board's texts, `objs[].inside`, freed at the next board (`zapobjs`) or when the object goes (`purgeobjs`) | 1-50 bytes each; a board's all from 156 (the map) to 2,318 (the title's, 83 texts) and 3,798 (`STORY.XR1`) | no: the biggest leaves 3,702 free. None leaks: the heap is the same at every board's start (`make test`) |
-| `text_get` (`hz_snd.c`) | a text window's text (`dotextmsg`, `pageview`), freed when it closes | up to 4,313 bytes (the help: F1 in a level, INSTRUCTIONS on the title) | no, but it is the tightest: on the title's board (the most texts of the boards with windows) 5,178 bytes are left in one piece for the help's 4,318 (860 to spare; at the smallest heap the link allows, 7,168, about 200). `tests/heapcheck.py` checks every board of the three episodes |
-| `playmac` (`gamectrl.c`) | a recorded macro, the whole file: the demo (`DEMO_MAC.XR0`, 2,360 bytes) or the end of episode 1 (`END_MAC.XR1`, 335), freed at its end | the file's length | not with these files (with the demo's held, 5,136 bytes stay free at its boards' starts) |
-| `recordmac` (`gamectrl.c`) | the level editor's macro recording | 8,000 bytes | always: more than the heap (and its end test, at 30,000 bytes, wrote past them on DOS too). Only `routines.c` and `_xargon.c` (not built) call it: under `_HORIZON` it records nothing |
-| `gr_init` (`graphics.c`) | `LOST=malloc(1)`, never used or freed | 6 bytes | no |
-| `init_info` (`x_info.c`) | the 900 tile names (the level editor's) | 8.5 KB | not done here (the names are read past) |
-| the C library's `open` (read only) | a 512-byte read-ahead while the file is open (NULL: reads go to the card, no error) | 516 | no. But `init_info` never closed the tile file, so 516 bytes stayed in use for good: INSTRUCTIONS on the title did nothing (the help's `malloc` gave NULL; seen in the emulator with the program before this change). Closed now. And a file's read-ahead taken before a block that outlives the file leaves a hole above it: `loadboard` opened the board, took its texts under the read-ahead, closed it, and 516 bytes over the texts were lost to the help. Now it reads the texts' lengths, closes the file, takes their room, opens it again; `text_get` reads the text's place and length, closes, takes the room, opens again |
-| `fopen` (`hzt_shots`, the tests' list) | 1 KB of buffer while open | 1 KB | no (NULL: unbuffered) |
+Each with where it is, what it holds, its size, and whether it can exceed the heap:
+
+- `loadboard` (`xargon.c`): the board's texts, `objs[].inside`, freed at the next board
+  (`zapobjs`) or when the object goes (`purgeobjs`). Size: 1-50 bytes each; a board's all
+  from 156 (the map) to 2,318 (the title's, 83 texts) and 3,798 (`STORY.XR1`). Exceeds the
+  heap: no: the biggest leaves 3,702 free. None leaks: the heap is the same at every
+  board's start (`make test`).
+- `text_get` (`hz_snd.c`): a text window's text (`dotextmsg`, `pageview`), freed when it
+  closes. Size: up to 4,313 bytes (the help: F1 in a level, INSTRUCTIONS on the title).
+  Exceeds the heap: no, but it is the tightest: on the title's board (the most texts of the
+  boards with windows) 5,178 bytes are left in one piece for the help's 4,318 (860 to
+  spare; at the smallest heap the link allows, 7,168, about 200). `tests/heapcheck.py`
+  checks every board of the three episodes.
+- `playmac` (`gamectrl.c`): a recorded macro, the whole file: the demo (`DEMO_MAC.XR0`,
+  2,360 bytes) or the end of episode 1 (`END_MAC.XR1`, 335), freed at its end. Size: the
+  file's length. Exceeds the heap: not with these files (with the demo's held, 5,136 bytes
+  stay free at its boards' starts).
+- `recordmac` (`gamectrl.c`): the level editor's macro recording. Size: 8,000 bytes.
+  Exceeds the heap: always: more than the heap (and its end test, at 30,000 bytes, wrote
+  past them on DOS too). Only `routines.c` and `_xargon.c` (not built) call it: under
+  `_HORIZON` it records nothing.
+- `gr_init` (`graphics.c`): `LOST=malloc(1)`, never used or freed. Size: 6 bytes. Exceeds
+  the heap: no.
+- `init_info` (`x_info.c`): the 900 tile names (the level editor's). Size: 8.5 KB. Not done
+  here (the names are read past).
+- The C library's `open` (read only): a 512-byte read-ahead while the file is open (NULL:
+  reads go to the card, no error). Size: 516. Exceeds the heap: no. But `init_info` never
+  closed the tile file, so 516 bytes stayed in use for good: INSTRUCTIONS on the title did
+  nothing (the help's `malloc` gave NULL; seen in the emulator with the program before
+  this change). Closed now. And a file's read-ahead taken before a block that outlives the
+  file leaves a hole above it: `loadboard` opened the board, took its texts under the
+  read-ahead, closed it, and 516 bytes over the texts were lost to the help. Now it reads
+  the texts' lengths, closes the file, takes their room, opens it again; `text_get` reads
+  the text's place and length, closes, takes the room, opens again.
+- `fopen` (`hzt_shots`, the tests' list): 1 KB of buffer while open. Size: 1 KB. Exceeds
+  the heap: no (NULL: unbuffered).
 
 The shapes, the sounds, the songs and the board itself are in far memory (`hg_banks`,
 checked: "not enough memory for the pictures"); `strdup` is only in a commented-out
@@ -159,22 +200,65 @@ memory".
 
 ## SDK problems met
 
-| # | Problem | Kind | What was done | Time |
-| --- | --- | --- | --- | --- |
-| 1 | **No POSIX file descriptors** (`open`, `read`, `write`, `lseek`, `close`, `creat`, `fcntl.h`, `unistd.h`): DOS and Unix code uses them (Xargon: every file) | library gap | added `cc816/include/fcntl.h`, `unistd.h`, `lib/cc816/posixio.c`; 20 checks in `tests/libc` (`t_posix`) | 30 min |
-| 2 | **Small reads were slow**: each `read` a call to the card (about 1 ms). `init_info` reads 3,600 records of 1-2 bytes: 3 s at the title | library | a read-only descriptor reads ahead 512 bytes (`read` still returns all bytes asked for unless the file ends); tested by `t_posix` (300 reads of 1 byte, seeks among them) | 20 min |
-| 3 | **`#define scan_f1= 0x3B` refused** ("Bad macro definition"): no space between the name and `=`. C99 asks for one; gcc warns and takes the rest of the line | compiler (preprocessor) | as gcc: a warning, the macro defined (`vendor/pcpp`, `driver.py`); `regress/r032_define_no_space.c`, `diag/define_no_space.c` | 15 min |
-| 4 | **Internal compiler error** (UnicodeDecodeError) on a header with code page 437 bytes in a string (`cfg_win.h`): included files were read as UTF-8 | compiler bug | every file read byte for byte; `regress/r033_latin1_source.c` | 10 min |
-| 5 | **"variable-length arrays" for an undeclared name** in an array's size (a header used without the one that defines it) | diagnostic | now "'numobjkinds' undeclared"; `diag/array_size_undeclared.c` | 10 min |
-| 6 | **`x * 31` and signed `x / 16` were calls** (`__mul16`, `__sdiv16`): 13 % of the game's time (31-byte objects, positions divided by 16 everywhere) | compiler speed | multiplies by constants with up to four signed digits (non-adjacent form) and signed divides by powers of two inline; `regress/r034_mul_div_const.c` (every value against the helpers) | 30 min |
-| 7 | **A `__far` array of arrays was indexed through 32-bit address arithmetic** at every access (`bd[x][y]`: base + sign-extended index products) | compiler speed | the indexes of an array of arrays add up in 16 bits; in a `__far` object (one bank) that index goes in Y (`[base],y`); an unsigned index through a far pointer too; `regress/r035_far_index.c` | 45 min |
-| 8 | **The main bank was full**: bss 34 KB (the game's objects and tables), hgame's record queues 7 KB (unused by this game: it draws with its own sheet records) | SDK limit | worked around in the port (the board far, the names not kept, small buffers); hgame's 7 KB of queues for every full-screen game is still open (as after Digger). (Done since: the queues are in far memory, 4.5 KB of the main bank back) | 30 min |
-| 9 | **`hz_read`'s result is an `int`**: a read of 32 KB returns -32,768, taken for an error (the effects did not load) | API wart | worked around (16 KB pieces); documented in porting.md ("size_t" row). Open: the stub could return `unsigned` | 20 min |
-| 10 | **No way to play AdLib music from a game**: the OPL2 was reachable only through the music engine's MIDI player (General MIDI instruments) | hgame gap | added `hg_has_opl`, `hg_opl_write`, `hg_opl_reset`, `hg_opl_play` (IMF register streams from far memory, across banks), `hg_opl_stop`, `hg_opl_playing`; tested in `gt_sound` (the stream's timing in frames, looping, stopping); games.md | 45 min |
-| 11 | **`hg_sound_from` took a near pointer**: samples loaded into far memory (the normal case for a game's sounds) could not be given | hgame gap | `const void __far *data` (near arrays still convert); tested in `gt_sound` (a sample made in a bank of `hz_far_alloc`, played) | 10 min |
-| 12 | **No events without a frame**: a game whose frames run late never waits, so never calls `hg_frame`: no keys, no music | hgame gap | added `hg_poll()` (events, POKEY envelopes, the OPL2 stream, no wait); the OPL2 stream timed by the frame counter; tested in `gt_sound` (a stream played by `hg_poll` and `vsync` alone); games.md | 20 min |
-| 13 | **`run816.py` passes no emulator options** (`--card-kbps` for the board's card speed, `--log-opl`) | tool gap | not changed (another job was changing run816.py): the test's slower run uses the game's own `/BUSY:ms`; OPL writes were logged once with a private copy | - |
-| 14 | **The emulator's OPL2 at three times a Lau voice** clips music written for a Sound Blaster (1-2 % of the samples) | mix (design) | the converter makes the songs 13.5 dB quieter (`OPL_ATT`); games.md, "AdLib music" | 20 min |
+Each problem with its kind, what was done, and the time it took:
+
+1. No POSIX file descriptors (`open`, `read`, `write`, `lseek`, `close`, `creat`,
+   `fcntl.h`, `unistd.h`): DOS and Unix code uses them (Xargon: every file). Kind: library
+   gap. Done: added `cc816/include/fcntl.h`, `unistd.h`, `lib/cc816/posixio.c`; 20 checks
+   in `tests/libc` (`t_posix`). 30 min.
+2. Small reads were slow: each `read` a call to the card (about 1 ms). `init_info` reads
+   3,600 records of 1-2 bytes: 3 s at the title. Kind: library. Done: a read-only
+   descriptor reads ahead 512 bytes (`read` still returns all bytes asked for unless the
+   file ends); tested by `t_posix` (300 reads of 1 byte, seeks among them). 20 min.
+3. `#define scan_f1= 0x3B` rejected ("Bad macro definition"): no space between the name
+   and `=`. C99 requires one; gcc warns and accepts the rest of the line. Kind: compiler
+   (preprocessor). Done: as gcc: a warning, the macro defined (`vendor/pcpp`,
+   `driver.py`); `regress/r032_define_no_space.c`, `diag/define_no_space.c`. 15 min.
+4. Internal compiler error (UnicodeDecodeError) on a header with code page 437 bytes in a
+   string (`cfg_win.h`): included files were read as UTF-8. Kind: compiler bug. Done:
+   every file read byte for byte; `regress/r033_latin1_source.c`. 10 min.
+5. "variable-length arrays" for an undeclared name in an array's size (a header used
+   without the one that defines it). Kind: diagnostic. Done: now "'numobjkinds'
+   undeclared"; `diag/array_size_undeclared.c`. 10 min.
+6. `x * 31` and signed `x / 16` were calls (`__mul16`, `__sdiv16`): 13 % of the game's time
+   (31-byte objects, positions divided by 16 everywhere). Kind: compiler speed. Done:
+   multiplies by constants with up to four signed digits (non-adjacent form) and signed
+   divides by powers of two inline; `regress/r034_mul_div_const.c` (every value against the
+   helpers). 30 min.
+7. A `__far` array of arrays was indexed through 32-bit address arithmetic at every access
+   (`bd[x][y]`: base + sign-extended index products). Kind: compiler speed. Done: the
+   indexes of an array of arrays add up in 16 bits; in a `__far` object (one bank) that
+   index goes in Y (`[base],y`); an unsigned index through a far pointer too;
+   `regress/r035_far_index.c`. 45 min.
+8. The main bank was full: bss 34 KB (the game's objects and tables), hgame's record queues
+   7 KB (unused by this game: it draws with its own sheet records). Kind: SDK limit. Done:
+   worked around in the port (the board far, the names not kept, small buffers); hgame's
+   7 KB of queues for every full-screen game is still open (as after Digger). (Done since:
+   the queues are in far memory, 4.5 KB of the main bank back.) 30 min.
+9. `hz_read`'s result is an `int`: a read of 32 KB returns -32,768, taken for an error (the
+   effects did not load). Kind: API wart. Done: worked around (16 KB pieces); documented in
+   porting.md ("size_t" row). Open: the stub could return `unsigned`. 20 min.
+10. No way to play AdLib music from a game: the OPL2 was reachable only through the music
+    engine's MIDI player (General MIDI instruments). Kind: hgame gap. Done: added
+    `hg_has_opl`, `hg_opl_write`, `hg_opl_reset`, `hg_opl_play` (IMF register streams
+    from far memory, across banks), `hg_opl_stop`, `hg_opl_playing`; tested in `gt_sound`
+    (the stream's timing in frames, looping, stopping); games.md. 45 min.
+11. `hg_sound_from` took a near pointer: samples loaded into far memory (the normal case
+    for a game's sounds) could not be passed. Kind: hgame gap. Done: `const void __far
+    *data` (near arrays still convert); tested in `gt_sound` (a sample made in a bank of
+    `hz_far_alloc`, played). 10 min.
+12. No events without a frame: a game whose frames run late never waits, so never calls
+    `hg_frame`: no keys, no music. Kind: hgame gap. Done: added `hg_poll()` (events, POKEY
+    envelopes, the OPL2 stream, no wait); the OPL2 stream timed by the frame counter;
+    tested in `gt_sound` (a stream played by `hg_poll` and `vsync` alone); games.md.
+    20 min.
+13. `run816.py` passes no emulator options (`--card-kbps` for the board's card speed,
+    `--log-opl`). Kind: tool gap. Done: not changed (another job was changing run816.py):
+    the test's slower run uses the game's own `/BUSY:ms`; OPL writes were logged once with
+    a private copy.
+14. The emulator's OPL2 at three times a Lau voice clips music written for a Sound Blaster
+    (1-2 % of the samples). Kind: mix (design). Done: the converter makes the songs
+    13.5 dB quieter (`OPL_ATT`); games.md, "AdLib music". 20 min.
 
 Nothing else failed in the compiler: 8,350 lines of 1993 Turbo C (K&R-ish style, function
 pointer tables, `#define` tables included twice with different `defobj` macros, signed
@@ -187,7 +271,7 @@ first try once problems 3 and 4 were fixed, and the recorded demo replays exactl
 journal, level 1 with a jump, a shot and a death, the game's menu, quit, high scores, a
 load) with 13 pictures compared by checksum, the save files on the card, the loaded
 game's position, Lau's writes and the recorded sound's level and clipping, the heap at
-every board's start (no leak) and the room on every board for the help (see "The heap");
+every board's start (no leak) and the room on every board for the help (see "Heap");
 the help opened twice on the title; then the
 recorded demo twice (the second time 30 ms a frame slower) to its frame 1,500, which
 must match `tests/demo.ref`, with 7 pictures (the title, the menu, five of the demo's
@@ -199,8 +283,8 @@ the slower machine.
 **The pictures' test.** At first the scripted game took 14 screenshots at fixed times.
 Any change of the program's timing (a compiler improvement, the code's place in its
 banks) moved the game by a frame or more, and 7 of them failed while the frame-exact
-demo passed. Now the program decides when a picture is taken (`/SHOTS:FILE`,
-`horizon/hz_frame.c`): `pN` is a screen that waits for keys (the title, a menu, a
+demo passed. Now the program sets when a picture is taken (`/SHOTS:FILE`,
+`horizon/hz_frame.c`): `pN` is a screen that polls for keys (the title, a menu, a
 dialog: upstream's `checkctrl0` loops, one key poll a BIOS tick, the menu's cursor and the
 palette's cycling moved by each) at its Nth key poll with no page flip and no key read
 since; `fN` is the play loop's frame N (upstream's `gamecount`) at its page flip, when
@@ -210,30 +294,33 @@ emulator takes the picture two blanks after the line (`--shot-on`), and the scri
 `wait` for each line before their next key. Level play is pictured only from the demo
 (the same inputs each frame); the keyboard game's pictures are of menus, dialogs and the
 map just after it starts (a new game, a loaded one). Two of them (the game's menu and the
-high scores over level 1) are taken but not compared: the level's frame behind them is
-the keys' timing. Three windows over the map are compared as their rectangle only
+high scores over level 1) are taken but not compared: the level's frame behind them
+depends on the keys' timing. Three windows over the map are compared as their rectangle only
 (`crop:` in `tests/play.md5`): the map's palette (its pods) is cycled by its frames, and
-the frame the key that opened the window came at is again the keys' timing. Checked: the
+the frame in which the key that opened the window arrived also depends on the keys'
+timing. Checked: the
 same pictures, three runs each, from the program built at -O2, at -O1 and at -O0, linked
 with `--main-room 0`, and run with `/BUSY:10` (the keyboard game and the first demo run)
 as well as the demo's `/BUSY:30`. (At -O0 the slower demo run does not reach frame 1,500
 within its 160 s; its pictures, which come before, are the same.)
 
-## How long each kind of thing took
+## Time by kind of work
 
 (Wall-clock time of the agent, with emulator runs on a fast PC.)
 
-| | |
-| --- | --- |
-| Finding the source, the data and their licences | 25 min |
-| Reading the game, the DOS layer and the SDL port's notes; the data formats | 45 min |
-| The data converter (shapes, sounds, CMF to IMF) | 40 min |
-| The SDK additions: POSIX I/O, `hg_opl_*`, `hg_sound_from`, `hg_poll`, their tests | 2 h |
-| The platform layer, first version (CPU drawing in a ring buffer) to the title and the menu | 1 h 30 |
-| Making it fit the main bank, the heap | 30 min |
-| Speed: profiling, the compiler's constant multiplies and divides and far indexing, the blitter version of the drawing, the glyph cache, `drawshape` in assembly, flips without waiting | 3 h |
-| Finding the way through the map for the tests, the scripted game, save/load, the demo checks | 1 h 30 |
-| Sound levels, these notes, the SDK's documents, the suites | 1 h |
+- Finding the source, the data and their licences: 25 min
+- Reading the game, the DOS layer and the SDL port's notes; the data formats: 45 min
+- The data converter (shapes, sounds, CMF to IMF): 40 min
+- The SDK additions: POSIX I/O, `hg_opl_*`, `hg_sound_from`, `hg_poll`, their tests: 2 h
+- The platform layer, first version (CPU drawing in a ring buffer) to the title and the
+  menu: 1 h 30
+- Making it fit the main bank, the heap: 30 min
+- Speed: profiling, the compiler's constant multiplies and divides and far indexing, the
+  blitter version of the drawing, the glyph cache, `drawshape` in assembly, flips without
+  waiting: 3 h
+- Finding the way through the map for the tests, the scripted game, save/load, the demo
+  checks: 1 h 30
+- Sound levels, these notes, the SDK's documents, the suites: 1 h
 
 ## Speed
 
@@ -241,25 +328,26 @@ Measured with `/STATS` in the emulator (which models the board's timing within a
 per cent). A game frame is one BIOS tick, 3.30 vertical blanks; "busy" is the time from
 the tick to the page flip.
 
-| Scene | Frames apart (blanks) | Busy (blanks) |
-| --- | --- | --- |
-| The map | 3.30-3.31 | 1.0-1.1 |
-| Level 1 (the test's walk, jumps, a death; load spikes included) | 3.45-3.50 | 1.6-1.7 |
-| The recorded demo, its first 5,000 frames (the intro board: 40-60 objects on the screen, rooms of text objects) | 3.46 (worst seconds 3.5) | 2.0-2.3 |
+Frames apart and busy time, in blanks:
 
-The path that got there, the demo's busy scenes (blanks between game frames):
+- The map: 3.30-3.31 apart, busy 1.0-1.1.
+- Level 1 (the test's walk, jumps, a death; load spikes included): 3.45-3.50 apart, busy
+  1.6-1.7.
+- The recorded demo, its first 5,000 frames (the intro board: 40-60 objects on the screen,
+  rooms of text objects): 3.46 apart (worst seconds 3.5), busy 2.0-2.3.
 
-| | Apart | Notes |
-| --- | --- | --- |
-| First version: CPU drawing into ring buffers, page flips by `fs_enter` | 8.2 | `__mul16` 8 %, `__sdiv16` 5 %, the copies 11 % |
-| cc816: constant multiplies, signed divides by 2^n inline | 6.9 | |
-| The opaque copies by MVN, `ldrawsh_vga`'s common case inline | 6.2 | |
-| cc816: 16-bit indexes into `__far` arrays of arrays | 6.1 | `refresh` 18 % cheaper |
-| The blitter: tiles and sprites as sheet records | 5.4 | |
-| `drawshape`'s fast path in C without address-taken locals | 4.4 | |
-| `drawshape`'s fast path in assembly | 4.3 | |
-| The glyph cache (fonts by the blitter), its fast path | 3.85 | |
-| Flips without waiting for their blank; `hg_poll` | 3.46 | |
+Each step's effect on the demo's busy scenes (blanks between game frames):
+
+- First version: CPU drawing into ring buffers, page flips by `fs_enter`: 8.2 (`__mul16`
+  8 %, `__sdiv16` 5 %, the copies 11 %)
+- cc816: constant multiplies, signed divides by 2^n inline: 6.9
+- The opaque copies by MVN, `ldrawsh_vga`'s common case inline: 6.2
+- cc816: 16-bit indexes into `__far` arrays of arrays: 6.1 (`refresh` 18 % cheaper)
+- The blitter: tiles and sprites as sheet records: 5.4
+- `drawshape`'s fast path in C without address-taken locals: 4.4
+- `drawshape`'s fast path in assembly: 4.3
+- The glyph cache (fonts by the blitter), its fast path: 3.85
+- Flips without waiting for their blank; `hg_poll`: 3.46
 
 What is left: upstream's object loop (`upd_objs`, its collision test of every pair of
 objects near the screen), `refresh`'s walk over the visible cells and `upd_bkgnd`
@@ -275,7 +363,7 @@ speed (170 KB/s; not measured on the board).
    `rand` for demos, absolute include paths, CP437 and CRLF sources.
 2. "Code that reads hardware": emulate the few ports and the BIOS tick in the platform
    layer instead of changing the game.
-3. "Let the blitter draw": every CPU write waits for the SDRAM; tiles and sprites as sheet
+3. "Let the blitter draw": every CPU write stalls on the SDRAM; tiles and sprites as sheet
    records; a cache sheet for what needs colours chosen at run time.
 4. Page flipping with the scroll registers, a ring for the scrolling playfield.
 5. `hg_poll` for games whose frames run late.

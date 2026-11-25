@@ -27,14 +27,25 @@ In: A = window, X, Y = the block below. EINVAL: a bad window or op; EFAULT: a ba
 | `WD_FILL` | 1 | the rectangle x, y, w, h in c1 |
 | `WD_FRAME` | 2 | a 1-pixel frame, the rectangle's edge, in c1 |
 | `WD_LINE` | 3 | a line from (x, y) to (w, h) in c1 |
-| `WD_TEXT` | 4 | the zero-terminated string at ptr, its top at y; ink c1, paper c2 ($FF = none); font 0 or 1 |
+| `WD_TEXT` | 4 | the string at ptr (below) |
 | `WD_BLIT` | 5 | the w x h picture at ptr (8 bpp, rows of w bytes) |
 | `WD_KBLIT` | 6 | the same, pixels of colour c2 are skipped (transparent) |
 | `WD_DITHER` | 7 | a checker of c1 and c2 (c2 where x + y is odd) |
-| `WD_SBLIT` | 8 | like WD_BLIT, with the source stride c1 \| c2 << 8: a w x h part of a larger picture |
-| `WD_COPY` | 9 | the rectangle x, y, w, h of the window's own content moves to (c1 \| c2 << 8, the low word of ptr); the two may overlap (scrolling) |
-| `WD_EXPAND` | 10 | (0.14, a 17-byte block: + u16 stride at 15) the w x h 1 bpp picture at ptr (bit 7 leftmost; its first pixel at bit `font`, 0 = bit 7; rows `stride` bytes apart, 0: the bytes a row needs): set bits in c1, clear bits in c2, or left as they are when c2 = $FF |
-| `WD_KSBLIT` | 11 | (0.14, 17 bytes) like WD_KBLIT, rows `stride` bytes apart (0: w) |
+| `WD_SBLIT` | 8 | a part of a larger picture (below) |
+| `WD_COPY` | 9 | a copy inside the content (below) |
+| `WD_EXPAND` | 10 | (0.14) a 1 bpp picture (below) |
+| `WD_KSBLIT` | 11 | (0.14) WD_KBLIT with a stride (below) |
+
+- `WD_TEXT`: the zero-terminated string at ptr, its top at y; ink c1, paper c2 ($FF =
+  none); font 0 or 1.
+- `WD_SBLIT`: like WD_BLIT, with the source stride c1 | c2 << 8: a w x h part of a larger
+  picture.
+- `WD_COPY`: the rectangle x, y, w, h of the window's own content moves to (c1 | c2 << 8,
+  the low word of ptr); the two may overlap (scrolling).
+- `WD_EXPAND`: a 17-byte block (+ u16 stride at 15). The w x h 1 bpp picture at ptr (bit 7
+  leftmost; its first pixel at bit `font`, 0 = bit 7; rows `stride` bytes apart, 0: the
+  bytes a row needs): set bits in c1, clear bits in c2, or left as they are when c2 = $FF.
+- `WD_KSBLIT`: a 17-byte block. Like WD_KBLIT, rows `stride` bytes apart (0: w).
 
 Rules:
 - A picture for WD_BLIT / WD_KBLIT / WD_SBLIT must lie in one bank (it may be in your code
@@ -49,7 +60,7 @@ Rules:
 - There is no scaling, no rotation, no blending, no circle, no "read pixels back".
   Pictures with transparency: WD_KBLIT. Fonts other than the two built-in ones: 1 bpp glyphs
   with WD_EXPAND (c2 = $FF: transparent), or expanded to 8 bpp yourself and WD_KBLIT
-  (examples/lantern, written before WD_EXPAND).
+  (examples/lantern does this).
 - Each call costs about 0.17 ms in the emulator before any pixel is drawn (the board: about
   twice that), plus the pixels: see [performance.md](performance.md). Draw big rectangles,
   not many small ones.
@@ -63,14 +74,22 @@ copies, keyed copies, 1 bpp expands and moves in one syscall, run by Ali as one 
 while the call returns at once. The same targets and the same clipping as win_draw (the
 window's content; in full-screen mode the program's framebuffer).
 
-| | win_draw | draw_list |
-| --- | --- | --- |
-| Syscalls | one per operation (about 0.17 ms each, emulator) | one per list (about 2,000 cycles a record in the call) |
-| Returns | when its blit has read your memory | at once: sources and target in use until `list_wait` / `vsync` / the next list |
-| Text | WD_TEXT with the system fonts | LS_EXPAND from your own 1 bpp font |
-| Lines, frames, dithers | yes | no |
-| Waiting for the vertical blank | no (`vsync` before the calls) | LS_VBL on a record: Ali waits, the CPU does not |
-| Full-screen framebuffer | no | yes |
+win_draw:
+- One syscall per operation (about 0.17 ms each, emulator).
+- Returns when its blit has read your memory.
+- Text: WD_TEXT with the system fonts.
+- Lines, frames, dithers.
+- No vertical blank synchronisation (call `vsync` before the calls).
+- Not in the full-screen framebuffer.
+
+draw_list:
+- One syscall per list (about 2,000 cycles a record in the call).
+- Returns at once: sources and target stay in use until `list_wait` / `vsync` / the next
+  list.
+- Text: LS_EXPAND from your own 1 bpp font.
+- No lines, frames or dithers.
+- LS_VBL on a record: Ali holds the list until the vertical blank, and the CPU continues.
+- Draws in the full-screen framebuffer.
 
 Use win_draw for a few operations (an application's controls, text in the system fonts); use
 a list for many blits a frame (a game's sprites drawn by blits, tiles, a scrolled strip), and
@@ -78,7 +97,7 @@ for anything in full-screen mode. 100 keyed 16 x 16 blits a frame: 100 win_draw 
 26.6 ms of CPU a frame (more than a frame), one list 14.4 ms in the call
 ([performance.md](performance.md)).
 
-## The block from code
+## Filling the block
 
 The block is easiest to fill with 16-bit stores; mind the two that straddle fields:
 `sta blk` (op) also writes c1, and `sta blk+14` (the bank of ptr) also writes the 16th
@@ -230,10 +249,10 @@ s_hi:   .byte   "Hello", 0
 
 ## Fonts
 
-| Font | | Size |
-| --- | --- | --- |
-| 0 | the UI font, proportional | 12-line cells: capitals and ascenders 7 rows, x-height 6, descenders 2 more; advances 2-7 pixels. Draw lines 12 pixels apart (`UI_LINE`) |
-| 1 | the console font, fixed | 8 x 12 cells, glyphs at most 6 pixels wide |
+- Font 0, the UI font, proportional: 12-line cells: capitals and ascenders 7 rows,
+  x-height 6, descenders 2 more; advances 2-7 pixels. Draw lines 12 pixels apart
+  (`UI_LINE`).
+- Font 1, the console font, fixed: 8 x 12 cells, glyphs at most 6 pixels wide.
 
 Both are Horizon's own designs; only printable ASCII (32-126).
 

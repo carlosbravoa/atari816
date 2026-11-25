@@ -2,11 +2,12 @@
 
 emu816 is a fast C model of the Atari816 native machine: a 65C816, FREDDIE II (memory map,
 bank 0 window, user/supervisor modes, protection, ABORT), the system block, the I/O
-processor mailbox, Marga, the video chip (first called the NVC, with sprites and fine scrolling
-from REV $0B), Ali, the blitter, Lau, the sample player, next to POKEY 2 (from REV $0C POKEY 1's
-native register bank), and from REV $0C the OPL2 (YM3812): its registers and timers, and its
-sound from Nuked OPL3 (`nuked-opl3/`). Use it to develop Horizon on a PC. The reference for FREDDIE II and the system block is `core/src/a816/a816_sys.sv`.
-The reference for the mailbox is `a816_mailbox()` in `core/firmware/firmware.c`. The reference for Marga is
+processor mailbox, Marga, the video chip (NVC in file and register names; sprites and fine
+scrolling from REV $0B), Ali, the blitter, Lau, the sample player, next to POKEY 2 (from REV
+$0C POKEY 1's native register bank), and from REV $0C the OPL2 (YM3812): its registers and
+timers, and its sound from Nuked OPL3 (`nuked-opl3/`). Use it to develop Horizon on a PC. The
+reference for FREDDIE II and the system block is `core/src/a816/a816_sys.sv`. The reference
+for the mailbox is `a816_mailbox()` in `core/firmware/firmware.c`. The reference for Marga is
 `core/src/a816/a816_nvc.sv`. The rest follows `Docs/02-register-spec.md`.
 
 ## Build and run
@@ -26,69 +27,203 @@ emu816 [--sd DIR] [--load FILE@ADDR]... [--max-seconds N] [--trace]
        [--no-pc-print] [--classic-print FILE@SECONDS]... PROGRAM.BIN
 ```
 
-| Option | Meaning |
-| --- | --- |
-| `--sd DIR` | Host directory served as the SD card through the mailbox |
-| `--load FILE@ADDR` | Extra file at a 24-bit hex address (`02:0000`, `$020000` and `0x20000` all work) |
-| `--max-seconds N` | Stop after N seconds of emulated time |
-| `--trace` | One line per instruction on stderr: cycle, PBR:PC, bytes, disassembly, A X Y S D DB, flags, E/N, U/S. IRQ, NMI and ABORT entries are marked `***` |
-| `--shot FILE.ppm` | Write the 1280x720 output frame (scaled, as on screen) as a PPM. It is written at the first VBLANK (trigger 360) at or after the following `--shot-at` seconds, or at exit. Repeatable |
-| `--dump-ram FILE` | At exit, write the 8 MB of RAM to FILE (what a PC tool reading memory over the link sees: `core/tools/a816_screen.py` is checked against it, `emu/tests/shot816.py`) |
-| `--dump-ram-on TEXT` | Write the RAM each time the program prints a console line holding TEXT, at once (`--dump-ram-prefix P`: P1.bin, P2.bin, ...; default dumpon): a program's memory at a point of its own progress |
-| `--watch ADDR[:LEN]` | Log on stderr every write into physical RAM ADDR..ADDR+LEN-1 (hex, `BBAAAA` or `BB:AAAA`; up to 16 ranges): `watch US PC=BB:PPPP U/S task N DB=BB $AAAAAA = $VV (was $OO)` with the writing instruction's own address; `dma` for the I/O processor's file reads and the blitter. `--watch-max N` (default 200,000 lines). Through run816: `--emu-arg --watch --emu-arg 0B8080:10` |
-| `--ram-fill HH`, `--ram-random SEED` | The RAM at power-on all HH, or pseudo-random from SEED, instead of the pattern $EA ^ (address & $FF): a program that reads memory it never wrote behaves differently (the board's memory holds whatever was there) |
-| `--keys LIST` | Key changes `t_ms:usage:down,...` (usage in hex) at emulated milliseconds. Three more kinds, for `sdk/tools/inputscript.py`: `t_ms:W:HEX` waits until the console shows a line holding that text (hex of the bytes), then moves the rest of the list on by as long as the wait took; a line printed since the last step mark `t_ms:M:` (an input line starts) meets it at once, and each line meets one wait; `t_ms:S:HEX` a screenshot to that file. (Horizon 0.31) `t_ms:Q:HEX` waits for a still screen: until the picture sent to the monitor has not changed for N frames (HEX: N in decimal, as text; a frame that differs alone and the next one is the picture again, a raster glitch, is forgiven), then the rest moves on; a screenshot right after it is taken from a frame showing that picture. `t_ms:C:` waits until a frame differs from the one before (it ends at a frame's start). `t_ms:A:` waits until a voice of Lau, the sample player, is started (KEYON; to the cycle). A picture taken after such a wait shows a state, not a moment: it does not depend on how fast the CPU or the kernel is (horizon/tests/keyscript.py: `still N`, `change`, `sound`). At the end, a wait not met: "the script still waits for ..." on stderr |
-| `--mouse LIST` | Mouse input `t_ms:dx:dy:wheel:buttons,...` at emulated milliseconds: decimal motion in desktop pixels (dy > 0 = down), buttons bit 0 left, 1 right, 2 middle (`0x` allowed). Example: `--mouse 100:5:-3:0:1,200:0:0:0:0` |
-| `--console-us N` | Slow console: after each DBG_OUT byte, DBG_STAT bit 7 reads 1 for N emulated microseconds, and bytes written meanwhile are dropped, as on the hardware. The board takes about 90 us per byte while its log is read and can stall for milliseconds. Default 0: never busy |
-| `--stats` | At exit, print the emulated time, host time, emulated MHz, the cycles the CPU waited in WAI (the kernel's idle loop: the rest is its load) and counters (and the dropped console bytes with `--console-us`; the cache fills, RAM writes, cache sweeps and stall cycles of the memory model) |
-| `--rev N` | SYS_REV to report: 6 (no sound page, no blitter), 7 (sound page), 8 (sound and blitter), 9 (+ blitter command lists, raster events at the beam, NV_FRAME), 10 = $0A (+ Lau, the sample player, the default hardware build of bring-up step 17), 11 = $0B (+ Marga's sprites and fine scrolling, bring-up step 19), 12 = $0C (+ the OPL2 at $00:DB30-$DB33; POKEY 2 replaced by POKEY 1's native register bank at the same addresses; the four DACs gone), 13 = $0D (default: + Ali's colour remap: BL_OP 5 TABLE, 6 COPY_REMAP, 7 COPY_KEY_REMAP). Below 13 OPs 5-7 do nothing, as every OP above 4. Below 12 $00:DB30-$DB33 belong to Lau's page as before (they read 0); below 11 Marga's registers $D930-$D9FF read 0 and ignore writes; below 10 the sample player reads 0 and ignores writes; below 9 the list registers do, and the raster events come at the fetch trigger; below 8 the blitter registers read 0 and ignore writes; below 7 the sound page ignores writes |
-| `--wav FILE.wav` | Write the sound the board's HDMI output carries, without the classic machine's part: Lau's left and right plus the OPL2's output on both (REV $0C), saturated to 16 bits, 48 kHz stereo, from the start of the run. Not in it: POKEY (the native bank and the classic machine's) and GTIA. See "OPL2", the mix |
-| `--log-sound` | Print every accepted write to the sound page ($00:DB00-$DB13; from REV $0C $DB00-$DB0F) on stderr |
-| `--log-sound-us` | The same as `--log-sound`, each line with the emulated time in microseconds: `sound 1234567 $DB01 = $AA` (ports/digger/tests/sndtime.py measures a game's sound steps from it) |
-| `--shot-on TEXT`, `--shot-on-prefix PATH` | A screenshot (PATH1.ppm, PATH2.ppm, ...) each time the program prints a console line holding TEXT, taken two vertical blanks later: pictures at points of the program's own progress, whatever its timing (the program shows what it wants seen, prints the line, holds the picture a few frames; `run816.py --shot-on`, ports/digger/tests/frames.sh) |
-| `--stop-on TEXT` | End the run when the program prints a console line holding TEXT (repeatable: any of the texts). `--max-seconds` stays the upper limit. Exit code 4, and on stderr `emu816: stopped on "TEXT" at 12.345678 s` (the time of the line's end, since power-on). At the end, as at the limit: stdout flushed, the `--wav` file closed, the `--prof` file written, `--dump-ram` written, the `--shot` files without a time written; a `--shot` whose `--shot-at` lies after the stop is not taken. Files the program still has open on the card keep what was written so far, but not their date: let the program print the line after it has closed its files, or give a delay. `run816.py --stop-on` |
-| `--stop-on-delay MS` | End the run MS ms of emulated time after the `--stop-on` line instead of at once (default 0) |
-| `--console-times` | Each console line on stdout starts with the emulated time of its first byte since power-on, `[  12.345678] ` (seconds, 6 decimals). This is the base of `--log-lau-us`, `--log-opl-us`, `--log-sound-us` and `--watch`: their microseconds are these digits without the point (`[  12.345678]` = `lau 12345678 ...`). A line starts after LF, CR or FF outside an escape sequence; empty lines get no time |
-| `--log-lau` | Print every write to Lau, the sample player ($00:DB20-$DBFF, REV $0A), on stderr as `lau $DBxx = $yy` (Horizon's sample-call test compares it) |
-| `--log-lau-us` | The same as `--log-lau`, each line with the emulated time in microseconds: `lau 1234567 $DB89 = $12` (the music tests rebuild Lau's voice state at every tick from it) |
-| `--kbd-release MS` | Release the keys held when no key has changed for MS ms. The I/O processor's firmware did so after 1,000 ms until 2026-11: a USB keyboard (the CH9350 or the Pico/TinyUSB bridge) reports only when its keys change, so on the board a key held longer than a second went up by itself. With this the emulator shows that board's behaviour (`--kbd-release 1000`); without it, the firmware's of now |
-| `--log-opl` | Print every OPL2 data write ($00:DB31, REV $0C) on stderr as `opl $RR = $yy`, RR the register selected at $DB30 (the selects themselves are not printed) |
-| `--log-opl-us` | The same as `--log-opl`, each line with the emulated time in microseconds: `opl 1234567 $B0 = $31` (Horizon's OPL2 and MIDI tests compare it) |
-| `--headless` | SDL builds open a window by default; this flag suppresses it (accepted and ignored in plain builds) |
-| `--fast` | SDL: keep the window but do not throttle to real time (the live sound is then cut to about 100 ms a frame) |
-| `--mute` | SDL: no live sound. Without the option the window plays what `--wav` records, through SDL's default output device (none found: a note on stderr, the run goes on silently) |
-| `--cpu-slow PCT`, `--kernel-slow PCT` | (Horizon 0.31; a test aid) Every instruction (`--kernel-slow`: every one run in supervisor mode) takes PCT % more cycles; negative: fewer, down to -50. Waiting (WAI), the devices, the card and the scripted input keep their times. A test that passes with `EMUFLAGS="--cpu-slow 3"` (or -3, `--kernel-slow 10`, ...) does not depend on the exact speed of the CPU or the kernel: `make -C horizon test EMUFLAGS=...` shows which pictures were taken at moments rather than at states |
-| `--ideal-timing` | The time model before Horizon 0.19: every CPU cycle ideal (no cache misses, SDRAM write stalls or cache sweeps) and Ali's older per-pixel rates. Programs then run about twice as fast as on the board (see "Memory timing") |
-| `--card-date YYYY-MM-DDTHH:MM` | The date STAT reports for every file this run did not create or write, on the card and on the PC volume (Horizon's tests run on fresh copies of the card, whose host dates mean nothing); the files the run writes keep the date SYS_TIME gives them |
-| `--pc-folder DIR` | The PC volume of the PC link: paths starting `/PC:` are served from DIR (see "The PC volume" below). Without it the volume is absent: those paths answer $87 |
-| `--pc-time YYYY-MM-DDTHH:MM` | The PC's clock at power-on; it counts on with emulated time. STAT `/PC:` reports it, and the PC files the run writes get it as their date. Default: the host's clock. (The PC files the run did not write get `--card-date`, as the card's) |
-| `--pc-drop-at SECONDS` | The PC link drops at this emulated time: open PC handles answer $88, new `/PC:` calls $87, the `PC:` entry leaves the root. Streams too (see "The internet"): open streams answer $88, requests put aside answer $88, each connection gets an $E4 event, new URL opens answer $87 |
-| `--pc-back-at SECONDS` | The link comes back at this time (after `--pc-drop-at`): a new session; handles from before the drop stay dead ($88) |
-| `--card-kbps R:W` | Slow card (see "Slow transfers"): READ and LOAD at R KB/s, WRITE at W KB/s, and 1 ms for every request on the card. 0 = instant. Default: off (every request instant). The board: about `170:100` |
-| `--card-board` | The board's card, request by request, as the firmware of Horizon 0.30 runs it (the card at 10.7 MHz; see "The card's speed"): an OPEN or a STAT 1.72 ms a folder level + 0.86 ms a folder sector scanned, a READ 0.5 ms + 0.86 ms a sector, ... Default: off (every request instant); `run816.py` turns it on from the program's start (`--card-board-at`) unless given `--fast-card` |
-| `--card-board-old` | `--card-board` as the firmware of v0.29 runs it (the card at 1.34 MHz: the released boards until 0.30): the same model with the costs of that table (`run816.py --emu-arg --card-board-old`: from the program's start) |
-| `--card-board-at S` | `--card-board` from S emulated seconds on (the boot stays instant: tests with fixed boot times) |
-| `--card-costs O:S:C:CW:SK:X:R:W:RK:WK[:LV:SF:CR]` | `--card-board` with other costs: ms for OPEN, STAT (fixed parts), CLOSE of a file read, CLOSE of a file written, SEEK, the other requests (+ their path), READ and WRITE (fixed part); KB/s of READ (by the sector: also a folder's sectors, and LOAD) and WRITE; ms for a folder level of a path, a SEEK into another cluster, a create (OPEN mode 2). Without the last three (the older 10-value form): 0. The default: `0.3:0.3:0.4:9:0.4:10:0.5:1.4:581:180:1.72:1.55:30`; `--card-board-old`: `5.1:5.1:1.45:17.5:0.4:20:0.5:3.6:163:100:1.54:3.4:45` |
-| `--log-card` | Each card request's `--card-board` time on stderr: `emu816: card 4.923341 s op $06 /APPS/XCOM/PACKS.VER 0 -> 8.04 ms` (the emulated second it came, the op, its path, the length or the SEEK's place) |
-| `--card-free BYTES` | (Horizon 0.29's tests) The card has room for BYTES more, written in this run: once they are used up, a WRITE on the card writes what still fits and answers that count (FatFs on a full volume: FR_OK, fewer bytes), and MKDIR answers FR_DENIED. Default: no limit |
-| `--pc-kbps R:W` | Slow PC volume: the same, with 6 ms for every request on the PC. The board: about `100:55` |
-| `--net` | The Net service of the PC link (step 2): `tcp://host:port` paths are real TCP connections from the host (see "The internet (PC link step 2)"). Without it they answer $8A |
-| `--net-root DIR` | The Fetch service: `http://`, `https://` and `ftp://` URLs are served from files in DIR (`scheme://host[:port]/path` = the file `DIR/host/path`). Without it they answer $8A |
-| `--net-delay MS` | The time the PC takes to answer an OPEN or STAT of a URL (the server's answer), in emulated milliseconds. Default 0 (+ 6 ms when `--pc-kbps` is given) |
-| `--no-pc-print` | (Horizon 0.23) The gateway cannot make PDFs: STAT `/PC:` answers its services without bit 4 (PRINT): $0D instead of $1D (see "Printing, Run in Atari, the folder disk") |
-| `--classic-print FILE@SECONDS` | (Horizon 0.23) At that emulated time the classic Atari prints FILE (ATASCII bytes as P: sends them, e.g. `HELLO` $9B): a print job `/Printouts/YYYY-MM-DD HH.MM.SS Atari.txt`, converted by the firmware's own `core/firmware/prnconv.c` (in records of 40 bytes, a record ending at its EOL), written at once under its `.` name and finished 3 s later (the firmware ends a job after 3 s without data); stderr: `emu816: P: job /Printouts/...`. Repeatable (8 at most) |
-| `--boot-cart PATH` | A cartridge (a FAT path on `--sd`) that the I/O processor loaded by itself at power-on (`boot=ash` in /atari.ini): CLASSIC\_STATE ($1E) reports it, from power-on and after a full restart |
+- `--sd DIR`: Host directory served as the SD card through the mailbox
+- `--load FILE@ADDR`: Extra file at a 24-bit hex address (`02:0000`, `$020000` and `0x20000`
+  all work)
+- `--max-seconds N`: Stop after N seconds of emulated time
+- `--trace`: One line per instruction on stderr: cycle, PBR:PC, bytes, disassembly, A X Y S
+  D DB, flags, E/N, U/S. IRQ, NMI and ABORT entries are marked `***`
+- `--shot FILE.ppm`: Write the 1280x720 output frame (scaled, as on screen) as a PPM. It is
+  written at the first VBLANK (trigger 360) at or after the following `--shot-at` seconds,
+  or at exit. Repeatable
+- `--dump-ram FILE`: At exit, write the 8 MB of RAM to FILE: the memory a PC tool reads over
+  the link (`core/tools/a816_screen.py` is tested against it with `emu/tests/shot816.py`)
+- `--dump-ram-on TEXT`: Write the RAM each time the program prints a console line holding
+  TEXT, at once (`--dump-ram-prefix P`: P1.bin, P2.bin, ...; default dumpon): a program's
+  memory at a point of its own progress
+- `--watch ADDR[:LEN]`: Log on stderr every write into physical RAM ADDR..ADDR+LEN-1 (hex,
+  `BBAAAA` or `BB:AAAA`; up to 16 ranges): `watch US PC=BB:PPPP U/S task N DB=BB $AAAAAA =
+  $VV (was $OO)` with the writing instruction's own address; `dma` for the I/O processor's
+  file reads and the blitter. `--watch-max N` (default 200,000 lines). Through run816:
+  `--emu-arg --watch --emu-arg 0B8080:10`
+- `--ram-fill HH`, `--ram-random SEED`: The RAM at power-on all HH, or pseudo-random from
+  SEED, instead of the pattern $EA ^ (address & $FF). A program that reads memory it never
+  wrote then behaves differently (on the board, memory holds whatever was there)
+- `--keys LIST`: Key changes `t_ms:usage:down,...` (usage in hex) at emulated milliseconds.
+  More entry kinds, used by `sdk/tools/inputscript.py`:
+  - `t_ms:W:HEX`: the list pauses until the console prints a line holding that text (HEX:
+    the bytes in hex); the rest of the list then moves later by the length of the pause. A
+    line printed since the last step mark `t_ms:M:` (where an input line starts) satisfies
+    it at once, and each line satisfies one `W` entry
+  - `t_ms:S:HEX`: a screenshot to that file
+  - `t_ms:Q:HEX`: the list pauses until the picture sent to the monitor has not changed for
+    N frames (HEX: N in decimal, as text). A single frame that differs, followed by the
+    earlier picture again (a raster glitch), is ignored. A screenshot right after it is
+    taken from a frame with that picture
+  - `t_ms:C:`: the list pauses until a frame differs from the one before (the pause ends at
+    a frame's start)
+  - `t_ms:A:`: the list pauses until a voice of Lau, the sample player, is started (KEYON;
+    to the cycle)
+
+  A picture taken after such a pause records a state, not a moment: it does not depend on
+  the speed of the CPU or the kernel (horizon/tests/keyscript.py: `still N`, `change`,
+  `sound`). A pause still pending at the end prints "the script still waits for ..." on
+  stderr
+- `--mouse LIST`: Mouse input `t_ms:dx:dy:wheel:buttons,...` at emulated milliseconds:
+  decimal motion in desktop pixels (dy > 0 = down), buttons bit 0 left, 1 right, 2 middle
+  (`0x` allowed). Example: `--mouse 100:5:-3:0:1,200:0:0:0:0`
+- `--console-us N`: Slow console: after each DBG_OUT byte, DBG_STAT bit 7 reads 1 for N
+  emulated microseconds, and bytes written meanwhile are dropped, as on the hardware. The
+  board takes about 90 us per byte while its log is read and can stall for milliseconds.
+  Default 0: never busy
+- `--stats`: At exit, print the emulated time, host time, emulated MHz, the cycles the CPU
+  spent in WAI (the kernel's idle loop; the rest is load) and counters (and the dropped
+  console bytes with `--console-us`; the cache fills, RAM writes, cache sweeps and stall
+  cycles of the memory model)
+- `--rev N`: SYS_REV to report: 6 (no sound page, no blitter), 7 (sound page), 8 (sound and
+  blitter), 9 (+ blitter command lists, raster events at the beam, NV_FRAME), 10 = $0A (+
+  Lau, the sample player), 11 = $0B (+ Marga's sprites and fine scrolling), 12 = $0C (+ the
+  OPL2 at $00:DB30-$DB33; POKEY 2 replaced by POKEY 1's native register bank at the same
+  addresses; the four DACs gone), 13 = $0D (default: + Ali's colour remap: BL_OP 5 TABLE, 6
+  COPY_REMAP, 7 COPY_KEY_REMAP). Below 13 OPs 5-7 do nothing, as every OP above 4. Below 12
+  $00:DB30-$DB33 belong to Lau's page (they read 0); below 11 Marga's registers $D930-$D9FF
+  read 0 and ignore writes; below 10 the sample player reads 0 and ignores writes; below 9
+  the list registers do, and the raster events come at the fetch trigger; below 8 the
+  blitter registers read 0 and ignore writes; below 7 the sound page ignores writes
+- `--wav FILE.wav`: Write the sound the board's HDMI output carries, without the classic
+  machine's part: Lau's left and right plus the OPL2's output on both (REV $0C), saturated
+  to 16 bits, 48 kHz stereo, from the start of the run. Not included: POKEY (the native bank
+  and the classic machine's) and GTIA. See "OPL2", the mix
+- `--log-sound`: Print every accepted write to the sound page ($00:DB00-$DB13; from REV $0C
+  $DB00-$DB0F) on stderr
+- `--log-sound-us`: The same as `--log-sound`, each line with the emulated time in
+  microseconds: `sound 1234567 $DB01 = $AA` (ports/digger/tests/sndtime.py measures a game's
+  sound steps from it)
+- `--shot-on TEXT`, `--shot-on-prefix PATH`: A screenshot (PATH1.ppm, PATH2.ppm, ...) each
+  time the program prints a console line holding TEXT, taken two vertical blanks later:
+  pictures at points of the program's own progress, whatever its timing (the program draws
+  the state to capture, prints the line, holds the picture a few frames; `run816.py
+  --shot-on`, ports/digger/tests/frames.sh)
+- `--stop-on TEXT`: End the run when the program prints a console line holding TEXT
+  (repeatable: any of the texts). `--max-seconds` stays the upper limit. Exit code 4, and on
+  stderr `emu816: stopped on "TEXT" at 12.345678 s` (the time of the line's end, since
+  power-on). At the end, as at the limit: stdout flushed, the `--wav` file closed, the
+  `--prof` file written, `--dump-ram` written, the `--shot` files without a time written; a
+  `--shot` whose `--shot-at` lies after the stop is not taken. Files the program still has
+  open on the card keep what was written so far, but not their date: let the program print
+  the line after it has closed its files, or give a delay. `run816.py --stop-on`
+- `--stop-on-delay MS`: End the run MS ms of emulated time after the `--stop-on` line
+  instead of at once (default 0)
+- `--console-times`: Each console line on stdout starts with the emulated time of its first
+  byte since power-on, `[  12.345678] ` (seconds, 6 decimals). `--log-lau-us`,
+  `--log-opl-us`, `--log-sound-us` and `--watch` use the same time base: their microseconds
+  are these digits without the point (`[  12.345678]` = `lau 12345678 ...`). A line starts
+  after LF, CR or FF outside an escape sequence; empty lines get no time
+- `--log-lau`: Print every write to Lau, the sample player ($00:DB20-$DBFF, REV $0A), on
+  stderr as `lau $DBxx = $yy` (Horizon's sample-call test compares this output)
+- `--log-lau-us`: The same as `--log-lau`, each line with the emulated time in microseconds:
+  `lau 1234567 $DB89 = $12` (the music tests rebuild Lau's voice state at every tick from
+  it)
+- `--kbd-release MS`: Release the keys held when no key has changed for MS ms. A USB keyboard
+  (the CH9350 or the Pico/TinyUSB bridge) reports only when its keys change. Older I/O
+  processor firmware released every key after 1,000 ms without a change, so a key held
+  longer than a second went up. `--kbd-release 1000` reproduces that firmware; without the
+  option the emulator follows the current firmware
+- `--log-opl`: Print every OPL2 data write ($00:DB31, REV $0C) on stderr as `opl $RR = $yy`,
+  RR the register selected at $DB30 (the selects themselves are not printed)
+- `--log-opl-us`: The same as `--log-opl`, each line with the emulated time in microseconds:
+  `opl 1234567 $B0 = $31` (Horizon's OPL2 and MIDI tests compare this output)
+- `--headless`: SDL builds open a window by default; this flag suppresses it (accepted and
+  ignored in plain builds)
+- `--fast`: SDL: keep the window but do not throttle to real time (the live sound is then
+  cut to about 100 ms a frame)
+- `--mute`: SDL: no live sound. Without the option the window plays what `--wav` records,
+  through SDL's default output device (if there is none: a note on stderr, and the run
+  continues without sound)
+- `--cpu-slow PCT`, `--kernel-slow PCT`: (A test aid) Every instruction (`--kernel-slow`:
+  every one run in supervisor mode) takes PCT % more cycles; negative: fewer, down to -50.
+  WAI, the devices, the card and the scripted input keep their times. A test that passes
+  with `EMUFLAGS="--cpu-slow 3"` (or -3, `--kernel-slow 10`, ...) does not depend on the
+  exact speed of the CPU or the kernel: `make -C horizon test EMUFLAGS=...` reports which
+  pictures were taken at moments rather than at states
+- `--ideal-timing`: The ideal time model: every CPU cycle ideal (no cache misses, SDRAM
+  write stalls or cache sweeps) and Ali's older per-pixel rates. Programs then run about
+  twice as fast as on the board (see "Memory timing")
+- `--card-date YYYY-MM-DDTHH:MM`: The date STAT reports for every file this run did not
+  create or write, on the card and on the PC volume (for runs on fresh copies of the card,
+  whose host dates are arbitrary); the files the run writes keep the date SYS_TIME gives
+  them
+- `--pc-folder DIR`: The PC volume of the PC link: paths starting `/PC:` are served from DIR
+  (see "The PC volume" below). Without it the volume is absent: those paths return $87
+- `--pc-time YYYY-MM-DDTHH:MM`: The PC's clock at power-on; it counts on with emulated time.
+  STAT `/PC:` reports it, and the PC files the run writes get it as their date. Default: the
+  host's clock. (The PC files the run did not write get `--card-date`, as the card's)
+- `--pc-drop-at SECONDS`: The PC link drops at this emulated time: open PC handles return
+  $88, new `/PC:` calls $87, the `PC:` entry leaves the root. Streams too (see "Internet"):
+  open streams return $88, deferred requests return $88, each connection gets an $E4 event,
+  new URL opens return $87
+- `--pc-back-at SECONDS`: The link comes back at this time (after `--pc-drop-at`): a new
+  session; handles from before the drop stay dead ($88)
+- `--card-kbps R:W`: Slow card (see "Slow transfers"): READ and LOAD at R KB/s, WRITE at W
+  KB/s, and 1 ms for every request on the card. 0 = instant. Default: off (every request
+  instant). The board: about `170:100`
+- `--card-board`: The board's card, request by request, as the firmware of Horizon 0.30 runs
+  it (the card at 10.7 MHz; see "The card's speed"): an OPEN or a STAT 1.72 ms a folder
+  level + 0.86 ms a folder sector scanned, a READ 0.5 ms + 0.86 ms a sector, ... Default:
+  off (every request instant); `run816.py` turns it on from the program's start
+  (`--card-board-at`) unless given `--fast-card`
+- `--card-board-old`: `--card-board` as the firmware of v0.29 runs it (the card at 1.34 MHz,
+  as on boards with firmware before 0.30): the same model with the costs of that table
+  (`run816.py --emu-arg --card-board-old`: from the program's start)
+- `--card-board-at S`: `--card-board` from S emulated seconds on (the boot stays instant:
+  tests with fixed boot times)
+- `--card-costs O:S:C:CW:SK:X:R:W:RK:WK[:LV:SF:CR]`: `--card-board` with other costs: ms for
+  OPEN, STAT (fixed parts), CLOSE of a file read, CLOSE of a file written, SEEK, the other
+  requests (+ their path), READ and WRITE (fixed part); KB/s of READ (by the sector: also a
+  folder's sectors, and LOAD) and WRITE; ms for a folder level of a path, a SEEK into
+  another cluster, a create (OPEN mode 2). Without the last three (the 10-value form): 0.
+  The default: `0.3:0.3:0.4:9:0.4:10:0.5:1.4:581:180:1.72:1.55:30`; `--card-board-old`:
+  `5.1:5.1:1.45:17.5:0.4:20:0.5:3.6:163:100:1.54:3.4:45`
+- `--log-card`: Each card request's `--card-board` time on stderr: `emu816: card 4.923341 s
+  op $06 /APPS/XCOM/PACKS.VER 0 -> 8.04 ms` (the emulated time of the request, the op, its
+  path, the length or the SEEK's place)
+- `--card-free BYTES`: The card has room for BYTES more, written in this run: once they are
+  used up, a WRITE on the card writes what still fits and returns that count (FatFs on a
+  full volume: FR_OK, fewer bytes), and MKDIR returns FR_DENIED. Default: no limit
+- `--pc-kbps R:W`: Slow PC volume: the same, with 6 ms for every request on the PC. The
+  board: about `100:55`
+- `--net`: The Net service of the PC link (step 2): `tcp://host:port` paths are real TCP
+  connections from the host (see "Internet (PC link step 2)"). Without it they return $8A
+- `--net-root DIR`: The Fetch service: `http://`, `https://` and `ftp://` URLs are served
+  from files in DIR (`scheme://host[:port]/path` = the file `DIR/host/path`). Without it
+  they return $8A
+- `--net-delay MS`: The PC's response time to an OPEN or STAT of a URL (the server's
+  latency), in emulated milliseconds. Default 0 (+ 6 ms when `--pc-kbps` is given)
+- `--no-pc-print`: A gateway that cannot make PDFs: STAT `/PC:` reports its services without
+  bit 4 (PRINT): $0D instead of $1D (see "Printing, Run in Atari, the folder disk")
+- `--classic-print FILE@SECONDS`: At that emulated time the classic Atari prints FILE
+  (ATASCII bytes as P: sends them, e.g. `HELLO` $9B): a print job
+  `/Printouts/YYYY-MM-DD HH.MM.SS Atari.txt`, converted by the firmware's own
+  `core/firmware/prnconv.c` (in records of 40 bytes, a record ending at its EOL), written at
+  once under its `.` name and finished 3 s later (the firmware ends a job after 3 s without
+  data); stderr: `emu816: P: job /Printouts/...`. Repeatable (8 at most)
+- `--boot-cart PATH`: A cartridge (a FAT path on `--sd`) that the I/O processor loaded by
+  itself at power-on (`boot=ash` in /atari.ini): CLASSIC\_STATE ($1E) reports it, from
+  power-on and after a full restart
 
 Exit codes: 0 when the program executes STP, 3 at the `--max-seconds` limit, 4 at a
-`--stop-on` line (after its delay), 1 on a usage or file error. Output written to DBG_OUT ($00:DEF0) goes to stdout.
+`--stop-on` line (after its delay), 1 on a usage or file error. Output written to DBG_OUT
+($00:DEF0) goes to stdout.
 
 ### Boot
 
 Boot follows the I/O processor and the RTL testbench:
 
 1. Every RAM byte is filled with `$EA ^ (address & $FF)`, junk rather than zeros.
-2. The program is loaded at $01:0000: at most 65,280 ($FF00) bytes, as the firmware reads. `--load` files have no limit.
-3. The reset stub `18 FB 5C 00 00 01` (CLC XCE JML $010000) goes to $00:FF00, and STP to $00:FF10.
+2. The program is loaded at $01:0000: at most 65,280 ($FF00) bytes, as the firmware reads.
+   `--load` files have no limit.
+3. The reset stub `18 FB 5C 00 00 01` (CLC XCE JML $010000) goes to $00:FF00, and STP to
+   $00:FF10.
 4. Every vector $00:FFE0-$FFFF points to $FF10, except RESET, which points to $FF00.
 5. The CPU is reset in emulation mode.
 
@@ -106,16 +241,16 @@ Boot follows the I/O processor and the RTL testbench:
 - Every bus access is one call to `read(addr, flags)` or `write(addr, val, flags)`. The
   flags mark an opcode fetch (SYNC), an operand fetch, a data access, a vector pull and
   "inside an entry sequence". Internal cycles are counted but make no access.
-- Cycle counts follow the data sheet. They were checked against the SingleStepTests/65816
-  suite: 508,400 tests (1,000 per opcode and mode) pass, including the exact sequence of
-  valid bus cycles. `make test` runs a 200-per-file sample.
+- Cycle counts follow the data sheet and pass the SingleStepTests/65816 suite: 508,400
+  tests (1,000 per opcode and mode), including the exact sequence of valid bus cycles.
+  `make test` runs a 200-per-file sample.
 - Known difference from the suite: WAI and STP take 3 cycles, as in the data sheet; the
   suite counts 4.
-- ABORT follows the RTL. A refused access sets `cpu->abort`, and the refused read returns
+- ABORT follows the RTL. A blocked access sets `cpu->abort`, and a blocked read returns
   $EA. The instruction runs to its end. Then every register (A X Y S D DBR PBR P E PC) is
   restored to its value at the opcode fetch, and the ABORT vector is taken
-  ($00:FFE8 native, $00:FFF8 emulation). ABORT has priority and a pending NMI waits.
-  Refusals during an entry sequence are ignored.
+  ($00:FFE8 native, $00:FFF8 emulation). ABORT has priority; a pending NMI stays pending.
+  Blocked accesses during an entry sequence are ignored.
 - Interrupt sampling follows the RTL:
   - After any entry sequence (IRQ, NMI, ABORT, reset), one instruction always runs before
     the next interrupt is taken.
@@ -127,7 +262,7 @@ Boot follows the I/O processor and the RTL testbench:
 
 ### FREDDIE II (`freddie.c`)
 
-This is a line-by-line model of the FREDDIE II part of `a816_sys.sv`:
+A line-by-line model of the FREDDIE II part of `a816_sys.sv`:
 
 - **Memory map:** 8 MB of flat RAM. RAM_BANKS reads $7F. Reads above $7F:FFFF return $00
   and writes there are dropped. The I/O page is $00:D000-$DFFF.
@@ -135,7 +270,7 @@ This is a line-by-line model of the FREDDIE II part of `a816_sys.sv`:
 - **Mode stack:** 8 deep.
   - A vector pull pushes the current mode and enters supervisor mode. Only the first of
     the two pull cycles pushes.
-  - Exception: the vector pull of a BRK/COP that already had a refused access (wr_block
+  - Exception: the vector pull of a BRK/COP that already had a blocked access (wr_block
     set, outside an entry sequence) does neither. It is checked like any user-mode read,
     as in a816_sys.sv `vpull`.
   - An RTI whose opcode was fetched in supervisor mode, outside an entry sequence, pops
@@ -144,17 +279,17 @@ This is a line-by-line model of the FREDDIE II part of `a816_sys.sv`:
   - FR_CTRL bit 1 is the top of the stack; FR_CTRL bit 7 is the current mode.
 - **NMI hold:** the first cycle of a counted vector pull out of user mode sets `nmi_hold`;
   any FR_CTRL write and reset clear it. While it is set the NMI line is not presented
-  (`nmi_n = ~(|nmi_status && !nmi_hold)`). NMI_STATUS still latches, and the CPU sees the
+  (`nmi_n = ~(|nmi_status && !nmi_hold)`). NMI_STATUS still latches, and the CPU takes the
   edge when the hold is released, so the first kernel instructions after an entry from
   user mode, still on the task's S, are never preempted by an NMI.
-- An RTI opcode fetch that was refused does not arm the mode-stack pop (`!refuse`).
+- A blocked RTI opcode fetch does not arm the mode-stack pop (`!refuse`).
 - **Protection check:** `user_eff` is applied per access. Reads inside an entry sequence
   are not checked; pushes are.
 - **WP_VEC** works independently of PROT_EN.
-- **ABORT_ADDR / ABORT_CAUSE** record the first refused access of each instruction.
-  A read-only refusal sets only the WRITE cause bit.
-- **Write block:** after a refusal, writes are blocked until the next opcode fetch, so
-  the ABORT sequence's own pushes go through.
+- **ABORT_ADDR / ABORT_CAUSE** record the first blocked access of each instruction.
+  A write blocked by a read-only page sets only the WRITE cause bit.
+- **Write block:** after a blocked access, writes are blocked until the next opcode fetch,
+  so the ABORT sequence's own pushes go through.
 - **Protection table:** like block RAM, it is not cleared at reset.
 - **CACHE_FLUSH** ($00:D80A) accepts writes and does nothing, because there is no cache.
 
@@ -179,67 +314,92 @@ This is a line-by-line model of the FREDDIE II part of `a816_sys.sv`:
   stops.
 - **Watchdog:** $5A arms it for 2,000,000 us and $A5 restarts it. Expiry sets NMI_STATUS
   bit 1.
-- **NMI** is held while NMI_STATUS != 0. The CPU sees the 0 to non-zero edge.
+- **NMI** is held while NMI_STATUS != 0. The CPU takes the edge from 0 to non-zero.
 - **DBG_OUT** ($DEF0) prints to stdout. DBG_STAT reads 0 unless `--console-us` is given.
-- **KB_ROUTE** ($DE20, bit 0) resets to 1, as in the RTL; the spec says 0. While it is 1
-  the keyboard belongs to the classic machine, which is not modelled, so no KEY events are
-  produced. JOY_PORT ($DE21) and JOY_TRIG ($DE22) read 0.
+- **KB_ROUTE** ($DE20, bit 0) resets to 1, as in the RTL; the register spec gives 0. While
+  it is 1 the keyboard belongs to the classic machine, which is not modelled, so no KEY
+  events are produced. JOY_PORT ($DE21) and JOY_TRIG ($DE22) read 0.
 - **F12** sets NMI_STATUS bit 0 (SYSTEM_KEY).
 
 ### Mailbox (`mailbox.c`)
 
 The I/O processor polls every 512 CPU cycles (about 36 us) and serves one request at a time,
-as the firmware does. Software cannot depend on synchronous answers.
+as the firmware does. Software must not depend on synchronous responses.
 
 - **One poll:** first at most one event (a key, else the mouse; see "Keyboard events"),
   also while a request is in progress. Then, if a request is in progress and its time is up,
-  its answer. Else, if the poll sent no event, the next request is taken: without the slow
-  transfer options it is answered at once (as before); with them its answer comes later.
+  its response. Else, if the poll sent no event, the next request is taken: without the slow
+  transfer options its response is written at once; with them, later.
 - **IOP_READY:** MB_STATUS bit 0 is set on the first poll after both MB_REQ_BASE and
   MB_RSP_BASE are non-zero. MB_REQ_TAIL and MB_RSP_HEAD restart at 0.
 - **Reset:** clearing a base closes every file and resets the state.
 - **Errors:** an unreadable ring sets IOP_ERROR (bit 1).
-- **Cache sweep:** every new MB_RSP_HEAD (an answer or an event) empties the 65C816's cache and
-  pauses the CPU for 256 cycles (18 us), as the RTL does before the head becomes visible; so
-  does a CACHE_FLUSH write (see "Memory timing").
+- **Cache sweep:** every new MB_RSP_HEAD (a response or an event) empties the 65C816's cache
+  and pauses the CPU for 256 cycles (18 us), as the RTL does before the head becomes
+  visible; so does a CACHE_FLUSH write (see "Memory timing").
 
 Responses copy the request, set OP | $80, and put the result in ARG0 and the value in ARG1.
 Result codes in ARG0 are:
 
-| Code | Meaning |
-| --- | --- |
-| 0 | OK |
-| 1-19 | FatFs FRESULT (4 NO_FILE, 5 NO_PATH, 6 INVALID_NAME, 7 DENIED, 8 EXIST, 18 TOO_MANY_OPEN_FILES, ...). Host errno values are mapped to the FRESULT FatFs would return |
-| $80 | Bad handle |
-| $81 | Bad address: >= $80:0000, or anywhere in bank $10, which the firmware cannot reach |
-| $82 | Unsupported operation (TIME $30, MOUNT, UNMOUNT and anything unknown, as in the current firmware; CLASSIC_MOUNT of a `/PC:` path while the PC volume is there) |
-| $87 | No PC link: a `/PC:` path while the PC volume is absent |
-| $88 | PC link lost: READ, WRITE or SEEK on a handle of the PC volume opened before the link dropped |
-| $89 | Not the same volume: RENAME between the card and the PC volume |
-| $8A-$93 | The internet (PC link step 2, see "The internet"): $8A no such service, $8B bad address, $8C name not found, $8D refused, $8E timeout, $8F HTTP status >= 400 (ARG1 = the status), $90 the connection was closed, $91 TLS failed, $93 other network error |
+- 0: OK
+- 1-19: FatFs FRESULT (4 NO_FILE, 5 NO_PATH, 6 INVALID_NAME, 7 DENIED, 8 EXIST, 18
+  TOO_MANY_OPEN_FILES, ...). Host errno values are mapped to the FRESULT FatFs would return
+- $80: Bad handle
+- $81: Bad address: >= $80:0000, or anywhere in bank $10, which the firmware cannot reach
+  (its `mb_ptr` rejects the bank)
+- $82: Unsupported operation (TIME $30, MOUNT, UNMOUNT and anything unknown, as in the
+  current firmware; CLASSIC_MOUNT of a `/PC:` path while the PC volume is there)
+- $87: No PC link: a `/PC:` path while the PC volume is absent
+- $88: PC link lost: READ, WRITE or SEEK on a handle of the PC volume opened before the link
+  dropped
+- $89: Not the same volume: RENAME between the card and the PC volume
+- $8A-$93: The internet (PC link step 2, see "Internet"): $8A no such service, $8B bad
+  address, $8C name not found, $8D refused, $8E timeout, $8F HTTP status >= 400 (ARG1 = the
+  status), $90 the connection was closed, $91 TLS failed, $93 other network error
 
 The open formats match the firmware:
 
-| Op | Format |
-| --- | --- |
-| OPEN | FLAGS 0 = read, 1 = read+write (file must exist), 2 = create/truncate read+write, 3 = append (write only). At most 4 files; handles 0-3, the lowest free one is used |
-| READ / WRITE | Through 1 MB-contiguous chunks, as `mb_xfer` does. A short count means end of file. A handle opened without that direction answers FR_DENIED |
-| SEEK | ARG1 = offset. The answer is the new position. A read-only file is clipped to its size, like `f_lseek` |
-| STAT | Writes 9 bytes into BUF: `u32 size, u8 attr, u32 time`. attr bit 4 = directory, $20 = archive (files), bit 0 = read-only. time is `fdate << 16 \| ftime`, FAT format, local time. ARG1 = size. STAT of the root answers FR_INVALID_NAME, as FatFs does |
-| READDIR | ARG0 = entries to skip, for continuation. Writes packed `{u32 size, u8 attr, u8 namelen, name}` entries, with no terminator, into BUF, which first holds the path. It stops when the next entry would not fit in LEN. ARG1 = entries returned. Entries are sorted by name; "." and ".." are left out |
-| RENAME | BUF = `"old\0new"`. Answers FR_EXIST if the target exists |
-| LOAD | Whole file to ARG0. ARG1 = bytes loaded |
-| SYS_TIME ($1D) | ARG0 = seconds since 2000-01-01 00:00 (local), as Horizon gives it at start and when the clock is set. The firmware counts on from it and FatFs stamps files with it; here the count is emulated time, and a file the 65C816 created or wrote gets that time as its host modification time when it is closed (MKDIR at once), so STAT shows it and runs stay deterministic. Before it is given: 2026-01-01 00:00 (the firmware: its build date) |
-| CLASSIC_MOUNT / EJECT / BOOT ($18-$1A) | A stub (there is no classic machine): the firmware's argument checks and result codes; any existing file mounts (kind 0: by its extension); BOOT always works. One line per op on stderr (`emu816: CLASSIC_MOUNT kind 1 slot 1 /GAME.ATR -> 00`). (Horizon 0.23) Kind 4 (CK_BASRUN, "Run in Atari"): a file on the card, $84 when empty or over 96 KB, recorded and answered as kind 2. Kind 5 (CK_FOLDER, ARG0 = the drive 0-3): a folder (made if missing; $48 if it is a file), answered as kind 1; one drive at most (a folder on another drive moves it); a disk image, executable or BASIC program mounted over that drive, and EJECT of it, end it |
-| CLASSIC_STATE ($1E) | ARG0 = 5 (the cartridge): ARG1 = its image size in bytes (a .CAR without its 16-byte header; 0 = none), BUF (LEN bytes) its path. The cartridges CLASSIC_MOUNT attached, or the `--boot-cart` one from power-on and after a full restart. $83 for another ARG0 |
+- OPEN: FLAGS 0 = read, 1 = read+write (file must exist), 2 = create/truncate read+write, 3
+  = append (write only). At most 4 files; handles 0-3, the lowest free one is used
+- READ / WRITE: Through 1 MB-contiguous chunks, as `mb_xfer` does. A short count marks the end
+  of file. A handle opened without that direction returns FR_DENIED
+- SEEK: ARG1 = offset. The result is the new position. A read-only file is clipped to its
+  size, like `f_lseek`
+- STAT: Writes 9 bytes into BUF: `u32 size, u8 attr, u32 time`. attr bit 4 = directory, $20
+  = archive (files), bit 0 = read-only. time is `fdate << 16 | ftime`, FAT format, local
+  time. ARG1 = size. STAT of the root returns FR_INVALID_NAME, as in FatFs
+- READDIR: ARG0 = entries to skip, for continuation. Writes packed `{u32 size, u8 attr, u8
+  namelen, name}` entries, with no terminator, into BUF, which first holds the path. It
+  stops when the next entry would not fit in LEN. ARG1 = entries returned. Entries are
+  sorted by name; "." and ".." are left out
+- RENAME: BUF = `"old\0new"`. Returns FR_EXIST if the target exists
+- LOAD: Whole file to ARG0. ARG1 = bytes loaded
+- SYS_TIME ($1D): ARG0 = seconds since 2000-01-01 00:00 (local), as Horizon gives it at
+  start and when the clock is set. The firmware counts on from it and FatFs stamps files
+  with it; here the count is emulated time, and a file the 65C816 created or wrote gets that
+  time as its host modification time when it is closed (MKDIR at once), so STAT shows it and
+  runs stay deterministic. Before it is given: 2026-01-01 00:00 (the firmware: its build
+  date)
+- CLASSIC_MOUNT / EJECT / BOOT ($18-$1A): A stub (there is no classic machine): the
+  firmware's argument checks and result codes; any existing file mounts (kind 0: by its
+  extension); BOOT always succeeds. One line per op on stderr (`emu816: CLASSIC_MOUNT kind 1
+  slot 1 /GAME.ATR -> 00`). Kind 4 (CK_BASRUN, "Run in Atari"): a file on the card, $84 when
+  empty or over 96 KB, recorded and reported as kind 2. Kind 5 (CK_FOLDER, ARG0 = the drive
+  0-3): a folder (made if missing; $48 if it is a file), reported as kind 1; one drive at
+  most (a folder on another drive moves it); a disk image, executable or BASIC program
+  mounted over that drive, and EJECT of it, end it
+- CLASSIC_STATE ($1E): ARG0 = 5 (the cartridge): ARG1 = its image size in bytes (a .CAR
+  without its 16-byte header; 0 = none), BUF (LEN bytes) its path. The cartridges
+  CLASSIC_MOUNT attached, or the `--boot-cart` one from power-on and after a full restart.
+  $83 for another ARG0
 
 Mapping FAT paths to the `--sd` directory:
 
 - A leading `/` or `0:` is optional.
 - Each path component is matched case-insensitively, as on FAT.
-- `..` components answer FR_INVALID_NAME.
+- `..` components return FR_INVALID_NAME.
 - Any existing path that resolves outside the directory, for example through a symlink,
-  answers FR_DENIED.
+  returns FR_DENIED.
 
 **The PC volume** (PC link step 1, `--pc-folder DIR`; the firmware gets it from the PC
 gateway over the USB serial link):
@@ -248,21 +408,22 @@ gateway over the USB serial link):
   the PC volume; `/PC:` alone is its root. The rest is resolved in DIR like a card path
   (each component exact first, then ignoring case), never outside DIR: `..` and anything that
   resolves outside it, a symlink pointing out (existing or dangling) or a new name in such a
-  folder, answer FR_DENIED (7). Deleting a folder that is not empty: 7.
+  folder, return FR_DENIED (7). Deleting a folder that is not empty: 7.
 - Absent (no `--pc-folder`, or after `--pc-drop-at`): every path op on a `/PC:` path (OPEN,
-  STAT, READDIR, MKDIR, DELETE, RENAME, LOAD) answers $87; CLASSIC_MOUNT of one too ($82 while
-  present).
+  STAT, READDIR, MKDIR, DELETE, RENAME, LOAD) returns $87; CLASSIC_MOUNT of one too ($82
+  while present).
 - READDIR of `/` (exactly) gives one more entry at the end while the volume is there: `PC:`,
   size 0, attr $10; the skip count counts it. READDIR on the volume: names starting with `.`
   are left out, sorted by name, symlinks pointing out of DIR left out.
-- STAT of `/PC:`: size = the services (Horizon 0.23: $1D, see below; 0 before), attr $10, time = the PC's current time (`--pc-time`, counting on with
-  emulated time; else the host's clock). STAT of anything else: as on the card (`--card-date`
-  for the files the run did not write; the files it wrote: the PC's time at their close).
+- STAT of `/PC:`: size = the services ($1D, see below), attr $10, time = the PC's current
+  time (`--pc-time`, counting on with emulated time; else the host's clock). STAT of
+  anything else: as on the card (`--card-date` for the files the run did not write; the
+  files it wrote: the PC's time at their close).
 - The 4 handles are shared by both volumes. RENAME between them: $89. After a drop, READ,
-  WRITE and SEEK on a PC handle answer $88 (also after `--pc-back-at`: a new session); CLOSE
-  frees it and answers 0. SYS_SYNC closes the PC's files too. A transfer takes no extra time
-  here unless `--pc-kbps` is given (see "Slow transfers"; on the board: about 55-100 KB/s, a
-  few ms a call).
+  WRITE and SEEK on a PC handle return $88 (also after `--pc-back-at`: a new session); CLOSE
+  frees it and returns 0. SYS_SYNC closes the PC's files too. A transfer takes no extra time
+  unless `--pc-kbps` is given (see "Slow transfers"; on the board: about 55-100 KB/s, a few
+  ms a call).
 - **Unfinished files** (the gateway's rule, Docs/04-pc-link.md): a file opened with mode 2 is
   written under a temporary name in the hidden folder `.atari816-partial` at the top of the
   folder; CLOSE (and SYS_SYNC) moves it onto its name in one step. Until then an older file of
@@ -270,8 +431,8 @@ gateway over the USB serial link):
   file still open (the link drops, the 65C816 is reset or restarted), the temporary file is
   deleted and the older file stays as it was. Modes 1 and 3 write in place.
 
-**Printing, Run in Atari, the folder disk** (PC link step 3, Horizon 0.23; the firmware's
-rules, ABI.md "Printing, Run in Atari and the folder disk"):
+**Printing, Run in Atari, the folder disk** (PC link step 3; the firmware's rules, ABI.md
+"Printing, Run in Atari and the folder disk"):
 
 - **`/PRN:NAME`** (any case for `PRN`): OPEN in any mode creates a print job, a normal handle
   0-3, written as `/Printouts/.YYYY-MM-DD HH.MM.SS NAME.txt` (the firmware's clock, SYS_TIME;
@@ -280,48 +441,49 @@ rules, ABI.md "Printing, Run in Atari and the folder disk"):
   > |` and bytes below 32 made `_`, blanks and dots at its ends removed, empty: `Job`; a name
   taken (finished or open): ` 2` .. ` 99` after NAME. Without a clock given every job has the
   fixed date 2026-01-01 00.00.00 (Horizon's tests put a /SYSTEM/CLOCK on the card when they
-  need running times).
+  need advancing dates).
 - **STAT of exactly `/PRN:`**: size = the jobs finished since power-on (also `--classic-print`
   ones; it survives restarts of the 65C816), attr $10, time = now. STAT of `/PRN:NAME`, and
   READDIR, MKDIR, DELETE, RENAME, LOAD, CLASSIC_MOUNT of a `/PRN:` path: $82.
 - **STAT of exactly `/PC:`** (the root): size = the gateway's services: bit 0 files, 2 net,
   3 fetch, 4 print: $1D with `--pc-folder`, $0D with `--no-pc-print` (bit 1, the developer
   service, is never reported). A file written as `/PC:/Printouts/NAME.pdf` with the print
-  marker stays as it was written (the gateway would make a PDF of it): tests compare its bytes.
+  marker stays as it was written (the gateway would make a PDF of it), so tests can compare
+  its bytes.
 - **The folder disk** (CLASSIC_MOUNT kind 5): there is no classic Atari, so no disk is built.
   STAT of exactly `/D1:` .. `/D4:` (any case) for the folder's drive gives the numbers of the
   firmware's rule, as they were at the mount (a refresh, the same folder and drive again,
   counts again): size = files shown | files left out << 8 | free sectors << 16, attr $10 (never
-  FD_SAVING: nothing waits to be saved here), the FAT time of the mount. The rule: in name
+  FD_SAVING: there are no unsaved changes), the FAT time of the mount. The rule: in name
   order (the Atari's 8.3 name, upper case) at most 64 files whose names fit Atari DOS (1-8
   letters or digits, the first a letter, optionally a dot and 1-3 letters or digits), each
   needing max(1, ceil(size / 125)) of 707 sectors (one that does not fit is left out and the
   next ones tried); folders inside ignored; every other file "left out". Another drive: $04.
   Not modelled: /atari.ini's `folder=` lines (the folder disk is kept across restarts of the
-  65C816 here, but not written to the card), the copy of the Atari's changes into the folder.
+  65C816, but not written to the card), the copy of the Atari's changes into the folder.
 
-**Slow transfers** (`--card-kbps R:W`, `--pc-kbps R:W`; off by default, so every request is
-answered in the poll that takes it, as before):
+**Slow transfers** (`--card-kbps R:W`, `--pc-kbps R:W`; off by default: every request
+completes in the poll that takes it):
 
 - READ, WRITE and LOAD on that volume take len / rate (KB = 1024 bytes; LOAD: the file's
   size, at the read rate) plus a fixed cost per request: 1 ms on the card, 6 ms on the PC.
   The other file requests on that volume (OPEN, CLOSE, SEEK, STAT, READDIR, MKDIR, DELETE,
-  RENAME) take the fixed cost. A request refused at once (a `/PC:` path with no link, a dead
-  PC handle) takes no time.
-- The request is done, and its answer written, when its time is up. Meanwhile no other request
-  is served, but KEY and MOUSE events keep coming.
-- A PC request during which the link drops (`--pc-drop-at`) answers $88 (link lost) at its end,
-  and is not done (a WRITE writes nothing; its mode 2 file was deleted at the drop).
+  RENAME) take the fixed cost. A request that fails at once (a `/PC:` path with no link, a
+  dead PC handle) takes no time.
+- The request is done, and its response written, when its time is up. Meanwhile no other
+  request is served, but KEY and MOUSE events continue.
+- A PC request during which the link drops (`--pc-drop-at`) returns $88 (link lost) at its
+  end and has no effect (a WRITE writes nothing; its mode 2 file was deleted at the drop).
 - The board's measured speeds: card read about 170 KB/s, write about 100 KB/s; PC read about
   100 KB/s, write about 55 KB/s: `--card-kbps 170:100 --pc-kbps 100:55`.
 
-**The card's speed** (`--card-board`, 2026-11-23). The board's card answers slowly per
-request: an OPEN or a STAT costs 9-16 ms, a READ 1-2 ms before its bytes. The instant card
-made a program's file calls look 5-15 times cheaper than they are (a screen that opens and
-reads a few files: 0.3 s in the emulator, 2-3 s on the board). The model follows what the
-firmware's FatFs reads (FF_FS_TINY: one 512-byte sector window for the folders, the FAT and
-the files' partial sectors), per request (the I/O processor's time; the kernel's own time
-comes on top as before):
+**The card's speed** (`--card-board`). Each card request on the board is slow: an OPEN or a
+STAT costs 9-16 ms, a READ 1-2 ms before its bytes. With the instant card (the default) a
+program's file calls cost 5-15 times less than on the board (a screen that opens and reads a
+few files: 0.3 s in the emulator, 2-3 s on the board). The model follows what the firmware's
+FatFs reads (FF_FS_TINY: one 512-byte sector window for the folders, the FAT and the files'
+partial sectors), per request (the I/O processor's time; the kernel's own time comes on
+top):
 
 | Request | ms: the default (Horizon 0.30, the card at 10.7 MHz) | `--card-board-old` (v0.29, 1.34 MHz) |
 | --- | --- | --- |
@@ -363,24 +525,24 @@ on the same folders (`tests/perf.sh OUT 90 /IOB`, OUT/pc/IOBENCH.TXT):
 Every line of both tables within 6 %. Not measured, estimated: the WRITE rate (no large
 write in /IOB), READDIR, MKDIR, DELETE, RENAME. A folder's cost depends on the card's
 folders: the emulator's (run816's card) are small, a board's card may have more in its
-root. `tests/asm/cardtest.bin` checks the times. `--card-kbps` (below) stays the simpler
-model it was.
+root. `tests/asm/cardtest.bin` checks the times. `--card-kbps` is the simpler model (see
+"Slow transfers").
 
-**Keyboard events** follow the firmware's "Keyboard events" block (with the changes of the
-firmware of Horizon 0.21: events during a request, every key change in order):
+**Keyboard events** follow the firmware's "Keyboard events" block (events also during a
+request, every key change in order):
 
 - **Source:** keys come from SDL (scancodes are HID usages) or from `--keys`. The host
   state is 4 held usages plus a modifier bitmap; a fifth key is dropped.
-- **When** (the firmware of Horizon 0.21): every poll may produce one event, also while a
-  request is in progress (a long card or PC transfer), while IOP_READY is set, KB_ROUTE = 0
-  and the response ring has at least 2 free slots (one stays free for the answer of the
-  request in progress). A key event comes before a mouse event.
+- **When:** every poll may produce one event, also while a request is in progress (a long
+  card or PC transfer), while IOP_READY is set, KB_ROUTE = 0 and the response ring has at
+  least 2 free slots (one stays free for the response to the request in progress). A key
+  event comes before a mouse event.
 - **Order:** every key change is reported, in the order it happened: a press and its release
-  are two events even when both come between two polls. A change that is no news (the release
-  of a key never reported, a fifth key) is skipped. Keys held before KB_ROUTE went to 0 are
-  reported from the difference between the keys held and those reported: releases first, then
-  modifier changes (usages $E0-$E7), then presses. While KB_ROUTE = 1 the keys count as not
-  held (held keys are reported released) and nothing is kept.
+  are two events even when both come between two polls. A change with nothing new to report
+  (the release of a key never reported, a fifth key) is skipped. Keys held before KB_ROUTE
+  went to 0 are reported from the difference between the keys held and those reported:
+  releases first, then modifier changes (usages $E0-$E7), then presses. While KB_ROUTE = 1
+  the keys count as not held (held keys are reported released) and nothing is kept.
 - **Format:** OP=$E0, TAG=0, byte 8 = usage, byte 12 = current modifier bitmap,
   byte 13 = 1 down / 0 up, every other byte 0.
 - **F12** produces a KEY event and the SYSTEM_KEY NMI, as on the hardware.
@@ -388,8 +550,8 @@ firmware of Horizon 0.21: events during a request, every key change in order):
   emulated times, with the usage in hex: `--keys 100:04:1,150:04:0` presses and releases
   A.
 
-**Mouse events** follow the firmware's "Mouse event ($E1)" block (0.21: events during a
-request, a button change always its own event):
+**Mouse events** follow the firmware's "Mouse event ($E1)" block (events also during a
+request; a button change is always its own event):
 
 - **Source:** the host side adds motion and wheel into int16 accumulators, one run for each
   button state: motion with unchanged buttons is added to the last run; a button change starts
@@ -407,33 +569,36 @@ request, a button change always its own event):
   the window, and there is no grab.
 - **Testing without SDL:** `--mouse "t_ms:dx:dy:wheel:buttons,..."`, next to `--keys`.
 
-### The internet (PC link step 2) (`net.c`)
+### Internet (PC link step 2) (`net.c`)
 
-The internet as the 65C816 sees it through the mailbox (`Docs/04-pc-link.md`, "What the 65C816
-sees (step 2)"): a URL is a path, and streams take 4 more handles, **4 to 7**. The gateway's
-services are the options: **Net** (`--net`) makes `tcp://` connections real host sockets;
-**Fetch** (`--net-root DIR`) serves `http://`, `https://` and `ftp://` URLs from host files.
-Tests never need the internet: a loopback server (`127.0.0.1`) is enough for Net.
+The internet through the mailbox, as the 65C816 uses it (`Docs/04-pc-link.md`, "65C816
+interface for the internet"): a URL is a path, and streams take 4 more handles, **4 to 7**.
+The gateway's services are the options: **Net** (`--net`) makes `tcp://` connections real
+host sockets; **Fetch** (`--net-root DIR`) serves `http://`, `https://` and `ftp://` URLs
+from host files. Tests need no internet access: a loopback server (`127.0.0.1`) is enough
+for Net.
 
 - **A URL** is a path that starts with letters and `://` (the scheme, any case), passed as it
   is (no leading `/`). Its service: `http`, `https`, `ftp` = Fetch; `tcp`, `tls` = Net; any
-  other scheme answers $8B. The link: up while any PC service is given (`--pc-folder`, `--net`,
-  `--net-root`), down between `--pc-drop-at` and `--pc-back-at`. Without `--pc-folder` the
-  files service is absent as before (`/PC:` answers $87) while the other services work.
-- **At once:** the link down: $87; READDIR, LOAD, CLASSIC_MOUNT of a URL: $82; MKDIR, DELETE,
-  RENAME (either name a URL): 7; an unknown scheme: $8B; the service not given: $8A; STAT of
-  `tcp://` / `tls://`: $82; `tls://`: $91 (TLS is not modelled); a 5th stream: 18.
+  other scheme returns $8B. The link: up while any PC service is given (`--pc-folder`,
+  `--net`, `--net-root`), down between `--pc-drop-at` and `--pc-back-at`. Without
+  `--pc-folder` the files service is absent (`/PC:` returns $87) while the other services
+  work.
+- **Immediate results:** the link down: $87; READDIR, LOAD, CLASSIC_MOUNT of a URL: $82;
+  MKDIR, DELETE, RENAME (either name a URL): 7; an unknown scheme: $8B; the service not
+  given: $8A; STAT of `tcp://` / `tls://`: $82; `tls://`: $91 (TLS is not modelled); a 5th
+  stream: 18.
 - **Handles 4-7** (the lowest free), apart from the files' 0-3. CLOSE frees one (also one of
-  an ended session: 0); a handle not open, or whose OPEN is not answered yet: $80. SEEK on a
-  stream: $82. SYS_SYNC closes every stream (requests put aside answer $88); a reset of the
+  an ended session: 0); a handle not open, or whose OPEN has no response yet: $80. SEEK on a
+  stream: $82. SYS_SYNC closes every stream (deferred requests return $88); a reset of the
   mailbox (a base cleared) and SYS_RESTART close them all (sockets closed).
-- **Requests put aside:** an OPEN or STAT of a URL, a Fetch READ that waits for its data and a
-  Net OPEN waiting for its connection do not hold the I/O processor: the request ring moves on
-  (MB_REQ_TAIL advances at once), other requests are served, KEY and MOUSE events keep coming,
-  and the answer comes later, matched by its TAG. The answers and $E4 events of the streams
-  are sent like KEY and MOUSE events: one per poll, while the response ring has 2 free slots
-  (a key or mouse event first). A request whose answer is already due is answered in the poll
-  that takes it, as before.
+- **Deferred requests:** an OPEN or STAT of a URL, a Fetch READ blocked on its data and a
+  Net OPEN blocked on its connection do not hold the I/O processor: the request ring moves on
+  (MB_REQ_TAIL advances at once), other requests are served, KEY and MOUSE events continue,
+  and the response comes later, matched by its TAG. The responses and $E4 events of the
+  streams are sent like KEY and MOUSE events: one per poll, while the response ring has 2 free
+  slots (a key or mouse event first). A request whose response is already due completes in
+  the poll that takes it.
 
 **Fetch** (`--net-root DIR`):
 
@@ -447,52 +612,53 @@ Tests never need the internet: a loopback server (`127.0.0.1`) is enough for Net
 - **Results:** no folder `DIR/host`: $8C (name not found). Not found: http(s) $8F with ARG1 =
   404; ftp $8D. Otherwise 0.
 - **STAT:** writes `u32 size, u8 $21, u32 time` (the PC's clock now, `--pc-time`) into BUF;
-  ARG1 = the size. **OPEN** (FLAGS 0; any other mode: 7): ARG1 = the handle. Both answer after
-  `--net-delay` ms (+ 6 ms with `--pc-kbps`). A STAT and then an OPEN of the same URL (the same
-  bytes) within 15 s: the OPEN answers at once, and the body has been coming since the STAT's
-  answer.
-- **READ** answers when LEN bytes have come or the body ended (fewer = the end; then 0).
-  The body comes from the OPEN's answer at the `--pc-kbps` read rate (else all at once); while
-  no READ waits, at most 4 KB more than the program has read (the firmware's buffer) comes.
-  So a 64 KB download with `--pc-kbps 100:55` takes about 0.64 s, for progress windows.
-  WRITE: 7. A Fetch stream sends no $E4.
+  ARG1 = the size. **OPEN** (FLAGS 0; any other mode: 7): ARG1 = the handle. Both respond
+  after `--net-delay` ms (+ 6 ms with `--pc-kbps`). A STAT and then an OPEN of the same URL
+  (the same bytes) within 15 s: the OPEN responds at once, and the body has been arriving
+  since the STAT's response.
+- **READ** responds when LEN bytes have arrived or the body has ended (fewer = the end; then
+  0). The body arrives from the OPEN's response on at the `--pc-kbps` read rate (else all at
+  once); while no READ is pending, at most 4 KB more than the program has read (the
+  firmware's buffer) arrives. A 64 KB download with `--pc-kbps 100:55` therefore takes about
+  0.64 s, for progress windows. WRITE: 7. A Fetch stream sends no $E4.
 
 **Net** (`--net`): `tcp://host:port` (port 1-65535, `[v6]` allowed, an optional final `/`;
 anything else $8B).
 
 - **OPEN** (any FLAGS): the name is looked up at once (blocking `getaddrinfo`, fine for
   loopback and the LAN; failure: $8C), then the connection is made without blocking the
-  emulated machine; each address in turn. The answer (ARG1 = the handle) comes when it is
+  emulated machine; each address in turn. The response (ARG1 = the handle) comes when it is
   connected (and `--net-delay` has passed), or fails: refused / unreachable $8D, 15 s of host
   time $8E, else $93. TCP_NODELAY is set.
-- **READ** never waits: the bytes that have come, up to LEN (0 = none yet; up to 4 KB are kept
-  per stream, more stays in the host's socket). When the other end has closed and every byte
-  was read: $90; after a socket error (reset): $93.
-- **WRITE** never waits: the bytes are copied into a 4 KB send buffer (the gateway's credit)
+- **READ** never blocks: the bytes that have arrived, up to LEN (0 = none yet; up to 4 KB
+  are kept per stream, more stays in the host's socket). When the other end has closed and
+  every byte was read: $90; after a socket error (reset): $93.
+- **WRITE** never blocks: the bytes are copied into a 4 KB send buffer (the gateway's credit)
   and sent as the socket takes them; ARG1 = the bytes taken (fewer than LEN, perhaps 0, when the
   buffer is full: try again later). After the end: $90 (after an error: $93).
-- **$E4 NET** (TAG 0, ARG0 = the handle): when bytes come, the other end closes or an error
+- **$E4 NET** (TAG 0, ARG0 = the handle): when bytes arrive, the other end closes or an error
   happens, and the program has READ from the handle since the last $E4 (an edge: each READ
-  re-arms it; the OPEN's answer arms it too, and gives an event at once if bytes came before
-  it). So a program reads until READ answers 0 (or an error), then waits for $E4.
+  re-arms it; the OPEN's response arms it too, and gives an event at once if bytes arrived
+  before it). A program therefore reads until READ returns 0 (or an error), then waits for
+  $E4.
 - **Time:** while a connection is open or connecting, emulated time is held to the host's
-  clock (each mailbox poll waits on the sockets for as long as emulated time is ahead), so a
-  remote program answers within the emulated time it would on the board and `--max-seconds`
-  is about host seconds. Otherwise emulated time runs as fast as it can.
+  clock (each mailbox poll blocks on the sockets for as long as emulated time is ahead), so a
+  remote program's responses take the emulated time they would take on the board and
+  `--max-seconds` is about host seconds. Otherwise emulated time runs as fast as it can.
 
 **Link drops** (`--pc-drop-at`, `--pc-back-at`): at the drop every stream ends (sockets closed,
-bodies dropped): READ and WRITE answer $88, requests put aside answer $88 at once, every
-connection that had answered its OPEN gets one $E4 event, CLOSE frees the handle (0), and new
-URL requests answer $87 until the link is back. Handles from before the drop stay dead after
+bodies dropped): READ and WRITE return $88, deferred requests return $88 at once, every
+connection whose OPEN had its response gets one $E4 event, CLOSE frees the handle (0), and new
+URL requests return $87 until the link is back. Handles from before the drop stay dead after
 `--pc-back-at`.
 
-**Not modelled:** TLS (`tls://` answers $91), HTTP redirects and real HTTP / FTP (Fetch never
-connects anywhere), the 40 s limit for requests put aside, the 8-streams-per-channel limit of
+**Not modelled:** TLS (`tls://` returns $91), HTTP redirects and real HTTP / FTP (Fetch never
+connects anywhere), the 40 s limit for deferred requests, the 8-streams-per-channel limit of
 the gateway ($92), the gateway's own name lookup (the host's resolver is used).
 
-### Marga (video) — $D900 (`nvc.c`)
+### Marga (video), $D900 (`nvc.c`)
 
-This is a model of `core/src/a816/a816_nvc.sv`, which is the definition.
+A model of `core/src/a816/a816_nvc.sv`, which is the definition.
 
 Modes:
 
@@ -510,7 +676,7 @@ Timing (the CPU cycle is 2 clk_core; the pixel clock is 71.71875 MHz = 2.5 clk_c
 
 - The raster is 1572 x 760 pixel clocks, one output picture of 1280x720 for everything.
   An output line is 314.4 CPU cycles and a frame exactly 238,944 CPU cycles (60.03 Hz).
-- Positions are counted in pixel clocks, so the fraction is exact. An event is seen at
+- Positions are counted in pixel clocks, so the fraction is exact. An event takes effect at
   the first CPU cycle at or after its pixel clock. The frame phase is 0 at reset.
 - Trigger n (n = 0-365) fires at the start of output line 28 + 2n, every 628.8 CPU
   cycles. Output lines 0-27 have no trigger. The first active output line is 30.
@@ -533,12 +699,12 @@ Timing (the CPU cycle is 2 clk_core; the pixel clock is 71.71875 MHz = 2.5 clk_c
     fetch show up a frame later.
   - Sprites follow the register spec exactly (choice in index order within the 640-pixel
     width budget, OVERFLOW, drawing from 15 down to 0, BEHIND, flips, MAG, 4 bpp PAL). The
-    choice runs (and sets OVERFLOW) even when no picture is wanted.
+    choice runs (and sets OVERFLOW) even when no picture is needed.
 - Line n is on screen from trigger n+1 on (output lines 30+2n and 31+2n). It is converted
   to RGB with NV_CTRL as it was then and with the palette of that moment.
   - The conversion is lazy: lines are converted before the next palette write, or when a
     picture is needed.
-  - When no picture is wanted (no SDL window, no pending `--shot`), fetch and display are
+  - When no picture is needed (no SDL window, no pending `--shot`), fetch and display are
     skipped altogether, because nothing can observe them.
 - The fetcher's SDRAM addresses are 23 bits, so they wrap within 8 MB.
 
@@ -567,7 +733,7 @@ Pointer:
 - In mode 2 the pointer pixels are framebuffer pixels (4x).
 - PTR_C1-C3 reset to $00, $0F and $08. In 4 bpp mode the low nibble of PTR_Cn is used.
 
-### Ali (blitter) — $DA00 (`blitter.c`)
+### Ali (blitter), $DA00 (`blitter.c`)
 
 Ali:
 
@@ -576,12 +742,12 @@ Ali:
   COPY and COPY_KEY / EXPAND, with the classic machine frozen 2.06 / 2.90 / 2.27 (Marga off),
   3.41 / 4.50 / 3.77 (640x360x8), 2.56 / 3.55 / 2.82 (320x180x8), and with it running
   7.0 / 10.7 / 7.8 in 640x360x8 (the other cases interpolated; a CPU cycle is 2 clk_core),
-  plus 8 CPU cycles a blit and, for FILL and EXPAND, 2 a line. (Horizon 0.30) A FILL is
-  charged by the 32-bit words it writes (four pixels' time each), as `a816_blit.sv` writes
-  aligned words with a byte mask: a run that starts or ends inside a word pays for the
-  whole word, which matters for lists of short one-line fills (`fill_runs`; a 23-pixel run
-  is 6 or 7 words). `tests/asm/blitruns.s` pins the time of such lists. A CPU access to RAM while Ali
-  is busy delays Ali by the access's time (and the CPU's access waits a little longer; see
+  plus 8 CPU cycles a blit and, for FILL and EXPAND, 2 a line. A FILL is charged by the
+  32-bit words it writes (four pixels' time each), as `a816_blit.sv` writes aligned words
+  with a byte mask: a run that starts or ends inside a word pays for the whole word, which
+  matters for lists of short one-line fills (`fill_runs`; a 23-pixel run is 6 or 7 words).
+  `tests/asm/blitruns.s` pins the time of such lists. A CPU access to RAM while Ali is busy
+  delays Ali by the access's time (and the CPU's access is delayed a little longer; see
   "Memory timing"). IRQ_EN raises BLITTER when BUSY drops. `--ideal-timing` keeps the older
   rates (FILL 2.0, EXPAND 2.2, COPY 2.9 / 3.5 + 0.8 with the video on, 8 + 2 a line).
 - The RTL's rules are enforced by counting (and printed on stderr, the first 10 of each):
@@ -612,10 +778,9 @@ Command lists (REV $09):
 - LIST reads the record at BL_LIST 30 CPU cycles after the previous blit has finished
   (BL_LIST + 24, BL_COUNT - 1, bytes 0-18 into $DA00-$DA12; the RTL reads it as three
   8-byte bursts one after the other through Ali's port, each followed by 8 clk_core of
-  loading the bytes: about 60 clk_core with an idle port, checked for Horizon 0.30), then
-  starts it at once or,
-  with WAIT_VBL, at the next VBLANK event. Its pixels are written when it starts; it is
-  BUSY for the same modelled time as a single blit. One interrupt at the end of the list.
+  loading the bytes: about 60 clk_core with an idle port), then starts it at once or, with
+  WAIT_VBL, at the next VBLANK event. Its pixels are written when it starts; it is BUSY for
+  the same modelled time as a single blit. One interrupt at the end of the list.
 - ABORT stops the list and drops BUSY at once; unlike the hardware, the blit that was
   running has already written all its pixels. DONE / ABORTED / WAITING as in the spec.
 - From REV $09 register writes while BUSY are ignored (still counted and reported).
@@ -626,19 +791,19 @@ NV_LINE, LINE, VBLANK and NV_FRAME come 2852 pixel clocks (1572 + 1280) after fe
 trigger n: at the horizontal blank before line n is drawn. Below REV $09 they come at the
 trigger. Reading $D906 / $D90C latches $D907 / $D90D.
 
-### Lau (sample player) — $DB20 (`audio.c`, REV $0A, `--rev 10`)
+### Lau (sample player), $DB20 (`audio.c`, REV $0A, `--rev 10`)
 
 A bit-exact model of `a816_snd.sv`: output sample k at CPU cycle floor(k x 11953 / 40)
-(48 kHz from the pixel clock), the same position, loop, volume and saturation arithmetic, and the per-voice 8-byte block (a voice plays the bytes of its
-block as they were when it read them). Differences: the hardware computes up to four
-samples ahead into a FIFO, so its positions and KEYON lead the emulator's by up to 4
-samples (83 us); AU_LATE is always 0. Steps run only while a voice plays (or with
-`--wav`, or the SDL build's live sound).
+(48 kHz from the pixel clock), the same position, loop, volume and saturation arithmetic,
+and the per-voice 8-byte block (a voice plays the bytes of its block as they were when it
+read them). Differences: the hardware computes up to four samples ahead into a FIFO, so its
+positions and KEYON lead the emulator's by up to 4 samples (83 us); AU_LATE is always 0.
+Steps run only while a voice plays (or with `--wav`, or the SDL build's live sound).
 
-### OPL2 (YM3812) — $DB30 (`opl.c`, REV $0C)
+### OPL2 (YM3812), $DB30 (`opl.c`, REV $0C)
 
-The part of `a816_opl.sv` and JTOPL (`jtopl_mmr.v`, `jtopl_timers.v`) that software can see.
-Like the hardware's, these registers work whether or not the classic machine is frozen.
+The software-visible part of `a816_opl.sv` and JTOPL (`jtopl_mmr.v`, `jtopl_timers.v`).
+As on the hardware, these registers work whether or not the classic machine is frozen.
 
 - **$DB30** write: the register select; read: the status `{IRQ, T1, T2, 0 0 1 1 0}`, $06
   when idle. **$DB31** write: the data for the selected register, kept in a 256-byte shadow
@@ -687,18 +852,19 @@ Like the hardware's, these registers work whether or not the classic machine is 
   register 0, both masks off, the prescalers restart.
 - Not modelled: the one-clk_core write and read registers of `a816_opl.sv`, and the flag
   clear lasting until JTOPL's next operator clock (at most 16 CPU cycles). No minimum time
-  between writes is enforced (the YM3812 wants 3.3 us after a select and 23 us after data).
+  between writes is enforced (the YM3812 needs 3.3 us after a select and 23 us after data).
 
-### Memory timing (since Horizon 0.19)
+### Memory timing
 
-The board ran CPU-heavy code about twice as slow as emu816 used to (the BASIC sieve 89 s
-there, 45 s here). `core/sw/a816/timing.s` (TIMING.BIN) measured why: loops of one kind of
-access each, timed with UPTIME on the board and here, with the classic machine frozen and
-Marga off (P4), in 640x360x8 at stride 1024 (P1, the desktop), 320x180x8 (P3), and with the
-classic machine running (P2). The CPU core itself takes exactly the emulator's cycles (REG,
-DPR, IOR: 1.00); everything else is memory:
+With ideal cycles (`--ideal-timing`) CPU-heavy code runs about twice as fast as on the board
+(the BASIC sieve: 45 s against 89 s on the board). `core/sw/a816/timing.s` (TIMING.BIN)
+measures each kind of access in its own loop, timed with UPTIME on the board and in emu816:
+with the classic machine frozen and Marga off (P4), in 640x360x8 at stride 1024 (P1, the
+desktop), in 320x180x8 (P3), and with the classic machine running (P2). The CPU core itself
+takes exactly the emulator's cycles (REG, DPR, IOR: 1.00); the rest of the difference is
+memory:
 
-- **Every RAM write waits for SDRAM** (write-through, `a816_sys.sv` S_WR): about 3.7 CPU
+- **Every RAM write stalls for SDRAM** (write-through, `a816_sys.sv` S_WR): about 3.7 CPU
   cycles extra with Marga off, 5.0 in 640x360x8, 9.3 with the classic machine running; a write
   right after a write a little more (3.8 / 6.2 / 12.4).
 - **A read miss fills an 8-byte line** (S_FILL): 5.8 / 6.5 / 11.3 cycles extra. The cache is
@@ -708,19 +874,18 @@ DPR, IOR: 1.00); everything else is memory:
   the I/O processor come first; Marga before the CPU): the costs above by mode.
 - **Ali** fills at 1.90 clk_core a pixel (2.95 in 640x360x8) and copies at 2.8 (4.2-4.3), and
   a CPU access to RAM while it runs delays it by the access's time.
-- **Every mailbox answer or event sweeps the cache** with the CPU paused (18 us), and so does
-  a CACHE_FLUSH write.
-- **The I/O processor's polling** (found with these loops): the firmware called its mailbox
-  routine, which runs from SDRAM, on every turn of its main loop, and the PicoRV32's
-  instruction fetches come before the 65C816, Marga and Ali. While Horizon runs (a response
-  ring with room) this took 10-20 % of the 65C816's memory time in 640x360x8. The firmware of
-  bring-up step 20 checks the mailbox registers first, in block RAM, and calls the routine
-  only when there is something to do; the tables below are with it.
+- **Every mailbox response or event sweeps the cache** with the CPU paused (18 us), and so
+  does a CACHE_FLUSH write.
+- **The I/O processor's polling:** the PicoRV32's instruction fetches have priority over the
+  65C816, Marga and Ali. The firmware of bring-up step 20 and later checks the mailbox
+  registers first, in block RAM, and runs its mailbox routine (from SDRAM) only when there is
+  work. Older firmware ran the routine on every turn of its main loop, which took 10-20 % of
+  the 65C816's memory time in 640x360x8 while Horizon runs (a response ring with room). The
+  tables below use the step 20 firmware.
 
 emu816 models all of this (`freddie.c` `stall()`, `blitter.c` `blit_cost()`), in sixteenths of
-a cycle, deterministically. `--ideal-timing` gives the old model (every cycle ideal, Ali's
-older rates). Horizon's picture sessions use it: they were timed for it and check what is
-drawn, not how fast.
+a cycle, deterministically. `--ideal-timing` gives the ideal model (every cycle ideal, Ali's
+older rates). Horizon's picture tests run with it: they check what is drawn, not the speed.
 
 TIMING.BIN, microseconds (board / emu816 0.18 = ideal, and the ratio / emu816 now, and its
 error), REV $0B, bring-up step 20 firmware:
@@ -747,78 +912,136 @@ error), REV $0B, bring-up step 20 firmware:
 320x180x8 lies between (all within 2 %). The remaining spread (up to 7 % with the classic
 machine running, 5-8 % for some loops whose period beats against the SDRAM's) is the phase of
 a loop against the memory's own cadence, which the model averages. BRINGUP1.BIN (classic
-machine running, Marga off): LOOP $5947 board / $5948 here, READ $860F / $8676, MVN $75D3 /
+machine running, Marga off): LOOP $5947 board / $5948 emu816, READ $860F / $8676, MVN $75D3 /
 $72FE. Under Horizon (the desktop, a program in the Terminal, 0.19 card, step 20 firmware;
-TBENCH, the same loops as a Horizon program, ms): REG 250 / 240, DPW 210 / 210, DPW16 376 / 367,
-LRMISS 90 / 89, LWSEQ 350 / 330, JSR 287 / 310, WRFILL 98 / 100, SIEVE 790 / 807. The BASIC
-sieve (SIEVE.BAS, `basic -t` in the Terminal): see Horizon's README, "Version 0.19".
+TBENCH, the same loops as a Horizon program, ms): REG 250 / 240, DPW 210 /
+210, DPW16 376 / 367, LRMISS 90 / 89, LWSEQ 350 / 330, JSR 287 / 310, WRFILL 98 / 100, SIEVE
+790 / 807. The BASIC sieve (SIEVE.BAS, `basic -t` in the Terminal): see Horizon's README,
+"Version 0.19".
+
+LOOP prints `00005948` (`00005943` with `--ideal-timing`); the board prints `00005947`. The
+emulator's cycle count for that window is the RTL's own: both have 327,771 CPU cycles
+between the two UPTIME latches, compared instruction by instruction against a Verilator
+trace; the rest are the SDRAM write stalls inside the measured window (stores to t0, the JSR
+and PHX pushes), which the memory model adds.
 
 Not measured: the mailbox's round trip (the PC link that reads the board's log keeps the
-I/O processor busy meanwhile: 500 us there against 72 here); the I/O processor still polls
-every 512 CPU cycles here.
+I/O processor busy meanwhile: 500 us on the board against 72 in emu816); emu816's I/O
+processor polls every 512 CPU cycles.
 
 ### Not modelled
 
 - **Audio:** the sound page (POKEY's native bank) is write only and makes no sound, nor does
-  the classic machine's POKEY and GTIA. Lau and the OPL2 sound (`--wav`, live in SDL builds;
-  see "OPL2").
+  the classic machine's POKEY and GTIA. Lau and the OPL2 make sound (`--wav`, live in SDL
+  builds; see "OPL2").
 - **Classic side:** the supervisor ($00:DC00) and the chipset window ($00:D000-$D7FF) read
   0, and the classic map ($00:D810-) is not implemented.
 - **Inputs:** joysticks read 0, and turbo mode is not modelled.
-- **4 bpp mode in the blitter:** the spec leaves this open, and the blitter is 8 bpp only.
+- **4 bpp mode in the blitter:** the register spec leaves this open, and the blitter is 8
+  bpp only.
 
 ## Tests
 
-`make test` runs `tests/run_tests.sh`. Every check passes. `EMUFLAGS="--rev 11" ./tests/run_tests.sh` (or 10, 9, 8, 7) runs them on an older board; checks of hardware it lacks are skipped:
+`make test` runs `tests/run_tests.sh`. `EMUFLAGS="--rev 11" ./tests/run_tests.sh` (or 10, 9,
+8, 7) runs them as on an older board; checks of hardware it lacks are skipped:
 
-| Test | Checks |
-| --- | --- |
-| A816.BIN | The self test (FREDDIE II, timers, preemption, watchdog, mailbox), run with `--sd` pointing at a copy of itself. Uses `core/sw/a816/A816.BIN` when it exists |
-| BRINGUP1.BIN | RAM test, LOOP ($5948, the board $5947), READ and MVN (within 3 % of the board's values) |
-| tests/asm/mbdemo | Mailbox: open/read/close, LOAD, READDIR (and with skip), create/write/STAT/DELETE, error codes $80/$81/$82/6/5. Waits with WAI on the IOP interrupt |
-| tests/asm/pctest | The PC volume, three runs: with `--pc-folder` (the `PC:` entry at the end of the root and the skip count, STAT `/PC:` = `--pc-time` and (Horizon 0.23) the services $1D, case-insensitive names, a file written, read back and seeked, MKDIR, RENAME inside the volume, $89 across, `..` and a symlink out denied, $87 / $82 for CLASSIC_MOUNT), without it ($87 everywhere, the root unchanged), and with `--pc-drop-at` / `--pc-back-at` ($88 on old handles, CLOSE frees them, the entry gone and back). Outputs `tests/expected/pctest*.txt`; nothing may be written outside the folder |
-| tests/asm/cpuirq | COP and BRK frames, an MVN interrupted 88 times by a 50 us timer, WAI with I clear, the NMI edge rule |
-| tests/asm/nvcdemo | Palette writes, every blitter operation, the pointer, 3 VBLANKs = 49,975 us (60.03 Hz). Picture checked by md5 |
-| tests/asm/nvcmode1/2 | 4 bpp and 320x180 modes, the LINE interrupt, BASE_PENDING. Picture checked by md5 |
-| NVTEST.BIN | `core/sw/a816/nvtest.s`, the hardware test of Marga, with shots at 1.5 s (mode 0 with the pointer), 24 s (mode 1) and 29 s (mode 2). Pictures are checked by md5; the PNGs are in `tests/pictures/` |
-| tests/asm/copabort, eirq | The two fixed RTL issues (below) |
-| tests/asm/nmihold | A user task with S at $00:9000 takes TIMER0; the watchdog NMI fires 3 us later. The NMI must stay latched but untaken until the handler writes FR_CTRL, and the canary at the task's S must be intact |
-| A816.BIN, slow console | The self test again with `--console-us 90`: same output |
-| tests/asm/mousetest | MOUSE events from a `--mouse` script: clamping with the remainder carried, a key event taking priority, motion discarded while KB_ROUTE = 1, a quick click (motion, press and release in one poll: three events) and a key tap in one poll (two events) |
-| tests/asm/kbtest | `core/sw/a816/kbtest.s`, unchanged, run with a `--keys` script: modifiers, the 4-key limit, F12 (KEY event + NMI), a key held before KB_ROUTE = 0, releases in the order they happened |
-| tests/asm/cardtest | `--card-board` (Horizon 0.30's card): OPEN, SEEK, READ 32 KB, CLOSE, STAT, a STAT of a name not in /DIR (40 files: 2 levels, 4 folder sectors), OPEN to create, WRITE 16, CLOSE of the written file, each answered after the board's time (slowtest.s built with `-D CARD`); with `--card-board-at 30` the same requests are instant |
-| tests/asm/slowtest | `--card-kbps 64:32 --pc-kbps 100:8 --pc-drop-at 3`: each answer after its time (a 32 KB card read 0.5 s, PC requests 6 ms), KEY and MOUSE events (a quick click, a tap) printed while a request is in progress, a mode 2 PC file not there before CLOSE, a 32 KB PC write cut by the drop: $88, no file left, the older file as it was |
-| tests/asm/nettest1-3 | The internet (PC link step 2), from `nettest.s` built three ways. 1: Fetch (`--net-root`, `--pc-kbps 16:16`): STAT then OPEN of the same URL (the OPEN at once), READ to the end, WRITE 7, SEEK $82, a closed handle $80, 404 in ARG1 with $8F, ftp $8D, no host $8C, mode 2 7, a folder's listing (case, query, dot files), MKDIR / RENAME 7, READDIR / LOAD $82, no Net $8A, an unknown scheme $8B, `/PC:` $87, an 8 KB READ put aside (0.5 s) while a card STAT is answered, the 5th stream 18. 2: Net (`--net`, `tests/netserver.py`: an echo server on 127.0.0.1 at a free port): OPEN, WRITE, $E4, READ, STAT / SEEK $82, a refused port $8D, `tls://` $91, no Fetch $8A, no port $8B, the server closing: $90. 3: `--pc-drop-at 1.5` with a connection and a slow Fetch READ open: $E4 at the drop, $88 for the READ put aside and on the handles, CLOSE 0, $87 after. Outputs `tests/expected/nettestN.txt`; 2 and 3 are skipped without python3 |
-| BLITTEST.BIN | `core/sw/a816/blittest.s`: every blitter op against a 65C816 reference (REV $08 and up) |
-| BLITLIST.BIN | `core/sw/a816/blitlist.s`: command lists against single blits, ABORT, WAIT_VBL, raster events, 60 frames = 999,504 us (REV $09 and up) |
-| tests/asm/blitremap | The colour remap (REV $0D and up): TABLE from an aligned and an unaligned address and a part of a table (DST 16, WIDTH 16), COPY_REMAP and COPY_KEY_REMAP (key tested on the source pixel) against the CPU's reading of the table, a plain COPY after them, a list of TABLE + COPY_REMAP, a FILL after them; and the times of a 320 x 200 COPY (8,068 us), a TABLE (32 us) and a 320 x 200 COPY_REMAP (9,036 us) |
-| SAMPLER.BIN | `core/sw/a816/sampler.s`: Lau's rate, end interrupt, loop, mix values, AU_LATE (REV $0A and up) |
-| SPRTEST.BIN | `core/sw/a816/sprtest.s`: Marga's REV $0B registers, NV_SPR_PEEK, COMMIT latching, the line limit (OVERFLOW), the load test (REV $0B and up) |
-| tests/sprsceneN.bin | `core/sw/a816/sprscene.s` with SEED 1-10: a random scene each (9 and 10 crowded, so the line limit drops sprites) (all modes, scrolling, wrap, split, pointer, 16 sprites with every option). The pictures must be identical to the frames the RTL simulation gave (`expected/sprsceneN.ppm.md5`), REV $0B and up |
-| OPLTEST.BIN | `core/sw/a816/opltest.s`, the OPL2 hardware self test (REV $0C and up): STAT ($06), TIMER (the AdLib detection sequence, status $C6, IRQ_STATUS bit 5) and TONE (a 440 Hz note: OPL_OUT reads both positive and negative samples) must pass (`OPL2 PASS`). Below REV $0C it must print `STAT FAIL 00` |
-| tests/asm/opltone | The OPL2's sound (REV $0C and up): a 440 Hz sine on channel 0 (F-number 579, block 4) keyed on for 1 s and released, recorded with `--wav` twice; `tests/oplwav.py` checks both sides equal, 440 +-0.5 Hz, the peak (one operator at total level 0: 4,000-4,100), the note's length (1.0-1.1 s above 200) and the last 0.5 s within +-2, and the two files must be the same bytes. Below REV $0C the recording must be silent |
-| tests/asm/opltimer | The OPL2's timers (REV $0C and up): the idle status, $DB31-$DB33 reading 0, timer A and B periods at value $F0 (1,285 us and 5,140 us, between two overflows), a masked flag that still sets and shows when unmasked, IRQ_STATUS bit 5 waking WAI, a new value taking effect after the running count, a stopped timer; with `--log-sound` its two frozen writes give only `sound $DB00 = $12` ($DB10 was a DAC). Output `tests/expected/opltimer.txt` |
-| SingleStepTests | 102,000 tests, with `tests/fetch_sst.py` / `make sst` to download them |
+- A816.BIN: The self test (FREDDIE II, timers, preemption, watchdog, mailbox), run with
+  `--sd` pointing at a copy of itself. Uses `core/sw/a816/A816.BIN` when it exists
+- BRINGUP1.BIN: RAM test, LOOP ($5948, the board $5947), READ and MVN (within 3 % of the
+  board's values)
+- tests/asm/mbdemo: Mailbox: open/read/close, LOAD, READDIR (and with skip),
+  create/write/STAT/DELETE, error codes $80/$81/$82/6/5. Uses WAI on the IOP interrupt
+- tests/asm/pctest: The PC volume, three runs: with `--pc-folder` (the `PC:` entry at the
+  end of the root and the skip count, STAT `/PC:` = `--pc-time` and the services $1D,
+  case-insensitive names, a file written, read back and seeked, MKDIR, RENAME inside the
+  volume, $89 across, `..` and a symlink out denied, $87 / $82 for CLASSIC_MOUNT), without
+  it ($87 everywhere, the root unchanged), and with `--pc-drop-at` / `--pc-back-at` ($88 on
+  old handles, CLOSE frees them, the entry gone and back). Outputs
+  `tests/expected/pctest*.txt`; nothing may be written outside the folder
+- tests/asm/cpuirq: COP and BRK frames, an MVN interrupted 88 times by a 50 us timer, WAI
+  with I clear, the NMI edge rule
+- tests/asm/nvcdemo: Palette writes, every blitter operation, the pointer, 3 VBLANKs =
+  49,975 us (60.03 Hz). Picture checked by md5
+- tests/asm/nvcmode1/2: 4 bpp and 320x180 modes, the LINE interrupt, BASE_PENDING. Picture
+  checked by md5
+- NVTEST.BIN: `core/sw/a816/nvtest.s`, the hardware test of Marga, with shots at 1.5 s (mode
+  0 with the pointer), 24 s (mode 1) and 29 s (mode 2). Pictures are checked by md5; the
+  PNGs are in `tests/pictures/`
+- tests/asm/copabort, eirq: The two fixed RTL issues (below)
+- tests/asm/nmihold: A user task with S at $00:9000 takes TIMER0; the watchdog NMI fires 3
+  us later. The NMI must stay latched but untaken until the handler writes FR_CTRL, and the
+  canary at the task's S must be intact
+- A816.BIN, slow console: The self test again with `--console-us 90`: same output
+- tests/asm/mousetest: MOUSE events from a `--mouse` script: clamping with the remainder
+  carried, a key event taking priority, motion discarded while KB_ROUTE = 1, a quick click
+  (motion, press and release in one poll: three events) and a key tap in one poll (two
+  events)
+- tests/asm/kbtest: `core/sw/a816/kbtest.s`, unchanged, run with a `--keys` script:
+  modifiers, the 4-key limit, F12 (KEY event + NMI), a key held before KB_ROUTE = 0,
+  releases in the order they happened
+- tests/asm/cardtest: `--card-board` (Horizon 0.30's card): OPEN, SEEK, READ 32 KB, CLOSE,
+  STAT, a STAT of a name not in /DIR (40 files: 2 levels, 4 folder sectors), OPEN to create,
+  WRITE 16, CLOSE of the written file, each completed after the board's time (slowtest.s
+  built with `-D CARD`); with `--card-board-at 30` the same requests are instant
+- tests/asm/slowtest: `--card-kbps 64:32 --pc-kbps 100:8 --pc-drop-at 3`: each response after
+  its time (a 32 KB card read 0.5 s, PC requests 6 ms), KEY and MOUSE events (a quick click,
+  a tap) printed while a request is in progress, a mode 2 PC file not there before CLOSE, a
+  32 KB PC write cut by the drop: $88, no file left, the older file as it was
+- tests/asm/nettest1-3: The internet (PC link step 2), from `nettest.s` built three ways. 1:
+  Fetch (`--net-root`, `--pc-kbps 16:16`): STAT then OPEN of the same URL (the OPEN at
+  once), READ to the end, WRITE 7, SEEK $82, a closed handle $80, 404 in ARG1 with $8F, ftp
+  $8D, no host $8C, mode 2 7, a folder's listing (case, query, dot files), MKDIR / RENAME 7,
+  READDIR / LOAD $82, no Net $8A, an unknown scheme $8B, `/PC:` $87, an 8 KB READ deferred
+  (0.5 s) while a card STAT completes, the 5th stream 18. 2: Net (`--net`,
+  `tests/netserver.py`: an echo server on 127.0.0.1 at a free port): OPEN, WRITE, $E4, READ,
+  STAT / SEEK $82, a refused port $8D, `tls://` $91, no Fetch $8A, no port $8B, the server
+  closing: $90. 3: `--pc-drop-at 1.5` with a connection and a slow Fetch READ open: $E4 at
+  the drop, $88 for the deferred READ and on the handles, CLOSE 0, $87 after. Outputs
+  `tests/expected/nettestN.txt`; 2 and 3 are skipped without python3
+- BLITTEST.BIN: `core/sw/a816/blittest.s`: every blitter op against a 65C816 reference (REV
+  $08 and up)
+- BLITLIST.BIN: `core/sw/a816/blitlist.s`: command lists against single blits, ABORT,
+  WAIT_VBL, raster events, 60 frames = 999,504 us (REV $09 and up)
+- tests/asm/blitremap: The colour remap (REV $0D and up): TABLE from an aligned and an
+  unaligned address and a part of a table (DST 16, WIDTH 16), COPY_REMAP and COPY_KEY_REMAP
+  (key tested on the source pixel) against the CPU's reading of the table, a plain COPY
+  after them, a list of TABLE + COPY_REMAP, a FILL after them; and the times of a 320 x 200
+  COPY (8,068 us), a TABLE (32 us) and a 320 x 200 COPY_REMAP (9,036 us)
+- SAMPLER.BIN: `core/sw/a816/sampler.s`: Lau's rate, end interrupt, loop, mix values,
+  AU_LATE (REV $0A and up)
+- SPRTEST.BIN: `core/sw/a816/sprtest.s`: Marga's REV $0B registers, NV_SPR_PEEK, COMMIT
+  latching, the line limit (OVERFLOW), the load test (REV $0B and up)
+- tests/sprsceneN.bin: `core/sw/a816/sprscene.s` with SEED 1-10: a random scene each (9 and
+  10 crowded, so the line limit drops sprites) (all modes, scrolling, wrap, split, pointer,
+  16 sprites with every option). The pictures must be identical to the frames the RTL
+  simulation gave (`expected/sprsceneN.ppm.md5`), REV $0B and up
+- OPLTEST.BIN: `core/sw/a816/opltest.s`, the OPL2 hardware self test (REV $0C and up): STAT
+  ($06), TIMER (the AdLib detection sequence, status $C6, IRQ_STATUS bit 5) and TONE (a 440
+  Hz note: OPL_OUT reads both positive and negative samples) must pass (`OPL2 PASS`). Below
+  REV $0C it must print `STAT FAIL 00`
+- tests/asm/opltone: The OPL2's sound (REV $0C and up): a 440 Hz sine on channel 0 (F-number
+  579, block 4) keyed on for 1 s and released, recorded with `--wav` twice;
+  `tests/oplwav.py` checks both sides equal, 440 +-0.5 Hz, the peak (one operator at total
+  level 0: 4,000-4,100), the note's length (1.0-1.1 s above 200) and the last 0.5 s within
+  +-2, and the two files must be the same bytes. Below REV $0C the recording must be silent
+- tests/asm/opltimer: The OPL2's timers (REV $0C and up): the idle status, $DB31-$DB33
+  reading 0, timer A and B periods at value $F0 (1,285 us and 5,140 us, between two
+  overflows), a masked flag that still sets and shows when unmasked, IRQ_STATUS bit 5 waking
+  WAI, a new value taking effect after the running count, a stopped timer; with
+  `--log-sound` its two frozen writes give only `sound $DB00 = $12` ($DB10 was a DAC).
+  Output `tests/expected/opltimer.txt`
+- SingleStepTests: 102,000 tests, with `tests/fetch_sst.py` / `make sst` to download them
 
-LOOP prints `00005948` (`00005943` with `--ideal-timing`); the board printed `00005947`. The
-emulator's cycle count for that window is the RTL's own: both have 327,771 CPU cycles
-between the two UPTIME latches, compared instruction by instruction against a Verilator
-trace; the rest are the SDRAM write stalls inside the measured window (stores to t0, the JSR
-and PHX pushes), which the memory model now adds.
+## Fixed RTL issues
 
-## RTL issues found (now fixed in the RTL, and in emu816)
+emu816 models the corrected RTL in both cases:
 
-1. **A refused BRK/COP push broke protection.** A user task with S in kernel memory
-   executed COP. The first push was refused, but COP's vector pull still pushed the mode
-   stack and entered supervisor mode. The ABORT entry then wrote PBR, PC and P (all chosen
-   by the task) into kernel memory, and the handler saw USER_ARM = 0.
-   - Fixed in a816_sys.sv: `vpull = ~cpu_vpb && !(wr_block && !cpu_int_seq)`. emu816 does
-     the same.
-   - `tests/asm/copabort.s` now prints `FR_CTRL 07 CAUSE 03 KERNEL $8FFD-$9000 55555555`.
-2. **Emulation-mode IRQ/NMI/ABORT pushed B=1.** Fixed in P65C816.v: the pushed bit 4 is now
-   `EF ? ~GotInterrupt : P[4]`. emu816 now always pushes B=0 for hardware interrupts, as a
-   WDC part does. `tests/asm/eirq.s` prints P=$20.
-3. **Bank $10 is unreachable for the I/O processor.** The firmware's `mb_ptr` refuses it, so
-   transfers there answer $81. This is mirrored. Also, for addresses below $40:0000 `mb_ptr`
-   XORs bit 20; it is worth checking that this matches the CPU's own SDRAM mapping for
-   banks $11-$3F.
+1. **BRK/COP with a blocked push.** When a user task's S points into kernel memory and it
+   executes COP, the first push is blocked. COP's vector pull then neither pushes the mode
+   stack nor enters supervisor mode (a816_sys.sv: `vpull = ~cpu_vpb && !(wr_block &&
+   !cpu_int_seq)`), so the ABORT entry cannot write PBR, PC and P, all set by the task, into
+   kernel memory. `tests/asm/copabort.s` prints `FR_CTRL 07 CAUSE 03 KERNEL $8FFD-$9000
+   55555555`.
+2. **B flag in emulation mode.** IRQ, NMI and ABORT push B=0, as a WDC part does
+   (P65C816.v: the pushed bit 4 is `EF ? ~GotInterrupt : P[4]`). `tests/asm/eirq.s` prints
+   P=$20.

@@ -1,5 +1,5 @@
 /* The internet through the PC link (step 2): what the 65C816 sees through the mailbox
- * (Docs/04-pc-link.md, "What the 65C816 sees (step 2)").
+ * (Docs/04-pc-link.md, "65C816 interface for the internet").
  *
  * - A path that starts with letters and "://" is a URL. http://, https://, ftp:// are the Fetch
  *   service (--net-root DIR: scheme://host[:port]/path is served from the host file

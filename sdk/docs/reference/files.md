@@ -7,15 +7,16 @@ The kernel makes every path absolute; the result must fit in 127 characters (EIN
 
 - **4 open files for the whole system** (an I/O processor limit): close files soon.
   A handle (0-3) belongs to the task that opened it and is closed when it exits.
-- A file call blocks the caller until the answer comes; other tasks run meanwhile.
+- A file call blocks the caller until the I/O processor completes it. Other tasks run
+  meanwhile.
 - Errors are $40 + the FatFs result: $44 no such file, $45 no such path, $46 bad name,
   $47 denied, $48 already exists, $52 too many open files; $C0 + n: an I/O processor error
   ($C7 no PC link, $C8 the PC link was lost, $C9 not the same volume: below).
 - (Horizon 0.20) **The PC volume.** With the PC link, one folder of the PC is a second volume:
   paths starting `/PC:` (any case; `/PC:` alone is its root). Every call below works on it,
-  with the same handles and errors; a rename between the card and the PC answers $C9 (copy,
+  with the same handles and errors; a rename between the card and the PC returns $C9 (copy,
   then delete: `ui_mvtree` in the controls library does it). Without the PC every `/PC:` call
-  answers $C7 at once; if the link drops, $C8. A readdir of `/` lists a folder `PC:` at the
+  returns $C7 at once; if the link drops, $C8. A readdir of `/` lists a folder `PC:` at the
   end while the volume is there. A stat of `/PC:` gives the PC's current time (the clock).
   It is slower than the card (about 100 KB/s to read, 55 KB/s to write, a few ms a call;
   the card about 170 and 100). (0.21) A file opened with mode 2 on the PC gets its name only
@@ -53,7 +54,7 @@ In: A = handle.
 ```
 
 ### $22 read (SYS_READ)
-In: X, Y = `{u8 handle, u24 buffer, u16 length}`. Out: A = bytes read; fewer than asked
+In: X, Y = `{u8 handle, u24 buffer, u16 length}`. Out: A = bytes read; fewer than requested
 = the end of the file (0: at the end). The buffer may be anywhere you may write (a bank
 from SYS_BALLOC too) but must not cross a bank boundary.
 ```asm

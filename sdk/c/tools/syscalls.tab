@@ -33,10 +33,10 @@ chdir         | ok       | const char *path:XY | | Change the current directory 
 getcwd        | int      | char *buf:XY, unsigned size:A | | The current directory (absolute, zero-terminated) into buf -> its length. EINVAL if buf is too small.
 restart       | ok       | unsigned full:A | | Restart Horizon (0) or the whole machine (1). Programs should rather use sysreq.
 sync          | ok       | unsigned flags:A | | Close every open file and flush the card; flags bit 0: end every other program first.
-sysreq        | ok       | unsigned what:A | | Ask the Desktop to shut down (SR_SHUTDOWN), restart (SR_RESTART) or fully restart (SR_FULLRESTART); (0.31) SR_APPS: the apps changed, the Desktop reads its Programs menu again.
+sysreq        | ok       | unsigned what:A | | Request a shutdown (SR_SHUTDOWN), a restart (SR_RESTART) or a full restart (SR_FULLRESTART) from the Desktop; (0.31) SR_APPS: the apps changed, and the Desktop reads its Programs menu again.
 time_get      | long     | | y | The clock: seconds since 2000-01-01 00:00; hz_y = CLK_NONE / CLK_SAVED / CLK_SET (how it was set).
 time_set      | ok       | long secs:AX32, unsigned state:Y | | Set the clock (state CLK_SAVED or CLK_SET).
-vsync         | unsigned | | | Wait for the next vertical blank (60 Hz) -> the frame counter. Also waits for the caller's draw list.
+vsync         | unsigned | | | Block until the next vertical blank (60 Hz) -> the frame counter. Also blocks until the caller's draw list is done.
 bank_alloc    | unsigned | | | A fresh 64 KB bank owned by the task -> its number. ENOMEM when none is left.
 bank_free     | ok       | unsigned bank:A | | Give back a bank from bank_alloc.
 mem_info      | unsigned | | x | Free banks; hz_x = total banks.
@@ -51,7 +51,7 @@ delete        | ok       | const char *path:XY | | Delete a file (or an empty fo
 mkdir         | ok       | const char *path:XY | | Make a folder.
 rename        | ok       | const hz_renameblk *blk:XY | | Rename or move a file or folder.
 spawn         | int      | const hz_spawnblk *blk:XY | | Start a program -> task id. Returns once it is loaded (load errors come here).
-wait          | int      | unsigned task:A | | Wait for a child to end -> its exit code (the low 15 bits; see the docs for $FF80 and $FF00+cause).
+wait          | int      | unsigned task:A | | Block until a child ends -> its exit code (the low 15 bits; see the docs for $FF80 and $FF00+cause).
 kill          | ok       | unsigned task:A | | End a task (it exits with $FF80).
 task_info     | ok       | unsigned slot:A, hz_taskinfo *rec:XY | | The task in slot 0-15 into rec (id 0 = a free slot).
 task_single   | ok       | | x | One instance of this program only: when one runs already, -1 with hz_errno ERUNNING and hz_x = its id (the program should exit).
@@ -62,7 +62,7 @@ send          | ok       | unsigned port:A, const hz_msg *msg:XY | | Send a 16-b
 recv          | ok       | unsigned port:A, hz_msg *msg:XY | | Receive a 16-byte message; blocks unless port | RV_POLL (then EAGAIN when empty).
 port_close    | ok       | unsigned port:A | | Close an own port.
 input_claim   | ok       | | | Take the keyboard (EAGAIN if another task holds it).
-input_read    | unsigned | | x y | Wait for a key or mouse event -> A (key: HID usage; mouse: $0100 | buttons; wheel: $0200); hz_x, hz_y as in ABI.md ("Mouse").
+input_read    | unsigned | | x y | Block until a key or mouse event arrives -> A (key: HID usage; mouse: $0100 | buttons; wheel: $0200); hz_x, hz_y as in ABI.md ("Mouse").
 input_release | ok       | | | Give the keyboard back.
 input_lend    | ok       | unsigned task:A, unsigned flags:X | | Lend the keyboard to a task (flags bit 0: ctrl-C kills it).
 input_poll    | unsigned | | x y | As input_read, but EAGAIN at once when nothing is queued (test hz_errno).
@@ -89,7 +89,7 @@ win_close     | ok       | unsigned win:A | | Close an own window.
 win_draw      | ok       | unsigned win:A, const hz_windraw *d:XY | | Draw in a window (WD_* ops; see hz_windraw).
 win_event     | ok       | unsigned poll:A, hz_event *ev:XY | | The next event of the caller's windows into ev; poll = 1: EAGAIN at once when there is none.
 win_twidth    | unsigned | unsigned font:A, const char *s:XY | | The width in pixels of s in a font (0 UI, 1 fixed 8x12).
-ws_sync       | ok       | | | Wait until the screen shows everything drawn so far.
+ws_sync       | ok       | | | Block until everything drawn so far is on the screen.
 win_move      | ok       | unsigned win:A, int x:X, int y:Y | | Move a window.
 ws_redraw     | ok       | | | Repaint the whole screen (for measurements).
 ws_stats      | long     | | | Microseconds the last repaint took.
@@ -127,7 +127,7 @@ fs_raster     | ok       | unsigned count:A, const hz_raster *e:XY | | The raste
 pal_set       | ok       | unsigned first:A.lo, unsigned count:A.hi, const unsigned char *rgb:XY | | Set count palette entries from first (count 0 = 256) from red, green, blue bytes.
 pal_alloc     | int      | unsigned count:A, unsigned first:X | | count palette entries in a row for the caller -> the first ($FFFF: any place; count 0: give all back).
 draw_list     | int      | unsigned win:A.lo, unsigned count:A.hi, const hz_drawrec *r:XY | | Run count (1-128) draw-list records with the blitter -> records drawn. Returns at once: see list_wait.
-list_wait     | unsigned | unsigned ask:A | | 0: wait until the caller's draw list is done; 1: ask -> 1 while it runs.
+list_wait     | unsigned | unsigned ask:A | | 0: block until the caller's draw list is done; 1: poll -> 1 while it runs.
 frame         | unsigned | | | The frame counter (+1 every vertical blank; REV $09).
 win_vbl       | ok       | unsigned win:A, unsigned on:X | | WE_VBL events at every vertical blank (REV $09).
 win_front     | ok       | unsigned win:A | | Raise an own window (restored if minimized) and give it the focus.

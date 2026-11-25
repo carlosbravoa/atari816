@@ -316,7 +316,7 @@ windows (Gem Run in C does it).
   vheight). Draw what comes into view at `(wx mod width, wy mod vheight)`. Panel at the top:
   `hg_scroll_wrap(0, 0, vh)`, `hg_split_wrap(line, cx, cy)`, then `hg_scroll(0, vh)` (the
   split first); at the bottom: `hg_scroll_wrap(cx, cy, vh)`, `hg_split(line, 0, vh)`.
-  `sdk/c/game/tests/gt_wrap.c`; sdk/docs/c/games.md, "A world larger than the framebuffer".
+  `sdk/c/game/tests/gt_wrap.c`; sdk/docs/c/games.md, "Worlds larger than the framebuffer".
 
 ## Input
 

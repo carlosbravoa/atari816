@@ -114,7 +114,7 @@ The supervisor block lets Horizon start, freeze, inspect and resume the classic 
 | $00:DC01 | SV\_STATUS | R, W1C on bits 1 to 4 | 0 FROZEN, 1 JAM (KIL opcode hit), 2 BREAKPOINT, 3 MAILBOX, 4 COLD\_START (6502 jumped to the OS cold-start entry), 7 IN\_VBLANK |
 | $00:DC02 | SV\_IRQ\_EN | RW | Same bit layout as SV\_STATUS bits 1 to 4; a set status bit with its enable raises the SUPERVISOR interrupt |
 
-**Freeze:** setting FREEZE\_REQ makes the hardware wait for the first scanline of vertical blank, then the next 6502 instruction boundary, then stop the classic clock enable and set FROZEN. Clearing FREEZE\_REQ resumes on the next clock. With FROZEN set, writing 1 to STEP runs exactly one 6502 instruction (ANTIC DMA included) and freezes again. POKEY audio is muted while frozen.
+**Freeze:** setting FREEZE\_REQ makes the hardware stall until the first scanline of vertical blank, then the next 6502 instruction boundary, then stop the classic clock enable and set FROZEN. Clearing FREEZE\_REQ resumes on the next clock. With FROZEN set, writing 1 to STEP runs exactly one 6502 instruction (ANTIC DMA included) and freezes again. POKEY audio is muted while frozen.
 
 **Reset and start:** with RESET set, write the classic map, load images, then clear RESET and set RUN. The 6502 starts from the RESET vector of the classic map, like a real power-on.
 
@@ -159,7 +159,7 @@ When the system block routes the keyboard to the classic side, this happens in h
 
 ### Mailbox
 
-A small register mailbox lets classic programs (the H: handler, an exit-to-desktop call) talk to Horizon.
+A small register mailbox lets classic programs (the H: handler, an exit-to-desktop call) communicate with Horizon.
 
 | Classic address | Native address | Direction | Meaning |
 | --- | --- | --- | --- |
@@ -168,7 +168,7 @@ A small register mailbox lets classic programs (the H: handler, an exit-to-deskt
 | $D1C8 to $D1CE | $00:DC38 to $00:DC3E | native to classic | 7 reply bytes |
 | $D1CF | $00:DC3F | native to classic | Reply status: bit 7 BUSY while the command is in progress, cleared when the reply is ready |
 
-Command $01 asks Horizon to end the session (Quit); $10 to $1F are reserved for the H: handler.
+Command $01 requests that Horizon end the session (Quit); $10 to $1F are reserved for the H: handler.
 
 ## Marga (video) — $D900: framebuffer, palette, pointer, sprites, scrolling
 
@@ -312,7 +312,7 @@ Ali, the blitter, does five rectangle operations on 8 bpp surfaces anywhere in R
 | $00:DA10 | BL\_KEY | RW | Transparent colour for COPY\_KEY |
 | $00:DA11 | BL\_OP | RW | 0 FILL, 1 COPY, 2 COPY\_KEY (skip pixels equal to BL\_KEY), 3 EXPAND (1 bpp source to BL\_FG and BL\_BG), 4 EXPAND\_KEY (0 bits leave the destination alone); REV $0D (see "Colour remap"): 5 TABLE (a COPY into the remap table), 6 COPY\_REMAP (COPY writing table[source pixel]), 7 COPY\_KEY\_REMAP (the same, pixels equal to BL\_KEY skipped) |
 | $00:DA12 | BL\_FLAGS | RW | 0 BACKWARDS (copy from the last pixel, for overlapping moves), bits 4 to 6 SRC\_BIT (first source bit for EXPAND, 7 = leftmost) |
-| $00:DA13 | BL\_CTRL | RW | Write: bit 0 START, bit 1 IRQ\_EN, bit 2 LIST (REV $09), bit 3 ABORT (REV $09). Read: bit 0 BUSY, bit 1 IRQ\_EN, and from REV $09 bit 2 LIST (a list is running), bit 3 WAITING (the list waits for vertical blank), bit 4 DONE, bit 5 ABORTED. IRQ\_EN raises BLITTER in the system block when a blit or a list is done |
+| $00:DA13 | BL\_CTRL | RW | Write: bit 0 START, bit 1 IRQ\_EN, bit 2 LIST (REV $09), bit 3 ABORT (REV $09). Read: bit 0 BUSY, bit 1 IRQ\_EN, and from REV $09 bit 2 LIST (a list is running), bit 3 WAITING (the list is held until vertical blank), bit 4 DONE, bit 5 ABORTED. IRQ\_EN raises BLITTER in the system block when a blit or a list is done |
 | $00:DA14 to $00:DA16 | BL\_LIST | RW | REV $09: 24-bit address of the next command record, 8-byte aligned (bits 0 to 2 are ignored and read 0) |
 | $00:DA17 to $00:DA18 | BL\_COUNT | RW | REV $09: number of records still to run, 0 to 65535 |
 
@@ -360,7 +360,7 @@ A command list lets the blitter run many blits without the CPU: the CPU writes t
 | Record byte | Field |
 | --- | --- |
 | 0 to 18 | Same layout as $DA00 to $DA12: SRC (3), SRC\_STRIDE (2), DST (3), DST\_STRIDE (2), WIDTH (2), HEIGHT (2), FG, BG, KEY, OP, FLAGS |
-| 19 | RFLAGS: bit 0 WAIT\_VBL (before this blit, wait for the next VBLANK event, see Marga) |
+| 19 | RFLAGS: bit 0 WAIT\_VBL (before this blit, hold until the next VBLANK event, see Marga) |
 | 20 to 23 | Reserved, write 0 |
 
 - A record is 24 bytes; records follow each other with no gap, and the first must be 8-byte aligned.
@@ -498,7 +498,7 @@ Horizon uses TIMER0 as the scheduler tick (10 ms suggested) and TIMER1 for sleep
 | $00:DE21 | JOY\_PORT | R | Raw DB9 ports: bits 0 to 3 stick 1 directions, 4 to 7 stick 2 (1 = pressed) |
 | $00:DE22 | JOY\_TRIG | R | 0 trigger 1, 1 trigger 2 |
 
-The mouse always goes to Horizon; while a classic session is shown, Horizon ignores it unless the session's profile asks for joystick-port mouse emulation.
+The mouse always goes to Horizon; while a classic session is shown, Horizon ignores it unless the session's profile enables joystick-port mouse emulation.
 
 ## I/O processor mailbox
 
@@ -547,23 +547,23 @@ A ring is empty when HEAD equals TAIL and full when HEAD + 1 equals TAIL.
 | $10 | LOAD | BUF = path, ARG0 = 24-bit destination address | Bytes loaded |
 | $18 to $1A | CLASSIC\_MOUNT, CLASSIC\_EJECT, CLASSIC\_BOOT | Implemented in the firmware; layout in the comment block in `core/firmware/firmware.c` (step 3: kinds 4 and 5, below) | |
 | $1B | SYS\_RESTART | ARG0 = 0: reload Horizon from the card and restart the 65C816; 1: full restart (/atari.ini read again, classic images ejected, classic machine cold booted, then Horizon). The OK reply comes first; the 65C816 is reset once it has moved MB\_RSP\_TAIL past it (at most 500 ms later). Errors: $83 bad ARG0, 4 no Horizon on the card (no restart then) | 0 |
-| $1C | SYS\_SYNC | none. Closes every mailbox file and classic disk image, unmounts the card; then the card may be removed or the power cut. Until the next restart every op below $1B answers $86 | Handles that were open |
-| $1D | SYS\_TIME | ARG0 = the time Horizon knows, in seconds since 2000-01-01 00:00 (local: the clock the user set, or the last one saved, counting from start). The firmware counts on from it with its own millisecond timer, and FatFs stamps files with it (`get_fattime`, FF\_FS\_NORTC = 0); before it is given, files get the firmware's build date. Horizon sends it whenever `time_set` is called (at start, after the saved clock is loaded, and when the user sets the clock) | 0 |
-| $1E | CLASSIC\_STATE | ARG0 = 5 (the cartridge; other values answer $83), BUF and LEN = where its path goes (zero-terminated, cut to LEN - 1; LEN 0: not written). Also reports a cartridge the firmware loaded by itself (`boot=ash` in /atari.ini, at power-on or a full restart): Horizon asks at start and reserves its banks | Size of the cartridge image in bytes, 0 = none |
+| $1C | SYS\_SYNC | none. Closes every mailbox file and classic disk image, unmounts the card; then the card may be removed or the power cut. Until the next restart every op below $1B returns $86 | Handles that were open |
+| $1D | SYS\_TIME | ARG0 = Horizon's current time, in seconds since 2000-01-01 00:00 (local: the clock the user set, or the last one saved, counting from start). The firmware counts on from it with its own millisecond timer, and FatFs stamps files with it (`get_fattime`, FF\_FS\_NORTC = 0); before it is given, files get the firmware's build date. Horizon sends it whenever `time_set` is called (at start, after the saved clock is loaded, and when the user sets the clock) | 0 |
+| $1E | CLASSIC\_STATE | ARG0 = 5 (the cartridge; other values return $83), BUF and LEN = where its path goes (zero-terminated, cut to LEN - 1; LEN 0: not written). Also reports a cartridge the firmware loaded by itself (`boot=ash` in /atari.ini, at power-on or a full restart): Horizon requests it at start and reserves its banks | Size of the cartridge image in bytes, 0 = none |
 | $20 | MOUNT | ARG0 = drive 1 to 8, BUF = ATR path, FLAGS bit 0 = read-only | 0 |
 | $21 | UNMOUNT | ARG0 = drive | 0 |
 | $30 | TIME | none | Seconds since 2000-01-01 |
 
 Paths are FAT32 paths, UTF-8, zero-terminated. LOAD streams a whole file straight into RAM, for ROM images, cartridge images and programs. $40 to $5F stay reserved (the internet of the PC link needed no new ops: a URL is a path, below).
 
-**The PC volume** (PC link, `04-pc-link.md`): a path that starts with `/PC:` (any case; then the end or `/`) is in the folder that the gateway on a connected PC shares. OPEN, CLOSE, READ, WRITE, SEEK, STAT, READDIR, MKDIR, DELETE, RENAME and LOAD work on it, with the same four handles. READDIR of `/` lists a folder `PC:` last while it is there; STAT of `/PC:` gives the PC's clock as its time. Results added: $87 no PC link (at once), $88 PC link lost (during the operation, or a handle of an ended link session; CLOSE frees such a handle and answers 0), $89 RENAME between the card and the PC volume. CLASSIC_MOUNT of such a path answers $82.
+**The PC volume** (PC link, `04-pc-link.md`): a path that starts with `/PC:` (any case; then the end or `/`) is in the folder that the gateway on a connected PC shares. OPEN, CLOSE, READ, WRITE, SEEK, STAT, READDIR, MKDIR, DELETE, RENAME and LOAD work on it, with the same four handles. READDIR of `/` lists a folder `PC:` last while it is there; STAT of `/PC:` gives the PC's clock as its time. Results added: $87 no PC link (at once), $88 PC link lost (during the operation, or a handle of an ended link session; CLOSE frees such a handle and returns 0), $89 RENAME between the card and the PC volume. CLASSIC_MOUNT of such a path returns $82.
 
-**The internet** (PC link step 2, `04-pc-link.md`, "What the 65C816 sees (step 2)"): a path
+**The internet** (PC link step 2, `04-pc-link.md`, "65C816 interface for the internet"): a path
 that is a URL is served by the gateway on the PC. `http://...`, `https://...` and `ftp://...`
 are read-only files (OPEN, STAT, READ, CLOSE); `tcp://host:port` and `tls://host:port` are
 connections (OPEN, READ and WRITE that never wait, CLOSE). They get handles **4 to 7** (the
-files keep 0 to 3). An OPEN, STAT or READ that has to wait for the internet is put aside: the
-request ring moves on (MB\_REQ\_TAIL advances) and its answer comes later, matched by TAG, while
+files keep 0 to 3). An OPEN, STAT or READ that has to block on the network is put aside: the
+request ring moves on (MB\_REQ\_TAIL advances) and its response comes later, matched by TAG, while
 other requests are served. Results added: $8A no such service, $8B bad address, $8C name not
 found, $8D refused, $8E timeout, $8F HTTP status 400 or more (ARG1 = the status), $90 the
 connection was closed, $91 TLS failed, $92 too many streams on the PC, $93 another network
@@ -578,15 +578,15 @@ error.
   CLOSE (also the CLOSE of SYS_SYNC or of a 65C816 restart), so a job is whole when it
   appears. A normal card handle (0-3). **STAT `/PRN:`**: size = print jobs finished since the
   I/O processor started (attribute $10, time now). Other ops on `/PRN:` paths: $82.
-- **The classic printer**: SIO devices $40-$43 (P1:-P4:) answer STATUS and WRITE (40, 29 or 20
+- **The classic printer**: SIO devices $40-$43 (P1:-P4:) handle STATUS and WRITE (40, 29 or 20
   bytes for AUX1 `N`, `S`, `D`); the records become the job `... Atari.txt` (ATASCII to text,
   `core/firmware/prnconv.c`), finished after 3 s without data, when the classic machine is
   frozen or cold booted, and by SYS_SYNC. It counts in STAT `/PRN:`.
 - **CLASSIC_MOUNT kind 4**: a BASIC program (a listing, or an Atari BASIC SAVE file; at most
-  96 KB) as the boot disk on D1: (the answer's kind is 2, as an executable); CLASSIC_BOOT then
+  96 KB) as the boot disk on D1: (the response's kind is 2, as an executable); CLASSIC_BOOT then
   cold boots with Atari BASIC enabled, and the boot program (`core/firmware/bas_loader.s`)
   ENTERs and RUNs it. **Kind 5**: a folder (made if missing) as an Atari DOS 2.0S disk on drive
-  ARG0 (answer: kind 1); the same folder on the same drive again builds it again (Refresh);
+  ARG0 (response: kind 1); the same folder on the same drive again builds it again (Refresh);
   CLASSIC_EJECT kind 1 of that drive saves what the Atari changed, then ejects; remembered in
   /atari.ini (`folder=`, `folderdrive=`). Only one drive is a folder disk.
 - **STAT `/D1:`-`/D4:`**: on the folder disk's drive: size = files shown | files left out << 8
@@ -607,13 +607,13 @@ error.
 | $E3 | MEDIA | ARG0 = 0 SD card removed, 1 inserted |
 | $E4 | NET | ARG0 = a stream handle (4-7) of a connection: bytes came, it ended or it failed since its program last read it |
 
-KEY and MOUSE events keep coming while a request is being served (from firmware of Nov 18, 2026; before, they waited until the request was done, and a key pressed and released meanwhile was lost). So the answer of a request may come after events that were sent while it ran. The firmware keeps one free slot in the response ring for that answer. Every key change gives its own event, in order; mouse motion with the same buttons is added up until it is sent, and every button change gives its own event. A task that waits for an answer does not stop the pointer: Marga draws it from PTR\_X / PTR\_Y, which Horizon's interrupt service writes for each MOUSE event.
+KEY and MOUSE events keep coming while a request is being served (from firmware of Nov 18, 2026; before, they waited until the request was done, and a key pressed and released meanwhile was lost). So the response to a request may come after events that were sent while it ran. The firmware keeps one free slot in the response ring for that response. Every key change gives its own event, in order; mouse motion with the same buttons is added up until it is sent, and every button change gives its own event. A task blocked on a response does not stop the pointer: Marga draws it from PTR\_X / PTR\_Y, which Horizon's interrupt service writes for each MOUSE event.
 
 ### Boot handshake
 
 1. At power-on the I/O processor holds the 65C816 in reset, loads /SYSTEM/HORIZON.SYS to $01:0000 and writes a small reset stub with the vectors at $00:FF00 to $00:FFFF.
 2. It releases the 65C816, whose reset stub jumps to $01:0000.
-3. Horizon writes MB\_REQ\_BASE and MB\_RSP\_BASE, then waits for IOP\_READY.
+3. Horizon writes MB\_REQ\_BASE and MB\_RSP\_BASE, then polls for IOP\_READY.
 
 ## Open questions
 

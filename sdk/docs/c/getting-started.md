@@ -1,30 +1,30 @@
 # Getting started with C
 
-From nothing to a C program running in the emulator and on the Atari816. The SDK's C
-compiler is **cc816**, the SDK's own (`sdk/c/cc816`, in Python); `hcc`, the SDK's driver,
-turns `.c` files into a Horizon program in one command. Floating point is section 8.
-Every command below was
-run on Linux (x86-64) for this guide; the output is what you should see, apart from paths,
-timings and sizes.
+From an empty folder to a C program running in the emulator and on the Atari816. The SDK's
+C compiler is **cc816** (`sdk/c/cc816`, written in Python). `hcc`, the SDK's driver, turns
+`.c` files into a Horizon program in one command. Floating point is section 8. The
+commands and outputs below are from Linux (x86-64). Your output should match, apart from
+paths, timings and sizes.
 
 ## 1. What you need
 
 | Tool | For |
 | --- | --- |
 | python3 3.8+ | `hcc` and cc816, the SDK's tools |
-| cc65's ca65, ld65 and ar65 | assembling and linking (cc65 2.19; Horizon's own programs are built with them) |
-| make, a C compiler for the PC | the Makefiles; building the emulator |
+| cc65's ca65, ld65 and ar65 | assembling and linking (cc65 2.19, also used for Horizon) |
+| make, a C compiler for the PC | the Makefiles, building the emulator |
 | this repository | the SDK, Horizon and the emulator |
 
-Build the emulator and Horizon once, from the repository's top folder (sdk/docs/getting-started.md, section 2):
+Build the emulator and Horizon once, from the repository's top folder
+([../getting-started.md](../getting-started.md), section 2):
 
 ```
 $ make -C emu
 $ make -C horizon
 ```
 
-Nothing else is needed and nothing is downloaded: cc816 and its C library are in the SDK
-(it vendors pycparser and pcpp, both BSD-licensed).
+Nothing else is needed and nothing is downloaded: cc816 and its C library are in the SDK,
+which vendors pycparser and pcpp (both BSD-licensed).
 
 ## 2. Check the tools
 
@@ -36,7 +36,7 @@ $ sdk/c/bin/hcc --version
 hcc 3.0 (Horizon C SDK: cc816)
 ```
 
-## 3. Hello in five minutes
+## 3. Hello, world
 
 ```c
 /* hello.c */
@@ -59,8 +59,8 @@ $ ls -l HELLO.PRG
 -rw-rw-r-- 1 user user 8561 Nov 22 21:52 HELLO.PRG
 ```
 
-The first build also builds the SDK's C library (a few seconds); after that `hcc`
-compiles, links and writes the program at once. `--map` adds the sizes:
+The first build also builds the SDK's C library (a few seconds). Later builds only
+compile, link and write the program. `--map` adds the sizes:
 
 ```
 $ sdk/c/bin/hcc --map -o HELLO.PRG hello.c
@@ -86,9 +86,9 @@ argument 2: two words
 
 run816 copies Horizon's SD card, puts the program at `/APPS/HELLO.PRG`, boots the
 emulator without a window, types the program's path and arguments at the shell's prompt
-and records the console. `--shot 2` takes a screenshot two seconds after the start,
-`--script FILE` types keys and clicks the mouse (sdk/docs/getting-started.md, section 5).
-Window programs start from the Desktop: leave out `--mode shell`.
+and records the console. `--shot 2` takes a screenshot two seconds after the start.
+`--script FILE` types keys and clicks the mouse ([../getting-started.md](../getting-started.md),
+section 5). Window programs start from the Desktop: leave out `--mode shell`.
 
 ## 5. A project with make
 
@@ -99,8 +99,8 @@ and read back):
 $ cp -r sdk/templates/c-console greet && cd greet
 ```
 
-Its Makefile is three settings and one include; set `SDK` to where the sdk folder is
-from the copy (here `../sdk`):
+Its Makefile has a few settings and one include. Set `SDK` to the path of the sdk folder
+as seen from the copy (here `../sdk`):
 
 ```make
 NAME := greet
@@ -121,9 +121,9 @@ run816: PASS (3 expected texts found)
 
 `make run` runs it with `test.script` (it types "Ada" and Enter) and leaves the console
 and a screenshot in `build/run/`. Every `.c` and `.s` in the folder is part of the
-program; `sdk/c/c.mk` lists the settings (HZ_CODE, HCCFLAGS, RUNMODE, ARGS, ...).
+program. `sdk/c/c.mk` lists the settings (HZ_CODE, HCCFLAGS, RUNMODE, ARGS, ...).
 
-## 6. When something is wrong
+## 6. Errors
 
 Compiler messages come with the file, the line and the column (here `bad.c` misses the
 `;` at the end of its line 5, `int x = 1`):
@@ -134,9 +134,9 @@ bad.c:6:5: error: expected ';' before 'printf' (at the end of line 5)
 hcc: 1 file(s) did not compile
 ```
 
-A program too big for its memory is stopped with the sizes (here the SDK's test program
-of 180 KB of code: `python3 sdk/c/tests/bigprog/genbig.py big` writes it into `big/`;
-then `cd big`):
+A program too big for its memory is rejected with the sizes. Here the program is the
+SDK's test program of 180 KB of code (`python3 sdk/c/tests/bigprog/genbig.py big` writes
+it into `big/`, then `cd big`):
 
 ```
 $ ../sdk/c/bin/hcc -o GAME.PRG big*.c
@@ -147,9 +147,9 @@ software stack takes 8,192 of them (hcc --stack N), so 57,072 are left. Build it
 --code large: its code then goes in several banks (docs/c/porting.md). ...
 ```
 
-When it is the code that does not fit, build with `--code large`: hcc puts the code in
-several banks. It still writes one file, `GAME.PRG`: the other code banks follow the main
-bank in it. Copy it to the card, into any folder (it needs Horizon 0.28 or later):
+When the code does not fit, build with `--code large`: hcc puts the code in several banks.
+It still writes one file, `GAME.PRG`, with the other code banks after the main bank. Copy
+it to any folder of the card (it requires Horizon 0.28 or later):
 
 ```
 $ ../sdk/c/bin/hcc --code large --map -o GAME.PRG big*.c
@@ -161,24 +161,24 @@ GAME.PRG: 213,679 bytes on the card, 317 relocations
   the main bank without its movable code: 17,397 bytes (code that must stay 11,038, constants 4,409, data 84, bss 1,866)
 ```
 
-Data, constants and the stacks still share the first bank; when they are what does not
-fit, hcc says so, and big arrays go to banks of their own (`hz_far_alloc`). See
+Data, constants and the stacks still share the first bank. When they do not fit, hcc
+reports it, and big arrays go to banks of their own (`hz_far_alloc`). See
 [porting.md](porting.md), "When the program is too big", and
-[reference.md](reference.md), "The two code models".
+[reference.md](reference.md#code-models), "Code models".
 
-A name nothing defines is said in C's terms (`undefined: nosuch (used in main.s)`).
-A crash shows on the console as `[kill] task N NAME cause CC addr AAAAAA pc PPPPPP`
-(ABI.md, "Faults"): link with `--map`, look up `pc`'s offset (the low 16 bits) in
-`NAME.lbl` (every label with its address, sorted by the linker: the nearest one below is
-the function or the block in it), and you have the place.
+An undefined name is reported in C's terms (`undefined: nosuch (used in main.s)`). A
+crash shows on the console as `[kill] task N NAME cause CC addr AAAAAA pc PPPPPP` (ABI.md,
+"Faults"). To find the place, link with `--map` and look up `pc`'s offset (the low 16
+bits) in `NAME.lbl`. That file lists every label with its address, sorted by the linker:
+the nearest label below the offset is the function or the block in it.
 
 ## 7. On the real machine
 
 A `.PRG` is an ordinary Horizon program (one built with `--code large` is one file too):
-copy it to the SD card (in `/BIN` it is a
-command of the shell) or send it over the PC link with `sdk/tools/deploy816.py`, as for
-assembly programs (sdk/docs/getting-started.md, section 6). Programs built with this SDK
-were run in the emulator only so far (it models the board's timing within about 5 %).
+copy it to the SD card (in `/BIN` it is a command of the shell) or send it over the PC
+link with `sdk/tools/deploy816.py`, as for assembly programs
+([../getting-started.md](../getting-started.md), section 6). The emulator models the
+board's timing within about 5 %.
 
 ## 8. Floating point
 
@@ -213,9 +213,9 @@ sqrt(2) = 1.4142135, sin(1) = 0.841471
 >
 ```
 
-The last line shows the 7 digits: a 64-bit `double` would give 0.3333333333. Nothing has
-to be added to the command: hcc links the floating-point code only into programs that use
-it. It costs room and time: CIRCLE.PRG is 18 KB (the hello world 8 KB), and an operation
+The last line shows the 7 digits: a 64-bit `double` would give 0.3333333333. The command
+needs no extra option: hcc links the floating-point code only into programs that use it.
+It costs space and time: CIRCLE.PRG is 18 KB (the hello world 8 KB), and an operation
 takes from 20 to 300 microseconds, `sin` about 4 milliseconds. Keep floats out of
 anything that runs every frame. The details: [reference.md](reference.md), "Floating
 point".
@@ -227,17 +227,17 @@ point".
   `make test`.
 - [reference.md](reference.md): the compiler, memory (where code, data, heap and the
   stacks live, the limits), int and pointer sizes, far memory, the calling convention for
-  assembly, the C library on Horizon, floating point, syscalls from C, speed.
+  assembly, the C library on Horizon, floating point, syscalls from C, performance.
 - [apps.md](apps.md): window applications with Horizon's controls library (`hui.h`:
-  buttons, fields, lists, menus, dialogs, the file dialog), a tutorial in five steps;
+  buttons, fields, lists, menus, dialogs, the file dialog), a tutorial in five steps,
   the template `sdk/templates/c-window-app`, the example `sdk/c/examples/viewer`.
-- [porting.md](porting.md): what breaks when C from a PC or from cc65 comes over, how
-  to find it, and what to do when the program is too big (`hcc --code large`).
+- [porting.md](porting.md): porting C from a PC or from cc65: the usual faults, how to
+  find them, and what to do when the program is too big (`hcc --code large`).
 - [../apps.md](../apps.md) (Horizon 0.29): your program as an app that users install
   with a double click: one folder in `/APPS` with APP.INF, an `.HZA` archive made with
-  `sdk/tools/hzapp.py`, and `hcc --needs` (the program checks what it needs at its start).
-- [compiler.md](compiler.md): cc816 itself, its options by purpose, reading its output;
-  [library.md](library.md): every header and function; [../tools.md](../tools.md) and
-  [../testing.md](../testing.md): the tools and how to test; [../README.md](../README.md):
-  the whole manual's map.
-- `make -C sdk/c test`: the SDK's own tests in the emulator.
+  `sdk/tools/hzapp.py`, and `hcc --needs` (the program checks its requirements at its
+  start).
+- [compiler.md](compiler.md): cc816, its options, reading its output.
+  [library.md](library.md): every header and function. [../tools.md](../tools.md) and
+  [../testing.md](../testing.md): the tools and testing. [../README.md](../README.md): the
+  map of the whole manual.

@@ -3,12 +3,12 @@
 ## OPEN: the picture is lost now and then (the monitor shows "no signal", then its HDMI banner)
 
 Reported 2026-11-24, "it has always happened": while playing, in FreeCell, and once seen with
-the Desktop idle and nobody using the serial link. Right after a loss the board answers the
+the Desktop idle and nobody using the serial link. Right after a loss the board responds to
 ping, `shot816` shows the framebuffer intact and Horizon's uptime runs on: the machine is fine,
 the HDMI output drops for the monitor and comes back.
 
 What the RTL does (read 2026-11-24):
-- The output is a custom raster sent as 720p60 (the AVI infoframe says VIC 4): 1572 x 760 at
+- The output is a custom raster sent as 720p60 (the AVI infoframe carries VIC 4): 1572 x 760 at
   71.71875 MHz (27 x 17/4 x 25/8 / 5), HFP/HS/HBP 72/80/140, VFP/VS/VBP 10/5/25, +/+ sync,
   60.03 Hz, 45.62 kHz lines (CEA: 1650 x 750 at 74.25 MHz, 110/40/220, 5/5/20, 60.00 Hz).
   The HDMI pins are LVDS25 outputs (`constraints/tang_nano_20k.cst`), as on every Tang Nano.
@@ -62,12 +62,12 @@ Atari loads a disk image returns to a desktop that takes no input. Not reproduce
 injected over the PC link (30 tries on `acid800.atr` and `DOS25.atr`, single density). One
 cause was found by reading and is fixed in the firmware, not yet confirmed as *the* cause: the
 SIO transmitter is clocked by the classic POKEY tick, which stops with the freeze, and
-`sio_tx_byte` waited without a bound for room in its 256-byte FIFO. An answer longer than the
+`sio_tx_byte` waited without a bound for room in its 256-byte FIFO. A reply longer than the
 FIFO (a 256-byte sector: 259 bytes) sent to a machine that has just been frozen hung the
-firmware, and Horizon's keyboard and mouse come through the firmware. It now gives up after
+firmware, and Horizon's keyboard and mouse come through the firmware. It now stops waiting after
 5 ms. Since the fast disk (bring-up log, step 26) the OS's sector reads no longer use the
 serial port at all, so only writes and programs with their own serial routines are still
-exposed. If it happens again: does `core/tools/atari.py status` still answer (firmware alive or
+exposed. If it happens again: does `core/tools/atari.py status` still return a status line (firmware running or
 not), and which disk image was it?
 
 ## OPEN: Horizon restarted by itself when a second disk was attached (seen once)
@@ -81,13 +81,13 @@ bank $2F) is inside the banks Horizon reserves ($20-$3F). Not known: the cause. 
 back: note the two files, whether the first was started with "Restart Atari" or only F12,
 and try `fastdisk=0`.
 
-## ROADMAP: the freeze should wait for the right moment
+## ROADMAP: freeze at a cycle or frame boundary
 
 Horizon's freeze (SV\_CTRL.FREEZE\_REQ) stops the classic machine at whatever clock it arrives.
 Two consequences: a POKEY write of the 6502 in the very clock where the freeze begins is lost
 (REV $0C routes POKEY's inputs to the native side in that clock), and a disk transfer is cut
 in the middle of a frame (the OS's retries recover it). The freeze should take effect at the
-end of a 6502 cycle and, better, between SIO frames; FROZEN would then tell Horizon when.
+end of a 6502 cycle and, better, between SIO frames; FROZEN would then show Horizon when it took effect.
 
 ## ROADMAP: "With BASIC / Without BASIC" in the Atari window
 
@@ -95,11 +95,11 @@ Asked 2026-11-21. The Atari window of the Desktop (where disks are attached and 
 should also offer the disk-boot choice that Settings has (`basic` in `/atari.ini`), so it
 can be changed where the disk is attached.
 
-## FIXED (v3.2): about one reset in fifteen left the machine dead (cold-boot / reset lottery)
+## FIXED (v3.2): about one reset in fifteen left the machine stalled
 
 Any reset path (power-on, Hard Reset, Boot OS/BASIC, cartridge attach, F9/Soft, PC Link
 reset) occasionally released the 6502 into a stall: black or stale screen, no keyboard, jiffy
-clock frozen, firmware still answering. Measured over 90 mixed resets in v3.1.2: 2–3 stalls per
+clock frozen, firmware still running. Measured over 90 mixed resets in v3.1.2: 2 to 3 stalls per
 30. Root cause: the core's asynchronous reset was released straight from a register in the
 firmware's 27 MHz clock domain, so the release landed at an arbitrary point of a core clock
 cycle. v3.2 releases it synchronously in the core clock (two flops): 90 mixed resets, zero
@@ -110,7 +110,7 @@ reset (bounded, logged as `boot: watchdog retry N`, counted in the status line's
 ## RESET (F9 / Soft Reset) inside a multi-game cartridge lands in BASIC or Self Test
 
 This is faithful, not a bug. The XL/XE cartridge port has no reset line, so a cartridge
-cannot see the RESET key; a multicart that switched itself off to run a game (Atarimax
+cannot detect the RESET key; a multicart that switched itself off to run a game (Atarimax
 compilations do this) is still off after RESET, and the XL OS then boots BASIC (or Self Test if
 BASIC is disabled). Altirra does exactly the same on F5. Use **Hard Reset** instead: since v3.0
 it power-cycles the emulated cartridge (bank 0, enabled) and brings the multicart menu back,
@@ -124,11 +124,11 @@ OSD. Workaround: the S2 button on the board always works, and closing the PC
 session restores F12 immediately. Under investigation.
 
 
-## FIXED (v2.4): disk writes were unreliable — ERROR 139, corrupted disks, could damage the SD card
+## FIXED (v2.4): unreliable disk writes (ERROR 139, corrupted disks, damage to the SD card)
 
 Writing to mounted disks (SAVE from DOS/BASIC, formatting) was broken in several
 stacked ways: writes to D2: failed with ERROR 139, "successful" writes could leave the
-disk image's filesystem inconsistent, and — worst — long write sessions could corrupt
+disk image's filesystem inconsistent, and, worst, long write sessions could corrupt
 the **SD card's own FAT filesystem** (in extreme cases wiping it). Root causes, all
 fixed in v2.4 and verified on hardware + a host-side FatFs test suite (`test/fatfs_host/`,
 removed in Horizon 0.24: the firmware functions it tested, the OSD's "New blank disk" and the H:
@@ -140,9 +140,9 @@ device, are gone; `test/fdisk_host/` tests the folder disk on the same kind of i
   write-protect (now: auto-clear of PC-inherited read-only attributes, "(RO)" marker,
   status write-protect bit, error 144);
 - mounting the same image on both drives created two write handles on one file
-  (illegal in FatFs, can corrupt the volume — now the second mount is forced read-only);
+  (illegal in FatFs, can corrupt the volume; now the second mount is forced read-only);
 - an out-of-range sector number made the firmware allocate the gap on the SD card
-  (one bad sector number grew a 92 KB ATR to 8+ MB — now rejected like a real drive);
+  (one bad sector number grew a 92 KB ATR to 8+ MB; now rejected as a real drive rejects it);
 - a firmware stack overflow could corrupt filesystem state during deep menu operations
   (stack usage reduced; a canary now flags it on the OSD debug line).
 
@@ -152,16 +152,16 @@ your files. v2.4 also adds DOS FORMAT support and OSD "New blank disk" creation.
 ## FIXED: mode-8 fine scrolling stuttered (Ninja Commando / Draconus marquees)
 
 Big-letter marquee scrollers (ANTIC mode 8 / GRAPHICS 3 with horizontal fine scroll)
-moved in coarse 4-colour-clock jumps instead of gliding smoothly — on photos this read
+moved in coarse 4-colour-clock jumps instead of moving smoothly. On photos this showed
 as per-scanline "shear" of the moving band. Root cause: an upstream Atari800_MiSTer
-ANTIC bug — HSCROL bit 1 was applied twice in the mode-8 pixel path (DMA fetch timing
+ANTIC bug: HSCROL bit 1 was applied twice in the mode-8 pixel path (DMA fetch timing
 *and* an extra shifter phase-select), summing to one full pixel period, i.e. no visible
 effect. Fixed here (one line in `antic.vhdl`, `enable_shift` slow-shift case) and
 hardware-verified 2026-07-04: Ninja Commando's title marquee now scrolls smoothly.
 Only display lists using mode 8 *with* horizontal scrolling are affected by the change;
 all other modes are bit-identical. (Current MiSTer still has this bug.)
 
-## FIXED (v3.1.2): games froze when played with the keyboard as joystick — impossible stick values
+## FIXED (v3.1.2): games froze when played with the keyboard as joystick (impossible stick values)
 
 Found 2026-09-20 with Tiger Attack (freezes within seconds of keyboard play, never with a DB9
 stick, never on MiSTer/Altirra). Root cause: the arrow-keys-as-joystick mode passed two
@@ -177,9 +177,9 @@ title" and "core timing" theories for this game were wrong.
 A few demanding titles show garbled sprites, a jumpy/jittery image, or freezes **during
 play**:
 
-- **Tiger Attack** (Atari UK, 1988) — minor image tearing while scrolling; plays fine otherwise
+- **Tiger Attack** (Atari UK, 1988): minor image tearing while scrolling; plays fine otherwise
   (the freezes once blamed on it were the keyboard-joystick bug, fixed in v3.1.2).
-- **Astro Droid** (Red Rat Software, 1987) — vertical jitter; sprites garbled / wrong colours.
+- **Astro Droid** (Red Rat Software, 1987): vertical jitter; sprites garbled / wrong colours.
 
 **Most likely cause: these are PAL games, and this build is NTSC-only.** Both are PAL
 British budget titles built around **PAL ANTIC timing** (312 lines / 50 Hz) and aggressive
@@ -190,11 +190,11 @@ A real Atari (or MiSTer) set to **NTSC** would behave the same way.
 
 It is **not a loading problem** (Astro Droid runs from cartridge; the issue is gameplay) and
 **not a memory/video-path bug** on our side: the SDRAM crossing is synchronous and the core
-stalls on a completion handshake, so it can't hand the CPU/ANTIC wrong data — slow SDRAM only
-slows the machine, it doesn't corrupt it.
+stalls on a completion handshake, so the CPU and ANTIC never receive wrong data. Slow SDRAM only
+slows the machine and does not corrupt it.
 
 **Why other scrollers are fine:** games like **River Raid** are NTSC-friendly and use *coarse*
-scrolling (one LMS-pointer update during VBLANK) — timing-insensitive — so they're unaffected.
+scrolling (one LMS-pointer update during VBLANK), which is not timing-sensitive, so they are unaffected.
 
 ### Status: PAL support is not planned
 Switching the core to PAL is **not a simple flag**: it changes the machine clock (1.7734 vs
@@ -212,24 +212,23 @@ clean on NTSC hardware → reopen as a core/wrapper investigation.
 
 The upstream MiSTer core ships a VBXE implementation (by Wojciech Mostowski, 2025). This
 tree does not include it: the VBXE outputs inside `atari800core.vhd` are tied to their
-"no VBXE" values. It is not a missing feature we forgot to wire up — the Tang Nano 20K
-cannot hold it:
+"no VBXE" values. The Tang Nano 20K does not have the resources for it:
 
 - **VRAM.** VBXE needs 512 KB of video RAM, which MiSTer keeps in FPGA block RAM. The
   GW2AR-18 has about 103 KB of block RAM in total and this design already uses 92% of it.
   Moving the VRAM to SDRAM would mean a new arbiter client streaming one byte per hi-res
   pixel for the overlay plus XDL fetches plus blitter traffic, concurrent with the CPU and
-  ANTIC — the same bandwidth/arbitration wall that killed the SDRAM frame-buffer attempt.
+  ANTIC: the same bandwidth and arbitration limit that ended the SDRAM frame-buffer attempt.
 - **Video path.** With VBXE on, the core emits 24-bit RGB with per-pixel palette selection
   and up to 640-pixel-wide overlays. Our scandoubler ring stores an 8-bit GTIA colour code
   at 352 pixels per line and scales by an integer 3×. Supporting VBXE output means a wider,
-  deeper ring, the VBXE palette moved to the pixel-clock side and non-integer scaling —
+  deeper ring, the VBXE palette moved to the pixel-clock side and non-integer scaling,
   all new logic on the HDMI path, which has no headroom left.
 - **Logic.** The VBXE engine is roughly 2300 lines of VHDL on a chip at 88% logic usage.
 
 ### Status: WONTFIX on the Tang Nano 20K
 There is no useful partial VBXE (every feature software uses depends on the 512 KB VRAM).
-The Atari816's own video (Marga) is the way forward on this board.
+On this board, the Atari816's own video chip (Marga) provides extended graphics instead.
 
 ## FIXED IN THE PC TOOL (confirmed on the board, 2026-11-22): `shot816` showed a black picture for Xargon
 

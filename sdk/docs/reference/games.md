@@ -1,11 +1,10 @@
 # Syscalls: frame sync, palette entries, sprites, full screen, draw lists, sheets, fill runs
 
-Horizon 0.18, "the games round": the calls a game needs to use Marga (the video chip) and
-Ali (the blitter) the way they were built for. A complete program that uses all of them:
-`sdk/examples/deepdive` (a full-screen scrolling game). Patterns: [game-patterns.md](game-patterns.md).
-The source of truth is `horizon/ABI.md` (its syscall table and "The games round (0.18)").
-Horizon 0.19 adds sheets ([below](#sheets-horizon-019)): art registered once, then cheap
-draw-list records from it.
+Horizon 0.18: the calls for games that use Marga (the video chip) and Ali (the blitter). A
+complete program that uses all of them: `sdk/examples/deepdive` (a full-screen scrolling
+game). Patterns: [game-patterns.md](game-patterns.md). The authoritative definition is
+`horizon/ABI.md` (its syscall table and "Games round (0.18)"). Horizon 0.19 adds sheets
+([below](#sheets-horizon-019)): art registered once, then cheap draw-list records from it.
 
 Examples assume `win`, `t0`, `t1`, `t2` in ZEROPAGE and `ev` (8 bytes) in BSS.
 
@@ -14,7 +13,7 @@ From BASIC (Horizon BASIC 2.0, `horizon/BASIC.md`, "Games"): `SPRITE n, x, y, pi
 `COPY` (draw lists in full screen), `PALETTE`, `VSYNC`, `FRAME`: the same calls, a few a frame
 (ABI.md, "For BASIC (2.0)"); `templates/basic-game` is a sprite game in BASIC.
 
-## The memory rule
+## Memory rule
 
 Marga (the framebuffer, sprite images), Ali (draw lists) and Lau (samples) read and write
 memory by themselves, past the memory protection (FREDDIE II). So **every address a program
@@ -26,20 +25,21 @@ hands over for them is checked against its own memory**:
 
 A range may run across consecutive banks the program owns, but not into a bank it does not
 own or a shared bank. Anything else is **EFAULT**, and nothing changes. Whatever a program
-holds (sprites, palette entries, full-screen mode, a running list, voices) goes back when it
-ends (exit, kill, crash), and when it frees the memory involved: a freed bank takes along the
-full screen whose framebuffer is in it, the images of sprites (hidden, `spr_show` then gives
-EINVAL until `spr_set` gives a new image), a list reading from it (stopped) and the voices
-playing from it.
+holds (sprites, palette entries, full-screen mode, a running list, voices) is released when it
+ends (exit, kill, crash), and when it frees the memory involved. Freeing a bank ends the full
+screen whose framebuffer is in it, removes the images of sprites in it (the sprites are
+hidden, and `spr_show` returns EINVAL until `spr_set` gives a new image), stops a list
+reading from it and stops the voices playing from it.
 
-What the hardware needs (ENODEV before; `ws_config` with A = 0 returns SYS_REV in X):
+Hardware requirements (ENODEV before; `ws_config` with A = 0 returns SYS_REV in X):
 
-| From | |
-| --- | --- |
-| REV $08 | Ali, the blitter (draw lists are drawn by the CPU before: same picture, slower) |
-| REV $09 | Ali's command lists (draw lists run in one go; on REV $08 the kernel starts the records one by one), Marga's VBLANK interrupt and frame counter (`vsync`, `frame`), the raster table, WE_VBL |
-| REV $0A | Lau, the sample player ([sound.md](sound.md)) |
-| REV $0B | sprites, fine scrolling (`fs_scroll`). The emulator models REV $0B by default ([hardware.md](hardware.md)) |
+- REV $08: Ali, the blitter. Before it the CPU draws the draw lists: same picture, slower.
+- REV $09: Ali's command lists (draw lists run in one go; on REV $08 the kernel starts the
+  records one by one), Marga's VBLANK interrupt and frame counter (`vsync`, `frame`), the
+  raster table, WE_VBL.
+- REV $0A: Lau, the sample player ([sound.md](sound.md)).
+- REV $0B: sprites, fine scrolling (`fs_scroll`). The emulator models REV $0B by default
+  ([hardware.md](hardware.md)).
 
 Full-screen mode itself (`fs_enter`, the program's own framebuffer and palette) works on every
 revision.
@@ -53,9 +53,9 @@ take effect in the same vertical blank: the one after the call.
 
 ### $0F vsync (SYS_VSYNC)
 Out: A = the frame counter (as `frame`). Blocks until the next vertical blank begins (line
-360). From REV $09 Marga's VBLANK interrupt ends the wait and A is NV_FRAME, so a difference of
-more than 1 between two results is a missed frame. Then it also **waits until the caller's
-draw list is done** and makes the CPU see what Ali wrote. Before REV $09 the moment comes from
+360). From REV $09 Marga's VBLANK interrupt unblocks the call and A is NV_FRAME, so a difference of
+more than 1 between two results is a missed frame. Then it also **blocks until the caller's
+draw list is done** and flushes the CPU's cache, so the CPU reads what Ali wrote. Before REV $09 the moment comes from
 the raster line and a timer, and A counts the vertical blanks waited for by any task.
 Interruptible by kill.
 ```asm
@@ -73,7 +73,7 @@ loop:   sys     SYS_VSYNC       ; a new frame: A = the frame counter
 
 ### $9E frame (SYS_FRAME)
 Out: A = the frame counter: NV_FRAME, + 1 at every vertical blank since the start, wrapping at
-65536 (REV $09). Before REV $09: the vertical blanks waited for with `vsync`. It does not wait.
+65536 (REV $09). Before REV $09: the vertical blanks waited for with `vsync`. It does not block.
 After a pause, read it again so that the pause does not count as missed frames.
 ```asm
         sys     SYS_FRAME
@@ -117,10 +117,10 @@ same for every program. A program takes entries 16-255 for colours of its own wi
 
 **The focus rule: an entry a program holds shows its colour while one of its windows has the
 keyboard focus, and the system colour otherwise.** It goes back to the system when the program
-ends or calls `pal_alloc` with A = 0. So the program in front always looks as it means to, and
+ends or calls `pal_alloc` with A = 0. So the program in front always shows its own colours, and
 no program's colours change what another shows while that one is in front; a program in the
 background may look different meanwhile (games pause there anyway). Two programs never hold
-the same entry (EAGAIN). A program that draws with system colours and wants them right also
+the same entry (EAGAIN). A program that draws with system colours and needs them correct also
 while another program is in front can claim them at their place with `pal_alloc` (they keep
 their system colours; the kernel gives other programs other entries). Entries 0-15 stay global
 (`ws_palette` sets them for everyone: Settings' desktop colours). (0.31) **The spare ranges
@@ -209,7 +209,7 @@ the entry's palette bank). SPR_MAG doubles a sprite on the screen (up to 64 x 64
 - **Off the screen**: a sprite may slide out past every edge; the kernel hides one that is far
   outside Marga's range (x -1024..1023, y -512..511).
 
-**The rule for windows.** Hardware sprites cannot be cut to a window's shape, so a window's
+**Sprites in windows.** Hardware sprites cannot be cut to a window's shape, so a window's
 sprites are shown only while that window has the keyboard focus, nothing lies over its
 content (no other window, menu or pop-up menu) and the desktop is on the screen; and only the
 ones that lie wholly inside its content. The others are hidden until that holds again. Their
@@ -219,7 +219,7 @@ moves takes them along). A program's sprites are freed when it ends or closes th
 ### $91 spr_alloc (SYS_SPRALLOC)
 In: A = count 1-16, X = one of your windows. Out: A = the first of count sprites in a row,
 hidden, without an image. ENODEV before REV $0B; EINVAL a bad count or not your window; EAGAIN
-no such run free (other programs hold sprites too: ask for what you need).
+no such run free (other programs hold sprites too: allocate only what you need).
 ```asm
         lda     #4
         ldx     z:win
@@ -338,8 +338,11 @@ in the background).
 | Mode | Value | Screen | Framebuffer |
 | --- | --- | --- | --- |
 | `FS_640X8` | 0 | 640 x 360, 256 colours | stride >= 640, rows >= 360 |
-| `FS_640X4` | 1 | 640 x 360, 16 colours (entries 0-15; two pixels a byte, the left one in the high nibble) | stride >= 320, rows >= 360 |
-| `FS_320X8` | 2 | 320 x 180, 256 colours, each pixel shown 4 x 4 on the monitor | stride >= 320, rows >= 180 |
+| `FS_640X4` | 1 | 640 x 360, 16 colours | stride >= 320, rows >= 360 |
+| `FS_320X8` | 2 | 320 x 180, 256 colours | stride >= 320, rows >= 180 |
+
+`FS_640X4` uses entries 0-15, two pixels a byte, the left one in the high nibble.
+`FS_320X8` shows each pixel 4 x 4 on the monitor.
 
 | Flag | Value | |
 | --- | --- | --- |
@@ -379,20 +382,20 @@ fsb:    .byte   FS_320X8, 0     ; mode, flags
         .byte   0
 ```
 
-### The framebuffer
+### Framebuffer
 
 It is your memory: the CPU may draw into it directly (long addressing), and Ali draws into it
 through draw lists, with coordinates in the framebuffer: all of its rows and its whole stride,
 so the parts off the screen can be prepared before they scroll in. **What Marga reads**: the
 rows of the framebuffer the scroll registers select, each from its row's start plus the x
 offset, a line's worth of bytes (640, or 320 in the 4 bpp and 320 x 180 modes); `fs_enter`
-checked the whole rows x stride range, and `fs_scroll` refuses any value that would make
-Marga read outside it.
+checked the whole rows x stride range, and `fs_scroll` rejects (EINVAL) any value that would
+make Marga read outside it.
 
 More than one bank (a framebuffer over 65,536 bytes, or two for page flipping): the range must
 run across consecutive banks you own. `bank_alloc` gives the lowest free bank, so the banks of
 a program that allocates them one after the other are usually consecutive, but not always
-(another program may have freed one in between). Check, and keep asking:
+(another program may have freed one in between). Check, and allocate again:
 ```asm
         sys     SYS_BALLOC
         bcs     fail
@@ -413,22 +416,22 @@ A 640 x 360 x 8 framebuffer is 230,400 bytes (4 banks at stride 640, more with a
 scrolling); 640 x 360 x 4 is 115,200 (2 banks); 320 x 180 x 8 is 57,600 (one bank, with room
 for a status panel or a wider ring: `examples/deepdive` uses 336 x 208 in two).
 
-### Keys, focus, and the way out
+### Keys, focus, leaving full screen
 
 Keys, buttons, motion (with a button held, or always with WF_HOVER) and the wheel go to the
 full-screen window as usual events, with the pointer's position on the screen (halved in
-320 x 180). The menu bar is not shown and the window manager keeps only its way out, which
-works whatever the program does:
+320 x 180). The menu bar is not shown. The window manager keeps only the ways to leave full
+screen, which work whatever the program does:
 
 - **Alt+Tab, Alt+Esc** minimize the full-screen window: the desktop comes back as it was;
 - **F12** does the same, then shows the classic machine as always;
-- **Alt+F4** sends WE_CLOSE (leave and end, or ask);
+- **Alt+F4** sends WE_CLOSE (leave and end, or ask the user);
 - whenever the window loses the focus otherwise (another program's window comes up, the
   program's own dialog, the Windows menu), the desktop comes back too;
 - the program's end (exit, kill, crash), `fs_leave`, closing the window and freeing a bank the
   framebuffer lies in end full-screen mode.
 
-On leaving, the program gets **WE_UNFOCUS** (pause: stop the samples, wait for events). When
+On leaving, the program gets **WE_UNFOCUS** (pause: stop the samples, block on events). When
 its window gets the focus again (Alt+Tab, the Windows menu, a click on the window) its screen
 is shown again exactly as it was and it gets **WE_FOCUS**.
 
@@ -502,7 +505,7 @@ later. Every frame starts with the palette's own colours. 0: off. EINVAL: not th
 program, a bad line or order.
 
 The kernel's LINE interrupt handler writes the colours in the horizontal blank (it takes the
-interrupt one line early and waits for the line to begin); programs never run code in
+interrupt one line early and polls until the line begins); programs never run code in
 interrupts. A change is exact from its line on while the CPU runs a program or idles; kernel
 work with interrupts masked (a file read, a CPU blit) can delay it.
 ```asm
@@ -527,16 +530,20 @@ starts them one by one, without the blitter the CPU draws them: the picture is t
 | Offset | Constant | Field |
 | --- | --- | --- |
 | 0 | `LR_OP` | u8 op (below) |
-| 1 | `LR_FLAGS` | u8 flags: bit 0 LS_VBL (wait for the vertical blank before this record), bits 4-6 expand's first source bit (0 = bit 7) |
+| 1 | `LR_FLAGS` | u8 flags (below) |
 | 2 | `LR_C1` | u8 c1: the fill colour, expand's set bits |
 | 3 | `LR_C2` | u8 c2: the key colour of LS_KEY, expand's clear bits |
 | 4 | `LR_X` | i16 x: the destination |
 | 6 | `LR_Y` | i16 y |
 | 8 | `LR_W` | u16 w |
 | 10 | `LR_H` | u16 h |
-| 12 | `LR_SRC` | u24 source (copy, keyed copy, expand), then u8 0; LS_MOVE: i16 sx at 12, i16 sy at 14 |
+| 12 | `LR_SRC` | u24 source, then u8 0 (below) |
 | 16 | `LR_STRIDE` | u16 source stride (0: the width; expand: the bytes a row needs) |
 | 18 | | u16 0 |
+
+- `LR_FLAGS`: bit 0 LS_VBL (start this record in the vertical blank), bits 4-6 expand's
+  first source bit (0 = bit 7).
+- `LR_SRC`: the source of a copy, keyed copy or expand. LS_MOVE: i16 sx at 12, i16 sy at 14.
 
 | Op | Value | |
 | --- | --- | --- |
@@ -562,12 +569,12 @@ starts them one by one, without the blitter the CPU draws them: the picture is t
   screens). On an error nothing is drawn. The records are read during the call: you may
   rewrite them as soon as it returns.
 - **While a list runs its sources are being read and its target written: leave them alone
-  until `list_wait` (or `vsync`, or the next `draw_list`, which wait for it).** Change a
-  source picture only after one of those; to read the framebuffer with the CPU after Ali
-  wrote it, `list_wait` first (it also makes the CPU see Ali's writes).
+  until `list_wait` (or `vsync`, or the next `draw_list`, which block until it is done).**
+  Change a source picture only after one of those; to read the framebuffer with the CPU
+  after Ali wrote it, `list_wait` first (it also flushes the CPU's cache of Ali's writes).
 - **LS_VBL** on the first record: the blits start in the vertical blank, together with the
   scroll values and sprite changes of the same frame. A frame's whole update in one syscall,
-  tear-free. (On any later record: wait for the next blank there.)
+  tear-free. (On a later record: that record starts in the next blank.)
 - A program's running list is stopped (Ali's ABORT) when it ends or frees a bank.
 - Cost (emulator): about 1,300 CPU cycles a record in the call (checking and clipping;
   Horizon 0.18: 1,400), then Ali's own time, while the CPU goes on:
@@ -591,8 +598,9 @@ sprite: .res    256
 ```
 
 ### $9D list_wait (SYS_LISTWAIT)
-In: A = 0 wait, 1 ask. Out: A = 1 while your list still runs (asked), 0 when done. Waiting
-(or an answer of 0) also makes the CPU see what Ali wrote (CACHE_FLUSH).
+In: A = 0 block, 1 poll. Out: A = 1 while your list still runs (poll), 0 when done.
+Blocking (or a result of 0) also flushes the CPU's cache (CACHE_FLUSH), so the CPU reads
+what Ali wrote.
 ```asm
         lda     #0
         sys     SYS_LISTWAIT    ; done: its sources may change now
@@ -604,8 +612,8 @@ A draw list checks every record's source against your memory: most of its cost. 
 moves the check to the start: you register a rectangle of your memory holding art once
 (`sheet_new`), and `sheet_draw`'s records name the sheet and a rectangle in it. The kernel
 then only compares small numbers with the sheet's size. Everything else is `draw_list`'s:
-the targets, clipping, LS_VBL (here SH_VBL), the revisions, the waiting (`list_wait`,
-`vsync`), the 460,800-pixel limit. What a sheet record cannot do (moves inside the target,
+the targets, clipping, LS_VBL (here SH_VBL), the revisions, the synchronisation
+(`list_wait`, `vsync`), the 460,800-pixel limit. What a sheet record cannot do (moves inside the target,
 1 bpp expands, a stride per record) stays `draw_list`'s; send one or the other each frame.
 
 Cost (emulator, `gtest t`, its board timing; `--ideal-timing` in brackets): about **31 us a
@@ -670,7 +678,7 @@ is drawn.
 | `SH_FILL` | 0 | w x h of the colour (no sheet) |
 | `SH_COPY` | 1 | from the sheet |
 | `SH_KEY` | 2 | the same, pixels of the key colour skipped |
-| `SH_VBL` | $80 | added to the op: wait for the vertical blank before this record |
+| `SH_VBL` | $80 | op flag: start this record in the vertical blank |
 
 ```asm
         lda     t0              ; the sheet from sheet_new, op SH_KEY: into the second record
@@ -698,8 +706,8 @@ and the measurements: horizon/ABI.md, "Fill runs"; performance.md, "Many small f
 ### $A4 fill_runs (SYS_FILLRUNS)
 In: A = the count (0-2688), X, Y = a 10-byte block {u24 the page (offset 0), u8 flags (0, or
 `FR_GROUPS`), u16 its size (0 = 65,536), u24 the runs, u8 0} (`FRB_*`). Out: A = the count;
-the call returns while Ali fills (`list_wait`, `vsync` or the next list call wait for it; the
-runs may be changed at once). Run (`FRR_*`, 4 bytes): u16 offset (y * stride + x from the
+the call returns while Ali fills (`list_wait`, `vsync` or the next list call block until it
+is done; the runs may be changed at once). Run (`FRR_*`, 4 bytes): u16 offset (y * stride + x from the
 page's start; a run past a row's end goes on in the next), u8 colour, u8 width 0-255. Every
 run must end inside the page: EINVAL with X = the first that does not (the runs before it
 may be drawn). EFAULT: the page not wholly your memory, the block or the runs not readable.

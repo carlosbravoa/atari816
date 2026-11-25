@@ -28,8 +28,8 @@ card, double-click it in Files (the Installer puts it in `/APPS/PRINCE`); it app
 Programs > Games. The archive contains the converted game data: it is built on your
 machine from your copy, never committed or published here.
 
-The program needs Horizon 0.30, the blitter and 3 MB of free memory (`hcc --needs`; it says
-so and stops on a machine without them). Sound uses Lau (REV $0A) and the OPL2 (REV $0C)
+The program needs Horizon 0.30, the blitter and 3 MB of free memory (`hcc --needs`; on a machine
+without them it prints what is missing and ends). Sound uses Lau (REV $0A) and the OPL2 (REV $0C)
 when they are there; without them the game plays silently.
 
 ## Keys
@@ -62,13 +62,13 @@ slower machine: the tests), `stats=N` (frame times every N game frames), `every=
 `shots=a,b`, `dump=a` (the tests' state lines, pictures and savestate dumps at replay ticks),
 `levelsum` (each level's checksum), `sndtest` (every sound once, then it ends).
 
-## What differs from the PC
+## Differences from the PC
 
-- **The screen.** The game draws 320 x 200; the Atari816's full screen shows 320 x 180.
+- **Screen.** The game draws 320 x 200; the Atari816's full screen shows 320 x 180.
   In a room the screen shows 172 of the room's 192 rows and, below a split (Marga, no
   cost), the 8-row status line (health, messages). The view follows the kid: his row
-  decides which 172 rows (the top ones when he is up, the bottom ones when he is down),
-  sliding a row a frame. Full pictures (the title, the story, the princess's room) show
+  selects which 172 rows are shown (the top ones when he is up, the bottom ones when he is
+  down), moving a row a frame. Full pictures (the title, the story, the princess's room) show
   their rows 20-199 (the top 20 are a border). Nothing is squeezed.
 - **The palette** is the DOS game's VGA palette (each image set in its own row of 16
   colours, as on the VGA): colours are exact; the flashes change palette entry 0, as the
@@ -105,7 +105,8 @@ from your data, byte for byte), and the app archive is built locally.
 ## Tests
 
 `make test` (tests/check.sh), all in the emulator, its card as slow as the board's (run816's
-default; the scripts wait for the program's console lines, never for fixed times):
+default; each step of the scripts starts on a console line of the program, never after a
+fixed time):
 
 1. four replays recorded with upstream SDLPoP on a PC (`tests/replays`: level 1 from its
    start to the sword and on through ten rooms; a loose floor; a sword fight on level 2;
@@ -115,7 +116,7 @@ default; the scripts wait for the program's console lines, never for fixed times
 2. one of them at the game's speed on a machine 30 ms a frame slower: the same states;
 3. 18 pictures at replay ticks (checksums in `tests/frames.md5`; equal pixel for pixel to
    the PC's frames: `make check-host`);
-4. a game through the keyboard (`tests/play.script`, the waits follow the program's
+4. a game through the keyboard (`tests/play.script`, its steps start on the program's
    console lines): the first screen, the title, level 1, a quicksave and quickload, a pause
    (QUICKSAVE.SAV, the quickload's savestate checksum equal to the quicksave's, Lau's
    writes, pictures in `tests/play.md5`: the first whole, the others' status line); the
@@ -128,7 +129,7 @@ default; the scripts wait for the program's console lines, never for fixed times
    (`tests/sndlevel.py`): the effects' and the songs' median rms within 3 dB (-27.6 and
    -28.4 dBFS), no clipping, the loudest peak -9 dBFS.
 
-`make test-long` (tests/levels.sh; `make host` first: the PC records the replays into
+`make test-long` (tests/levels.sh; `make host` first: the host build records the replays into
 `build/levels`, `tests/mklevels.sh`, since a replay holds the level's map):
 
 1. each level 1-14 from its start (40 ticks): the start room, the level structure's

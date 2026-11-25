@@ -13,19 +13,43 @@ app** (`make app`: XCOM.HZA, no game data in it): the intro, menus, geoscape, ba
 UFOpaedia, interceptions, battles, debriefings, the end slides; the AdLib music on the
 OPL2 (a helper task keeps its tempo while the game computes) and the Sound Blaster effects
 on Lau (also the buttons' clicks and the windows' pop-up sounds, the footsteps by terrain, as DOS); windows that pop up and buttons that press as DOS's; saves (also inside a battle) in the app's folder. Every screen is checked against
-the PC build by `make test`. Battles are still slow in places (PORTING-NOTES.md, "What is
-next").
+the PC build by `make test`. Battles are still slow in places (PORTING-NOTES.md, "Next
+steps").
 
-| | State |
-| --- | --- |
-| Engine | our fork in `engine/` (`engine/FORK.md`: what it is, our changes by topic, `git diff cca0456 -- ports/xcom/engine`, how to take a newer upstream); the port's hooks are `#if defined(XCOM_PORT)`, fixes and the interface's sounds are for every build; `plat/` replaces three of its files on the Atari816 (the Makefile leaves them out) |
-| Data | `tools/getdata.sh` runs the fork's XCOMCONV (`engine/tools`) on your copy (GOG works with `--skip-check`); the VGA mode uses 18.3 MB of it; pack format 6 (`PACKS.VER`: older packs are refused, `make` says so, the app on its screen: a card's packs of format 5 must be made again) |
-| Host build (Linux) | the whole engine headless on a model of the DOS machine (`plat/xdos.c`), with DOS's 16-bit `int` (`tools/host16.py`): the reference |
-| Atari816 build | `hcc --code large --data far`: XCOM.PRG and MUSD.PRG (the music task) |
-| Tests | `make test`: 16 KEYS-script runs of every screen on both builds (the two night battles, one with the night lights' walk, fire, flare and sightings, also as a board without the colour remap, REV $0C) (same LOG, same pictures pixel for pixel, same saves, open files counted), the real mouse and keyboard three times (the clock as after the start, after 5 minutes, wrapping), a full card, the sound (OPL2 stream and Sound Blaster blocks against the host's, the beat, the volume); `make test-long`: longer runs (a big battle saved and loaded, the defeat slides, the campaign soak); `make test-app`: the app installed and started from the Desktop; `make speed`: BENCH and an alien turn on the real clock; `make smooth`: the player's pointer stops and frames in a scripted battle (by day and at night) and the geoscape, with limits (PORTING-NOTES.md 4h) |
-| Night battles | the night lights as in the original: each 16 x 8 cell of the view at its tile's level (the night sky, the soldiers' own light, fires, flares, the terrain's lamps: upstream's VGA model, `engine/src/vlit.c`), drawn by the blitter's colour remap (hardware REV $0D, Horizon 0.31), the levels made again only when a light moves; older boards shade by the CPU, the same pictures (PORTING-NOTES.md 4j, 4k) |
-| Screen | 320 x 200 on 320 x 180: the picture stands still, each kind of screen at its own rows (centred, or where its buttons are); the mouse wheel or F5 / F6 move it; the battle view is split (the panel whole below 124 rows of the view); the pointer is a hardware sprite |
-| On the board | `make kit`: a measuring kit (XCOM.ARG, `/M` self-timing to `/PC:/`, `/IOB` the card's costs); PORTING-NOTES.md section 4e |
+State by part:
+
+- Engine: our fork in `engine/` (`engine/FORK.md`: what it is, our changes by topic,
+  `git diff cca0456 -- ports/xcom/engine`, how to take a newer upstream); the port's hooks
+  are `#if defined(XCOM_PORT)`, fixes and the interface's sounds are for every build;
+  `plat/` replaces three of its files on the Atari816 (the Makefile leaves them out).
+- Data: `tools/getdata.sh` runs the fork's XCOMCONV (`engine/tools`) on your copy (GOG
+  works with `--skip-check`); the VGA mode uses 18.3 MB of it; pack format 6 (`PACKS.VER`:
+  older packs are rejected, with an error from `make` and on the app's screen: a card's
+  packs of format 5 must be made again).
+- Host build (Linux): the whole engine headless on a model of the DOS machine
+  (`plat/xdos.c`), with DOS's 16-bit `int` (`tools/host16.py`): the reference.
+- Atari816 build: `hcc --code large --data far`: XCOM.PRG and MUSD.PRG (the music task).
+- Tests: `make test`: 16 KEYS-script runs of every screen on both builds (the two night
+  battles, one with the night lights' walk, fire, flare and sightings, also as a board
+  without the colour remap, REV $0C) (same LOG, same pictures pixel for pixel, same saves,
+  open files counted), the real mouse and keyboard three times (the clock as after the
+  start, after 5 minutes, wrapping), a full card, the sound (OPL2 stream and Sound Blaster
+  blocks against the host's, the beat, the volume); `make test-long`: longer runs (a big
+  battle saved and loaded, the defeat slides, the campaign soak); `make test-app`: the app
+  installed and started from the Desktop; `make speed`: BENCH and an alien turn on the real
+  clock; `make smooth`: the player's pointer stops and frames in a scripted battle (by day
+  and at night) and the geoscape, with limits (PORTING-NOTES.md 4h).
+- Night battles: the night lights as in the original: each 16 x 8 cell of the view at its
+  tile's level (the night sky, the soldiers' own light, fires, flares, the terrain's lamps:
+  upstream's VGA model, `engine/src/vlit.c`), drawn by the blitter's colour remap (hardware
+  REV $0D, Horizon 0.31), the levels made again only when a light moves; older boards shade
+  by the CPU, the same pictures (PORTING-NOTES.md 4j, 4k).
+- Screen: 320 x 200 on 320 x 180: the picture stands still, each kind of screen at its own
+  rows (centred, or where its buttons are); the mouse wheel or F5 / F6 move it; the battle
+  view is split (the panel whole below 124 rows of the view); the pointer is a hardware
+  sprite.
+- On the board: `make kit`: a measuring kit (XCOM.ARG, `/M` self-timing to `/PC:/`, `/IOB`
+  the card's costs); PORTING-NOTES.md section 4e.
 
 Read [PORTING-NOTES.md](PORTING-NOTES.md): the assessment, the measurements, the plan,
 what is next. The player's guide is [app/README.TXT](app/README.TXT) (it goes into the app).
@@ -57,7 +81,7 @@ Your own copy of X-COM: UFO Defense (DOS 1.4; the GOG edition, whose fonts diffe
 with `--skip-check`, which the Makefile passes). The packs it makes are for your own use:
 `data/` is ignored by git, reference pictures are kept as checksums only, and XCOM.HZA
 holds none of them. On the card the app needs `PACKS.VER`, `*.PAK` and `VGA/` in its folder
-(`/APPS/XCOM/`); without them it says so on its screen.
+(`/APPS/XCOM/`); without them it shows an error on its screen.
 
 Dependencies of the converter: Python 3 and PyYAML.
 

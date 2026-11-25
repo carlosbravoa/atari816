@@ -46,7 +46,7 @@ As upstream's: arrows (or the keypad) move, climb and look, **Ctrl** or **Alt** 
 (Space and Shift fire too). Alt+Tab, Alt+Esc, F12 pause the game and show the Desktop;
 Alt+F4 closes it.
 
-## The screen
+## Screen
 
 Upstream draws 320 x 200 in 256 colours: the playfield (158 rows, rows 2-159) above a
 40-row status bar. Horizon's screen is 320 x 180. Chosen: **the playfield's 140 middle
@@ -57,11 +57,11 @@ demo): 9 rows are out of sight at the top and at the bottom. The game keeps the 
 between rows 32 and 120 of its view and its windows inside rows 16-144, so both are always
 seen. Full-screen pictures (the title, the story, the ordering pages) show rows 0-179.
 
-Scrolling is smooth and costs nothing: both pages are in one framebuffer whose rows are
+Scrolling is smooth and copies nothing: both pages are in one framebuffer whose rows are
 rings (Marga's horizontal wrap); the view moves by the scroll registers instead of the
 50 KB copy upstream makes on the VGA each frame. The tiles and sprites are drawn by the
 blitter from an atlas of the game's shapes in far memory (sheets), the fonts' glyphs in
-their colours through a small cache: `PORTING-NOTES.md`, "The platform layer".
+their colours through a small cache: `PORTING-NOTES.md`, "Platform layer".
 
 ## Sound
 
@@ -95,16 +95,16 @@ Details in `PORTING-NOTES.md`, "Speed".
    sound (Lau's writes, the recording's level and clipping), the frame statistics, 13
    pictures of its screens (`tests/play.shots`) against `tests/play.md5`;
 2. the recorded demo (`DEMO_MAC.XR0`, the menu's DEMO-PREVIEW) twice, the second time on a
-   slower machine (`/BUSY:30`): at its frame 1,500 the game must be as `tests/demo.ref`
-   says (score, health, emeralds, hero, objects), the same both times; and both runs'
+   slower machine (`/BUSY:30`): at its frame 1,500 the game's state must match
+   `tests/demo.ref` (score, health, emeralds, hero, objects), the same both times; and both runs'
    pictures (the title, the menu, the demo's frames 100, 300, 700, 1,000 and 1,300:
    `tests/demo.shots`) as `tests/demo.md5`.
 
 The pictures are taken at the game's frames, not at moments: with `/SHOTS:FILE` the
-program stops at each screen of FILE's list (`pN`: a screen waiting for keys, at its Nth
+program stops at each screen of FILE's list (`pN`: a screen that polls the keys, at its Nth
 key poll; `fN`: the game's frame N, at its page flip), prints `xargon: shot K at ...` and
-holds the picture; the emulator takes it then (`run816.py --shot-on`) and the scripts wait
-for those lines before their next keys. So the pictures stay the same when the program's
+holds the picture; the emulator takes it then (`run816.py --shot-on`) and the scripts send their next keys
+after those lines. So the pictures stay the same when the program's
 speed changes (its code, the compiler's optimisation, `/BUSY`). Their references are
 kept as checksums (the game's pictures stay out of the repository, as its data); `make
 refs` writes new ones and the pictures into `tests/ref/` (look at them before you keep
@@ -112,16 +112,19 @@ them).
 
 ## Files
 
-| | |
-| --- | --- |
-| `src/` | upstream's source as released (names in lower case), with `upstream.patch` applied |
-| `horizon/` | the platform layer: `hz_vga.c` + `hz_blit.s` (drawing, the VGA's registers), `hz_shm.c` (the shapes), `hz_frame.c` (the clock, the retrace, the game port, statistics), `hz_kbd.c` (keyboard), `hz_snd.c` (sound), `hz_cfg.c` (configuration), `hz_dos.c` + `compat/` (DOS and Turbo C), `hz_main.c` |
-| `tools/getdata.sh` | the game's files: downloaded (SHA-256 checked) or from your copy, into `data/orig/` |
-| `tools/mkdata.py` | the game's files to the port's: `XSHAPES.XRn` (the shapes' atlas), `XSOUND.XRn` (the effects), `SONG_n.OPn` (the music), the boards and texts as they are |
-| `tests/` | the scripts, `check.sh`, `shots.py`, `wavcheck.py`, the references |
-| `upstream.patch` | every change to upstream's files |
-| `PORTING-NOTES.md` | what the port needed, the SDK problems met, timings |
-| `Kiloblaster_and_Xargon_Freeware_License.txt` | upstream's licence |
+- `src/`: upstream's source as released (names in lower case), with `upstream.patch` applied
+- `horizon/`: the platform layer: `hz_vga.c` + `hz_blit.s` (drawing, the VGA's registers),
+  `hz_shm.c` (the shapes), `hz_frame.c` (the clock, the retrace, the game port,
+  statistics), `hz_kbd.c` (keyboard), `hz_snd.c` (sound), `hz_cfg.c` (configuration),
+  `hz_dos.c` + `compat/` (DOS and Turbo C), `hz_main.c`
+- `tools/getdata.sh`: the game's files: downloaded (SHA-256 checked) or from your copy, into
+  `data/orig/`
+- `tools/mkdata.py`: the game's files to the port's: `XSHAPES.XRn` (the shapes' atlas),
+  `XSOUND.XRn` (the effects), `SONG_n.OPn` (the music), the boards and texts as they are
+- `tests/`: the scripts, `check.sh`, `shots.py`, `wavcheck.py`, the references
+- `upstream.patch`: every change to upstream's files
+- `PORTING-NOTES.md`: what the port needed, the SDK problems met, timings
+- `Kiloblaster_and_Xargon_Freeware_License.txt`: upstream's licence
 
 ## Licence
 

@@ -1,4 +1,4 @@
-# The controls library (ui.lib): controls, dialogs, alerts
+# Controls library (ui.lib): controls, dialogs, alerts
 
 Horizon's own programs (Files, Edit, Paint, Settings, BASIC, Sheet, Write, Calculator,
 Solitaire) share one library for the standard look: buttons, labels, one-line text fields,
@@ -14,9 +14,10 @@ Esc, the clipboard in fields) for about 9 KB of code.
 - Every routine: `jsr`, A/X/Y 16-bit, clobbers A, X, Y unless noted. Structures and
   strings must be **in your code bank** (= DBR): a "pointer" here is a 16-bit address.
 - After `SYS_WSSTART` call `ui_init` once. Read events with `ui_getev` (not
-  `SYS_WEVENT`): the library needs to see them, and dialogs keep events aside for you.
+  `SYS_WEVENT`): the library processes them, and `ui_getev` also returns a WE_RESIZE or
+  WE_CLOSE that arrived while an alert or file dialog was open.
 
-## The look
+## Appearance
 
 | Metric | Constant | Pixels |
 | --- | --- | --- |
@@ -53,25 +54,28 @@ CT_Y, CT_W, CT_H` (in the content), `u16 CT_FLAGS`. Then the type's fields.
 | `UF_DEFAULT` | 2 | button: Enter activates it |
 | `UF_CANCEL` | 4 | button: Esc activates it |
 | `UF_RIGHT` | 16 | label: right-aligned |
-| `UF_DIM` | 32 | button / label: greyed, a button does not react |
+| `UF_DIM` | 32 | button / label: greyed, a button ignores clicks |
 
 A label, a field and a default button (their definitions are at the end of the example
 below, after the code that sets them up and the event loop).
 
 ### Routines
 
-| Routine | In | Does |
-| --- | --- | --- |
-| `ui_init` | - | once, after SYS_WSSTART |
-| `ui_getev` | A = 0 wait / 1 poll | the next event into `ui_ev` (8 bytes, as SYS_WEVENT); C set: none |
-| `ui_drawall` | X = control list | draws every control |
-| `ui_draw` | X = control | draws one (after you changed it) |
-| `ui_event` | X = control list, the event in ui_ev | routes it; A = `UA_NONE` 0 (yours), `UA_USED` 1, `UA_CLICK` 2 (a button), `UA_CHANGE` 3 (a value), `UA_OPEN` 4 (list: double click / Enter); X = the control |
-| `ui_focus` | X = control | gives it the focus |
-| `ui_fdset` | X = field, Y = string | new text (all selected) |
-| `ui_sbset` / `ui_sbpos` | X = scroll bar, A = position | set (redraw all / only the thumb: `SB_POS` must still hold the position drawn now, the new one goes in A) |
-| `ui_lsset` | X = list, A = rows | new row count (selection none) |
-| `ui_lssel` | X = list, A = row | select and show a row |
+- `ui_init`: once, after SYS_WSSTART.
+- `ui_getev` (A = 0 wait / 1 poll): the next event into `ui_ev` (8 bytes, as
+  SYS_WEVENT); C set: none.
+- `ui_drawall` (X = control list): draws every control.
+- `ui_draw` (X = control): draws one (after you changed it).
+- `ui_event` (X = control list, the event in ui_ev): routes it. A = `UA_NONE` 0 (yours),
+  `UA_USED` 1, `UA_CLICK` 2 (a button), `UA_CHANGE` 3 (a value), `UA_OPEN` 4 (list:
+  double click / Enter); X = the control.
+- `ui_focus` (X = control): gives it the focus.
+- `ui_fdset` (X = field, Y = string): new text (all selected).
+- `ui_sbset` / `ui_sbpos` (X = scroll bar, A = position): set the position. `ui_sbset`
+  redraws the whole bar, `ui_sbpos` only the thumb: `SB_POS` must still hold the position
+  drawn now, the new one goes in A.
+- `ui_lsset` (X = list, A = rows): new row count (selection none).
+- `ui_lssel` (X = list, A = row): select and show a row.
 
 Set every control's `CT_WIN`, draw them, then loop:
 ```asm
@@ -156,12 +160,12 @@ s_disc: .byte   "Discard", 0
 s_canc: .byte   "Cancel", 0
 ```
 
-## The file dialog
+## File dialog
 
 `ui_filedlg`: A = 0 open / 1 save, X = a 128-byte path buffer, Y = the title. C clear:
 the full path chosen is in the buffer; C set: cancelled. For a save dialog the buffer may
 hold a suggested name. The dialog starts in, and changes, the task's current directory.
-Save asks before replacing a file.
+The save dialog asks for confirmation before it replaces a file.
 ```asm
         stz     path                    ; nothing suggested
         lda     #0                      ; open
@@ -228,20 +232,38 @@ s_msg:  .byte   "Saved.", 0
 
 ## Programs and files
 
-| Routine | In | Does |
-| --- | --- | --- |
-| `ui_launch` | X = path, Y = argument string (0: none), A = name for messages (0: from the path) | starts a program detached; on an error an alert says why (C set) |
-| `ui_run` | as `ui_launch` | (Horizon 0.31) starts it as the Desktop and Files do: an app's program (`/APPS/NAME/...`, the one its APP.INF names) gets APP.INF's `console=` and, when Y = 0, its `args=`; then `ui_launchx` |
-| `ui_launchx` | as `ui_launch`, and `ui_lxmode` (0 again after the call) | (0.31) `LX_TERM`: in a Terminal window (`/BIN/TERM.PRG "PATH" ARGS`, kept open at its end), `LX_TERME`: the same, closed by itself after exit code 0, `LX_NOARG`: no options file. Unless `LX_NOARG` the options file `PROG.ARG` next to the program is appended (its words, `#` comments dropped); 127 characters in all, else an alert (C set, A = EINVAL) |
-| `ui_spawnerr` | A = a spawn error, X = name | the "Cannot start NAME" alert |
-| `ui_ftype` | X = name or path | -> A = `FT_*` by the extension |
-| `ui_open` | X = full path | opens it with its program (a folder in Files, .BAS in BASIC, an Atari file in the classic machine, ...) |
-| `ui_cptree` | X = source path, Y = destination path (the new name) | (Horizon 0.20) copies a file (a file there is replaced), or a folder and everything in it (the destination folder must not exist); also between the card and the PC volume `/PC:`. C set: A = error |
-| `ui_rmtree` | X = path | (0.20) deletes a file, or a folder and everything in it. C set: A = error |
-| `ui_mvtree` | X = from, Y = to | (0.20) moves (`SYS_RENAME`); between the card and the PC volume (error $C9) it copies, then deletes the source (never after an error or a cancel). C set: A = error ($48: "to" exists; (0.21) `ECANCELED`: cancelled) |
-| `ui_cpwin` | A = 0 copy, 1 move | (0.21) the progress window for the next `ui_cptree` / `ui_mvtree` (call it just before; it sets `ui_cpcb`). It opens only when the copy still runs about 0.5 s later: "Copying" / "Moving", the file's name, "123 of 1,500 KB (8%)", a bar, Cancel (Esc and the close box too). Cancel makes the copy return C set, A = `ECANCELED` |
-| `ui_cpdone` | - | (0.21) after the copy: the window closed if it opened, `ui_cpcb` = 0. Keeps A and the carry |
-| `ui_clkpc` | - | (0.20) when the PC volume is there, sets the clock from the PC's clock and saves it to /SYSTEM/CLOCK. C set: no PC volume |
+- `ui_launch` (X = path, Y = argument string (0: none), A = name for messages (0: from
+  the path)): starts a program detached. On an error an alert shows the reason (C set).
+- `ui_run` (as `ui_launch`): (Horizon 0.31) starts it as the Desktop and Files do: an
+  app's program (`/APPS/NAME/...`, the one its APP.INF names) gets APP.INF's `console=`
+  and, when Y = 0, its `args=`; then `ui_launchx`.
+- `ui_launchx` (as `ui_launch`, and `ui_lxmode`, 0 again after the call): (0.31)
+  `LX_TERM`: in a Terminal window (`/BIN/TERM.PRG "PATH" ARGS`, kept open at its end),
+  `LX_TERME`: the same, closed by itself after exit code 0, `LX_NOARG`: no options file.
+  Unless `LX_NOARG` the options file `PROG.ARG` next to the program is appended (its
+  words, `#` comments dropped); 127 characters in all, else an alert (C set, A = EINVAL).
+- `ui_spawnerr` (A = a spawn error, X = name): the "Cannot start NAME" alert.
+- `ui_ftype` (X = name or path): -> A = `FT_*` by the extension.
+- `ui_open` (X = full path): opens it with its program (a folder in Files, .BAS in
+  BASIC, an Atari file in the classic machine, ...).
+- `ui_cptree` (X = source path, Y = destination path, the new name): (Horizon 0.20)
+  copies a file (a file there is replaced), or a folder and everything in it (the
+  destination folder must not exist); also between the card and the PC volume `/PC:`.
+  C set: A = error.
+- `ui_rmtree` (X = path): (0.20) deletes a file, or a folder and everything in it. C
+  set: A = error.
+- `ui_mvtree` (X = from, Y = to): (0.20) moves (`SYS_RENAME`); between the card and the
+  PC volume (error $C9) it copies, then deletes the source (never after an error or a
+  cancel). C set: A = error ($48: "to" exists; (0.21) `ECANCELED`: cancelled).
+- `ui_cpwin` (A = 0 copy, 1 move): (0.21) the progress window for the next `ui_cptree` /
+  `ui_mvtree` (call it just before; it sets `ui_cpcb`). It opens only when the copy is
+  still running about 0.5 s later: "Copying" / "Moving", the file's name, "123 of 1,500
+  KB (8%)", a bar, Cancel (Esc and the close box too). Cancel makes the copy return C
+  set, A = `ECANCELED`.
+- `ui_cpdone`: (0.21) after the copy: the window closed if it opened, `ui_cpcb` = 0.
+  Keeps A and the carry.
+- `ui_clkpc`: (0.20) when the PC volume is there, sets the clock from the PC's clock and
+  saves it to /SYSTEM/CLOCK. C set: no PC volume.
 
 Paths are in the program's bank. These routines (not `ui_cpwin`) do not need the rest of the
 library (no zero page): a console program can link them too. `ui_cpcb` (a word, 0 = none) may

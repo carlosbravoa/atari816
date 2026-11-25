@@ -1,4 +1,4 @@
-# SkyRoads on the Atari816 (the road experiment, round 2)
+# SkyRoads on the Atari816 (road experiment, round 2)
 
 SkyRoads (Bluemoon Interactive, 1993) from the C translation of
 [SDL-skyroads](https://github.com/carlosbravoa/SDL-skyroads) (C++17, MIT). **Not a playable

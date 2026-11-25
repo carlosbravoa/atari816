@@ -30,11 +30,11 @@ Options:
                     program in one 64 KB bank (JSR/RTS). large: code in several banks
                     (JSL/RTL; data, constants and stacks stay in the main bank): still
                     one file, NAME.PRG: the other code banks follow its o65 (it needs
-                    Horizon 0.28 then; docs/c/reference.md, "The two code models")
+                    Horizon 0.28 then; docs/c/reference.md, "Code models")
   --data near|far   the data model (default: $HZ_DATA, else near). far (with --code large
                     only): plain data pointers are 32-bit far pointers, malloc takes
                     other banks, string literals and const objects go to banks of far
-                    data: DOS's large model (docs/c/reference.md, "The far data model")
+                    data: DOS's large model (docs/c/reference.md, "Far data model")
   -fdos-keywords    far, near and huge are keywords (as __far, __near, __far); a DOS
                     program is C89: also -fimplicit-int and -fextra-args
   -std=c89, -std=gnu89, -ansi
@@ -67,7 +67,7 @@ Options:
                     call two functions sharing a state in one call's arguments need it)
   -ffar-wrap        far pointer arithmetic (p + n, p++, p[i]) on the offset alone: the
                     bank never changes, as with DOS's far pointers (docs/c/reference.md,
-                    "The far data model", "Pointers")
+                    "Far data model", "Pointers")
   --sizes           print every object and function, its size and where it went
                     (main bank, code bank k, far data bank k), biggest first; also when
                     the program does not fit (linked again to measure it with the
@@ -100,7 +100,7 @@ Options:
   --no-stack-check  no software-stack check at the entry of the program's functions
                     (by default every function with a frame there checks that it fits,
                     10 cycles, and stops the program with its name when it does not:
-                    docs/c/reference.md, "The heap and the stacks"); the library keeps
+                    docs/c/reference.md, "Heap and stacks"); the library keeps
                     its checks
   -l FILE           link an extra object or library (.o, .lib)
   -lm               accepted and ignored (math.h's functions are in the C library)

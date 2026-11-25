@@ -3,7 +3,7 @@
    17 banks, mode 13h's A000 IS the full-screen framebuffer (320 x 200,
    stride 320, one bank: the engine draws into it as into a VGA's memory,
    nothing is copied), the 200 rows shown 180 at a time (the view follows
-   the pointer: PORTING-NOTES.md "The screen"), keys and mouse from hgame,
+   the pointer: PORTING-NOTES.md "Screen"), keys and mouse from hgame,
    the OPL2 from hg_opl_write, the clock from the microsecond counter (or
    the virtual clock with /V, as the host's, for comparing runs).
 
@@ -290,7 +290,7 @@ static int view_on, vtop;               /* the battle view shown split, its top 
 #define VIEW_SPLIT 124                  /* screen lines of the view; the panel's 56 below */
 
 /* The screen as the model has it: the DAC when it was written, and which of
-   the 200 rows the 180 lines show (PORTING-NOTES.md "The screen").
+   the 200 rows the 180 lines show (PORTING-NOTES.md "Screen").
 
    The picture stands still: the pointer never moves it. It starts where the
    screen's kind wants it (plat_screen_kind: the DOS palette the engine sets,

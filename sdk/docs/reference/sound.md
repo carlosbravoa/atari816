@@ -10,7 +10,7 @@ DACs (writes to them do nothing: use Lau). Code written for POKEY 2 runs unchang
 Hardware REV $0A adds **Lau**, the 8-voice sample player (`Docs/02-register-spec.md`,
 "Lau"): signed 8- or 16-bit PCM from RAM, 48 kHz output, a pitch and two volumes per voice,
 loops. Horizon 0.17 gives programs four calls for it ($68-$6B, below). On older boards they
-return ENODEV: ask SYS_SSTAT once at the start and fall back to POKEY.
+return ENODEV: call SYS_SSTAT once at the start and fall back to POKEY.
 
 Hardware REV $0C adds the **OPL2**, a YM3812 FM synthesizer (the AdLib's chip: nine
 two-operator voices; `Docs/02-register-spec.md`, "OPL2"). Horizon 0.27 gives programs one
@@ -63,16 +63,19 @@ If you changed AUDCTL ($08), set it back to 0 when the music stops.
 
 ## POKEY registers (writes through SYS_SNDW)
 
-| Register | Name | Meaning |
-| --- | --- | --- |
-| $00, $02, $04, $06 | AUDF1-4 | the pitch of channel 1-4 (a divider: higher = lower note) |
-| $01, $03, $05, $07 | AUDC1-4 | bits 7-5 distortion, bit 4 volume only (the output is the volume level: a DAC), bits 3-0 volume |
-| $08 | AUDCTL | bit 0 15 kHz base clock (else 64 kHz), 1 high-pass filter on channel 2 by 4, 2 high-pass on 1 by 3, 3 join channels 4 + 3 (16 bits), 4 join 2 + 1, 5 channel 3 from 1.79 MHz, 6 channel 1 from 1.79 MHz, 7 the 9-bit noise polynomial (else 17-bit) |
-| $09 | STIMER | (any value) restart the channel counters together |
-| $0F | SKCTL | serial / keyboard control; the kernel writes 3 at boot (POKEY out of reset). Leave it |
+- $00, $02, $04, $06, AUDF1-4: the pitch of channel 1-4 (a divider: higher = lower
+  note).
+- $01, $03, $05, $07, AUDC1-4: bits 7-5 distortion, bit 4 volume only (the output is the
+  volume level: a DAC), bits 3-0 volume.
+- $08, AUDCTL: bit 0 15 kHz base clock (else 64 kHz), 1 high-pass filter on channel 2 by
+  4, 2 high-pass on 1 by 3, 3 join channels 4 + 3 (16 bits), 4 join 2 + 1, 5 channel 3
+  from 1.79 MHz, 6 channel 1 from 1.79 MHz, 7 the 9-bit noise polynomial (else 17-bit).
+- $09, STIMER: (any value) restart the channel counters together.
+- $0F, SKCTL: serial / keyboard control. The kernel writes 3 at boot (POKEY out of
+  reset). Leave it.
 
-REV $0C takes exactly these registers (of SKCTL, bits 0 and 1); the others never did anything
-useful for sound.
+REV $0C implements exactly these registers (of SKCTL, bits 0 and 1); the other POKEY
+registers have no use for sound.
 
 Distortion (the high nibble of AUDC) in practice:
 
@@ -93,20 +96,26 @@ the board's POKEY runs from the 1.79 MHz classic clock tick. Not measured here.)
 
 Notes (64 kHz clock, pure tone): AUDF for an octave from middle C:
 
-| Note | C4 | D4 | E4 | F4 | G4 | A4 | B4 | C5 |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| Hz | 262 | 294 | 330 | 349 | 392 | 440 | 494 | 523 |
-| AUDF | 121 | 108 | 96 | 91 | 81 | 72 | 64 | 60 |
+| Note | Hz | AUDF |
+| --- | --- | --- |
+| C4 | 262 | 121 |
+| D4 | 294 | 108 |
+| E4 | 330 | 96 |
+| F4 | 349 | 91 |
+| G4 | 392 | 81 |
+| A4 | 440 | 72 |
+| B4 | 494 | 64 |
+| C5 | 523 | 60 |
 
-## The DACs (REV $07 to $0B only)
+## DACs (REV $07 to $0B only)
 
 `SYS_SNDW` registers $10-$13: four 8-bit DACs (0, 1 left; 2, 3 right), the value is the
 output level. REV $0C does not have them. Without a timer interrupt or DMA for programs, a program can only change a
 level per syscall (about 50 us each): clicks, ramps, a few hundred Hz of a coarse wave
-while the program does nothing else. Lau, the sample player, is the answer (REV $0A,
-Horizon 0.17: below).
+while the program does nothing else. For sample playback use Lau, the sample player (REV
+$0A, Horizon 0.17: below).
 
-## A sound effect engine
+## Sound effect engine
 
 Games change the pitch and volume of a voice a little every tick (20 ms): a rising "pick
 up" blip, a falling "game over", a noise burst that fades. See `sfx_*` in
@@ -136,7 +145,7 @@ length, and two SYS_SNDW calls per voice per tick.
 
 Lau reads the samples from RAM by itself while it plays, past the memory protection, so the
 kernel checks that the whole sample lies in **your own memory** (the window, the code bank,
-banks from SYS_BALLOC; a range may run across consecutive banks you own), and remembers which
+banks from SYS_BALLOC; a range may run across consecutive banks you own), and records which
 task started each voice. Keep the sample where it is, unchanged, while it plays (changing it
 is heard: streaming into a loop works). Your voices stop when your program ends (also when it
 is killed) and when you free a bank one of them plays from; all voices stop while the
@@ -213,12 +222,12 @@ In: A = one of your ports ($FFFF: off), X = the period's low 16 bits, Y = its hi
 microseconds (1,000 or more). Out: A = the generation. Horizon 0.26: **the music timer**
 (TIMER1, REV $0A+). At every period the kernel puts {u8 $FF, u8 the generation, u16 the
 count of periods since the start, 12 x 0} into the port (when there is room; the count goes on
-anyway and follows the microsecond clock: a jump means periods passed, run that many ticks) and wakes you in `recv`. Called again while it runs, the
+anyway and follows the microsecond clock: a jump: periods passed, run that many ticks) and unblocks your `recv`. Called again while it runs, the
 new period counts from the next one on: a tempo change without a gap. Each start from off is a
 new generation, so messages queued before a restart can be ignored. One owner at a time
-(EAGAIN); ENODEV without Lau; it stops at your end. Run the task that waits for it at
-**priority 0** (spawn's priority byte) and its ticks come within a fraction of a millisecond,
-whatever other programs do. 1 ms is the shortest period.
+(EAGAIN); ENODEV without Lau; it stops at your end. Run the task that blocks on it at
+**priority 0** (spawn's priority byte) and its ticks arrive within a fraction of a
+millisecond, whatever other programs do. 1 ms is the shortest period.
 ```asm
         sys     SYS_PCREATE
         sta     z:n                     ; the port
@@ -234,14 +243,14 @@ whatever other programs do. 1 ms is the shortest period.
 `SPF_KEEP` (4, Horizon 0.26) in sample_play's flags marks a voice as music: it plays on while
 the classic Atari is shown (the others stop).
 
-## FM: the OPL2 (Horizon 0.27, REV $0C)
+## FM: OPL2 (Horizon 0.27, REV $0C)
 
 ### $6D opl_write (SYS_OPLW)
 In: A = an OPL2 register $00-$F5 and X = its value; or A = $FFFE (probe: nothing written),
 $FFFF (reset: every register 0, about 10 ms) or $FFFD (release). Out: A = the chip's status
-($06 when idle). Each write costs about 45 us (the kernel waits as a YM3812 needs). **One
+($06 when idle). Each write costs about 45 us (the kernel inserts the delays a YM3812 requires). **One
 owner**: the first program that writes or resets owns the chip until it ends or releases it;
-another program's write gets EAGAIN meanwhile (the probe always answers). When the owner ends
+another program's write gets EAGAIN meanwhile (the probe always succeeds). When the owner ends
 or releases, all notes are keyed off; while the classic machine is shown the notes are keyed
 off too, the rest stays. Errors: ENODEV before REV $0C, EINVAL another A above $F5, EAGAIN.
 The registers are the YM3812's (any AdLib programming guide applies).
@@ -295,7 +304,7 @@ nofm:   rts
 Two ways to have music in a program.
 
 **The engine**, `/SYSTEM/MUSICD.PRG`: start it with `spawn` at **priority 0** with the
-arguments `-p PORT` (a port you created). It answers `MS_HELLO` with its own port, then takes
+arguments `-p PORT` (a port you created). It sends `MS_HELLO` with its own port, then accepts
 16-byte commands: `MC_PATH` (the file's path, 14 characters a message) and `MC_LOAD`,
 `MC_PLAY`, `MC_PAUSE`, `MC_STOP`, `MC_SEEK`, `MC_VOL`, `MC_SEP`, `MC_LOOP`, `MC_READ` (bytes of
 the module or of its info block), `MC_QUIT`; it sends `MS_STATUS` (state, order, row,
@@ -319,9 +328,9 @@ order), `mp_setvol` (0-64), `mp_setsep` (stereo separation 0-64, default 32). St
 
 - **Voices:** a module of N channels takes Lau's voices 8 - N .. 7: a 4-channel module leaves
   voices 0-3 to your sound effects (`SP_ANY` takes the lowest free voice, so effects and
-  music never meet). Set `mp_keep` to `SPF_KEEP` for music that plays on while the classic
+  music never share a voice). Set `mp_keep` to `SPF_KEEP` for music that plays on while the classic
   Atari is shown.
-- **Timing:** tick the music from a task at priority 0 that waits for the music timer
+- **Timing:** tick the music from a task at priority 0 that blocks on the music timer
   (as `/SYSTEM/MUSICD.PRG` does): steady whatever the rest does. A game that calls `mp_tick`
   from its frame loop instead (60 frames, 50 ticks a second at 125 BPM: count microseconds
   and tick when one is due) is late by up to a frame now and then: fine for simple tunes.
@@ -330,7 +339,7 @@ order), `mp_setvol` (0-64), `mp_setsep` (stereo separation 0-64, default 32). St
   lands inside a sample's loop.
 
 `sdk/examples/tune` plays a module in 30 lines of code: read the file into a bank, `mp_open`,
-`mp_play`, then wait for the timer and `mp_tick` until `MPF_END`.
+`mp_play`, then block on the timer and `mp_tick` until `MPF_END`.
 
 More modules: copy `.MOD` files to the card, or fetch one in the shell with
 `get http://... /Music/NAME.MOD`; double-click it in Files to play it in Music Player.
@@ -348,15 +357,15 @@ or a name such as `"C#5"`; one `sample_play` each), `PLAY OFF` stops them, `NOTE
 In: A = CH_INFO 0, CH_WARN 1, CH_QUESTION 2 or CH_ERROR 3; X = volume 0-15 ($FFFF: the
 user's alert volume setting). Horizon 0.15: the soft two-note chime of the user interface
 (pure tone, the volume falling every 10 ms, 0.22 s). It plays on a POKEY channel no
-program owns; if a program owns all four, it borrows channel 4 and gives the program's
-values back after it. The controls library's alerts and `ui_beep` use it.
+program owns; if a program owns all four, it uses channel 4 and restores the program's
+values afterwards. The controls library's alerts and `ui_beep` use it.
 ```asm
         lda     #CH_INFO
         ldx     #$FFFF          ; the setting's volume
         sys     SYS_CHIME
 ```
 
-Sound ownership (Horizon 0.15): every channel, DAC and the rest of POKEY (AUDCTL, SKCTL)
-remembers the task that wrote it last; when that task ends, its channels and DACs are
+Sound ownership (Horizon 0.15): for every channel, DAC and the rest of POKEY (AUDCTL,
+SKCTL) the kernel records the task that wrote it last; when that task ends, its channels and DACs are
 silenced (AUDCTL and SKCTL go back to 0 and 3), so a game killed while it plays leaves no
 tone hanging.

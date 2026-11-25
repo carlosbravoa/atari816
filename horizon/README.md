@@ -2086,7 +2086,7 @@ The new hardware (Marga's sprites, fine scrolling and raster events, Ali's comma
 for programs, safely and cheaply for the CPU. Marga, Ali and Lau read and write RAM by
 themselves, past FREDDIE II, so every address a program hands over is checked against its own
 memory, and everything a program holds goes back when it ends or frees the memory involved.
-ABI.md, "The games round", has the rules; `user/gtest.s` tests them.
+ABI.md, "Games round (0.18)", has the rules; `user/gtest.s` tests them.
 
 - **Kernel space: a second code segment.** Bank $01 was full (3.6 KB left). The new calls live
   in `kernel/k2.s` and its modules, a separate assembly unit that runs from bank 0 $E100-$FEFF

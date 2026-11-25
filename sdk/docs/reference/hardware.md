@@ -1,58 +1,78 @@
-# The hardware, for game and graphics programmers
+# Hardware for game and graphics programmers
 
 **A Horizon program never touches these registers.** The I/O page ($00:D000-$DFFF) is
 closed to user mode: one access and the kernel kills the task. Everything below is
-reached through syscalls (the "From a program" column). It is here so you know what the
-syscalls cost and why the rules are what they are. The definition is
-`Docs/02-register-spec.md`; where the hardware differs from it today, this page says so.
+reached through syscalls ("From a program" below). This page explains what the syscalls
+cost and the reasons for their rules. The definition is `Docs/02-register-spec.md`; this
+page notes where the hardware differs from it.
 
-## The machine
+## Machine
 
-| | |
-| --- | --- |
-| CPU | 65C816 (a soft core in the FPGA, the MiSTer SNES core's), 14.34 MHz (clk_core / 2); a turbo setting exists in the spec, not in the build |
-| Memory | 8 MB SDRAM on the Tang Nano 20K (16 MB in the spec): banks $00-$7F; 2-4 KB CPU cache |
-| Video | Marga, the video chip: 640 x 360 at 8 bpp (the desktop), 640 x 360 at 4 bpp, 320 x 180 at 8 bpp, shown on 1280 x 720 at 60 Hz (HDMI); hardware pointer 32 x 32; (REV $0B) 16 sprites, fine scrolling with wrap and a split |
-| Blitter | Ali, the blitter: rectangle fill, copy, keyed copy, 1-to-8 bpp expand; 8 bpp only; (REV $09) command lists |
-| Sound | POKEY of the classic machine (4 voices; REV $07 to $0B: its second POKEY, and four 8-bit DACs); the OPL2, a YM3812 FM synthesizer (REV $0C; Horizon 0.27: SYS_OPLW); Lau, the 8-voice sample player (REV $0A; Horizon 0.17: SYS_SPLAY ...) |
-| Input | USB keyboard and mouse through the I/O processor; two DB9 joystick ports (classic side) |
-| Storage | SD card (FAT32) through the I/O processor (a PicoRV32 in the FPGA) |
-| Classic machine | a cycle-exact Atari 800/XL/XE (NMOS 6502, ANTIC, GTIA, POKEY, PIA) |
+- CPU: 65C816 (a soft core in the FPGA, the MiSTer SNES core's), 14.34 MHz (clk_core /
+  2). A turbo setting exists in the spec, not in the build.
+- Memory: 8 MB SDRAM on the Tang Nano 20K (16 MB in the spec): banks $00-$7F; 2-4 KB CPU
+  cache.
+- Video: Marga, the video chip: 640 x 360 at 8 bpp (the desktop), 640 x 360 at 4 bpp, 320
+  x 180 at 8 bpp, shown on 1280 x 720 at 60 Hz (HDMI); hardware pointer 32 x 32; (REV
+  $0B) 16 sprites, fine scrolling with wrap and a split.
+- Blitter: Ali: rectangle fill, copy, keyed copy, 1-to-8 bpp expand; 8 bpp only; (REV
+  $09) command lists.
+- Sound: POKEY of the classic machine (4 voices; REV $07 to $0B: its second POKEY, and
+  four 8-bit DACs); the OPL2, a YM3812 FM synthesizer (REV $0C; Horizon 0.27: SYS_OPLW);
+  Lau, the 8-voice sample player (REV $0A; Horizon 0.17: SYS_SPLAY ...).
+- Input: USB keyboard and mouse through the I/O processor; two DB9 joystick ports
+  (classic side).
+- Storage: SD card (FAT32) through the I/O processor (a PicoRV32 in the FPGA).
+- Classic machine: a cycle-exact Atari 800/XL/XE (NMOS 6502, ANTIC, GTIA, POKEY, PIA).
 
 Revisions (SYS_REV; `ws_config` with A = 0 returns it in X):
 
-| REV | Adds |
-| --- | --- |
-| $06 | (no blitter, no native sound) |
-| $07 | native sound: POKEY 2, the DACs |
-| $08 | Ali, the blitter |
-| $09 | Ali's command lists, Marga's VBLANK interrupt and frame counter (NV_FRAME), raster (LINE) events at the beam |
-| $0A | Lau, the sample player |
-| $0B | Marga's 16 sprites and fine scrolling |
-| $0C | the OPL2 (YM3812); one POKEY, mono: POKEY 2 and the DACs are gone, native sound uses POKEY's second register bank |
-| $0D | Ali's colour remap: a 256-entry table inside the blitter, OPs 5 TABLE, 6 COPY_REMAP, 7 COPY_KEY_REMAP (Horizon 0.31: `sheet_draw`'s SH_REMAP) |
+- $06: no blitter, no native sound.
+- $07: native sound: POKEY 2, the DACs.
+- $08: Ali, the blitter.
+- $09: Ali's command lists, Marga's VBLANK interrupt and frame counter (NV_FRAME), raster
+  (LINE) events at the beam.
+- $0A: Lau, the sample player.
+- $0B: Marga's 16 sprites and fine scrolling.
+- $0C: the OPL2 (YM3812); one POKEY, mono: POKEY 2 and the DACs are removed, native sound
+  uses POKEY's second register bank.
+- $0D: Ali's colour remap: a 256-entry table inside the blitter, OPs 5 TABLE, 6
+  COPY_REMAP, 7 COPY_KEY_REMAP (Horizon 0.31: `sheet_draw`'s SH_REMAP).
 
 **emu816 models REV $0D by default**; `--rev 12`, `11`, `10`, `9`, `8` or `7` (also `run816.py --rev N`)
 emulate the older ones. Test your program on the revisions you care about: without sprites
 or scrolling (before $0B) the calls give ENODEV; without the blitter Horizon draws with the
-CPU, 5-15 times slower. The board's own revision is whatever its FPGA build is: ask SYS_REV
-(the bring-up log, `Docs/03-bringup1-log.md`, says which features have been run on it).
+CPU, 5-15 times slower. The board's own revision is that of its FPGA build: read SYS_REV
+(the bring-up log, `Docs/03-bringup1-log.md`, lists which features have been run on it).
 
-## Marga (video) — $D900
+## Marga (video), $D900
 
-| Register | Address | Meaning | From a program |
-| --- | --- | --- | --- |
-| NV_CTRL | $00:D900 | bit 0 enable, bits 1-2 mode (0 = 640 x 360 x 8 bpp, 1 = 640 x 360 x 4 bpp, 2 = 320 x 180 x 8 bpp shown 4 x 4), bit 3 the pointer | `fs_enter` (the mode of a full-screen program); the window system uses mode 0, the text console mode 1 |
-| NV_BASE | $00:D901-3 | framebuffer address (256-byte aligned), taken at the next vertical blank | `fs_enter` |
-| NV_STRIDE | $00:D904-5 | bytes per line (a multiple of 16 from REV $0B) | `fs_enter` |
-| NV_LINE | $00:D906-7 | the line being shown (0-359; 360-374 in the blank) | none |
-| NV_LINE_CMP | $00:D908-9 | raise the LINE interrupt at this line; (REV $0B) also the split line | `fs_raster`, `fs_scroll` (the kernel's) |
-| NV_STATUS | $00:D90A | bit 0 in vertical blank, bit 1 a new base not yet taken | none |
-| PAL_IDX / R / G / B | $00:D910-3 | palette entry, red, green, blue (a write to B commits) | `SYS_WSPAL`, `pal_set` |
-| PTR_* | $00:D920-A | pointer position, hot spot, image, colours | `SYS_WPTR` (shape only) |
-| NV_SCROLLX .. NV_SCROLL_CTRL | $00:D930-A | (REV $0B) scroll offsets, a second set, VHEIGHT, HWRAP / SPLIT | `fs_scroll` |
-| NV_SPR_* and records | $00:D940-2, $D980-$D9FF | (REV $0B) sprites on, commit, status; 16 records of 8 bytes | `spr_*` |
-| NV_FRAME | $00:D90C-D | (REV $09) the frame counter: + 1 at every vertical blank | `vsync`, `frame` |
+Registers, with what a program uses instead ("From a program"):
+
+- NV_CTRL, $00:D900: bit 0 enable, bits 1-2 mode (0 = 640 x 360 x 8 bpp, 1 = 640 x 360 x
+  4 bpp, 2 = 320 x 180 x 8 bpp shown 4 x 4), bit 3 the pointer. From a program:
+  `fs_enter` (the mode of a full-screen program); the window system uses mode 0, the text
+  console mode 1.
+- NV_BASE, $00:D901-3: framebuffer address (256-byte aligned), taken at the next vertical
+  blank. From a program: `fs_enter`.
+- NV_STRIDE, $00:D904-5: bytes per line (a multiple of 16 from REV $0B). From a program:
+  `fs_enter`.
+- NV_LINE, $00:D906-7: the line being shown (0-359; 360-374 in the blank). From a
+  program: none.
+- NV_LINE_CMP, $00:D908-9: raise the LINE interrupt at this line; (REV $0B) also the
+  split line. From a program: `fs_raster`, `fs_scroll` (the kernel's).
+- NV_STATUS, $00:D90A: bit 0 in vertical blank, bit 1 a new base not yet taken. From a
+  program: none.
+- PAL_IDX / R / G / B, $00:D910-3: palette entry, red, green, blue (a write to B
+  commits). From a program: `SYS_WSPAL`, `pal_set`.
+- PTR_*, $00:D920-A: pointer position, hot spot, image, colours. From a program:
+  `SYS_WPTR` (shape only).
+- NV_SCROLLX .. NV_SCROLL_CTRL, $00:D930-A: (REV $0B) scroll offsets, a second set,
+  VHEIGHT, HWRAP / SPLIT. From a program: `fs_scroll`.
+- NV_SPR_* and records, $00:D940-2, $D980-$D9FF: (REV $0B) sprites on, commit, status; 16
+  records of 8 bytes. From a program: `spr_*`.
+- NV_FRAME, $00:D90C-D: (REV $09) the frame counter: + 1 at every vertical blank. From a
+  program: `vsync`, `frame`.
 
 - The window system's screen: mode 0, 640 x 360, 8 bpp, stride 1024, in 6 banks the kernel
   takes at `SYS_WSSTART`. Each window has its own 8 bpp bitmap; the compositor copies them
@@ -70,13 +90,13 @@ CPU, 5-15 times slower. The board's own revision is whatever its FPGA build is: 
   wrap (a row is a ring of stride bytes) and vertical wrap (VHEIGHT); full-screen mode only.
 - The frame is 60.03 Hz (238,944 CPU cycles). `vsync` blocks until the vertical blank and
   returns Marga's frame counter (REV $09), `frame` reads it, WE_VBL comes at every blank
-  if asked for (`win_vbl`); the window timer (`SYS_WTIMER`) ticks every 10 ms. Tearing: a
+  if requested (`win_vbl`); the window timer (`SYS_WTIMER`) ticks every 10 ms. Tearing: a
   blit may be shown half old, half new if the beam passes it meanwhile; a draw list with
   LS_VBL starts in the blank.
 - The reset palette is the GTIA NTSC palette; Horizon loads its own system palette (0-15 UI
   colours, 16-231 a 6 x 6 x 6 cube, 232-255 greys) when the window system starts.
 
-## Ali (blitter) — $DA00 (REV $08)
+## Ali (blitter), $DA00 (REV $08)
 
 | Register | Address | |
 | --- | --- | --- |
@@ -91,7 +111,8 @@ CPU, 5-15 times slower. The board's own revision is whatever its FPGA build is: 
 | BL_FLAGS | $DA12 | bit 0 BACKWARDS (overlapping moves), bits 4-6 the first source bit for EXPAND |
 | BL_CTRL | $DA13 | write bit 0 START; read bit 0 BUSY; bit 1 interrupt when done |
 
-Rules the kernel keeps (the emulator reports any break, `run816.py` fails on it): no
+Rules the kernel follows (the emulator reports any violation, and `run816.py` fails on
+it): no
 register write and no START while BUSY; a CACHE_FLUSH ($00:D80A) before the CPU reads what
 the blitter wrote; an overlapping copy in the wrong direction is undefined.
 
@@ -100,7 +121,7 @@ WD_KBLIT, WD_KSBLIT = COPY_KEY; WD_EXPAND = EXPAND / EXPAND_KEY; WD_TEXT = one E
 glyph. The kernel clips, translates your window coordinates, and copies from your memory
 (your picture's physical address is used directly: no copy of the data is made). Horizon
 0.18: `draw_list` hands up to 128 such operations to Ali as one command list (REV $09),
-started in the vertical blank if asked ([games.md](games.md)).
+started in the vertical blank if requested ([games.md](games.md)).
 
 Speed (the RTL's measured cost, modelled by the emulator): about 2 clk_core per pixel for
 FILL (one CPU cycle: ~14 million pixels a second), 2.2 for EXPAND, 2.9 for COPY with the
@@ -110,11 +131,12 @@ pixels a second for a copy; plus 8 + 2 per line CPU cycles. See
 
 ## Sound ($00:DB00, REV $07)
 
-| Address | | From a program |
-| --- | --- | --- |
-| $DB00-$DB0F | POKEY (write only): AUDF1-4, AUDC1-4, AUDCTL, STIMER, SKCTL | `SYS_SNDW` A = $00-$0F |
-| $DB10-$DB13 | four 8-bit DACs: 0, 1 left; 2, 3 right (REV $07 to $0B) | `SYS_SNDW` A = $10-$13 |
-| $DB30-$DB31 | the OPL2: register select / status, data (REV $0C) | `SYS_OPLW` |
+- $DB00-$DB0F: POKEY (write only): AUDF1-4, AUDC1-4, AUDCTL, STIMER, SKCTL. From a
+  program: `SYS_SNDW` A = $00-$0F.
+- $DB10-$DB13: four 8-bit DACs: 0, 1 left; 2, 3 right (REV $07 to $0B). From a program:
+  `SYS_SNDW` A = $10-$13.
+- $DB30-$DB31: the OPL2: register select / status, data (REV $0C). From a program:
+  `SYS_OPLW`.
 
 The writes are taken only while the classic machine is frozen (it is, whenever the desktop
 is shown). The kernel silences AUDC1-4 and the DACs before the classic machine runs. Lau,
@@ -124,15 +146,15 @@ SYS_SPLAY, SYS_SSTOP, SYS_SSTAT and SYS_SSET (Horizon 0.17). Details:
 
 ## Input
 
-| Register | Address | | From a program |
-| --- | --- | --- | --- |
-| KB_ROUTE | $00:DE20 | 0: keys to Horizon, 1: to the classic machine | none (classic_show) |
-| JOY_PORT | $00:DE21 | DB9 ports: bits 0-3 stick 1 (up, down, left, right), 4-7 stick 2, 1 = pressed | SYS_JOY (Horizon 0.15): A |
-| JOY_TRIG | $00:DE22 | bit 0 trigger 1, bit 1 trigger 2 | SYS_JOY: X |
+- KB_ROUTE, $00:DE20: 0: keys to Horizon, 1: to the classic machine. From a program:
+  none (classic_show).
+- JOY_PORT, $00:DE21: DB9 ports: bits 0-3 stick 1 (up, down, left, right), 4-7 stick 2,
+  1 = pressed. From a program: SYS_JOY (Horizon 0.15): A.
+- JOY_TRIG, $00:DE22: bit 0 trigger 1, bit 1 trigger 2. From a program: SYS_JOY: X.
 
 Keyboard and mouse come as events (WE_KEY, WE_BUTTON, WE_MOTION, WE_WHEEL); the joysticks
 are polled with SYS_JOY (Horizon 0.15). The emulator reads both joystick registers as 0
-(SYS_JOY's test aid can feed values). Keep input in one place (a "joy" bit mask in the DB9
+(SYS_JOY's test aid can inject values). Keep input in one place (a "joy" bit mask in the DB9
 layout, the keys ORed with the stick, as the game template does).
 
 ## Timers and interrupts
@@ -147,6 +169,6 @@ The I/O processor can also start a raw 65C816 program instead of Horizon: emu816
 `PROGRAM.BIN` (loaded at $01:0000, entered in emulation mode), and on the board
 `core/tools/atari.py run816 FILE` (sends it as /A816.BIN and restarts the 65C816 with it).
 Such a program owns everything: video modes, the blitter, raster interrupts, the joystick
-registers. No files, windows or multitasking unless it talks to the mailbox itself. This
+registers. No files, windows or multitasking unless it drives the mailbox itself. This
 SDK does not cover it; examples: `emu/tests/asm/nvcdemo.s` (palette, every blitter
 operation, the pointer, VBLANK timing), `core/sw/a816/nvtest.s`, `sndnat.s`, `kbtest.s`.

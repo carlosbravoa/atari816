@@ -1,4 +1,4 @@
-# Syscalls: the window system
+# Syscalls: window system
 
 The desktop is 640 x 360 pixels, 8 bits per pixel, shown 2 x 2 on a 1280 x 720 monitor.
 Every window has its own bitmap: you draw into it with `win_draw` (see
@@ -44,11 +44,18 @@ events are content coordinates.
 | Flag | Value | Meaning |
 | --- | --- | --- |
 | `WF_RESIZE` | 1 | a size grip; WE_RESIZE after a resize |
-| `WF_PLAIN` | 2 | no border, no title: the content is the whole window (a game's "full screen": 640 x 344 at (0, 16)) |
-| `WF_BACK` | 4 | a backdrop (the Desktop's): always below the others, gets F12 and shows its menus first |
+| `WF_PLAIN` | 2 | no border, no title |
+| `WF_BACK` | 4 | a backdrop (the Desktop's) |
 | `WF_TERM` | 16 | a terminal of 8 x 12 cells (see ws_term) |
-| `WF_MODAL` | 32 | a dialog: a click on another window of the same program raises the dialog instead (with the error beep) |
-| `WF_HOVER` | 64 | motion events also without a button held, and WE_LEAVE |
+| `WF_MODAL` | 32 | a dialog |
+| `WF_HOVER` | 64 | motion events without a button, WE_LEAVE |
+
+- `WF_PLAIN`: the content is the whole window (a game's "full screen": 640 x 344 at
+  (0, 16)).
+- `WF_BACK`: always below the others, gets F12 and shows its menus first.
+- `WF_MODAL`: a click on another window of the same program raises the dialog instead
+  (with the error beep).
+- `WF_HOVER`: motion events also without a button held, and WE_LEAVE.
 
 ### $72 win_open (SYS_WOPEN)
 In: X, Y = `{i16 x, i16 y, u16 width, u16 height, u24 title, u8 flags}` (x, y = the outer
@@ -132,14 +139,16 @@ full, key releases are dropped).
 | `WE_DROP` | 8 | x | y | the sender's task id |
 | `WE_MOTION` | 9 | x | y | buttons \| modifiers << 8 |
 | `WE_LEAVE` | 10 | - | - | - |
-| `WE_SYSREQ` | 11 | what SYS_SYSREQ asked (backdrop only) | - | the asking task |
+| `WE_SYSREQ` | 11 | the SYS_SYSREQ request (backdrop only) | - | the calling task |
 | `WE_STATUS` | 12 | (backdrop only) the status text was clicked | - | - |
-| `WE_MENUOPEN` | 13 | (backdrop only) one of its menus is opening | - | - |
+| `WE_MENUOPEN` | 13 | (backdrop only) one of its menus opens | - | - |
 | `WE_FOCUS` | 14 | (0.15) the window got the keyboard focus | - | - |
-| `WE_UNFOCUS` | 15 | (0.15) it lost it; the keys it held got their releases just before | - | - |
-| `WE_VBL` | 16 | (0.18) a vertical blank, asked for with `win_vbl` ([games.md](games.md)) | - | - |
-| `WE_NET` | 17 | (0.22) to the program's first window: bit mask of its internet handles (4-7) with news ([internet.md](internet.md)) | - | - |
+| `WE_UNFOCUS` | 15 | (0.15) the window lost the focus | - | - |
+| `WE_VBL` | 16 | (0.18) a vertical blank (`win_vbl`, [games.md](games.md)) | - | - |
+| `WE_NET` | 17 | (0.22) internet handles with activity ([internet.md](internet.md)) | - | - |
 
+- `WE_NET` goes to the program's first window; `a` is the bit mask of its internet handles
+  (4-7) with activity.
 - **Keys** go to the focused window (the top one). A held key repeats as further down
   events (the user's repeat setting). Modifier bits: 0 left ctrl, 1 left shift, 2 left
   Alt, 3 left GUI, 4-7 the right ones. Some keys never reach programs: F10 and Alt alone
@@ -152,8 +161,8 @@ full, key releases are dropped).
   WF_HOVER window. A queued motion event is updated, not repeated (you get the latest
   position).
 - **WE_CLOSE** comes from the close box, Alt+F4, ctrl+W, and from the Desktop's Restart /
-  Shut down (it asks every program to close). The window stays open until you close it
-  (or exit). Ask about unsaved work there.
+  Shut down (it sends WE_CLOSE to every program). The window stays open until you close it
+  (or exit). Ask the user about unsaved work there.
 - **Focus** (0.15): WE_FOCUS when a window gets the keyboard focus, WE_UNFOCUS when it loses
   it (the keys it held got their releases just before). A game pauses on WE_UNFOCUS. The
   sprites of a window and the palette entries of a program show only while it has the focus;
@@ -207,9 +216,9 @@ In: A = window, X, Y = the menus: `"title", "item", ..., "", "title", ..., "", "
 item `"-"` is a separator (it counts in the item numbers). An item may hold a TAB: the text
 after it is shown right-aligned (a shortcut such as "Ctrl+S"; the program handles the key
 itself). An item may start with a state byte `MS_STATE | bits` (MS_CHECK a check mark,
-MS_DIM greyed out). 254 bytes at most; the kernel reads 256 bytes at the pointer (128
-if 256 are not readable), so keep the menus away from the end of a bank (Edit pads its
-menu block to 256 bytes). The bar shows the backdrop's menus, then the
+MS_DIM greyed out). (0.14) Up to 2045 bytes are kept (254 before): the list is read up to
+its end, or to the end of the pointer's bank (or of the window in bank 0); a longer one is
+cut at a string, keeping the menus well formed. The bar shows the backdrop's menus, then the
 focused window's. A choice gives WE_MENU (a = menu, b = item).
 
 | Constant | Value |
@@ -287,7 +296,7 @@ s_clip: .byte   "hello"
 
 ### $81 clip_get (SYS_CLGET)
 In: X, Y = `{u24 buffer, u16 size}`. Out: A = the clipboard's length; min(length, size)
-bytes are copied. Size 0 asks the length only.
+bytes are copied. Size 0 returns the length only.
 ```asm
         ptr     gblk
         sys     SYS_CLGET       ; -> A = length (only 255 copied)
@@ -338,7 +347,7 @@ In: A = index, X = red | green << 8, Y = blue. Sets one palette entry.
   the system colour otherwise ((0.31) in the spare ranges 76-113 and 136-175, where
   `pal_alloc` takes entries first: your colour always); it goes back to the system when you
   end (or `pal_alloc` 0).
-  So changing it no longer changes other programs' windows while they are in front.
+  Changing it does not change other programs' windows while they are in front.
 - In full-screen mode: your own palette, all 256 entries.
 
 Several entries at once, and taking entries that nobody uses: `pal_set` and `pal_alloc`
@@ -357,7 +366,7 @@ programs had to put it back at exit.
 In: A = your WF_TERM window ($FF = detach). From now on your console output and console
 input (putc, puts, input_*) go to that window, and those of the programs you start. The
 Terminal program is this plus `/BIN/SH.PRG`. A WF_TERM window of w x h pixels has w / 8 x
-h / 12 cells and understands the console's control codes and escapes.
+h / 12 cells and interprets the console's control codes and escapes.
 ```asm
         ptr     tw              ; a WF_TERM window, 76 x 24 cells
         sys     SYS_WOPEN
@@ -374,7 +383,7 @@ s_term: .byte   "Log", 0
 ## Measuring and the compositor
 
 ### $77 ws_sync (SYS_WSSYNC)
-Waits until the screen shows everything drawn so far. Useful before a screenshot or a
+Blocks until the screen shows everything drawn so far. Useful before a screenshot or a
 timing measurement; a game loop does not need it.
 ```asm
         sys     SYS_WSSYNC
@@ -382,8 +391,8 @@ timing measurement; a game loop does not need it.
 
 ### $8B ws_hold (SYS_WSHOLD)
 In: A = 1 hold, 0 release. While you draw one change in several calls (a scroll and the
-rows that come in) the compositor waits (5 ticks at most), so the screen never shows it
-half done. Released at exit. A window not covered by another one draws straight onto the
+rows that come in) the compositor delays its repaint (5 ticks at most), so the screen
+never shows it half done. Released at exit. A window not covered by another one draws straight onto the
 screen and does not need it.
 ```asm
         lda     #1
@@ -411,14 +420,14 @@ Out: A, X = microseconds the last repaint took (low, high word).
 In: A = bit 0 blitter off, bit 1 the compositor sleeps on the blitter interrupt, bit 2 no
 direct drawing. Out: A = 1 if the blitter (Ali) is in use; X = the hardware revision
 (SYS_REV, Horizon 0.16). For measurements and tests: it changes how everything is drawn.
-`lda #0` restores the default and tells you whether the machine has a blitter (REV $08
-and later); X tells the rest (POKEY sound on REV $07+, Lau, the sample player, on REV $0A+, the OPL2 on REV $0C+).
+`lda #0` restores the default and returns whether the machine has a blitter (REV $08
+and later); X gives the rest (POKEY sound on REV $07+, Lau, the sample player, on REV $0A+, the OPL2 on REV $0C+).
 ```asm
         lda     #0
         sys     SYS_WSCONFIG    ; -> A = 1: the blitter draws
 ```
 
-## The Desktop's own calls
+## Desktop calls
 
 ### $8D ws_closeall (SYS_WSCLOSEALL)
 Every window of every other task gets WE_CLOSE (the Desktop's Restart and Shut down).
@@ -430,7 +439,7 @@ EINVAL without the window system. Not for applications.
 ### $8E win_geom (SYS_WGEOM)
 In: A = own window, X, Y = {i16 x, i16 y, u16 width, u16 height}: moves and resizes it (x, y
 its outer top-left, width, height its content; x = $8000: it stays where it is). No
-WE_RESIZE comes (the program knows). Horizon 0.14. The Calculator changes its view this way.
+WE_RESIZE follows (the caller made the change). Horizon 0.14. The Calculator changes its view this way.
 ```asm
         lda     #$8000          ; stays where it is
         sta     blk
@@ -498,5 +507,5 @@ your window. Added with BASIC 2.0 (Horizon 0.18).
 
 Focus (Horizon 0.15): win_event also gives WE_FOCUS (14) when a window gets the keyboard
 and WE_UNFOCUS (15) when it loses it. Just before WE_UNFOCUS every key the window holds
-gets its release (b = 0); the real release comes to nobody, so a game that counts held keys
-never keeps one stuck.
+gets its release (b = 0); the real release is not delivered, so a game that counts held
+keys never keeps one stuck.

@@ -1,4 +1,4 @@
-# The internet (Horizon 0.22)
+# Internet (Horizon 0.22)
 
 The Atari816 reaches the internet through the **PC link**: the PC it is connected to by USB
 runs the gateway, `tools/atari816-link`, and does the network work for it. There are no new
@@ -21,22 +21,23 @@ syscalls: **a URL is a path**, used with the normal file calls ([files.md](files
 
 These open as **read-only files**:
 
-| Call | What it does |
-| --- | --- |
-| open | Mode 0 only (`O_READ`; another mode: $47 denied). Waits until the server has answered or failed. Out: A = handle 4-7 |
-| stat | Size: the server's size if it gave one, else 0. Attribute $21 (a read-only file). Time: the PC's clock now |
-| read | Waits until the length asked for has come, or the end. **Fewer bytes than asked = the end**, as with a file |
-| close | Ends the request |
-| seek | $C2 (not possible) |
-| write, delete, mkdir, rename | $47 (denied) |
-| readdir, spawn | $C2 |
+- open: mode 0 only (`O_READ`; another mode: $47 denied). Blocks until the server's
+  response arrives or the request fails. Out: A = handle 4-7.
+- stat: size: the size the server sent, else 0. Attribute $21 (a read-only file). Time:
+  the PC's clock now.
+- read: blocks until the requested length has arrived, or the end. **Fewer bytes than
+  requested = the end**, as with a file.
+- close: ends the request.
+- seek: $C2 (not possible).
+- write, delete, mkdir, rename: $47 (denied).
+- readdir, spawn: $C2.
 
 - An `ftp://` URL that ends with `/` reads as the folder's listing: text, one name per line.
 - A stat and then an open of the same URL within 15 s make one request (the shell's `cp`
   and `get` do this: the size first, then the data).
 - An HTTP error (status 400 or more) is `E_HTTP`; **open and stat then return the status in
   X** (404, 403, 500, ...).
-- An open or read that waits for the internet does not hold up other programs' file calls.
+- An open or read that blocks on the network does not delay other programs' file calls.
 
 ```asm
         ptr     url
@@ -60,15 +61,18 @@ The example [examples/fetch](../../examples/fetch) prints any URL on the console
 `tcp://host:port` opens a TCP connection; `tls://host:port` the same with TLS (done by the
 PC). The host is a name or an address; the port 1-65535.
 
-| Call | What it does |
-| --- | --- |
-| open | Waits until connected or failed (at most about 20 s). Out: A = handle 4-7. The mode is not used (pass 0) |
-| read | **Never waits.** Gives the bytes that have come, up to the length asked for. A = 0: nothing yet. After the other end closed and every byte was read: `E_CLOSED` |
-| write | **Never waits.** Takes what fits and returns that count, perhaps 0: try the rest a little later. After the end: `E_CLOSED` |
-| close | Ends the connection |
-| seek, stat | $C2 |
+- open: blocks until connected or failed (at most about 20 s). Out: A = handle 4-7. The
+  mode is not used (pass 0).
+- read: **never blocks.** Returns the bytes that have arrived, up to the requested
+  length. A = 0: nothing yet. After the other end closed and every byte was read:
+  `E_CLOSED`.
+- write: **never blocks.** Accepts what fits and returns that count, perhaps 0: write
+  the rest a little later. After the end: `E_CLOSED`.
+- close: ends the connection.
+- seek, stat: $C2.
 
-There is no separate status call: a read tells it (bytes, 0, or an error).
+There is no separate status call: the result of a read gives the status (bytes, 0, or an
+error).
 
 ```asm
 @again: ptr     iob             ; {u8 handle, u24 buffer, u16 length}
@@ -84,22 +88,23 @@ There is no separate status call: a read tells it (bytes, 0, or an error).
 ```
 
 The example [examples/echo](../../examples/echo) connects, sends a line and prints the
-answer.
+reply.
 
-## Waiting: WE_NET or polling
+## WE_NET or polling
 
-- **A window program** waits for **`WE_NET` (17)** in its event loop. It goes to the
+- **A window program** handles **`WE_NET` (17)** in its event loop. The event goes to the
   program's **first window** (the lowest window number it owns). `a` = a bit mask of the
-  program's handles with news (bit n = handle n: bit 4 for handle 4, ...). News is: bytes
-  came, the connection ended, or it failed. Read the handle then, until it gives 0.
+  program's handles with activity (bit n = handle n: bit 4 for handle 4, ...). Activity
+  is: bytes arrived, the connection ended, or it failed. Read the handle then, until a
+  read returns 0.
 - A handle gets a new `WE_NET` only after the program has read from it since the last one,
   so the queue never fills up with them.
-- **A program without windows polls**: read, and if nothing came, sleep (10 ms is a good
-  step) and read again. Count the steps to give up after a while.
+- **A program without windows polls**: read, and if nothing arrived, sleep (10 ms is a
+  good step) and read again. Count the steps to stop after a time-out of your own.
 
 | Type | Value | a | b | c |
 | --- | --- | --- | --- | --- |
-| `WE_NET` | 17 | bit mask of the handles (4-7) with news | - | - |
+| `WE_NET` | 17 | handles (4-7) with activity, bit mask | - | - |
 
 ```asm
         cmp     #WE_NET         ; (the event type, in a win_event loop)
@@ -113,30 +118,33 @@ answer.
 
 ## Errors
 
-`horizon.inc` names them. They come from open, stat, read and write (on any of these calls).
+`horizon.inc` defines them. Open, stat, read and write can return any of them.
 
 | Name | Code | Meaning |
 | --- | --- | --- |
 | `E_NOLINK` | $C7 | No PC link (the gateway is not running, or the cable is out) |
 | `E_LOST` | $C8 | The PC link was lost |
-| `E_NOSVC` | $CA | No such service: an older gateway, or one started with `--no-net` (an older firmware answers $46, bad name) |
+| `E_NOSVC` | $CA | No such service (below) |
 | `E_BADADDR` | $CB | Bad address (URL, host or port) |
 | `E_NONAME` | $CC | Name not found (no such host) |
 | `E_REFUSED` | $CD | Refused or unreachable (also an FTP login refused or a missing FTP file) |
 | `E_TIMEOUT` | $CE | Timeout |
-| `E_HTTP` | $CF | HTTP status 400 or more: open and stat return the status in X |
+| `E_HTTP` | $CF | HTTP status 400 or more (status in X) |
 | `E_CLOSED` | $D0 | The connection was closed (a read after the end, or a write) |
 | `E_TLS` | $D1 | TLS failed (a bad certificate) |
 | `E_PCBUSY` | $D2 | Too many connections on the PC |
 | `E_NET` | $D3 | Another network error |
 | `E_NSTREAM` | $52 | All four stream handles are in use |
 
+`E_NOSVC`: an older gateway, or one started with `--no-net`. An older firmware returns
+$46 (bad name) instead. `E_HTTP`: open and stat return the HTTP status in X.
+
 ## In the emulator
 
 emu816 has the PC link's internet too (`tools/run816.py` passes these on):
 
 - `--net`: `tcp://` URLs become real connections of the PC running the emulator (`tls://`
-  answers `E_TLS`: TLS is not modelled).
+  returns `E_TLS`: TLS is not modelled).
 - `--net-root DIR`: `http://host/path` (also `https://`, `ftp://`) is the file
   `DIR/host/path`; a folder gives its listing; a missing file is HTTP status 404; a missing
   host folder is `E_NONAME`.

@@ -1,5 +1,5 @@
 /* farprog.c - the far data model on its own (hcc --code large --data far; tests/run.py's
- * "far" test, docs/c/reference.md "The far data model"): far data in several banks, the
+ * "far" test, docs/c/reference.md "Far data model"): far data in several banks, the
  * placement rules, the heap over banks, the library with far pointers, files read
  * straight into far memory. Prints "farprog: N checks, F failures" and FARPROG PASS. */
 #include <stdio.h>

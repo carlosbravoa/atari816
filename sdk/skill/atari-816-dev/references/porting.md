@@ -203,7 +203,7 @@ worked example: with near data it could not link (51 KB of constants + 26 KB of 
 main bank, every malloc'd structure out of reach); with `--data far` it links, boots and
 plays the new game to the geoscape, its LOG line for line the PC's.
 
-What the model does (sdk/docs/c/reference.md, "The far data model"):
+What the model does (sdk/docs/c/reference.md, "Far data model"):
 
 | | |
 | --- | --- |

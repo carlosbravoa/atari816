@@ -3,7 +3,7 @@
 // pcnet.c - the internet through the PC link (step 2): streams on channel 4 (Net: TCP
 // connections, "tcp://host:port", "tls://host:port") and channel 5 (Fetch: "http://...",
 // "https://...", "ftp://..." read as files). Protocol and mailbox rules: Docs/04-pc-link.md,
-// "Channels 4 and 5" and "What the 65C816 sees (step 2)".
+// "Channels 4 and 5" and "65C816 interface for the internet".
 //
 // Each stream keeps NS_RING bytes in SDRAM; the PC never sends more than the credit the board
 // gave (the ring's room), so the board is never flooded. A request that has to wait for the

@@ -3,34 +3,35 @@
 Horizon's own programs (Files, Edit, Paint, Settings, ...) share one library for the
 standard look: buttons, labels, text fields, lists, scroll bars, alerts, the file
 dialog, small dialogs, pop-up menus. `hui.h` makes all of it callable from C, with the
-same names as the assembly library (`ui_alert`, `ui_filedlg`, ...). This page is a
-tutorial (an empty file to a small application, in five steps), then the reference, how
-the library gets into a program, and the limits. Before it: [getting started with
-C](getting-started.md); the C SDK's reference: [reference.md](reference.md).
+same names as the assembly library (`ui_alert`, `ui_filedlg`, ...). Read
+[Getting started with C](getting-started.md) first. The C SDK's reference is
+[reference.md](reference.md).
 
 ```
 cp -r sdk/templates/c-window-app mywin    # a window, menus, a field, buttons, dialogs
 cd mywin && make && make run              # HELLOWIN.PRG; the Desktop starts it
 ```
 
-| | |
-| --- | --- |
-| Header | `#include <hui.h>` (after `horizon.h`; it includes it if needed) |
-| Linking | automatic: `hcc` links the library when the program uses a name of `hui.h` (`--ui` forces it) |
-| Code models | both (small and large): the library is linked straight into the program |
-| Needs | cc65's `ca65`, `ld65` and `ar65` (the library is assembly), the Horizon tree (its sources) |
-| Template | [sdk/templates/c-window-app](../../templates/c-window-app): the C twin of [window-app](../../templates/window-app), the same window pixel for pixel |
-| Examples | [sdk/c/examples/guests](../../c/examples/guests) (this tutorial's steps), [sdk/c/examples/viewer](../../c/examples/viewer) (a text viewer: a list, scroll bars, resizing, drag and drop) |
-| The library's own docs | [controls.md](../reference/controls.md), [windows.md](../reference/windows.md), `horizon/user/ui.inc` |
+- Header: `#include <hui.h>`, after `horizon.h` (it includes `horizon.h` if needed).
+- Linking: automatic. `hcc` links the library when the program uses a name of `hui.h`
+  (`--ui` forces it).
+- Code models: both small and large. The library is linked into the program.
+- Requires: cc65's `ca65`, `ld65` and `ar65` (the library is assembly), and the Horizon
+  tree (its sources).
+- Template: [sdk/templates/c-window-app](../../templates/c-window-app), the C twin of
+  [window-app](../../templates/window-app), with the same window pixel for pixel.
+- Examples: [sdk/c/examples/guests](../../c/examples/guests) (this tutorial's steps),
+  [sdk/c/examples/viewer](../../c/examples/viewer) (a text viewer: a list, scroll bars,
+  resizing, drag and drop).
+- The library's assembly documentation: [controls.md](../reference/controls.md),
+  [windows.md](../reference/windows.md), `horizon/user/ui.inc`.
 
-## The tutorial: Guests
+## Tutorial: Guests
 
 Five steps from an empty window to a small application: a guest list with a field, a
 list, menus, an alert, files and a clock. Each step is a complete program in
-[sdk/c/examples/guests](../../c/examples/guests) (`step1.c` .. `step5.c`); `make test`
-there builds the five and runs each in the emulator with a script (`stepN.script`), so
-every piece of code below was built and run. The code blocks of this page are checked
-against those files by the SDK's tests (`make -C sdk/c test`, test `appsdoc`).
+[sdk/c/examples/guests](../../c/examples/guests) (`step1.c` .. `step5.c`). `make test`
+there builds the five and runs each in the emulator with a script (`stepN.script`).
 
 ### Step 1: an empty window
 
@@ -86,18 +87,18 @@ $ python3 sdk/tools/run816.py STEP1.PRG --mode desktop --shot 2
 - `hz_ws_start` starts the window system, or returns 0 when it already runs (under the
   Desktop). The program that started it stops it at the end.
 - `ui_init` once, after the window system is there.
-- **Events come from `ui_getev`, not `hz_win_event`**: the library must see every
-  event (and a dialog keeps a close or resize of your windows aside for you). The event
+- **Events come from `ui_getev`, not `hz_win_event`**: the library has to process every
+  event (and a dialog holds back a close or resize of your windows until it ends). The event
   is in `ui_ev`, a `hz_event`: `type` (`WE_*`), `win`, `a`, `b`, `c`.
 - The first time a program uses `hui.h`, hcc builds the library from the Horizon tree's
-  sources (a second or so). Then it links what the program uses: here the core of the
+  sources (about a second). It then links what the program uses: here the core of the
   library, about 9 KB of the program.
 
 ### Step 2: controls
 
 A label, a text field and a button. Controls are structures you declare, **static or
 global** (the library keeps pointers to them and writes into them), with the `UI_*`
-initialisers; a control list (`ui_ctlref`, ending with 0) gives their order for Tab.
+initialisers. A control list (`ui_ctlref`, ending with 0) gives their order for Tab.
 
 From `step2.c`:
 
@@ -109,7 +110,7 @@ static ui_button b_add = UI_BUTTON(240, 8, 72, UF_DEFAULT, "Add");
 static ui_ctlref ctls[] = { &l_name, &f_name, &b_add, 0 };
 ```
 
-After the window opens, put the controls in it and draw them; then every event goes to
+After the window opens, put the controls in it and draw them. Every event then goes to
 the controls first:
 
 ```c
@@ -188,11 +189,12 @@ static ui_alertblk about = { AL_INFO, "About Guests", "Guests 1.0\nthe C tutoria
   modifiers, `| $100` when pressed; `$11` = either ctrl).
 - `ui_alert` is modal: it returns the button chosen (0 = the first, the rightmost; the
   last one given is the cancel button: Esc and the close box). The block is static: the
-  library reads its strings through 16-bit pointers (see "The rule").
+  library reads its strings through 16-bit pointers (see
+  [Pointers and the code bank](#pointers-and-the-code-bank)).
 
 ### Step 4: a list
 
-A list asks your function for each row's text when it draws it. From `step4.c`:
+A list calls your function for each row's text when it draws the row. From `step4.c`:
 
 ```c
 /* the list asks for each row's text when it draws it */
@@ -239,7 +241,7 @@ static void add(const char *s)
 - The row function is a **callback**: the library calls it in the middle of drawing.
   It returns the row's text (from anywhere: the library copies it, so one static buffer
   can serve every row) and may draw (an icon in the list's `indent` pixels at `ri->x`,
-  `ri->y`), but must not call a control routine (see "Callbacks").
+  `ri->y`), but must not call a control routine (see [Callbacks](#callbacks)).
 - The list has a scroll bar of its own, the keys (Up, Down, PgUp, PgDn, Home, End when
   it has the focus) and the wheel. `l_guests.sel` is the selected row (`UI_NONE`: none).
 - A label shows the string its `text` points to; after changing the string, `ui_draw`
@@ -292,28 +294,28 @@ static void show_clock(void)
 
 - `ui_filedlg(0 open / 1 save, path, title)` returns 0 with the full path in `path` (128
   bytes), or -1 when cancelled. `path` is a local here: a local is in the code bank like
-  everything else. The dialog changes the task's current
-  folder as the user moves; Save asks before replacing a file.
+  everything else. The dialog changes the task's current folder as the user moves through
+  folders. Save prompts for confirmation before replacing a file.
 - A timer: `hz_win_timer(win, ticks)` sends `WE_TICK` every ticks x 10 ms (0 stops it).
 - The whole program: [step5.c](../../c/examples/guests/step5.c), 174 lines; 26,390 bytes
   on the card.
 
-## The rule: what must be in the code bank
+## Pointers and the code bank
 
 The controls library uses 16-bit pointers into the program's **code bank** (where its
 globals, string constants and `malloc` blocks are).
 
-**There is nothing to watch**: every C data pointer is an offset in the code
+In the near data model this needs no care: every C data pointer is an offset in the code
 bank, locals included (arrays, structures and locals whose address is taken live on the
 software stack, in the code bank). A control may be a local of a function that does not
-return while the control is in use (`main`'s), a string anything. Only memory of other
-banks (`__far` pointers) has to be copied in first: a `const char *` cannot hold a far
-address at all (see [porting.md](porting.md)).
+return while the control is in use (`main`'s), and a string may be anything. Only memory
+of other banks (`__far` pointers) has to be copied in first: a `const char *` cannot hold
+a far address at all (see [porting.md](porting.md)).
 
 The structures' pointer fields are `__near` (16 bits), so a static initialiser takes a
 string constant or a static array directly (`UI_LABEL(..., "Name:")`, `UI_FIELD(...,
 name, sizeof name)`). The text a row function returns may be anywhere, a far bank too:
-the library copies it. (`tests/ui/badhui.c ptr` checks that a local control works.)
+the library copies it.
 
 ## Events
 
@@ -331,16 +333,21 @@ the library copies it. (`tests/ui/badhui.c ptr` checks that a local control work
     }
 ```
 
-| `ui_ev.type` (UA_NONE) | a, b, c |
-| --- | --- |
-| `WE_CLOSE` | the close box, ctrl+W, the Desktop's Shut down |
-| `WE_MENU` | a = menu, b = item (counting separators) |
-| `WE_KEY` | a = HID usage, b = modifiers \| `$100` when pressed (`hz_key_ascii(a, b)`: ASCII) |
-| `WE_BUTTON` | a, b = the pointer in the content, c = buttons (2: right: `ui_popup`) |
-| `WE_RESIZE` | a, b = the new content size (windows opened with `WF_RESIZE`): change the controls' x, y, w, h and draw them again |
-| `WE_TICK` | the window's timer (`hz_win_timer`) |
-| `WE_DROP` | something was dropped on the window (a file from Files): `hz_win_dropget(win, buf128)` reads the string |
-| `WE_WHEEL`, `WE_MOTION`, `WE_FOCUS`, `WE_UNFOCUS`, `WE_NET`, ... | [windows.md](../reference/windows.md) |
+The events that reach the program as `UA_NONE`, by `ui_ev.type`, with the meaning of
+`a`, `b` and `c`:
+
+- `WE_CLOSE`: the close box, ctrl+W, the Desktop's Shut down.
+- `WE_MENU`: a = menu, b = item (counting separators).
+- `WE_KEY`: a = HID usage, b = modifiers, `| $100` when pressed (`hz_key_ascii(a, b)`
+  gives ASCII).
+- `WE_BUTTON`: a, b = the pointer in the content, c = buttons (2: right, for `ui_popup`).
+- `WE_RESIZE`: a, b = the new content size (windows opened with `WF_RESIZE`). Change the
+  controls' x, y, w, h and draw them again.
+- `WE_TICK`: the window's timer (`hz_win_timer`).
+- `WE_DROP`: something was dropped on the window (a file from Files).
+  `hz_win_dropget(win, buf128)` reads the string.
+- `WE_WHEEL`, `WE_MOTION`, `WE_FOCUS`, `WE_UNFOCUS`, `WE_NET`, ...: see
+  [windows.md](../reference/windows.md).
 
 Drag and drop: Files drops a file's path on a window (`WE_DROP`); a program can drop a
 string on any window with `hz_win_drop(win, s)`. The [viewer](../../c/examples/viewer)
@@ -353,50 +360,59 @@ stops the window system when it ends; its `printf` output goes to the console lo
 
 Two library features call into your C code:
 
-| Callback | Set by | Signature |
-| --- | --- | --- |
-| a list's row text | `UI_LIST(..., fn)` (or `ls.rowfn = fn`) | `const char *fn(ui_list *ls, unsigned row, const ui_rowinfo *ri)`; `ri`: `win`, `x`, `y` (the row's top left), `sel` (1 if selected) |
-| the copy routines' progress | `ui_setcpcb(fn)` (NULL: none; `ui_cpwin` replaces it) | `int fn(const char *name, unsigned kdone, unsigned long size)`: nonzero cancels the copy (`ui_cptree` then returns -1, `hz_errno == HZ_ECANCELED`) |
+- A list's row text, set by `UI_LIST(..., fn)` (or `ls.rowfn = fn`). Signature:
+  `const char *fn(ui_list *ls, unsigned row, const ui_rowinfo *ri)`. `ri` has `win`, `x`,
+  `y` (the row's top left) and `sel` (1 if selected).
+- The copy routines' progress, set by `ui_setcpcb(fn)` (NULL: none; `ui_cpwin` replaces
+  it). Signature: `int fn(const char *name, unsigned kdone, unsigned long size)`. A
+  nonzero result cancels the copy (`ui_cptree` then returns -1, `hz_errno ==
+  HZ_ECANCELED`).
 
-**What a callback may do.** It runs inside a library call (a list's drawing, a copy). It
-may compute, call the C library and `hz_` functions, and draw: `ui_rect`, `ui_text`,
+A callback runs inside a library call (a list's drawing, a copy). It may compute, call the
+C library and `hz_` functions, and draw: `ui_rect`, `ui_text`,
 `ui_bevel`, `ui_copy`, `ui_twidth`, `ui_cwidth`, `ui_btnw`, `ui_fit`, the clock and
 string functions. It must **not** call a control or dialog routine (`ui_draw`,
 `ui_drawall`, `ui_event`, `ui_getev`, `ui_lsset`, `ui_alert`, `ui_filedlg`, ...: those
-marked `ctl` in `ui/hui.tab`): the library is in the middle of its own work. Such a call
-stops the program with a message:
+marked `ctl` in `ui/hui.tab`), because the library is in the middle of its own work. Such
+a call stops the program with a message:
 
 ```
 hui: ui_lsset: a control routine called inside a callback (a list's row function, the copy callback): a callback may only draw
 ```
 
 It should return quickly (a row function runs for every row drawn). The library's
-direct page is saved around the call and restored after it, so drawing inside it does
-not disturb the list being drawn.
+direct page is saved before the call and restored after it, so drawing inside the
+callback does not disturb the list being drawn.
 
 ## Reference
 
 ### Structures
 
 Laid out from `ui.inc`'s offsets by `tools/genhui.py` (in `include/huigen.h`). The
-fields ending in `_` are the library's.
+fields ending in `_` are the library's. The controls' fields follow the header `type, win,
+x, y, w, h, flags`.
 
-| Type | Fields (after the header `type, win, x, y, w, h, flags`) | Initialiser |
-| --- | --- | --- |
-| `ui_button` | `label` | `UI_BUTTON(x, y, w, flags, label)` (height `UI_BTNH`) |
-| `ui_label` | `text` | `UI_LABEL(x, y, w, flags, text)` (height `UI_LINE`) |
-| `ui_field` | `buf`, `max` (its size), `len`, `cur`, `anc`, `scr` | `UI_FIELD(x, y, w, flags, buf, size)` (height `UI_FLDH`) |
-| `ui_scroll` | `pos`, `max` (total - visible), `page`, `step` | `UI_VSCROLL(x, y, h, max, page, step)`, `UI_HSCROLL(x, y, w, max, page, step)` |
-| `ui_list` | `count`, `sel`, `top`, `indent`, `rowfn` | `UI_LIST(x, y, w, h, flags, rowfn)` |
-| `ui_ctl` | the header alone | |
-| `ui_alertblk` | `kind` (`AL_INFO`, `AL_WARN`, `AL_QUESTION`, `AL_ERROR`), `title`, `text`, `b1`, `b2`, `b3` | `{ kind, title, text, b1, b2, b3 }` |
-| `ui_dlgblk` | `title`, `w`, `h`, `list`, `win` | `{ title, w, h, controls, 0 }` |
-| `ui_askblk` | `title`, `prompt`, `buf`, `size`, `ok` | `{ title, prompt, buf, size, 0 }` |
-| `ui_clock` | `year`, `mon`, `day`, `hour`, `min`, `sec`, `wday` | (the variable `ui_clk`) |
-| `ui_ctlref` | a control list's entry: `static ui_ctlref ctls[] = { &a, &b, 0 };` | |
+- `ui_button`: `label`. Initialiser `UI_BUTTON(x, y, w, flags, label)` (height
+  `UI_BTNH`).
+- `ui_label`: `text`. Initialiser `UI_LABEL(x, y, w, flags, text)` (height `UI_LINE`).
+- `ui_field`: `buf`, `max` (its size), `len`, `cur`, `anc`, `scr`. Initialiser
+  `UI_FIELD(x, y, w, flags, buf, size)` (height `UI_FLDH`).
+- `ui_scroll`: `pos`, `max` (total - visible), `page`, `step`. Initialisers
+  `UI_VSCROLL(x, y, h, max, page, step)`, `UI_HSCROLL(x, y, w, max, page, step)`.
+- `ui_list`: `count`, `sel`, `top`, `indent`, `rowfn`. Initialiser `UI_LIST(x, y, w, h,
+  flags, rowfn)`.
+- `ui_ctl`: the header alone.
+- `ui_alertblk`: `kind` (`AL_INFO`, `AL_WARN`, `AL_QUESTION`, `AL_ERROR`), `title`,
+  `text`, `b1`, `b2`, `b3`. Initialiser `{ kind, title, text, b1, b2, b3 }`.
+- `ui_dlgblk`: `title`, `w`, `h`, `list`, `win`. Initialiser `{ title, w, h, controls,
+  0 }`.
+- `ui_askblk`: `title`, `prompt`, `buf`, `size`, `ok`. Initialiser `{ title, prompt, buf,
+  size, 0 }`.
+- `ui_clock`: `year`, `mon`, `day`, `hour`, `min`, `sec`, `wday` (the variable `ui_clk`).
+- `ui_ctlref`: a control list's entry: `static ui_ctlref ctls[] = { &a, &b, 0 };`.
 
 Flags (`flags`): `UF_FOCUS` (has the keyboard), `UF_DEFAULT` (Enter), `UF_CANCEL` (Esc),
-`UF_RIGHT` (a label right-aligned), `UF_DIM` (greyed, a button does not react). Metrics:
+`UF_RIGHT` (a label right-aligned), `UF_DIM` (greyed; a dimmed button ignores clicks). Metrics:
 `UI_LINE` 12, `UI_BTNH` 20, `UI_FLDH` 18, `UI_ROWH` 14, `UI_SBW` 14, `UI_GAP` 8.
 Values of `hui.h`: `UI_NONE` (no row, no item), `UI_INK(ink, paper)`, `UI_NOPAPER`,
 `UI_FILL(c)`, `UI_FRAME(c)`, `UI_DITHER(c1, c2)`. Every constant of `ui.inc` and
@@ -404,50 +420,68 @@ Values of `hui.h`: `UI_NONE` (no row, no item), `UI_INK(ink, paper)`, `UI_NOPAPE
 
 ### Functions
 
-Each prototype in `include/huigen.h` has its comment; the assembly reference
-([controls.md](../reference/controls.md), `ui.inc`) has the details. "-1" results also
-set `hz_errno` where it says so (the Horizon error code).
+Each prototype in `include/huigen.h` has its comment. The assembly reference
+([controls.md](../reference/controls.md), `ui.inc`) has the details. Where the comment
+states it, a -1 result also sets `hz_errno` (the Horizon error code).
 
-| Group | Functions |
-| --- | --- |
-| start, events | `ui_init()`, `int ui_getev(poll)`, `hz_event ui_ev` |
-| controls | `ui_setwin(list, win)`, `ui_draw(ctl)`, `ui_drawall(list)`, `unsigned ui_event(list, &ctl)`, `ui_focus(ctl)`, `ui_sbset(sb, pos)`, `ui_sbpos(sb, pos)`, `ui_fdset(fd, text)`, `ui_lsset(ls, count)`, `ui_lssel(ls, row)` |
-| pop-up menus | `unsigned ui_popup(win, items)`, `unsigned ui_popat(win, items, x, y)`, `int ui_menukey()` |
-| dialogs | `unsigned ui_alert(al)`, `int ui_filedlg(save, path, title)`, `unsigned ui_dlfilt`, `int ui_dlgopen(dg)`, `void *ui_dlgrun(dg)`, `ui_dlgclose(dg)`, `int ui_ask(ak)` |
-| drawing | `ui_rect(win, x, y, w, h, op)`, `ui_bevel(win, x, y, w, h, sunken)`, `ui_text(win, x, y, font, colors, s)`, `ui_copy(win, x, y, w, h, dx, dy)`, `unsigned ui_twidth(s, font)`, `unsigned ui_cwidth(c, font)`, `ui_fit(s, width)`, `unsigned ui_btnw(label)`, `ui_beep()`, `ui_chime(kind)` |
-| programs, files | `int ui_launch(path, args, name)` (-1, hz_errno), (0.31) `int ui_run(path, args, name)`, `int ui_launchx(path, args, name)` with `ui_lxmode` (`LX_TERM`, `LX_TERME`, `LX_NOARG`), `ui_spawnerr(err, name)`, `unsigned ui_ftype(name)`, `int ui_open(path)`, `int ui_atload(path)` (kind or -1, hz_errno), `int ui_lnkread(path)` (`ui_lktgt`, `ui_lktitl`, `ui_lkargs`), `int ui_mklink(path)`, `const char *ui_prog(path, &icon)`, `unsigned ui_ficon(path, folder)` |
-| the date | `ui_clock ui_clk`, `ui_clksplit(secs)`, `unsigned long ui_clkjoin()`, `int ui_clkcheck()`, `unsigned ui_clkmdays(month)`, `unsigned ui_clkfmt(buf20)`, `ui_clklong(buf32)`, `int ui_clkparse(s)`, `int ui_clkload()`, `int ui_clksave()`, `int ui_clkpc()` |
-| copying | `int ui_cptree(from, to)`, `int ui_rmtree(path)`, `int ui_mvtree(from, to)` (-1, hz_errno), `ui_cpwin(move)`, `ui_cpdone()`, `ui_setcpcb(fn)`, `ui_cpname`, `ui_cpk`, `ui_cpsize`, `ui_cpblk`, `ui_cpx`, `int ui_isurl(s)`, `ui_urlname(path, buf)` |
-| ulib (Atari files) | `unsigned atari_kind(path)`, `unsigned atari_rkind(path)`, `int atari_run(path)` (-1, hz_errno) |
+- Start and events: `ui_init()`, `int ui_getev(poll)`, `hz_event ui_ev`.
+- Controls: `ui_setwin(list, win)`, `ui_draw(ctl)`, `ui_drawall(list)`, `unsigned
+  ui_event(list, &ctl)`, `ui_focus(ctl)`, `ui_sbset(sb, pos)`, `ui_sbpos(sb, pos)`,
+  `ui_fdset(fd, text)`, `ui_lsset(ls, count)`, `ui_lssel(ls, row)`.
+- Pop-up menus: `unsigned ui_popup(win, items)`, `unsigned ui_popat(win, items, x, y)`,
+  `int ui_menukey()`.
+- Dialogs: `unsigned ui_alert(al)`, `int ui_filedlg(save, path, title)`, `unsigned
+  ui_dlfilt`, `int ui_dlgopen(dg)`, `void *ui_dlgrun(dg)`, `ui_dlgclose(dg)`, `int
+  ui_ask(ak)`.
+- Drawing: `ui_rect(win, x, y, w, h, op)`, `ui_bevel(win, x, y, w, h, sunken)`,
+  `ui_text(win, x, y, font, colors, s)`, `ui_copy(win, x, y, w, h, dx, dy)`, `unsigned
+  ui_twidth(s, font)`, `unsigned ui_cwidth(c, font)`, `ui_fit(s, width)`, `unsigned
+  ui_btnw(label)`, `ui_beep()`, `ui_chime(kind)`.
+- Programs and files: `int ui_launch(path, args, name)` (-1, hz_errno), (0.31) `int
+  ui_run(path, args, name)`, `int ui_launchx(path, args, name)` with `ui_lxmode`
+  (`LX_TERM`, `LX_TERME`, `LX_NOARG`), `ui_spawnerr(err, name)`, `unsigned
+  ui_ftype(name)`, `int ui_open(path)`, `int ui_atload(path)` (kind or -1, hz_errno), `int
+  ui_lnkread(path)` (`ui_lktgt`, `ui_lktitl`, `ui_lkargs`), `int ui_mklink(path)`, `const
+  char *ui_prog(path, &icon)`, `unsigned ui_ficon(path, folder)`.
+- Date: `ui_clock ui_clk`, `ui_clksplit(secs)`, `unsigned long ui_clkjoin()`, `int
+  ui_clkcheck()`, `unsigned ui_clkmdays(month)`, `unsigned ui_clkfmt(buf20)`,
+  `ui_clklong(buf32)`, `int ui_clkparse(s)`, `int ui_clkload()`, `int ui_clksave()`, `int
+  ui_clkpc()`.
+- Copying: `int ui_cptree(from, to)`, `int ui_rmtree(path)`, `int ui_mvtree(from, to)`
+  (-1, hz_errno), `ui_cpwin(move)`, `ui_cpdone()`, `ui_setcpcb(fn)`, `ui_cpname`,
+  `ui_cpk`, `ui_cpsize`, `ui_cpblk`, `ui_cpx`, `int ui_isurl(s)`, `ui_urlname(path,
+  buf)`.
+- ulib (Atari files): `unsigned atari_kind(path)`, `unsigned atari_rkind(path)`, `int
+  atari_run(path)` (-1, hz_errno).
 
-Not bound, because C has its own (the table says so for each): `ui_strcpy`, `ui_strlen`
+Not bound, because C has its own (`hui.tab` gives the reason for each): `ui_strcpy`, `ui_strlen`
 (string.h), ulib's console output (`printf`: ulib's line buffer is never used from C,
 so it cannot reorder with stdout), its keyboard and argument routines (`getchar`,
 `hz_getline`, `hz_key_ascii`, `argv`), `spawn` (`hz_spawn_path`); the library's direct
 page variables (`ui_x` ...: arguments of the drawing functions, `ui_rowinfo` in a row
 function).
 
-## How the library gets into a program
+## Linking the library
 
-The controls library is assembly (ca65), linked by ld65.
+The controls library is assembly (ca65), linked by ld65. hcc links it into the program, as
+Horizon's own assembly programs do:
 
-hcc links it straight into the program, as Horizon's own assembly programs have it:
-
-1. **The SDK build** (the first `hcc` of a program using `hui.h`): `tools/hui816.py`
+1. The SDK build (the first `hcc` of a program using `hui.h`): `tools/hui816.py`
    assembles the Horizon tree's current sources (`horizon/user/ui*.s` into `ui.lib`,
    `ulib.s` into `ulib.lib`, as Horizon's Makefile does), and a binding library
    `hui816.lib`: one generated shim per function and one alias per variable
    (`tools/genhui.py --shims` from `sdk/c/ui/hui.tab`), the SDK's helpers
    (`sdk/c/ui/lib`: the row and copy callbacks, the failure exit) and `ui/huirt.c`.
-   All in `sdk/c/build/ui/small/` (and `large/` for the large code model), built again whenever one of those files changes.
-2. **A program's link**: when ld65 reports a `hui.h` name undefined (or with `--ui`), hcc
+   All in `sdk/c/build/ui/small/` (and `large/` for the large code model), built again
+   whenever one of those files changes.
+2. A program's link: when ld65 reports a `hui.h` name undefined (or with `--ui`), hcc
    links again with the three libraries; ld65 takes the shims the program calls and the
    library's modules they need, and places the library's zero page after cc816's registers
    ($78 and up). No block, no list of bank bytes.
-3. **A call**: C calls a shim with JSR (every argument on the stack); the shim checks
-   that it is not inside a callback where it must not be, loads A, X, Y and the library's
-   direct-page arguments, JSRs the routine, and turns its registers and carry into the C
-   result (0 / -1, `hz_errno`). Pointers need no check and no copy: they are in the code
+3. A call: C calls a shim with JSR (every argument on the stack). The shim checks that it
+   is not called inside a callback where that is not allowed, loads A, X, Y and the
+   library's direct-page arguments, JSRs the routine, and turns its registers and carry
+   into the C result (0 / -1, `hz_errno`). Pointers need no check and no copy: they are in the code
    bank. A callback goes the other way: the library JSRs a small routine that saves the
    library's direct page and calls the C function (a list's row function through
    `HUI_ROWCB`, `hui_rowtramp`).
@@ -462,27 +496,22 @@ Measured (`hcc --map`):
 | `step5.c`; the viewer | 15; 13 | 26,390; 26,214 |
 | tests/ui/uitest.c (nearly everything) | 66 | 38,471 |
 
-The library's granularity is its source files: `ui_beep` alone brings `ui.s`, the core
-every control needs. The shims have no checks or copies to make (the pointers are in the
-code bank already), and the C library is linked by the function. The same template in assembly (`sdk/templates/window-app`) is 16,744
-bytes: C's own library (printf, files) is most of the difference.
-
-`make -C sdk/c check` runs `genhui.py --check`: it fails when a public routine or
-variable of `ui.inc` or of ulib has no entry in `hui.tab` (bound, or `unbound` with the
-reason), when `hui.tab` names something the library lacks, when a structure's fields
-overlap or its size disagrees with `ui.inc`, or when `include/huigen.h` is not what the
-sources give now (`make -C sdk/c gen` writes it again).
+The library is linked by source file: `ui_beep` alone brings in `ui.s`, the core every
+control needs. The shims make no checks or copies (the pointers are in the code bank
+already), and the C library is linked by the function. The same template in assembly
+(`sdk/templates/window-app`) is 16,744 bytes: C's own library (printf, files) is most of
+the difference.
 
 ## Limits
 
-- **The data bank**: the library runs with DBR = the code bank, as every C program does.
-- **The direct page**: the library's variables follow cc816's registers
-  ($00-$77; ld65 places them: 196 bytes in all for uitest); your own assembly declares
-  its zero page in a `ZEROPAGE` segment and ld65 places it too.
-- **Program size**: the library is 9-25 KB of the code bank (table above). Big data belongs in other banks (`hz_far_alloc`):
-  the viewer keeps the file in one.
-- A callback must not call a control routine; the library is not reentrant.
-- Nothing of this runs on the real board yet: it was built and tested in the emulator.
+- Data bank: the library runs with DBR = the code bank, as every C program does.
+- Direct page: the library's variables follow cc816's registers ($00-$77). ld65 places
+  them: 196 bytes in all for uitest. Your own assembly declares its zero page in a
+  `ZEROPAGE` segment and ld65 places it too.
+- Program size: the library takes 9-25 KB of the code bank (table above). Big data
+  belongs in other banks (`hz_far_alloc`): the viewer keeps the file in one.
+- A callback must not call a control routine. The library is not reentrant.
+- The C binding has been built and tested in the emulator only, not on the board.
 
 ## Files
 

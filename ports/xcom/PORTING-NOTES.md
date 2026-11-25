@@ -18,45 +18,75 @@ unusually thorough.
 
 C: 90 files, 49,352 lines with the headers (1.8 MB). By area (lines of `.c` + `.h`):
 
-| Area | Lines | Files (main ones) |
-| --- | --- | --- |
-| Geoscape and campaign | 12,393 | geo.c 3,620, alien.c, craft.c, base.c, facil.c, airfight.c, report.c, graphs.c, items.c, rules.c, soldier.c |
-| Base and UI screens | 11,984 | uik.c 1,362 (the DOS look: pictures, fonts, windows), invscr.c, labscr.c, trade.c, qlist.c, basescr.c, pedia.c, menu.c, batui.c, hud.c, panel.c |
-| Battlescape logic | 12,350 | battle.c 1,677, ai.c 1,579, bplayer.c, bturn.c, effects.c, spawn.c, unit.c, path.c, los.c, vox.c, voxx.c, mapgen.c |
-| Rendering and video | 3,948 | render.c, gfx.c, canvas.c (EMS/XMS canvas), cvinit.c, nlit.c (EGA night), vgainit.c, vgageo.c, hgcinit.c, cut.c (intro, slides), mouse.c |
-| Data loading and memory | 4,396 | pak.c, floorld.c, picplan.c (which pictures fit), sprcache.c (disk-paged sprites), xmem.c (EMS/XMS read cache), startup.c, main.c |
-| Sound | 2,149 | sound.c (PC speaker, Sound Blaster DMA, FM effects), music.c (AdLib driver), timer.c |
-| Input, bench | 1,594 | input.c (keys, KEYS scripts, LOG), vbench.c (BENCH) |
+- Geoscape and campaign. Lines: 12,393. Files (main ones): geo.c 3,620, alien.c, craft.c,
+  base.c, facil.c, airfight.c, report.c, graphs.c, items.c, rules.c, soldier.c.
+- Base and UI screens. Lines: 11,984. Files (main ones): uik.c 1,362 (the DOS look:
+  pictures, fonts, windows), invscr.c, labscr.c, trade.c, qlist.c, basescr.c, pedia.c,
+  menu.c, batui.c, hud.c, panel.c.
+- Battlescape logic. Lines: 12,350. Files (main ones): battle.c 1,677, ai.c 1,579,
+  bplayer.c, bturn.c, effects.c, spawn.c, unit.c, path.c, los.c, vox.c, voxx.c, mapgen.c.
+- Rendering and video. Lines: 3,948. Files (main ones): render.c, gfx.c, canvas.c (EMS/XMS
+  canvas), cvinit.c, nlit.c (EGA night), vgainit.c, vgageo.c, hgcinit.c, cut.c (intro,
+  slides), mouse.c.
+- Data loading and memory. Lines: 4,396. Files (main ones): pak.c, floorld.c, picplan.c
+  (which pictures fit), sprcache.c (disk-paged sprites), xmem.c (EMS/XMS read cache),
+  startup.c, main.c.
+- Sound. Lines: 2,149. Files (main ones): sound.c (PC speaker, Sound Blaster DMA, FM
+  effects), music.c (AdLib driver), timer.c.
+- Input, bench. Lines: 1,594. Files (main ones): input.c (keys, KEYS scripts, LOG), vbench.c
+  (BENCH).
 
 Python tools: 10,544 lines (the converter XCOMCONV and its parts: convert.py, ui.py,
 vgasprite.py, world.py, intro.py, sound.py, ...), plus PowerShell build and test scripts for
 86Box.
 
-### The assembly (NASM, 8086/286, 12,862 lines)
+### Assembly (NASM, 8086/286, 12,862 lines)
 
-| File | Lines | What | C upstream? | Port |
-| --- | --- | --- | --- | --- |
-| vgaasm.asm | 2,966 | the VGA prototype: 8-bit back buffer, sprite blitters for vgasprite.py's span formats (masked, OR, clipped), clear/present/shift, the cursor box, the palette; the interface (pictures streamed from UIV.PAK to A000, glyphs, the clean screen, fills, copies, BIOS-font text, the pointer); the arrow; smoke/fire overlays and DOS's smoke pictures; night lights (OpenXcom's terrain lighting, shade tables) | no | interface: **C** (`plat/vga.c`); battle view entries 0-8, 22-26: **C** (`plat/vgabat.c`), except DOS's smoke/fire pictures and the per-cell night lights (one night shade for now) |
-| vgxasm.asm | 866 | VGA outside the battle: DOS palettes per screen (PALV.PAK), VGA themes, the geoscape world view with zoom, markers | no | **done in C** (`plat/vga.c`) |
-| xmemres.asm, xmemhma.asm | 1,571 | EMS/XMS read cache hooked into INT 21h, HMA variant | no | not needed (all data fits in memory) |
-| rendasm.asm | 957 | the battlescape's floor pass (render.c draw_region): per level the tiles under the redraw rectangle, floors drawn, walls/objects/units collected | no | **C** (`plat/rend.c`) |
-| pathasm.asm | 955 | path search (Dijkstra with cost buckets) | **yes**: `path_search_c` (vbench.c) | the C one now |
-| blit.asm | 838 | EGA planar blitters | (EGA) | never used |
-| voxasm.asm | 739 | the voxel line (OpenXcom calculateLine + voxelCheck) | no (OpenXcom's C++ is the reference) | **C** (`plat/voxrun.c`): 0 mismatches against OpenXcom's lines in 1,165 lines checked (below) |
-| losasm.asm | 547 | fog of war: the fan of sight rays | no | **C** (`plat/losfan.c`; no independent reference yet) |
-| blitc.asm | 441 | CGA blitters (the VGA path keeps their names and arguments) | (CGA) | the names are the VGA entry points |
-| rdcount.asm | 404 | INT 21h read counter, the mode folder for opens | no | C (`plat/xdos.c`: the mode folder; counts 0) |
-| hgcasm.asm | 379 | Hercules | | never |
-| litasm.asm | 346 | EGA night light | | never |
-| sndasm.asm | 294 | XMS driver calls, disk-paged sprite faults | | not needed |
-| heldasm.asm | 282 | the inventory's held item at the pointer | no | to C (stage 2) |
-| cvasm.asm | 232 | EMS/XMS canvas copies | | not needed |
-| cutasm.asm | 228 | intro frame deltas (EGA/CGA runs, VGA FLI chunks) | no | FLI to C (stage 4) |
-| fxasm.asm | 215 | dithered smoke/fire overlays EGA/CGA | (VGA's in vgaasm) | via vgaasm's entry 23 |
-| arrow.asm | 211 | the selected unit's arrow | no | to C (stage 2) |
-| uiasm.asm | 173 | EGA night colours of the panel | | never |
-| video.asm | 106 | mode set, Hercules stubs | | C |
-| wayasm.asm | 67 | blaster bomb waypoints' door walk | no | **C** (`plat/way.c`) |
+- vgaasm.asm. Lines: 2,966. What: the VGA prototype: 8-bit back buffer, sprite blitters for
+  vgasprite.py's span formats (masked, OR, clipped), clear/present/shift, the cursor box,
+  the palette; the interface (pictures streamed from UIV.PAK to A000, glyphs, the clean
+  screen, fills, copies, BIOS-font text, the pointer); the arrow; smoke/fire overlays and
+  DOS's smoke pictures; night lights (OpenXcom's terrain lighting, shade tables). C in
+  upstream: no. Port: interface: **C** (`plat/vga.c`); battle view entries 0-8, 22-26:
+  **C** (`plat/vgabat.c`), except DOS's smoke/fire pictures and the per-cell night lights
+  (one night shade for now).
+- vgxasm.asm. Lines: 866. What: VGA outside the battle: DOS palettes per screen (PALV.PAK),
+  VGA themes, the geoscape world view with zoom, markers. C in upstream: no. Port: **done in
+  C** (`plat/vga.c`).
+- xmemres.asm, xmemhma.asm. Lines: 1,571. What: EMS/XMS read cache hooked into INT 21h, HMA
+  variant. C in upstream: no. Port: not needed (all data fits in memory).
+- rendasm.asm. Lines: 957. What: the battlescape's floor pass (render.c draw_region): per
+  level the tiles under the redraw rectangle, floors drawn, walls/objects/units collected. C in
+  upstream: no. Port: **C** (`plat/rend.c`).
+- pathasm.asm. Lines: 955. What: path search (Dijkstra with cost buckets). C in upstream:
+  **yes**: `path_search_c` (vbench.c). Port: the C one now.
+- blit.asm. Lines: 838. What: EGA planar blitters. C in upstream: (EGA). Port: never used.
+- voxasm.asm. Lines: 739. What: the voxel line (OpenXcom calculateLine + voxelCheck). C in
+  upstream: no (OpenXcom's C++ is the reference). Port: **C** (`plat/voxrun.c`): 0
+  mismatches against OpenXcom's lines in 1,165 lines checked (below).
+- losasm.asm. Lines: 547. What: fog of war: the fan of sight rays. C in upstream: no. Port:
+  **C** (`plat/losfan.c`; no independent reference yet).
+- blitc.asm. Lines: 441. What: CGA blitters (the VGA path keeps their names and arguments).
+  C in upstream: (CGA). Port: the names are the VGA entry points.
+- rdcount.asm. Lines: 404. What: INT 21h read counter, the mode folder for opens. C in
+  upstream: no. Port: C (`plat/xdos.c`: the mode folder; counts 0).
+- hgcasm.asm. Lines: 379. What: Hercules. Port: never.
+- litasm.asm. Lines: 346. What: EGA night light. Port: never.
+- sndasm.asm. Lines: 294. What: XMS driver calls, disk-paged sprite faults. Port: not
+  needed.
+- heldasm.asm. Lines: 282. What: the inventory's held item at the pointer. C in upstream: no.
+  Port: to C (stage 2).
+- cvasm.asm. Lines: 232. What: EMS/XMS canvas copies. Port: not needed.
+- cutasm.asm. Lines: 228. What: intro frame deltas (EGA/CGA runs, VGA FLI chunks). C in
+  upstream: no. Port: FLI to C (stage 4).
+- fxasm.asm. Lines: 215. What: dithered smoke/fire overlays EGA/CGA. C in upstream: (VGA's in
+  vgaasm). Port: via vgaasm's entry 23.
+- arrow.asm. Lines: 211. What: the selected unit's arrow. C in upstream: no. Port: to C (stage
+  2).
+- uiasm.asm. Lines: 173. What: EGA night colours of the panel. Port: never.
+- video.asm. Lines: 106. What: mode set, Hercules stubs. Port: C.
+- wayasm.asm. Lines: 67. What: blaster bomb waypoints' door walk. C in upstream: no. Port:
+  **C** (`plat/way.c`).
 
 Plus Watcom `#pragma aux` inline code in 7 files: `rl_imul`, `rl_mul14` (rules.h), `zoom_bytes`
 (geo.c), `cpu_below_286` (3 files), the SB and timer interrupt stacks: all C now
@@ -100,7 +130,7 @@ bank: so a far pointer's 16-bit arithmetic stays right), as a DOS block never pa
 A000 is the VGA picture, B800 the CGA page, 0040:006C the BIOS clock, F000:FA6E the 8 x 8
 font (`plat/font8x8.h`), the PSP and the program's MCB where `main.c` reads them. INT 10h,
 21h (memory, version, list of lists), 33h (mouse), 16h, 2Fh (no XMS), 67h (no EMS) and the
-ports (VGA DAC, OPL2 388h/389h, retrace) are answered by C. Files: DOS names (`\`, case),
+ports (VGA DAC, OPL2 388h/389h, retrace) are implemented in C. Files: DOS names (`\`, case),
 the mode folder (`VGA/` first for read-only opens, as rdcount.asm's INT 21h hook does).
 
 On the Atari816 this model needs **far data pointers by default**: a plain `T *` in the
@@ -138,22 +168,31 @@ upstream functions when `g_vga` is set (no self-modifying code). On the Atari816
 the full-screen framebuffer (320 x 200, stride 320, one bank: `horizon/hz_plat.c`), so the
 engine's drawing is the screen's, nothing copied.
 
-### The screen: 320 x 200 on 320 x 180
+### Screen: 320 x 200 on 320 x 180
 
 The VGA screenshots (upstream `release/screenshots`, lines at rows 20 and 180 drawn on
 them) show:
 
-| Screen | Rows 0-19 | Rows 180-199 | Proposal |
-| --- | --- | --- | --- |
-| Battlescape | map view | panel: soldier name, TU/health/energy/morale bars | **split**: the panel (rows 144-199, 56 rows) always shown at the bottom (Marga split at screen line 124); the view above shows 124 of the 144 rows, following the cursor / centring as the engine scrolls. Lose 20 rows of map only |
-| Geoscape | map, INTERCEPT button | message line (row ~165) and the rotate/zoom buttons | **pan**: the 180 rows shown follow the pointer (`offset = pointer_y * 20 / 179`: every row reachable, the view moves 1 row per 9 of the pointer). Alternative: move the message line to rows 160-170 (it is drawn by hud.c) and show rows 0-179 (the zoom buttons' lower third cut): rejected, the buttons matter |
-| Basescape, base screens | title, funds | GEOSCAPE button, last grid row | pan (as above) |
-| Inventory | soldier name, OK and arrow buttons | ground grid | pan |
-| UFOpaedia, briefings, reports, menus (windows centred in 200) | window frames | window frames | pan; windows centred: rarely needed |
+- Battlescape. Rows 0-19: map view. Rows 180-199: panel: soldier name,
+  TU/health/energy/morale bars. Proposal: **split**: the panel (rows 144-199, 56 rows)
+  always shown at the bottom (Marga split at screen line 124); the view above shows 124 of
+  the 144 rows, following the cursor / centring as the engine scrolls. Lose 20 rows of map
+  only.
+- Geoscape. Rows 0-19: map, INTERCEPT button. Rows 180-199: message line (row ~165) and the
+  rotate/zoom buttons. Proposal: **pan**: the 180 rows shown follow the pointer (`offset =
+  pointer_y * 20 / 179`: every row reachable, the view moves 1 row per 9 of the pointer).
+  Alternative: move the message line to rows 160-170 (it is drawn by hud.c) and show rows
+  0-179 (the zoom buttons' lower third cut): rejected, the buttons matter.
+- Basescape, base screens. Rows 0-19: title, funds. Rows 180-199: GEOSCAPE button, last grid
+  row. Proposal: pan (as above).
+- Inventory. Rows 0-19: soldier name, OK and arrow buttons. Rows 180-199: ground grid.
+  Proposal: pan.
+- UFOpaedia, briefings, reports, menus (windows centred in 200). Rows 0-19: window frames.
+  Rows 180-199: window frames. Proposal: pan; windows centred: rarely needed.
 
 Panning is one `hg_scroll` per change (free) and works for every screen without touching
-the engine; it is in `horizon/hz_plat.c` now. The battlescape's split needs the engine to say
-"battle" (the view's size is `VIEW_H`, a constant; the split is the platform's).
+the engine; it is in `horizon/hz_plat.c` now. The battlescape's split needs a signal from the
+engine for "battle" (the view's size is `VIEW_H`, a constant; the split is the platform's).
 
 **640 x 360?** It would show the whole 320 x 200 at 1:1 in a 640 x 360 screen (a window
 half the monitor's size, black around), or need 2 x 1.8 scaling (no hardware scaling). Text
@@ -208,55 +247,82 @@ Atari816 with `/V`, so the two can be compared run for run.
 
 ### Watcom specifics and how each is handled
 
-| Construct | Count (upstream) | Handling |
-| --- | --- | --- |
-| `far`, `__far` | 133 `__far`, `far` on about 290 lines | `#define far __far` (cc816) / nothing (host); see the data model |
-| `__near` | 67 | nothing (near is cc816's default) |
-| `__cdecl`, `__pascal`, `__interrupt`, `__loadds` | 86 + 4 | nothing |
-| `#pragma aux` | 10 in 7 files | C functions (`plat/asm.c`; `geo.c`'s static `zoom_bytes` by the patch); cc816 ignores the pragma silently |
-| `int86`, `int86x`, `intdos`, `intdosx`, `intr`, `segread`, `union REGS`, `union REGPACK` | 82 calls in 18 files | `compat/xdos.h` + `plat/xdos.c`: the services answered |
-| `MK_FP`, `FP_SEG`, `FP_OFF` | 229 in 41 files | the arena (above) |
-| `_dos_allocmem/freemem/setblock`, `_dos_open/read/close/findfirst/findnext`, `_dos_getvect/setvect` | 88 | the model |
-| `inp`, `outp`, `outpw` | 193 in 13 files (EGA registers mostly, the DAC, OPL2, PIT, SB) | the model's port table |
-| `_fmemcpy`, `_fmemset`, `_fmemcmp`, `_fmemmove` | 63 | the near ones (host); see the data model (816) |
-| `_psp`, `__argc/__argv`, `_amblksiz`, `_nmalloc`, `_fheapshrink`, `_ovl_addarea` | a few | the model |
-| `stricmp`, `strupr` | 63 | `strcasecmp`, a C `strupr` |
-| `getenv` (BLASTER, XCV, XPIC, XWALK, XLIT) | 9 | none set |
-| self-modifying hooks (`vgainit.c`, `vgageo.c`: code bytes of C functions overwritten) | 2 files | replaced by `plat/vga.c`; the hooked functions call it (the patch) |
-| `T far *a, far *b;` (a qualifier before a later declarator's `*`) | 8 lines | one declarator a line (the patch): cc816 rejects it ("Invalid declarator") |
-| far function pointers `void (__far *f)(void)` | 4 | not needed in the port (the patch, `xd_isr`) |
-| 8.3 names, `\` | in strings | the model's file names |
+- `far`, `__far`. Count (upstream): 133 `__far`, `far` on about 290 lines. Handling:
+  `#define far __far` (cc816) / nothing (host); see the data model.
+- `__near`. Count (upstream): 67. Handling: nothing (near is cc816's default).
+- `__cdecl`, `__pascal`, `__interrupt`, `__loadds`. Count (upstream): 86 + 4. Handling:
+  nothing.
+- `#pragma aux`. Count (upstream): 10 in 7 files. Handling: C functions (`plat/asm.c`;
+  `geo.c`'s static `zoom_bytes` by the patch); cc816 ignores the pragma silently.
+- `int86`, `int86x`, `intdos`, `intdosx`, `intr`, `segread`, `union REGS`, `union REGPACK`.
+  Count (upstream): 82 calls in 18 files. Handling: `compat/xdos.h` + `plat/xdos.c`: the
+  services implemented.
+- `MK_FP`, `FP_SEG`, `FP_OFF`. Count (upstream): 229 in 41 files. Handling: the arena
+  (above).
+- `_dos_allocmem/freemem/setblock`, `_dos_open/read/close/findfirst/findnext`,
+  `_dos_getvect/setvect`. Count (upstream): 88. Handling: the model.
+- `inp`, `outp`, `outpw`. Count (upstream): 193 in 13 files (EGA registers mostly, the DAC,
+  OPL2, PIT, SB). Handling: the model's port table.
+- `_fmemcpy`, `_fmemset`, `_fmemcmp`, `_fmemmove`. Count (upstream): 63. Handling: the near
+  ones (host); see the data model (816).
+- `_psp`, `__argc/__argv`, `_amblksiz`, `_nmalloc`, `_fheapshrink`, `_ovl_addarea`. Count
+  (upstream): a few. Handling: the model.
+- `stricmp`, `strupr`. Count (upstream): 63. Handling: `strcasecmp`, a C `strupr`.
+- `getenv` (BLASTER, XCV, XPIC, XWALK, XLIT). Count (upstream): 9. Handling: none set.
+- self-modifying hooks (`vgainit.c`, `vgageo.c`: code bytes of C functions overwritten).
+  Count (upstream): 2 files. Handling: replaced by `plat/vga.c`; the hooked functions call
+  it (the patch).
+- `T far *a, far *b;` (a qualifier before a later declarator's `*`). Count (upstream): 8
+  lines. Handling: one declarator a line (the patch): cc816 rejects it ("Invalid
+  declarator").
+- far function pointers `void (__far *f)(void)`. Count (upstream): 4. Handling: not needed
+  in the port (the patch, `xd_isr`).
+- 8.3 names, `\`. Count (upstream): in strings. Handling: the model's file names.
 
 Nothing else of C was missing in cc816: no VLAs, no `long long`, floating point in 19 lines
 (statistics), 16-bit `int` assumed throughout (the engine *is* 16-bit code: cc816's 16-bit
-int is an advantage; the host's 32-bit int is the exception, see "The host build").
+int is an advantage; the host's 32-bit int is the exception, see "Host build").
 
-## 2. What was built
+## 2. Components
 
-| Path | What |
-| --- | --- |
-| `engine/` | the engine, our fork of XCOM-XT (`engine/FORK.md`; until section 4g: `tools/getsrc.sh` fetched upstream into `upstream/` and the Makefile applied `patches/`) |
-| `tools/getdata.sh` | the fork's XCOMCONV (`engine/tools/xcomconv.py`) on your copy into `data/packs/` |
-| `tools/mkfont8.py` | `plat/font8x8.h` (the BIOS font) from a Linux console font |
-| (`patches/src-0001-port.patch`, `patches/tools-0001-he-type.patch`) | the first changes to upstream (13 files, about 180 lines, all `#if defined(XCOM_PORT)`) and the converter's for the GOG copy: now in `engine/` |
-| `compat/` | `xcompat.h` (given to every file: keywords, `long` 32 bits on the host), `xdos.h` (the DOS machine), `xport.h` (the hooks), Watcom's headers (`i86.h`, `dos.h`, `conio.h`, `bios.h`, `malloc.h`, `io.h`) |
-| `plat/` | `xdos.c` (the DOS model), `timer.c` (upstream's timer.c's interface on the platform's clock), `vga.c` (vgainit + the VGA interface + vgxasm in C), `vgabat.c` (vgaasm's battle view), `rend.c` (rendasm), `losfan.c` (losasm), `voxrun.c` (voxasm), `way.c` (wayasm), `asm.c` (every other assembly routine: C or a stub that says so once), `plat.h` (the back ends' interface) |
-| `host/host.c` | the Linux back end: headless, virtual clock, pictures (PPM) whenever the screen changed at a wait, the end after 30 s of no input |
-| `horizon/hz_plat.c` | the Atari816 back end: arena in 17 banks, A000 = the framebuffer, pan, keys, mouse, OPL2, clock |
-| `tests/geo.keys`, `tests/battle.keys`, `tests/runs`, `tests/host.sh`, `tests/host.md5` | the host's reference runs (`make check-host`): a new game to the geoscape, base, UFOpaedia, graphs; a quick battle (FA1, sectoids, seed 1); 14 pictures checked by MD5 (no picture of the game in git) |
-| `tests/bench816/` | the Atari816 measurements (section 3) |
-| `Makefile` | `src`, `data`, `host`, `host-run`, `check-host`, `refs-host`, `XCOM.PRG` |
+- `engine/`. What: the engine, our fork of XCOM-XT (`engine/FORK.md`; until section 4g:
+  `tools/getsrc.sh` fetched upstream into `upstream/` and the Makefile applied `patches/`).
+- `tools/getdata.sh`. What: the fork's XCOMCONV (`engine/tools/xcomconv.py`) on your copy
+  into `data/packs/`.
+- `tools/mkfont8.py`. What: `plat/font8x8.h` (the BIOS font) from a Linux console font.
+- (`patches/src-0001-port.patch`, `patches/tools-0001-he-type.patch`). What: the first
+  changes to upstream (13 files, about 180 lines, all `#if defined(XCOM_PORT)`) and the
+  converter's for the GOG copy: now in `engine/`.
+- `compat/`. What: `xcompat.h` (given to every file: keywords, `long` 32 bits on the host),
+  `xdos.h` (the DOS machine), `xport.h` (the hooks), Watcom's headers (`i86.h`, `dos.h`,
+  `conio.h`, `bios.h`, `malloc.h`, `io.h`).
+- `plat/`. What: `xdos.c` (the DOS model), `timer.c` (upstream's timer.c's interface on the
+  platform's clock), `vga.c` (vgainit + the VGA interface + vgxasm in C), `vgabat.c`
+  (vgaasm's battle view), `rend.c` (rendasm), `losfan.c` (losasm), `voxrun.c` (voxasm),
+  `way.c` (wayasm), `asm.c` (every other assembly routine: C or a stub that prints a notice once),
+  `plat.h` (the back ends' interface).
+- `host/host.c`. What: the Linux back end: headless, virtual clock, pictures (PPM) whenever
+  the screen changed at a wait, the end after 30 s of no input.
+- `horizon/hz_plat.c`. What: the Atari816 back end: arena in 17 banks, A000 = the
+  framebuffer, pan, keys, mouse, OPL2, clock.
+- `tests/geo.keys`, `tests/battle.keys`, `tests/runs`, `tests/host.sh`, `tests/host.md5`.
+  What: the host's reference runs (`make check-host`): a new game to the geoscape, base,
+  UFOpaedia, graphs; a quick battle (FA1, sectoids, seed 1); 14 pictures checked by MD5 (no
+  picture of the game in git).
+- `tests/bench816/`. What: the Atari816 measurements (section 3).
+- `Makefile`. What: `src`, `data`, `host`, `host-run`, `check-host`, `refs-host`,
+  `XCOM.PRG`.
 
-### The converter
+### Converter
 
 `python3 tools/xcomconv.py GAME -o OUT` runs on Linux with Python 3.12+ (3.14 here) and
 PyYAML; 33 s for all three modes (EGA 15 MB, CGA 9 MB, VGA 18 MB, shared 0.3 MB). The
 user's copy is the **GOG edition**, which is not DOS 1.4 byte for byte: BIGLETS.DAT (44,288
 bytes against 32,768), SMALLSET.DAT and ENGLISH.DAT differ (the Collector's Edition fonts
 and texts), and several terrain MCD records have HE_Type 1 (smoke, in OpenXcom's terms: the
-UFOs' power-source parts, a URBAN record), which convert.py refuses. `--skip-check` passes
+UFOs' power-source parts, a URBAN record), which convert.py rejects. `--skip-check` passes
 the first; `patches/tools-0001-he-type.patch` leaves those records out of the "explodes"
-list (the engine knows only high explosive; they break without a blast). The fonts converted
+list (the engine handles only high explosive; they break without a blast). The fonts converted
 fine (the menus' text looks right). To report upstream: GOG data.
 
 Format decision: **the VGA packs as they are for stage 2**, read by the engine's own
@@ -266,7 +332,7 @@ span-coded sprites) into blitter atlases in far memory, as `ports/prince` did, b
 CPU cannot draw them fast enough (section 3). UI pictures stay streamed from UIV.PAK (the
 card reads straight into the framebuffer).
 
-### The host build
+### Host build
 
 `make host`: gcc, 64-bit Linux, all 87 upstream files that the port builds (timer.c,
 vgainit.c, vgageo.c are replaced) plus `plat/` and `host/`. Run in the packs folder:
@@ -317,7 +383,7 @@ levels about 2-3 times that.
 `engine/tools/voxcheck.py` (upstream's) reads `vcol` at the wrong offset for pack format 4 (a fixed copy
 in the agent's scratch): to report upstream.
 
-### The Atari816 build
+### Atari816 build
 
 `make`: every upstream file compiles with cc816 (`hcc --code large`), after the 8 lines of
 "one far declarator a line" and the far function pointers in the patch. Warnings with
@@ -331,14 +397,12 @@ The link fails:
 hcc: XCOM.PRG does not fit in its code bank (the main bank), by 18,428 bytes
 ```
 
-| Part of the main bank | Bytes |
-| --- | --- |
-| constants (RODATA: strings, const tables) | 51,058 |
-| bss | 24,705 (+1,600 with the battle view's buffers: over by 18,428 now) |
-| data | 268 |
-| code that must stay (startup, libraries' assembly) | 5,430 |
-| heap + software stack (8 KB + 8 KB as linked) | 16,384 |
-| movable code (in other banks) | 578,218 in 1,823 functions (9 banks) |
+- constants (RODATA: strings, const tables). Bytes: 51,058.
+- bss. Bytes: 24,705 (+1,600 with the battle view's buffers: over by 18,428 now).
+- data. Bytes: 268.
+- code that must stay (startup, libraries' assembly). Bytes: 5,430.
+- heap + software stack (8 KB + 8 KB as linked). Bytes: 16,384.
+- movable code (in other banks). Bytes: 578,218 in 1,823 functions (9 banks).
 
 Biggest contributors: items.c (4,966 of tables), unit.c (5,037 bss), geo.c (4,190), xdos.c
 (3,695: the port's buffers, movable), vbench.c (2,957 strings), vga.c (2,614), main.c,
@@ -350,18 +414,19 @@ The engine cannot run on the 816 yet, so the VGA path's work was measured with t
 packs on the card by `tests/bench816/bench.c` (emu816, Horizon 0.30, REV $0C; the emulator
 models the board's memory timing within about 5 %, but not the card's speed):
 
-| Work | Time |
-| --- | --- |
-| a full-screen picture from UIV.PAK into the framebuffer, `read()` in 512-byte pieces + far copies (what `_dos_read` does now) | 132.8 ms |
-| the same, `hz_read` straight into the framebuffer | 1.4 ms in the emulator (the board's card: about 170 KB/s, so about 0.38 s, as an XT's disk) |
-| geoscape world view 256 x 160, zoom 0 (row copies, MVN) | 46.5 ms |
-| the same zoomed 2x / 4x (C byte loop through far pointers) | 351.6 / 277.4 ms |
-| battle view present, 320 x 144 back buffer to the screen (MVN) | 40.4 ms |
-| one 32 x 40 masked sprite, C byte loop through far pointers (as vgaasm.asm's spans would be in C) | 8.76 ms |
-| the same as 40 MVN spans of 24 bytes | 2.36 ms |
-| the same by the blitter (hgame image, keyed, 300 queued, one flush) | 0.29 ms |
+- a full-screen picture from UIV.PAK into the framebuffer, `read()` in 512-byte pieces + far
+  copies (what `_dos_read` does now). Time: 132.8 ms.
+- the same, `hz_read` straight into the framebuffer. Time: 1.4 ms in the emulator (the
+  board's card: about 170 KB/s, so about 0.38 s, as an XT's disk).
+- geoscape world view 256 x 160, zoom 0 (row copies, MVN). Time: 46.5 ms.
+- the same zoomed 2x / 4x (C byte loop through far pointers). Time: 351.6 / 277.4 ms.
+- battle view present, 320 x 144 back buffer to the screen (MVN). Time: 40.4 ms.
+- one 32 x 40 masked sprite, C byte loop through far pointers (as vgaasm.asm's spans would
+  be in C). Time: 8.76 ms.
+- the same as 40 MVN spans of 24 bytes. Time: 2.36 ms.
+- the same by the blitter (hgame image, keyed, 300 queued, one flush). Time: 0.29 ms.
 
-What it says:
+Conclusions:
 - **The battle view cannot be drawn by the CPU.** A full redraw draws hundreds of sprites
   (floors, walls, objects, units over 4 levels; upstream's BENCH reports the counts: to be
   measured on the host in stage 2): at 2-9 ms a sprite that is seconds per redraw, against
@@ -381,28 +446,111 @@ What it says:
 
 ## 4. SDK needs and cc816 problems (not changed: notes for the SDK)
 
-| # | What | Kind | Minimal case |
-| --- | --- | --- | --- |
-| 1 | **A far data model.** A DOS large-model program's plain pointers are far (seg:off); its heap is far. cc816's plain pointers are main-bank offsets, so the engine's 640 KB of data cannot be reached without changing every pointer declaration of 49,000 lines (80 `-Wfar-pointer` sites are only where a far value is visibly assigned; every malloc'd structure is the rest). Needed: an option (`--data far`) under which unqualified data pointers are 32-bit far pointers, `__near` gives a main-bank one, malloc/calloc/realloc/free allocate far (blocks within a bank, like DOS's), string literals and statics may live in far banks, and the C library takes far pointers (strlen, memcpy, sprintf, fread/fwrite, ...). This is Watcom's `-ml`; it would serve every large-model DOS port. Objects never cross a bank, so pointer arithmetic stays 16-bit on the offset, as Watcom's far pointers do. | cc816 + libc feature | `char *p = malloc(40000); p[39999] = 1;` (with `--data far`: works in any bank; today: the heap is the main bank's, 40,000 bytes never fit beside 76 KB of constants and bss) |
-| 2 | **Constants and statics outside the main bank.** 51 KB of constants + 25 KB of bss do not fit 64 KB even with no heap or stack. With (1) they could go to far banks; without it, a per-file option (`--rodata far` for files whose strings are only passed to the engine's own functions) would do. Same wish as skyroads' #10 | hcc/cc816 | `static const char *const names[] = { "a", ... }` in 90 files: the main bank fills with strings |
-| 3 | `T __far *a, __far *b;` and `int a = 1, __far *p;` are refused ("Invalid declarator"). Watcom and Microsoft C accept a far qualifier before a later declarator's `*`; it appears in 8 upstream lines. Known (pitfalls.md says "not C"); accepting it as `T __far *b` would make DOS code compile unchanged | cc816 extension | `unsigned char __far *p, __far *q;` |
-| 4 | Far function pointers: `void (__far *f)(void);` refused. cc816 has no far code pointers (the large model's function pointers are main-bank thunks), so the right answer may be to accept `__far` there and ignore it, with a warning | cc816 | `void (__far *fp)(void);` |
-| 5 | `#pragma aux name = "..."` is ignored silently: a function defined only by its pragma becomes an undefined symbol at the link (or a static one never defined). A warning ("Watcom inline code ignored: name needs a C body") would point at all 10 at once | cc816 diagnostic | `#pragma aux f = "nop"` then `int f(void); int main(void){ return f(); }` |
-| 6 | Far byte loops are slow: `if (*s) d[k] = *s;` over far pointers runs about 120-200 cycles a byte (8.8 ms for a 32 x 40 sprite) | cc816 speed | the sprite loop in `tests/bench816/bench.c` |
-| 7 | `read()` into a near buffer + `hz_far_copy` is the only portable way to read into far memory, 100 times slower than `hz_read` into it: a `read_far(fd, void __far *, n)` in the library (honouring the read-ahead) would be the right tool | libc wish | `tests/bench816/bench.c` pictures |
-| 8 | `od65` (cc65's object dumper) is not installed on the build machine, and hcc has no per-module size report: the main bank's parts per file came from `--keep`'s trial map. `hcc --sizes` (per object: constants, data, bss) would help every port | hcc wish | |
-| 9 | **hgame's full screen gets no pointer motion without a button**: `hg_screen_fb` opens its window without `WF_HOVER`, so `hg_mouse_x/y` move only while a button is held; a mouse-driven game's pointer does not follow the mouse. The port reads `ws_mouse` itself. Wanted: `WF_HOVER` for full-screen windows (or an `HG_MOUSE` flag) | hgame | `hg_screen(HG_320X180, "t"); while (hg_frame()) printf("%d\n", hg_mouse_x);` with the mouse moved, no button: the value never changes |
-| 10 | **No way to send a scroll/split without a frame**: a program that keeps its own time (a DOS port: `hg_poll`, never `hg_frame`) cannot make `hg_scroll`/`hg_split` take effect; the port calls `hz_fs_scroll(&hg__scr)` on hgame's internal block. Wanted: `hg_view_send()` (or `hg_poll` sending a changed scroll) | hgame | `hg_screen_fb(HG_320X180, "t", 320, 200); hg_scroll(0, 20); for (;;) hg_poll();`: the view never moves |
-| 11 | `read()` returns `int`: with 16-bit int a read of 32,768 bytes or more looks negative (`k < 0` taken for an error). The port tests `k == -1`. Wanted: a line in c-library.md (or `ssize_t` as `long`) | libc doc | `int k = read(fd, p, 40000u); if (k < 0) ...` |
-| 12 | **A far pointer plus an int that overflowed.** `cost + 4 * TILES` (an enum, 4 x 10,000 = 40,000: -25,536 in 16-bit int) wrapped back to offset 40,000 on DOS (Watcom adds to the offset alone); cc816's 24-bit far pointer goes 25 KB back into another block (here: the path search's bucket array over the walk tables, every alien path different from the host's). Documented as unsupported (reference.md, "Arithmetic"); `-Woverflow` finds it (2 sites in 49,000 lines), but the port builds with `-w`. Wanted: `-Woverflow` on even under `-w` (it is never harmless next to a far pointer), or an int addend added to the offset alone, as an element access already is | cc816 | `unsigned char __far *p = ...; enum { T = 10000 }; unsigned short __far *b = (unsigned short __far *)(p + 4 * T);` |
-| 13 | **Argument evaluation order.** cc816 evaluates a call's arguments left to right, gcc and Watcom right to left; `hurt(u, roll_damage(), rl_side())` (both call `rnd`) drew the random numbers in the other order: different damage than DOS. Unspecified in C, but every DOS port depends on it somewhere. Wanted: a warning when two arguments of one call both call functions (or an option for right-to-left) | cc816 | `int a(void), b(void); void f(int, int); f(a(), b());` |
-| 14 | Horizon: no bank can be shared by two tasks (a helper task reading the game's memory is killed, cause 02): the music task loads MUSIC.PAK itself (2 banks) | Horizon note | |
-| 15 | run816.py: the emulator always runs to `--seconds`, also after the program has ended: a test suite pays for the longest run's budget in every run (tests/check.sh gives each run its own `s=N`). Wanted: `--stop-on TEXT` (end the run when the console shows TEXT), or end at the program's exit in shell mode | tool wish | |
-| 16 | console.txt and `--log-lau` have no emulated-time stamps: a test cannot line up the program's phases (an alien turn) with `--log-opl-us` | tool wish | |
-| 17 | The Desktop leaves 3,136 KB free of 8 MB at a program's start (emu816, Files open): an app's `mem=` must fit that | note | `--needs mem=4096K` refused: "XCOM needs 4096 KB of free memory (3136 KB free)" |
-| 18 | **ca65 takes a small constant as a direct-page address**: `lda V_N,x` with `V_N = 62` (a field's offset in a block whose address is in X, DBR the main bank) is assembled as `lda dp,x` (B5 3E): it reads the direct page in bank 0, not the block; a store there trashes the direct page or kills the task (cause 02, an address in bank 0). The SDK's own assembly addresses blocks by symbol (`_hz_ph+44`: absolute), so this only bites a routine that takes the block's address at run time. `a:V_N,x` forces absolute. Wanted: a line in reference.md ("In the large code model" / "Movable assembly"), or a `-W` in hcc's ca65 call for `dp,x` with a constant below 256 in a FUNC segment | doc | `.p816` `.a16` `.i16` `V_N = 62` then `lda V_N,x` assembles to `B5 3E`; `lda a:V_N,x` to `BD 3E 00` |
-| 19 | prof816: `--prof-from/--prof-to` count from the program's start, `--console-times` from the machine's (in shell mode the program starts about 4.75 s later): a window taken from the console lands seconds late. And only exported names (or `_name` labels) become rows: an assembly function's own loops are all charged to its exported entry | tool wish | a console line at 23.07 s marks a phase; `--prof-from 23.07` profiles from 27.8 s of the machine |
-| 20 | The blitter waits and the vertical-blank sleeps show only as "idle (WAI)" and "syscall $0F": which of the program's calls slept is not in the profile (each syscall row could name its callers' functions) | tool wish | |
+1. **A far data model.** A DOS large-model program's plain pointers are far (seg:off); its
+   heap is far. cc816's plain pointers are main-bank offsets, so the engine's 640 KB of data
+   cannot be reached without changing every pointer declaration of 49,000 lines (80
+   `-Wfar-pointer` sites are only where a far value is visibly assigned; every malloc'd
+   structure is the rest). Needed: an option (`--data far`) under which unqualified data
+   pointers are 32-bit far pointers, `__near` gives a main-bank one,
+   malloc/calloc/realloc/free allocate far (blocks within a bank, like DOS's), string
+   literals and statics may live in far banks, and the C library takes far pointers (strlen,
+   memcpy, sprintf, fread/fwrite, ...). This is Watcom's `-ml`; it would serve every
+   large-model DOS port. Objects never cross a bank, so pointer arithmetic stays 16-bit on
+   the offset, as Watcom's far pointers do. Kind: cc816 + libc feature. Minimal case: `char
+   *p = malloc(40000); p[39999] = 1;` (with `--data far`: works in any bank; today: the heap
+   is the main bank's, 40,000 bytes never fit beside 76 KB of constants and bss).
+2. **Constants and statics outside the main bank.** 51 KB of constants + 25 KB of bss do not
+   fit 64 KB even with no heap or stack. With (1) they could go to far banks; without it, a
+   per-file option (`--rodata far` for files whose strings are only passed to the engine's
+   own functions) would do. Same wish as skyroads' #10. Kind: hcc/cc816. Minimal case:
+   `static const char *const names[] = { "a", ... }` in 90 files: the main bank fills with
+   strings.
+3. `T __far *a, __far *b;` and `int a = 1, __far *p;` are rejected ("Invalid declarator").
+   Watcom and Microsoft C accept a far qualifier before a later declarator's `*`; it appears
+   in 8 upstream lines. Known (pitfalls.md: "not C"); accepting it as `T __far *b` would
+   make DOS code compile unchanged. Kind: cc816 extension. Minimal case: `unsigned char
+   __far *p, __far *q;`.
+4. Far function pointers: `void (__far *f)(void);` rejected. cc816 has no far code pointers
+   (the large model's function pointers are main-bank thunks), so the right answer may be to
+   accept `__far` there and ignore it, with a warning. Kind: cc816. Minimal case: `void
+   (__far *fp)(void);`.
+5. `#pragma aux name = "..."` is ignored silently: a function defined only by its pragma
+   becomes an undefined symbol at the link (or a static one never defined). A warning
+   ("Watcom inline code ignored: name needs a C body") would point at all 10 at once. Kind:
+   cc816 diagnostic. Minimal case: `#pragma aux f = "nop"` then `int f(void); int
+   main(void){ return f(); }`.
+6. Far byte loops are slow: `if (*s) d[k] = *s;` over far pointers runs about 120-200 cycles
+   a byte (8.8 ms for a 32 x 40 sprite). Kind: cc816 speed. Minimal case: the sprite loop in
+   `tests/bench816/bench.c`.
+7. `read()` into a near buffer + `hz_far_copy` is the only portable way to read into far
+   memory, 100 times slower than `hz_read` into it: a `read_far(fd, void __far *, n)` in the
+   library (honouring the read-ahead) would be the right tool. Kind: libc wish. Minimal
+   case: `tests/bench816/bench.c` pictures.
+8. `od65` (cc65's object dumper) is not installed on the build machine, and hcc has no
+   per-module size report: the main bank's parts per file came from `--keep`'s trial map.
+   `hcc --sizes` (per object: constants, data, bss) would help every port. Kind: hcc wish.
+9. **hgame's full screen gets no pointer motion without a button**: `hg_screen_fb` opens its
+   window without `WF_HOVER`, so `hg_mouse_x/y` move only while a button is held; a
+   mouse-driven game's pointer does not follow the mouse. The port reads `ws_mouse` itself.
+   Wanted: `WF_HOVER` for full-screen windows (or an `HG_MOUSE` flag). Kind: hgame. Minimal
+   case: `hg_screen(HG_320X180, "t"); while (hg_frame()) printf("%d\n", hg_mouse_x);` with
+   the mouse moved, no button: the value never changes.
+10. **No way to send a scroll/split without a frame**: a program that keeps its own time (a
+    DOS port: `hg_poll`, never `hg_frame`) cannot make `hg_scroll`/`hg_split` take effect;
+    the port calls `hz_fs_scroll(&hg__scr)` on hgame's internal block. Wanted:
+    `hg_view_send()` (or `hg_poll` sending a changed scroll). Kind: hgame. Minimal case:
+    `hg_screen_fb(HG_320X180, "t", 320, 200); hg_scroll(0, 20); for (;;) hg_poll();`: the
+    view never moves.
+11. `read()` returns `int`: with 16-bit int a read of 32,768 bytes or more looks negative
+    (`k < 0` taken for an error). The port tests `k == -1`. Wanted: a line in c-library.md
+    (or `ssize_t` as `long`). Kind: libc doc. Minimal case: `int k = read(fd, p, 40000u); if
+    (k < 0) ...`.
+12. **A far pointer plus an int that overflowed.** `cost + 4 * TILES` (an enum, 4 x 10,000 =
+    40,000: -25,536 in 16-bit int) wrapped back to offset 40,000 on DOS (Watcom adds to the
+    offset alone); cc816's 24-bit far pointer goes 25 KB back into another block (here: the
+    path search's bucket array over the walk tables, every alien path different from the
+    host's). Documented as unsupported (reference.md, "Arithmetic"); `-Woverflow` finds it
+    (2 sites in 49,000 lines), but the port builds with `-w`. Wanted: `-Woverflow` on even
+    under `-w` (it is never harmless next to a far pointer), or an int addend added to the
+    offset alone, as an element access already is. Kind: cc816. Minimal case: `unsigned char
+    __far *p = ...; enum { T = 10000 }; unsigned short __far *b = (unsigned short __far *)(p
+    + 4 * T);`.
+13. **Argument evaluation order.** cc816 evaluates a call's arguments left to right, gcc and
+    Watcom right to left; `hurt(u, roll_damage(), rl_side())` (both call `rnd`) drew the
+    random numbers in the other order: different damage than DOS. Unspecified in C, but
+    every DOS port depends on it somewhere. Wanted: a warning when two arguments of one call
+    both call functions (or an option for right-to-left). Kind: cc816. Minimal case: `int
+    a(void), b(void); void f(int, int); f(a(), b());`.
+14. Horizon: no bank can be shared by two tasks (a helper task reading the game's memory is
+    killed, cause 02): the music task loads MUSIC.PAK itself (2 banks). Kind: Horizon note.
+15. run816.py: the emulator always runs to `--seconds`, also after the program has ended: a
+    test suite pays for the longest run's budget in every run (tests/check.sh gives each run
+    its own `s=N`). Wanted: `--stop-on TEXT` (end the run when the console shows TEXT), or
+    end at the program's exit in shell mode. Kind: tool wish.
+16. console.txt and `--log-lau` have no emulated-time stamps: a test cannot line up the
+    program's phases (an alien turn) with `--log-opl-us`. Kind: tool wish.
+17. The Desktop leaves 3,136 KB free of 8 MB at a program's start (emu816, Files open): an
+    app's `mem=` must fit that. Kind: note. Minimal case: `--needs mem=4096K` rejected: "XCOM
+    needs 4096 KB of free memory (3136 KB free)".
+18. **ca65 takes a small constant as a direct-page address**: `lda V_N,x` with `V_N = 62` (a
+    field's offset in a block whose address is in X, DBR the main bank) is assembled as `lda
+    dp,x` (B5 3E): it reads the direct page in bank 0, not the block; a store there trashes
+    the direct page or kills the task (cause 02, an address in bank 0). The SDK's own
+    assembly addresses blocks by symbol (`_hz_ph+44`: absolute), so this only bites a
+    routine that takes the block's address at run time. `a:V_N,x` forces absolute. Wanted: a
+    line in reference.md ("Large code model" / "Movable assembly"), or a `-W` in
+    hcc's ca65 call for `dp,x` with a constant below 256 in a FUNC segment. Kind: doc.
+    Minimal case: `.p816` `.a16` `.i16` `V_N = 62` then `lda V_N,x` assembles to `B5 3E`;
+    `lda a:V_N,x` to `BD 3E 00`.
+19. prof816: `--prof-from/--prof-to` count from the program's start, `--console-times` from
+    the machine's (in shell mode the program starts about 4.75 s later): a window taken from
+    the console lands seconds late. And only exported names (or `_name` labels) become rows:
+    an assembly function's own loops are all charged to its exported entry. Kind: tool wish.
+    Minimal case: a console line at 23.07 s marks a phase; `--prof-from 23.07` profiles from
+    27.8 s of the machine.
+20. The blitter waits and the vertical-blank sleeps show only as "idle (WAI)" and "syscall
+    $0F": which of the program's calls slept is not in the profile (each syscall row could
+    name its callers' functions). Kind: tool wish.
 
 **Where items 9-17 stand (24 November 2026).**
 
@@ -415,7 +563,7 @@ What it says:
 - 12: `-Woverflow` is no longer silenced by `-w` (the build now prints `geo.c:180`'s
   `WMAP_W * WMAP_H`, 51,200 into an `unsigned`: harmless); cc816 has `-ffar-wrap` (far
   pointer arithmetic on the offset alone, DOS's), not used by the port, whose upstream fix
-  (`4u * TILES`, src-0005) stays (reference.md, "The far data model", "Pointers").
+  (`4u * TILES`, src-0005) stays (reference.md, "Far data model", "Pointers").
 - 13: cc816 has `-fargs-right-to-left` (DOS's order) and `-Wsequence-args`, which names 44
   calls in the port's sources (most of them `log_printf`/`sprintf` of getters; battle.c's
   `hurt` is the one known to matter, fixed by src-0003's `HURT`). The port keeps
@@ -438,7 +586,7 @@ What it says:
 ## 4b. Stage 3's gate: the far data model (done, 23 November 2026)
 
 The SDK now has items 1-5 and 7-8 of the table above: `hcc --code large --data far`
-(sdk/docs/c/reference.md, "The far data model"): plain data pointers are 32-bit far
+(sdk/docs/c/reference.md, "Far data model"): plain data pointers are 32-bit far
 pointers, string literals and `const` tables live in banks of far data, `malloc` takes
 banks from Horizon, the C library and hgame take far pointers, `read` goes straight into
 far memory, `T far *a, far *b;` and `void (far *f)(void)` compile, `#pragma aux` is
@@ -448,13 +596,23 @@ warned about, and `hcc --sizes` lists every object. The port changed only `Makef
 (`_dos_read`/`_dos_write` straight into the arena) and `horizon/hz_plat.c` (`@FILE`: the
 options of a test from a file, `tests/*.args`). Upstream is untouched.
 
-| | |
-| --- | --- |
-| XCOM.PRG | 833,994 bytes: an o65 of 21 KB, 12 code banks (732,183 bytes of code; 578,218 with near data: far pointers make it 27 % bigger), 1 bank of far data (51,168 bytes: the strings and constant tables) |
-| The main bank | 46,577 bytes besides movable code: code that must stay 8,005, constants 3,517, data 319, bss 34,736 (the biggest, `hcc --sizes`: hgame's record queues 4.6 KB, `arena` 2 KB, `g_units` 2 KB, `save_box` 1.3 KB); + `--heap 2048` + `--stack 8192` = 56,817 of 65,264; 8 KB of it then filled with movable code |
-| Banks at run time | 13 for the program, 17 for the DOS arena, the framebuffer's |
-| Boot | `X.PRG @GEO.ARG` (`/V VGA NOINTRO LOG GEO.TXT KEYS GEO.KEY`): the start menu, a new game, the base placed, the geoscape within 20 s of emulated time; the whole of tests/geo.keys (the base, the UFOpaedia, the graphs) by about 80 s |
-| Against the host | GEO.TXT and BATTLE.TXT (tests/battle.keys: a quick battle on FA1V, sectoids, seed 1, to "script finished") are the host's line for line, except the VGA buffer's segment (the structures' sizes differ: 16-bit `int`, 4-byte pointers) and BATTLE.TXT's "KB in all" (the host prints 0: a 32-bit `int` fault of the host build; the Atari816's 434 is the DOS model's own figure); every screenshot is one of the host's pictures but for 55 pixels (the mouse arrow: the emulator's pointer at 0,0) |
+- XCOM.PRG: 833,994 bytes: an o65 of 21 KB, 12 code banks (732,183 bytes of code; 578,218
+  with near data: far pointers make it 27 % bigger), 1 bank of far data (51,168 bytes: the
+  strings and constant tables)
+- The main bank: 46,577 bytes besides movable code: code that must stay 8,005, constants
+  3,517, data 319, bss 34,736 (the biggest, `hcc --sizes`: hgame's record queues 4.6 KB,
+  `arena` 2 KB, `g_units` 2 KB, `save_box` 1.3 KB); + `--heap 2048` + `--stack 8192` =
+  56,817 of 65,264; 8 KB of it then filled with movable code
+- Banks at run time: 13 for the program, 17 for the DOS arena, the framebuffer's
+- Boot: `X.PRG @GEO.ARG` (`/V VGA NOINTRO LOG GEO.TXT KEYS GEO.KEY`): the start menu, a new
+  game, the base placed, the geoscape within 20 s of emulated time; the whole of
+  tests/geo.keys (the base, the UFOpaedia, the graphs) by about 80 s
+- Against the host: GEO.TXT and BATTLE.TXT (tests/battle.keys: a quick battle on FA1V,
+  sectoids, seed 1, to "script finished") are the host's line for line, except the VGA
+  buffer's segment (the structures' sizes differ: 16-bit `int`, 4-byte pointers) and
+  BATTLE.TXT's "KB in all" (the host prints 0: a 32-bit `int` fault of the host build; the
+  Atari816's 434 is the DOS model's own figure); every screenshot is one of the host's
+  pictures but for 55 pixels (the mouse arrow: the emulator's pointer at 0,0)
 
 The profile of the first 60 s (`run816.py --prof`, `sdk/tools/prof816.py`): the platform
 layer's polling dominates, not the engine: `uptime_us` (`hg_us`) 82,206 calls, 13 % of the
@@ -464,9 +622,9 @@ cycles; `__udiv32` 9 % (the clock's conversions); `memcmp` 8 % (`plat_poll` comp
 
 **The next blockers** were (1) the polling and (2) the battle view's drawing: both done in
 stage 4a (section 4c); (3) remains: the far data model's code in the engine's hot loops
-(the render logic, the voxel lines, the path search: assembly where the profile says so).
+(the render logic, the voxel lines, the path search: assembly where the profile shows the need).
 
-## 4c. Stage 4a: tests, polling, the battle view by the blitter (23 November 2026)
+## 4c. Stage 4a: tests, polling, battle view by the blitter (23 November 2026)
 
 ### make test
 
@@ -475,12 +633,14 @@ build of both) runs each line of `tests/runs` (upstream's KEYS scripts) on the h
 and on the Atari816 in the emulator, both with the virtual clock (`/V`), and compares
 (`tests/compare.py`):
 
-| Run | Script | What |
-| --- | --- | --- |
-| geo | `tests/geo.keys` | a new game, the base placed, geoscape time, base screen, UFOpaedia, graphs |
-| battle | `tests/battle.keys` | a quick battle (FA1V, sectoids, seed 1): the view, the Options window |
-| save | `tests/save.keys` | a new game, an hour of game time, Save Game in slot 1, Load Game |
-| bench | (none) | upstream's BENCH: its renderer checks ("check scroll: 0 screen bytes differ, full redraw same", "VGA sprite check", path search C = asm) |
+- geo. Script: `tests/geo.keys`. What: a new game, the base placed, geoscape time, base
+  screen, UFOpaedia, graphs.
+- battle. Script: `tests/battle.keys`. What: a quick battle (FA1V, sectoids, seed 1): the
+  view, the Options window.
+- save. Script: `tests/save.keys`. What: a new game, an hour of game time, Save Game in slot
+  1, Load Game.
+- bench. Script: (none). What: upstream's BENCH: its renderer checks ("check scroll: 0
+  screen bytes differ, full redraw same", "VGA sprite check", path search C = asm).
 
 Checked for each: the engine's LOG line for line (one allowed difference: "KB in all",
 pointer size, above); the **test pictures**: the model (`plat/xdos.c xd_shot_point`)
@@ -497,7 +657,7 @@ MD5s are in `tests/host.md5` (27; no picture of the game in git). Plus a run wit
 **real keyboard and mouse** (no KEYS, the real clock, `tests/input.script`): the start
 menu clicked, New Game, the difficulty, a base placed by a click on the globe and Enter,
 the base screen by its button, GEOSCAPE at the bottom (the pan brings it in), G for the
-graphs: the LOG must say each. The test could fail and did: the first blitter version
+graphs: the LOG must record each. The test could fail and did: the first blitter version
 left the view black (37 % of the pixels differed).
 
 The arrow: in `/V` runs the pointer moves only by the script (as on the host), so the
@@ -529,14 +689,17 @@ CPU never idle. Now (`horizon/hz_plat.c`, `plat/xdos.c`, `plat/timer.c`):
 
 The profile (10 s of each screen, real clock, `tests/prof.sh`; % of all cycles):
 
-| Screen | Before | After |
-| --- | --- | --- |
-| start menu, idle | idle 2 %; uptime_us 32 %, memcmp 10 %, int33 7 %, plat_counts 6 %, __mul32 6 % | **idle 77 %**; vsync 3.9 %, uptime_us 2.2 %, int33 1.9 %, ws_mouse 1.7 % |
-| geoscape, time running (1 min) | idle 2 %; uptime_us 21 %, vga_uk_glyph 8.6 %, memcmp 6.6 %, __mul32 5.3 % | **idle 50 %**; vga_uk_glyph 7.8 % (the clock's text), vformat 2.7 %, __udiv32 2.0 % (the engine's), fly_craft 1.8 % |
-| base screen, idle | idle 2 %; as the menu | **idle 76 %** |
-| battle view, idle | idle 2 %; uptime_us 31 %, memcmp 9.7 %, __mul32 7.2 % | **idle 77 %** |
+- start menu, idle. Before: idle 2 %; uptime_us 32 %, memcmp 10 %, int33 7 %, plat_counts 6
+  %, __mul32 6 %. After: **idle 77 %**; vsync 3.9 %, uptime_us 2.2 %, int33 1.9 %, ws_mouse
+  1.7 %.
+- geoscape, time running (1 min). Before: idle 2 %; uptime_us 21 %, vga_uk_glyph 8.6 %,
+  memcmp 6.6 %, __mul32 5.3 %. After: **idle 50 %**; vga_uk_glyph 7.8 % (the clock's text),
+  vformat 2.7 %, __udiv32 2.0 % (the engine's), fly_craft 1.8 %.
+- base screen, idle. Before: idle 2 %; as the menu. After: **idle 76 %**.
+- battle view, idle. Before: idle 2 %; uptime_us 31 %, memcmp 9.7 %, __mul32 7.2 %. After:
+  **idle 77 %**.
 
-### The battle view by the blitter
+### Battle view by the blitter
 
 Measured first (BENCH, real clock, the C renderers through far pointers): a full redraw of
 level 0 at the map's middle (51 masked + 37 OR sprites) **1,256 ms**, all four levels
@@ -544,7 +707,7 @@ level 0 at the map's middle (51 masked + 37 OR sprites) **1,256 ms**, all four l
 81 ms; a real-time quick battle still showed a black view after 50 s. The profile: the C
 pixel loops (present, clear, the span blitters, clipspan, the shift), not the engine.
 
-Now (`horizon/hz_bb.c`, `plat/vgabat.c` asks the platform first; the host keeps the C,
+Now (`horizon/hz_bb.c`, `plat/vgabat.c` calls the platform first; the host keeps the C,
 which stays the reference):
 
 - **Where.** The framebuffer is 320 x 400 in two banks: rows 0-199 are A000 (the screen),
@@ -588,7 +751,7 @@ What limits it now: "same without blits" is 164 ms, the engine's own render code
 (the floor pass, `render.c`'s columns, `__mul16`, `__umul1632`, `__udiv32` calls, far
 pointer arithmetic) plus the records' CPU side (`plat_bb_sprite`, `find`, `put`: about
 50 us a sprite). So **0.15 s is not reached** (0.21 s for level 0, 0.42 s for four levels);
-cursor moves (21 ms) and scrolling (52-113 ms) feel immediate. Next: profile the redraw
+cursor moves (21 ms) and scrolling (52-113 ms) appear immediate. Next: profile the redraw
 alone (BENCH's checksums out of the window), the floor pass and `hz_bb.c`'s record path in
 assembly, the pictures unpacked at the battle's start instead of during the first redraw,
 the smoke/fire overlay by Ali's EXPAND (a 1-bit mask, `LS_EXPANDK`).
@@ -601,13 +764,13 @@ changes 16 palette entries a frame, not 256. Needed for it in hardware: a copy t
 (Marga). Meanwhile the C does the night present (a 46,080-byte remap; assembly next), or
 pre-shaded copies of the pictures in the atlas (one per shade level) when the lights come.
 
-### The screen
+### Screen
 
 (Stage 4a's way, `/PANPTR` since section 4e: the picture now stands still, the wheel
 moves it.) Implemented in `horizon/hz_plat.c`: every screen pans (the 180 lines show rows from
 `s * 20 / 179`, s the pointer's line; the pointer's row is `s + s * 20 / 179`); the
 battle view is split: the panel (rows 144-199) whole at lines 124-179, 124 of the view's
-144 rows above it, following the pointer while it is over them (the engine says so:
+144 rows above it, following the pointer while it is over them (the engine signals it:
 `plat_view(1)` at a present, `plat_view(0)` when a picture crosses row 144: the Options
 window, the inventory, the geoscape). Seen in the emulator's pictures: start menu,
 difficulty, geoscape (rows 10-189 with the pointer at 100: the INTERCEPT button's top
@@ -626,27 +789,50 @@ framebuffer, 1 for the pictures' table, 4 per atlas sheet (BENCH: 1 sheet). Atla
 a sheet, made from the packs in memory (no file, no load time of its own: about 2 ms of
 CPU a picture the first time it is drawn).
 
-## 4d. Stage 5: the playable app (23 November 2026)
+## 4d. Stage 5: playable app (23 November 2026)
 
 Done by the lead and three helper agents in parallel (sound, speed, screens), each in its
 own tree, merged three-way; the whole `make test` from a clean build at the end.
 
 ### Faults found (port, upstream, compiler)
 
-| # | What | Where | Fix |
-| --- | --- | --- | --- |
-| 1 | Every path search on the 816 differed from the host's: `vbench.c path_search_c` takes `cost + 4 * TILES` (an enum: 40,000 overflows 16-bit int to -25,536); DOS's far pointer wrapped the offset back, cc816's 24-bit one went 25 KB back and `memset(bucket, 0xFF, 512)` trashed the walk tables (wc, wd): aliens that did not move, battles that went their own way after the first alien turn | upstream (int overflow) + cc816's far pointers (SDK 12) | `patches/src-0005-fixes.patch`: `4u * TILES` |
-| 2 | Damage drawn in another order: `hurt(u, roll_damage(), ..., rl_side())`, both call `rnd`; cc816 evaluates arguments left to right, Watcom/gcc right to left | upstream (unspecified order) + cc816 (SDK 13) | `src-0003`: a `HURT` macro, the side first (4 sites) |
-| 3 | A comrade's death cost no morale on DOS/816 (`rank_mod*200*(...)` overflows 16 bits), 10 on the host | upstream | `src-0003`: the product in `long` (DOS, OpenXcom, host and 816 agree) |
-| 4 | Plain `char` was signed in the port's build (Watcom: unsigned): the battle's Game Options screen indexed `"\x94..."` strings to y = -115 (host crash, 816 writes off screen) | port Makefile | `-funsigned-char` (host), `-fsigned-char` dropped (cc816's default is unsigned) |
-| 5 | The base screen black under windows: the VGA "clean screen" was the last picture only | port (`plat/vga.c`, upstream's VGA prototype) | a real 64,000-byte copy at E000 (`XD_CLEAN_SEG`, bank 14, outside DOS memory) |
-| 6 | The UFOpaedia list drawn over the article | upstream | `src-0003`: `uk_restore` after an article |
-| 7 | The end slides never shown: INT 21h seek (42h) missing; `read()` of 64,000 bytes | port | modelled; reads in pieces (below) |
-| 8 | The AdLib driver reads past a track's end (GMTACTIC's instrument 10): on the 816 a tempo of 1 from the memory after it, the music crawling after 75 s | upstream | `src-0002`: an instrument ends at the track's end, both builds |
-| 9 | Test runs on the 816 took 20 emulated s a virtual second: a KEYS `WAIT` polls 20,000 times a virtual second at 60 counts a clock reading, each poll about 1 ms | port (test clock) | `XD_TICK_STEP` 600 (plat.h): geo 230 → 45 s |
-| 10 | `plat_counts`: `d * 611` overflowed for a gap above 7 s (the first reading, a long load) | port | `plat_us_to_counts` in two parts |
-| 11 | The BIOS clock (0040:006C) fell back to 0 when the 32-bit PIT count wrapped (1 hour of play): every WAIT ending at once, `now > end` tests stuck | port | its high word counts the wraps |
-| 12 | The app started from the Desktop (no options) ran in EGA mode (no XMS in the model) | port | VGA unless the options name a mode |
+1. Every path search on the 816 differed from the host's: `vbench.c path_search_c` takes
+   `cost + 4 * TILES` (an enum: 40,000 overflows 16-bit int to -25,536); DOS's far pointer
+   wrapped the offset back, cc816's 24-bit one went 25 KB back and `memset(bucket, 0xFF,
+   512)` trashed the walk tables (wc, wd): aliens that did not move, battles that went their
+   own way after the first alien turn. Where: upstream (int overflow) + cc816's far pointers
+   (SDK 12). Fix: `patches/src-0005-fixes.patch`: `4u * TILES`.
+2. Damage drawn in another order: `hurt(u, roll_damage(), ..., rl_side())`, both call `rnd`;
+   cc816 evaluates arguments left to right, Watcom/gcc right to left. Where: upstream
+   (unspecified order) + cc816 (SDK 13). Fix: `src-0003`: a `HURT` macro, the side first (4
+   sites).
+3. A comrade's death cost no morale on DOS/816 (`rank_mod*200*(...)` overflows 16 bits), 10
+   on the host. Where: upstream. Fix: `src-0003`: the product in `long` (DOS, OpenXcom, host
+   and 816 agree).
+4. Plain `char` was signed in the port's build (Watcom: unsigned): the battle's Game Options
+   screen indexed `"\x94..."` strings to y = -115 (host crash, 816 writes off screen).
+   Where: port Makefile. Fix: `-funsigned-char` (host), `-fsigned-char` dropped (cc816's
+   default is unsigned).
+5. The base screen black under windows: the VGA "clean screen" was the last picture only.
+   Where: port (`plat/vga.c`, upstream's VGA prototype). Fix: a real 64,000-byte copy at
+   E000 (`XD_CLEAN_SEG`, bank 14, outside DOS memory).
+6. The UFOpaedia list drawn over the article. Where: upstream. Fix: `src-0003`: `uk_restore`
+   after an article.
+7. The end slides never shown: INT 21h seek (42h) missing; `read()` of 64,000 bytes. Where:
+   port. Fix: modelled; reads in pieces (below).
+8. The AdLib driver reads past a track's end (GMTACTIC's instrument 10): on the 816 a tempo
+   of 1 from the memory after it, the music crawling after 75 s. Where: upstream. Fix:
+   `src-0002`: an instrument ends at the track's end, both builds.
+9. Test runs on the 816 took 20 emulated s a virtual second: a KEYS `WAIT` polls 20,000
+   times a virtual second at 60 counts a clock reading, each poll about 1 ms. Where: port
+   (test clock). Fix: `XD_TICK_STEP` 600 (plat.h): geo 230 → 45 s.
+10. `plat_counts`: `d * 611` overflowed for a gap above 7 s (the first reading, a long
+    load). Where: port. Fix: `plat_us_to_counts` in two parts.
+11. The BIOS clock (0040:006C) fell back to 0 when the 32-bit PIT count wrapped (1 hour of
+    play): every WAIT ending at once, `now > end` tests stuck. Where: port. Fix: its high
+    word counts the wraps.
+12. The app started from the Desktop (no options) ran in EGA mode (no XMS in the model).
+    Where: port. Fix: VGA unless the options name a mode.
 
 To report upstream: 1, 2, 3, 5, 6, 8 (and the converter's GOG HE types, voxcheck.py's offset).
 
@@ -667,7 +853,7 @@ battle loads, redraws and alien turns with no hook in the engine's loops.
 version, speaker, time constant, PCM 14h, 4-bit ADPCM 75h/74h, halt), the 8237's registers
 and pages; at a block's end, on the model's clock, the handler the engine set with
 `_dos_setvect` is called. The effects live in a 64 KB "UMB" of the sound's own at C000
-(the arena's bank 12, outside the DOS memory: the memory plan unchanged; the LOG says "all
+(the arena's bank 12, outside the DOS memory: the memory plan unchanged; the LOG prints "all
 23 effects in the UMB"). SOUNDS.PAK's 23 effects are Creative 4-bit ADPCM at 6,000 or
 8,000 Hz; on the 816 each block is decoded once into signed 8-bit samples (cached by
 address and checksum in up to 3 far banks, about 82 KB for all) and played on Lau at
@@ -702,15 +888,15 @@ effect rates +500 failed all three.
   battle can differ from the uninterrupted one (seen with TAB and an abductor's aliens);
   the same on host and 816: the engine's, not the port's.
 - **Open files** (Horizon: 4 for the whole system): the model counts them on both
-  builds, refuses a fifth as Horizon would (so both behave alike) and prints "xcom: files:
-  at most N open (...)"; compare.py fails on any refusal and on a different peak. Peaks
+  builds, rejects a fifth as Horizon would (so both behave alike) and prints "xcom: files:
+  at most N open (...)"; compare.py fails on any rejection and on a different peak. Peaks
   seen: 4 in tests (the KEYS file is one: UFOPAED.PAK + UIV.PAK + PALV.PAK in the
   UFOpaedia; XCOMXT1.SAV + the mission pack + the LOG in a battle save), so 3 in play;
   the music task opens nothing during play.
 - `read()`/`write()` in pieces of 32,767 bytes until n, the end or an error
   (`read_all`/`write_all`): the SDK's read moves at most that much a call.
 - **A full card** (`check.sh`, emu816 `--card-free 8000`): the save is written short, the
-  engine says "Could not save the game!", the model removes the cut save (`xd_fclose`: a
+  engine prints "Could not save the game!", the model removes the cut save (`xd_fclose`: a
   cut slot would load as garbage), the game goes on to its end (no kill). emu816 counts
   the bytes written in the run, so its card stays full after the removal: the LOG's later
   lines are lost there (on a real card the removal gives the room back).
@@ -761,11 +947,11 @@ How (`horizon/*.s`, ca65, built by hcc as ports/skyroads' are):
 - `hz_path.s`: the profile of a real alien turn put about 85 % in the path search (not the
   voxel lines or the sight fan); an exact assembly twin of `path_search_c` with path.c's
   step rules (`plat/way.c` sets it up; `src-0004` calls it from path.c). The LOG's alien
-  positions are the same with and without it; BENCH says "match".
+  positions are the same with and without it; BENCH prints "match".
 - `hz_vga.s`: each zoomed world row built once and copied for the rows that repeat it; the
   glyphs.
 
-What the player feels: entering a battle is about 1 s longer than before (the bar), then
+Effect in play: entering a battle is about 1 s longer than before (the bar), then
 smooth (scrolling and the cursor immediate); a soldier's step is paced by the animation
 (about 1.1 s a tile, as on DOS's default speed); the first alien turn of a small battle
 a few seconds, of an abductor about 20 s (upstream: about 20 s on an 8 MHz 286 for the
@@ -778,26 +964,34 @@ tiles within the TU, as the C reference does: the next big win for alien turns, 
 references), the unpacking's second pass in assembly (the bar 1.5 → 0.8 s), the voxel line
 and sight fan in assembly, per-cell night lights.
 
-### The screens walked through (host vs Atari816)
+### Screens covered (host vs Atari816)
 
 Every row passes `make test` (same LOG, the same pictures pixel for pixel, the same end
 time; 4 PASS lines a run):
 
-| Screens, features | Run |
-| --- | --- |
-| the intro (FLI), 10 s then skipped | `intro` |
-| the victory slides / the defeat slides | `endwin` / `endlose` (test-long) |
-| new game, geoscape time, base screen, UFOpaedia, graphs | `geo` |
-| base info, stores, monthly costs, transfers list, soldier list and info, rename, Select Armour, Equip Craft (craft, crew, equipment, armour list) | `base1` |
-| Build Facilities (a refused place and its notice, then built), research (new project, staff, start), manufacture, purchase (a soldier, scientists), sell/sack, transfer (destinations), a new base | `base2` |
-| the Intercept window, graphs, UFOpaedia (section, article, back), options, funding, soldiers, time buttons, pause, zoom, scroll, right-click centre | `geobtn` |
-| a UFO detected, an interceptor launched, stances, weapons toggled, the UFO shot down | `dogfight` |
-| a terror site, its window, the Skyranger sent, "Begin Mission?", briefing, pre-battle inventory, battle, abort, debriefing | `mission` |
-| battle: Options and Game Options windows, walk, inventory with the held item (mouse), a grenade primed and thrown, kneel, turn, end turn, alien turn, abort, debriefing | `bturn` |
-| battle: walk, an alien spotted, snap / auto / aimed shots, hits and misses, reaction fire, a soldier killed, end turn, abort | `bfire` |
-| a night battle | `night` |
-| Save Game / Load Game (geoscape), battle save and load | `save`, `bsave`, `bsavebig` (test-long) |
-| BENCH (upstream's renderer checks) | `bench` |
+- the intro (FLI), 10 s then skipped. Run: `intro`.
+- the victory slides / the defeat slides. Run: `endwin` / `endlose` (test-long).
+- new game, geoscape time, base screen, UFOpaedia, graphs. Run: `geo`.
+- base info, stores, monthly costs, transfers list, soldier list and info, rename, Select
+  Armour, Equip Craft (craft, crew, equipment, armour list). Run: `base1`.
+- Build Facilities (a refused place and its notice, then built), research (new project,
+  staff, start), manufacture, purchase (a soldier, scientists), sell/sack, transfer
+  (destinations), a new base. Run: `base2`.
+- the Intercept window, graphs, UFOpaedia (section, article, back), options, funding,
+  soldiers, time buttons, pause, zoom, scroll, right-click centre. Run: `geobtn`.
+- a UFO detected, an interceptor launched, stances, weapons toggled, the UFO shot down. Run:
+  `dogfight`.
+- a terror site, its window, the Skyranger sent, "Begin Mission?", briefing, pre-battle
+  inventory, battle, abort, debriefing. Run: `mission`.
+- battle: Options and Game Options windows, walk, inventory with the held item (mouse), a
+  grenade primed and thrown, kneel, turn, end turn, alien turn, abort, debriefing. Run:
+  `bturn`.
+- battle: walk, an alien spotted, snap / auto / aimed shots, hits and misses, reaction fire,
+  a soldier killed, end turn, abort. Run: `bfire`.
+- a night battle. Run: `night`.
+- Save Game / Load Game (geoscape), battle save and load. Run: `save`, `bsave`, `bsavebig`
+  (test-long).
+- BENCH (upstream's renderer checks). Run: `bench`.
 
 Not covered: a transfer between two bases, fitting armour (none in stores at the start).
 The held item: heldasm.asm is EGA/CGA only; invscr.c's VGA path draws the item in C (the
@@ -807,7 +1001,7 @@ shown, 26 ms a frame on average (one due every 83 ms), 75 frames over 80 ms (the
 explosion, 249 ms at worst; 1.1 s behind at worst, caught up after): played, as upstream
 does; any key skips it, `NOINTRO` stays.
 
-### The app
+### App
 
 - `make app`: **XCOM.HZA** (about 900 KB): XCOM.PRG, MUSD.PRG, APP.INF (`name=X-COM UFO
   Defense`, category Games; `needs=` copied from XCOM.PRG: `horizon=0.30,sprites,blitter,
@@ -903,21 +1097,29 @@ that must stay 9,299, constants 3,881, data 374, bss 37,043) + heap 2 KB + stack
 ## 4e. On the board (24 November 2026)
 
 The first tries on the board: "it works! music on ... the scrolling thing is a bit annoying
-... the game stutters a lot ... the battle is laggy". The emulator had promised a calm game.
+... the game stutters a lot ... the battle is laggy". The emulator had shown a smooth game.
 
-### The measuring kit (`make kit`)
+### Measuring kit (`make kit`)
 
 Programs started from the Desktop get no options, so the port reads **XCOM.ARG** in its
 folder when it gets none (README.TXT section 4; `#` comments). The port's own options for
 measuring:
 
-| Option | What |
-| --- | --- |
-| `/M`, `/MN NAME` | self-timing (`horizon/hz_perf.c`): counters of time per kind of work (the engine's file calls, the card's own calls, the blitter waits, the vertical-blank sleeps = the idle time, view and palette sends, the pointer, effects started and decoded), histograms of the gaps a player feels (between the engine's looks at the keyboard and at events, pointer move → pointer drawn, between pointer draws, between battle view presents), the music task's own lateness (`mus/musd.c` 'M'/'R'), the memory; a line every 5 s, a block every 30 s, the totals at the exit, appended to NAME.TXT in the program's folder and to `/PC:/NAME.TXT` (the PC link's folder; silently nothing without it) |
-| `/W` | the pointer circles by itself (a step every 20 ms): a KEYS script's run with the pointer moving |
-| `/Q n`, `/E` | end after n s; end at the first wait for input (after BENCH) |
-| `/C FILE` | copy FILE to `/PC:/` at the exit (BENCH.TXT) |
-| `/IOB` | the card's costs: each kind of Horizon file request timed alone (stat, open, close, seek, reads of 16 B to 32 KB, a LOG line's create/append), IOBENCH.TXT and `/PC:/`, then the end |
+- `/M`, `/MN NAME`. What: self-timing (`horizon/hz_perf.c`): counters of time per kind of
+  work (the engine's file calls, the card's own calls, the blitter waits, the vertical-blank
+  sleeps = the idle time, view and palette sends, the pointer, effects started and decoded),
+  histograms of the gaps a player notices (between the engine's reads of the keyboard and
+  of events, pointer move → pointer drawn, between pointer draws, between battle view
+  presents), the music task's own lateness (`mus/musd.c` 'M'/'R'), the memory; a line every
+  5 s, a block every 30 s, the totals at the exit, appended to NAME.TXT in the program's
+  folder and to `/PC:/NAME.TXT` (the PC link's folder; silently nothing without it).
+- `/W`. What: the pointer circles by itself (a step every 20 ms): a KEYS script's run with
+  the pointer moving.
+- `/Q n`, `/E`. What: end after n s; end at the first wait for input (after BENCH).
+- `/C FILE`. What: copy FILE to `/PC:/` at the exit (BENCH.TXT).
+- `/IOB`. What: the card's costs: each kind of Horizon file request timed alone (stat, open,
+  close, seek, reads of 16 B to 32 KB, a LOG line's create/append), IOBENCH.TXT and `/PC:/`,
+  then the end.
 
 A KEYS script's `WAIT` now sleeps to the next frame between its looks at the mouse on the
 real clock (`patches/src-0006-perf.patch`; the virtual clock: unchanged), as a player's
@@ -928,26 +1130,33 @@ app's folder, no options, the PC folder at OUT/pc); `tests/perfcmp.py BOARD EMU`
 reports' totals side by side. The kit's runs: `tests/perf/*.arg` (0 IOB, 1 BENCH, 2
 menus and geoscape scripted, 3 a battle scripted, 4 and 5 by hand).
 
-### What the board showed (kit runs 1-3), against the emulator of then
+### Board results (kit runs 1-3) against the emulator of then
 
-| Per call | Board | Emulator (instant card) | Emulator optimistic by |
-| --- | --- | --- | --- |
-| the engine's open (stat + open, 2-3 requests) | 54-66 ms | 4.3-4.7 ms | 13-14 x |
-| close of a file read / of a LOG line | 7 / 16 ms (with its write) | 1.3 / 1.6 ms | 5-10 x |
-| seek | 1.34 ms | 0.52 ms | 2.6 x |
-| read (the engine's, through stdio's buffer) | 1.7-3.1 ms | 0.55-0.76 ms | 3-4 x |
-| PALV.PAK (an open, seek, read and close at each palette) / NAMES.PAK / UIV.PAK / FA1V.PAK | 1,557 / 2,082 / 5,136 / 2,075 ms | 115 / 207 / 1,175 / 550 ms | 13 / 10 / 4.4 / 3.8 x |
-| plat_poll's work (events) | 1.06 ms | 0.85 ms | 1.2 x |
-| the pointer drawn, a view send, a palette, a blitter wait, a present, an effect started | 2.08 / 0.45 / 14.6 / 2.04 / 5.0 / 73 ms | 2.07 / 0.46 / 16.5 / 2.16 / 5.4 / 73 ms | none (within 10 %) |
-| BENCH (redraw 159 ms, scroll 93, cursor 21, present 11) | | the same | none |
+- the engine's open (stat + open, 2-3 requests). Board: 54-66 ms. Emulator (instant card):
+  4.3-4.7 ms. Emulator optimistic by: 13-14 x.
+- close of a file read / of a LOG line. Board: 7 / 16 ms (with its write). Emulator (instant
+  card): 1.3 / 1.6 ms. Emulator optimistic by: 5-10 x.
+- seek. Board: 1.34 ms. Emulator (instant card): 0.52 ms. Emulator optimistic by: 2.6 x.
+- read (the engine's, through stdio's buffer). Board: 1.7-3.1 ms. Emulator (instant card):
+  0.55-0.76 ms. Emulator optimistic by: 3-4 x.
+- PALV.PAK (an open, seek, read and close at each palette) / NAMES.PAK / UIV.PAK / FA1V.PAK.
+  Board: 1,557 / 2,082 / 5,136 / 2,075 ms. Emulator (instant card): 115 / 207 / 1,175 / 550
+  ms. Emulator optimistic by: 13 / 10 / 4.4 / 3.8 x.
+- plat_poll's work (events). Board: 1.06 ms. Emulator (instant card): 0.85 ms. Emulator
+  optimistic by: 1.2 x.
+- the pointer drawn, a view send, a palette, a blitter wait, a present, an effect started.
+  Board: 2.08 / 0.45 / 14.6 / 2.04 / 5.0 / 73 ms. Emulator (instant card): 2.07 / 0.46 /
+  16.5 / 2.16 / 5.4 / 73 ms. Emulator optimistic by: none (within 10 %).
+- BENCH (redraw 159 ms, scroll 93, cursor 21, present 11). Emulator (instant card): the
+  same. Emulator optimistic by: none.
 
-So the CPU, the blitter and the memory are modelled honestly; **the card was not**: the
-emulator answered every file request at once. On the board a request costs what the I/O
+So the CPU, the blitter and the memory are modelled accurately; **the card was not**: the
+emulator completed every file request at once. On the board a request costs what the I/O
 processor's FatFs needs, whatever its size: an OPEN or a STAT about 25 ms. That was the
 stutter at every screen change (seconds of opens and small reads), and the music task's
 timing was fine all along (at most 26 ms between its wake-ups, no tick lost).
 
-### The fixes
+### Fixes
 
 - **The emulator's card** (emu/README.md "The card's speed"): `--card-board`, each request
   costs the board's time (OPEN, STAT 24 ms, CLOSE 0 / 16 ms after writing, SEEK 1.1 ms, READ
@@ -962,7 +1171,7 @@ timing was fine all along (at most 26 ms between its wake-ups, no tick lost).
   size) and their contents in 16 KB blocks in far banks taken while at least 12 banks stay
   free (at most 24; given back to the battle's atlas when it needs them), least recently
   used reused. An open, a seek, a read of what is in memory make no card call; the engine
-  sees the same bytes, files and errors (`make test`: the host's LOGs, pictures and saves).
+  gets the same bytes, files and errors (`make test`: the host's LOGs, pictures and saves).
   Measured (emulator, the board's card): no card call at all in steady play on the
   geoscape or in a battle after its start; a screen's first visit 1-6 card calls (0.2 s),
   later visits none; the start: machine on to the start menu 19.6 s (21.3 before), to a
@@ -995,7 +1204,7 @@ timing was fine all along (at most 26 ms between its wake-ups, no tick lost).
   s, in assembly: 3.7 s in C), and a start checksums 1 byte in 61 (`sb_sum`, both builds):
   0.9 ms. Lau's volume 255 (Prince's and Xargon's; was 160). The Lau setup is theirs
   (`hg_sound_from` of signed 8-bit samples in far banks, `hg_play`), nothing the hardware
-  would refuse. What a player hears: no effect in the menus or on buttons (since section 4g: their clicks and the windows' pop-ups); a chime when a
+  would reject. What a player hears: no effect in the menus or on buttons (since section 4g: their clicks and the windows' pop-ups); a chime when a
   UFO is detected; an interception's shots and hits; in a battle every step, shot, hit,
   death, door, explosion.
 - **The alien turn**: 44 s without a poll in the scripted battle (FA1V, seed 6), the board
@@ -1009,31 +1218,39 @@ timing was fine all along (at most 26 ms between its wake-ups, no tick lost).
   the same turn 8.4 s with the exact sight.)
 - **"xdos: FP_OFF of a pointer outside the DOS memory"** (8 lines in a battle): panel.c's
   `FP_OFF(u)` of a unit in `g_units` (a global, in the main bank), only to test it for NULL:
-  the expected case the model already answers (non-zero); no longer reported for the main
+  the expected case the model already handles (non-zero); no longer reported for the main
   bank's globals.
 - **BENCH's "CPU read of blitter-written memory"** (emu816's rule check): BENCH's own
   screen checks read the screen (bank 4B in that run) right after a present whose list the
   port did not wait for; on the board the reads could be stale (its CPU has a 4 KB cache;
-  hz_list_wait flushes it), the board's BENCH said "0 differ" all the same. BENCH only:
+  hz_list_wait flushes it), the board's BENCH printed "0 differ" all the same. BENCH only:
   the game itself reads what Ali wrote after `plat_bb_sync` (the old CPU pointer read the
   screen under the arrow: the sprite does not).
 
 ### Expected on the board now (the emulator with the board's card; `/M` on)
 
-| Kit run | Figure | Before (board) | Now (emulator) |
-| --- | --- | --- | --- |
-| 0 IOB | stat / open / C open+close / seek / read 512 B / 4 KB / 32 KB / LOG line | (new) | 25 / 25 / 51 / 1.5-1.8 / 7.4 / 23 / 151 / 46 ms |
-| 1 BENCH | average full redraw / scroll / cursor step | 159 / 93 / 21 ms | 156 / 93 / 21 ms |
-| 2 GEO | to the start menu (ready for input after the start) | 10.4 s (+ card) | 13.0 s |
-| 2 GEO | idle on the geoscape at 5 Sec, the pointer circling | 44-47 % | 62-66 % |
-| 2 GEO | pointer move → drawn, at most / view sends a second | 40-52 ms / 17 | 30-40 ms / 0 |
-| 2 GEO | card calls in steady play / at a screen change | 0 / 220-1,400 calls, 0.6-1.6 s | 0 / 0-6 calls, 0-0.2 s |
-| 3 BAT | ready in a quick battle | 17.2 s (emu, board card) | 14.9 s |
-| 3 BAT | idle in the battle view, the pointer circling | 18-25 % | 40 % |
-| 3 BAT | an effect's start | 73 ms (206 at most) | 0.9 ms |
-| 3 BAT | the alien turn | 45 s, pointer frozen | 44 s, the pointer moves |
+- 0 IOB. Figure: stat / open / C open+close / seek / read 512 B / 4 KB / 32 KB / LOG line.
+  Before (board): (new). Now (emulator): 25 / 25 / 51 / 1.5-1.8 / 7.4 / 23 / 151 / 46 ms.
+- 1 BENCH. Figure: average full redraw / scroll / cursor step. Before (board): 159 / 93 / 21
+  ms. Now (emulator): 156 / 93 / 21 ms.
+- 2 GEO. Figure: to the start menu (ready for input after the start). Before (board): 10.4 s
+  (+ card). Now (emulator): 13.0 s.
+- 2 GEO. Figure: idle on the geoscape at 5 Sec, the pointer circling. Before (board): 44-47
+  %. Now (emulator): 62-66 %.
+- 2 GEO. Figure: pointer move → drawn, at most / view sends a second. Before (board): 40-52
+  ms / 17. Now (emulator): 30-40 ms / 0.
+- 2 GEO. Figure: card calls in steady play / at a screen change. Before (board): 0 /
+  220-1,400 calls, 0.6-1.6 s. Now (emulator): 0 / 0-6 calls, 0-0.2 s.
+- 3 BAT. Figure: ready in a quick battle. Before (board): 17.2 s (emu, board card). Now
+  (emulator): 14.9 s.
+- 3 BAT. Figure: idle in the battle view, the pointer circling. Before (board): 18-25 %. Now
+  (emulator): 40 %.
+- 3 BAT. Figure: an effect's start. Before (board): 73 ms (206 at most). Now (emulator): 0.9
+  ms.
+- 3 BAT. Figure: the alien turn. Before (board): 45 s, pointer frozen. Now (emulator): 44 s,
+  the pointer moves.
 
-## 4f. The alien turn (24 November 2026)
+## 4f. Alien turn (24 November 2026)
 
 "The battle is laggy": the aliens' turn took 41 s in the kit's scripted battle (FA1V,
 seed 6), 24 s with an abductor's 11 sectoids, 28 s for the first turn of a small scout
@@ -1042,7 +1259,7 @@ is not an option: it changes what the aliens see). Upstream's own figure for an 
 286: about 20 s for the first jungle turn in exact mode. Now: 6.5-8.5 s, the game's
 state the same as before (the host's: `make test`, `make test-long`).
 
-### The profile
+### Profile
 
 emu816's counts over the turn alone (`run816 --prof`, `--prof-from/--prof-to` are
 program times: the console's `--console-times` are the machine's, about 4.75 s later in
@@ -1050,13 +1267,23 @@ shell mode; prof816 names only exported labels, so the assembly's own labels wer
 exported as `_hzv_*` / `_hzp_*` for the label-level rows), and the host build's call
 counts (gprof, and a copy of vox.c printing each line's caller, steps and result):
 
-| Turn | What took the time (before) | The work |
-| --- | --- | --- |
-| FA1V seed 6 (the kit's battle: 41 s) | the voxel line's C 82 % (enter_tile 12 %, `__udiv16` 11 %, rows 9 %, run 8 %, skip 7 %, `__mul16` 6 %, room_of 5 %, shift 4 %, check 4 %: the divisions and multiplies of the empty-layer skip, a far pointer at every voxel), the path search 4 %, the rest the music task, interrupts, polling | 2,171 lines, 2,163 of them sight checks (62 `vox_sees`: los_unit_sees for each step of the walking alien, by it and by each soldier who might see it; 37 lines each, almost all blocked: the unit is not seen); a line 199 main steps, 16.6 tiles, 27 voxels checked, about 230,000 cycles (16 ms) |
-| abductor, 11 sectoids (FA5V seed 2: 24 s) | the path search (`hz_path_run`) 70 %, the voxel line 18 % | 33 searches, 27 of them `path_search_to` toward a patrol node, each a whole flood of the map within 254 TU (1,400-1,575 tiles) for goals 8-18 TU away; 848 lines |
-| FA1V seed 1, the first turn (sndai: 28 s) | the voxel line | one alien patrolling: 1,406 lines, every one a sight check that fails (38 checks of 37 lines) |
+- FA1V seed 6 (the kit's battle: 41 s). What took the time (before): the voxel line's C 82 %
+  (enter_tile 12 %, `__udiv16` 11 %, rows 9 %, run 8 %, skip 7 %, `__mul16` 6 %, room_of 5
+  %, shift 4 %, check 4 %: the divisions and multiplies of the empty-layer skip, a far
+  pointer at every voxel), the path search 4 %, the rest the music task, interrupts,
+  polling. The work: 2,171 lines, 2,163 of them sight checks (62 `vox_sees`: los_unit_sees
+  for each step of the walking alien, by it and by each soldier who might see it; 37 lines
+  each, almost all blocked: the unit is not seen); a line 199 main steps, 16.6 tiles, 27
+  voxels checked, about 230,000 cycles (16 ms).
+- abductor, 11 sectoids (FA5V seed 2: 24 s). What took the time (before): the path search
+  (`hz_path_run`) 70 %, the voxel line 18 %. The work: 33 searches, 27 of them
+  `path_search_to` toward a patrol node, each a whole flood of the map within 254 TU
+  (1,400-1,575 tiles) for goals 8-18 TU away; 848 lines.
+- FA1V seed 1, the first turn (sndai: 28 s). What took the time (before): the voxel line.
+  The work: one alien patrolling: 1,406 lines, every one a sight check that fails (38 checks
+  of 37 lines).
 
-So both of the hot spots of the notes' "what is next" were right, and they are the whole
+So both of the hot spots of the notes' "Next steps" were right, and they are the whole
 turn: the lines of sight (not aims: 59 lines of fire in the kit's battle) and the path
 search toward a goal.
 
@@ -1150,30 +1377,35 @@ and loads show the engine's hourglass as before (busy_show).
 The app as the board runs it (`tests/perf.sh`: the app's folder, MUSD.PRG, XCOM.ARG, the
 board's card model), the turn as the LOG gives it ("alien turn N ms"):
 
-| Turn (the script) | Before | After |
-| --- | --- | --- |
-| FA1V seed 6, the kit's battle (tests/perf/bat.keys: a walk, shots, a soldier killed, the turn ended) | 41.4 s | **8.5 s** |
-| FA5V seed 2, an abductor's 11 sectoids (tests/prof/alien.keys) | 24.0 s | **7.8 s** |
-| FA3V seed 3 (bturn: a walk, a grenade, kneel, the turn ended) | 14.2 s | **6.8 s** |
-| FA1V seed 1, the first turn (sndai: the turn ended at once) | 28.4 s | **6.5 s** |
-| FA1V seed 1, four turns (bsave: saved, loaded, two more) | 2.3 / 1.2 / 2.7 / 1.4 s | **1.9 / 0.5 / 2.0 / 0.5 s** |
+- FA1V seed 6, the kit's battle (tests/perf/bat.keys: a walk, shots, a soldier killed, the
+  turn ended). Before: 41.4 s. After: **8.5 s**.
+- FA5V seed 2, an abductor's 11 sectoids (tests/prof/alien.keys). Before: 24.0 s. After:
+  **7.8 s**.
+- FA3V seed 3 (bturn: a walk, a grenade, kneel, the turn ended). Before: 14.2 s. After:
+  **6.8 s**.
+- FA1V seed 1, the first turn (sndai: the turn ended at once). Before: 28.4 s. After: **6.5
+  s**.
+- FA1V seed 1, four turns (bsave: saved, loaded, two more). Before: 2.3 / 1.2 / 2.7 / 1.4 s.
+  After: **1.9 / 0.5 / 2.0 / 0.5 s**.
 
 The same in the emulator's shell (`tests/xrun.sh`, no music task), and BENCH (real clock):
 
-| | Before | After |
-| --- | --- | --- |
-| FA1V seed 6 / the abductor / bturn / sndai | 38.1 / 22.2 / 13.1 / 26.1 s | 7.9 / 7.3 / 6.3 / 6.1 s |
-| bsave's four turns | 2.2 / 1.2 / 2.5 / 1.3 s | 1.7 / 0.5 / 1.9 / 0.5 s |
-| (the abductor with only the searches' early ends, the voxel line still C) | 22.2 s | 10.2 s |
-| BENCH: 360 voxel lines / the same on past the tile | 3,457 / 4,110 ms | 751 / 932 ms |
-| BENCH: 8 aims (canTargetUnit) | 1,963 ms | 569 ms |
-| BENCH: path search, unit 0, 60 TU (a whole search: unchanged) | 249 ms | 249 ms |
-| BENCH: average full redraw | 147 ms | 147 ms |
+- FA1V seed 6 / the abductor / bturn / sndai. Before: 38.1 / 22.2 / 13.1 / 26.1 s. After:
+  7.9 / 7.3 / 6.3 / 6.1 s.
+- bsave's four turns. Before: 2.2 / 1.2 / 2.5 / 1.3 s. After: 1.7 / 0.5 / 1.9 / 0.5 s.
+- (the abductor with only the searches' early ends, the voxel line still C). Before: 22.2 s.
+  After: 10.2 s.
+- BENCH: 360 voxel lines / the same on past the tile. Before: 3,457 / 4,110 ms. After: 751 /
+  932 ms.
+- BENCH: 8 aims (canTargetUnit). Before: 1,963 ms. After: 569 ms.
+- BENCH: path search, unit 0, 60 TU (a whole search: unchanged). Before: 249 ms. After: 249
+  ms.
+- BENCH: average full redraw. Before: 147 ms. After: 147 ms.
 
 The game's state: every turn's LOG the same as before (positions, shots, hits, the
 same lines; only the "N ms" figures differ), `make test` and `make test-long` pass.
 
-### What limits it now
+### Remaining limits
 
 - The voxel line: about 40,000 cycles a line of 16 tiles; per tile crossing about 1,300
   (the tile's parts, the skip's rooms and moves, the step across), per minor-axis move
@@ -1199,9 +1431,9 @@ The main bank without movable code: 51,687 bytes (code that must stay 9,440, con
 hz_vox.s (about 2 KB) and the rest of the new code are movable (code banks). XCOM.PRG
 about 950 KB.
 
-## 4g. The fork in the tree; the interface's sounds (24 November 2026)
+## 4g. Fork in the tree; interface sounds (24 November 2026)
 
-### The fork
+### Fork
 
 The engine is now our fork, kept in `engine/` (upstream's tree at `a53918220c90` came in
 unchanged in commit `cca0456`; `engine/FORK.md`: what it is, our changes by topic, the
@@ -1227,7 +1459,7 @@ fixes no longer behind `XCOM_PORT` (`path_search_c`'s `4u * TILES`, the `HURT` o
 the morale in `long`, an instrument ending at its track's end); the host and the Atari816
 compile the same code as before.
 
-### The interface's sounds
+### Interface sounds
 
 DOS (and OpenXcom) click when a button is pressed and play one of three pop-up sounds when
 a window opens; the engine had none (only `geo popup`, the UFO alert). OpenXcom's
@@ -1255,7 +1487,7 @@ opens over a screen; digital samples only, not in a battle, at priority 1 (under
 and the battle's effects; a click cuts a pop-up's tail). Pack format 5: an older pack
 stops the DOS build ("Packs are from another version"), the Atari816 shows "the game's
 data is out of date" with both formats on its screen (`horizon/hz_plat.c`), and the
-Makefile's targets that use the packs say "data/packs are ... PACKS 4, the engine needs
+Makefile's targets that use the packs print "data/packs are ... PACKS 4, the engine needs
 format 5: make data GAME=... again" (`make data` without GAME checks them).
 
 Memory: all 26 effects in the sound's 64 KB UMB, 46,154 bytes (40,966 before); the
@@ -1271,18 +1503,18 @@ pop-up, kept its alert priority and silenced the clicks after it: the interface'
 now play at their own priority.) `soundcheck.py` names the effects again (its checksum
 had not followed `sb_sum`: the battle's blocks showed as "?").
 
-## 4h. The stutter (24 November 2026)
+## 4h. Stutter (24 November 2026)
 
 "The game stutters a lot", "the battle is laggy": the kit's battle (`/M`, 3BAT) showed
 gaps of 263-901 ms between presents and between the engine's arrow draws, on the board and
 in the emulator alike; not the Desktop's card requests (another round proved it), so the
 game's own work.
 
-### What /M says now (`horizon/hz_perf.c`)
+### /M output now (`horizon/hz_perf.c`)
 
 The 5 s line's old "gap" columns measured the engine's arrow draws (since the pointer is a
 sprite, it moves at every event poll whatever the engine draws) and the time between two
-presents (waits for input included): neither is what the player feels. Now:
+presents (waits for input included): neither is what the player notices. Now:
 
 - **gaps** between event polls (the sprite and the input stand still), and **frames**: a
   battle view present that came after the CPU worked without looking for input or sleeping
@@ -1298,7 +1530,7 @@ presents (waits for input included): neither is what the player feels. Now:
   vformat and console: it lengthened the gaps it measured), to the console and the report,
   with the machine's time of each (for `run816 --prof-from`: program time = machine time -
   the "started at" of run816). The line's new `still` and `busy` columns are the longest
-  of each; the totals say how many and the longest, the player's apart.
+  of each; the totals give how many and the longest, the player's apart.
 - the battle view's presents logged (time, a scroll before it, an effect before it: a
   walk's step), printed at the exit: `tests/smooth.py` makes the frame rates of them.
 - /M's own cost: the 30 s and total counters are now added up from the 5 s line's
@@ -1309,33 +1541,63 @@ bursts R*12 L*12 U*8 D*8, walks, two selections, kneeling, a snap and an auto sh
 turn's end), the gap lines, then `run816 --prof` over the worst ones, and temporary zones
 around walk(), refresh_paths(), cursor_to(), hud_status(), shoot() (removed again).
 
-### What it was, and what changed
+### Causes and changes
 
-| Cause | Where | Before | After | How |
-| --- | --- | --- | --- | --- |
-| No poll while the view redraws, a panel draws, a fan or an unpack runs | the player's turn | the pointer still 100-1,444 ms (a key burst's scrolls: 59 redraws, 1.4 s) | 81 ms at most | `plat_busy_tick` (the clock every call, the DOS model's clock every 10 ms, `plat_poll` every 30 ms): per level of a redraw (`rd_level`), each redraw (`rd_setup`), every 32nd sprite (`plat/vgabat.c`), each unpack, every 8th ray of a fan, each 32 rows of the night's shade; `plat_busy_poll` (every 2nd call ticks) every 8th interface drawing call (`plat/vga.c`), in the engine's `busy_tick` (`mouse.c`, XCOM_PORT: its busy loops, the turn's end) |
-| The pointer between busy polls in an alien turn | voxel lines, path searches | 60-90 ms (every 8th call, 40 ms) | 45 ms at most | every 2nd call, 30 ms |
-| The atlas forgotten at the battle's start | `horizon/hz_bb.c` `plat_mem_changed` | a file read into a block between two kept pictures forgot all 208 (the 1.2 s bar for nothing): every picture unpacked again in play, 6-7 ms each (18 in the first walk: 112 ms) | none forgotten: 0-1 unpacks in play | the pictures' lengths kept (`PLEN`, in the table's bank); only a read or a free over a kept picture forgets them (as before, all) |
-| The selected unit's path search after each action | `bplayer.c` refresh_paths | 177-1,103 ms before the view or the panel answered (14 searches: 3.7 s) | 20 ms slices while the turn waits | `path_search_begin/more/finish` (`path.c`), `hz_path.s` stops at a tile's end when the slice is over and goes on (its tables and buckets are its whole state); the turn's wait (`map_key`, a KEYS script's WAIT through `g_wait_hook`) runs the slices, the next key finishes it first, the cursor's TU shown when it is done. Real clock only (`g_path_slice` 20; the tests: 0, all at once) |
-| The sight fan | `plat/losfan.c` | 32 ms a fan, 90 at most | 19, 41 at most | its walk (80 % of it) in assembly: `horizon/hz_fan.s` on `hz_fw` (the walk's state, a block both use), the C the reference; `-DFANCHECK` compares both on every fan |
-| The panel's pictures | `plat/vga.c` part() | a seek and a read a row (a hand's item 48 rows: 50 reads); a geoscape screen change 2.5 s | blocks of whole rows (4 KB): 3 reads | the same bytes, the pack left where the row reads left it |
-| The panel's numbers | `panel.c` number() | sprintf and a 1 x 1 fill a pixel | digits by hand, a fill a run of a row | the same pixels |
-| A console line at the end of each effect | `plat/xdos.c` xd_seg | sound.c's `FP_SEG(sb_stack)` (a main-bank global) reported, 12 ms each, 8 a run | not reported (as FP_OFF's) | |
+- No poll while the view redraws, a panel draws, a fan or an unpack runs. Where: the
+  player's turn. Before: the pointer still 100-1,444 ms (a key burst's scrolls: 59 redraws,
+  1.4 s). After: 81 ms at most. How: `plat_busy_tick` (the clock every call, the DOS model's
+  clock every 10 ms, `plat_poll` every 30 ms): per level of a redraw (`rd_level`), each
+  redraw (`rd_setup`), every 32nd sprite (`plat/vgabat.c`), each unpack, every 8th ray of a
+  fan, each 32 rows of the night's shade; `plat_busy_poll` (every 2nd call ticks) every 8th
+  interface drawing call (`plat/vga.c`), in the engine's `busy_tick` (`mouse.c`, XCOM_PORT:
+  its busy loops, the turn's end).
+- The pointer between busy polls in an alien turn. Where: voxel lines, path searches.
+  Before: 60-90 ms (every 8th call, 40 ms). After: 45 ms at most. How: every 2nd call, 30
+  ms.
+- The atlas forgotten at the battle's start. Where: `horizon/hz_bb.c` `plat_mem_changed`.
+  Before: a file read into a block between two kept pictures forgot all 208 (the 1.2 s bar
+  for nothing): every picture unpacked again in play, 6-7 ms each (18 in the first walk: 112
+  ms). After: none forgotten: 0-1 unpacks in play. How: the pictures' lengths kept (`PLEN`,
+  in the table's bank); only a read or a free over a kept picture forgets them (as before,
+  all).
+- The selected unit's path search after each action. Where: `bplayer.c` refresh_paths.
+  Before: 177-1,103 ms before the view or the panel responded (14 searches: 3.7 s). After: 20
+  ms slices while the turn waits. How: `path_search_begin/more/finish` (`path.c`),
+  `hz_path.s` stops at a tile's end when the slice is over and goes on (its tables and
+  buckets are its whole state); the turn's wait (`map_key`, a KEYS script's WAIT through
+  `g_wait_hook`) runs the slices, the next key finishes it first, the cursor's TU shown when
+  it is done. Real clock only (`g_path_slice` 20; the tests: 0, all at once).
+- The sight fan. Where: `plat/losfan.c`. Before: 32 ms a fan, 90 at most. After: 19, 41 at
+  most. How: its walk (80 % of it) in assembly: `horizon/hz_fan.s` on `hz_fw` (the walk's
+  state, a block both use), the C the reference; `-DFANCHECK` compares both on every fan.
+- The panel's pictures. Where: `plat/vga.c` part(). Before: a seek and a read a row (a
+  hand's item 48 rows: 50 reads); a geoscape screen change 2.5 s. After: blocks of whole
+  rows (4 KB): 3 reads. How: the same bytes, the pack left where the row reads left it.
+- The panel's numbers. Where: `panel.c` number(). Before: sprintf and a 1 x 1 fill a pixel.
+  After: digits by hand, a fill a run of a row. How: the same pixels.
+- A console line at the end of each effect. Where: `plat/xdos.c` xd_seg. Before: sound.c's
+  `FP_SEG(sb_stack)` (a main-bank global) reported, 12 ms each, 8 a run. After: not reported
+  (as FP_OFF's).
 
 ### Before and after (the emulator, the board's card, the pointer circling)
 
 `tests/smooth.sh` (make smooth), the same runs on the tree before (HEAD with only the new
 /M) and after:
 
-| | Before | After |
-| --- | --- | --- |
-| battle: the player's gaps over 50 ms / the longest | 59 / 1,444 ms | 31 / 79 ms |
-| battle: the player's frames over 100 ms / the longest | 16 / 297 ms | 15 / 181 ms |
-| battle: scrolling (presents after a scroll) | 23 a second (median 43 ms, the slowest 200) | 21 a second (median 47 ms, the slowest 116) |
-| battle: walking (a step's present; paced by the animation) | 5.7 a second (median 174 ms, the slowest 976) | 6.1 a second (median 165 ms, the slowest 572) |
-| battle: path searches / sight fans / unpacks in play | 3.7 s whole / 320 ms (90 at most) / 53, 353 ms | slices / 187 ms (41 at most) / 0 |
-| 3BAT (the kit's battle): gaps over 50 ms / the longest | 47 / 855 ms | 10 / 94 ms |
-| geoscape (geo.keys): the player's gaps over 50 ms / the longest | 7 / 2,526 ms | 17 / 330 ms (more over 50: the screen changes' long ones split) |
+- battle: the player's gaps over 50 ms / the longest. Before: 59 / 1,444 ms. After: 31 / 79
+  ms.
+- battle: the player's frames over 100 ms / the longest. Before: 16 / 297 ms. After: 15 /
+  181 ms.
+- battle: scrolling (presents after a scroll). Before: 23 a second (median 43 ms, the
+  slowest 200). After: 21 a second (median 47 ms, the slowest 116).
+- battle: walking (a step's present; paced by the animation). Before: 5.7 a second (median
+  174 ms, the slowest 976). After: 6.1 a second (median 165 ms, the slowest 572).
+- battle: path searches / sight fans / unpacks in play. Before: 3.7 s whole / 320 ms (90 at
+  most) / 53, 353 ms. After: slices / 187 ms (41 at most) / 0.
+- 3BAT (the kit's battle): gaps over 50 ms / the longest. Before: 47 / 855 ms. After: 10 /
+  94 ms.
+- geoscape (geo.keys): the player's gaps over 50 ms / the longest. Before: 7 / 2,526 ms.
+  After: 17 / 330 ms (more over 50: the screen changes' long ones split).
 
 BENCH and the alien turn (make speed): the polls cost a little: average full redraw 149 →
 157 ms by day, 253 → 267 at night; 360 voxel lines 724 → 790 ms; the abductor's turn 6.6 →
@@ -1355,7 +1617,7 @@ fails when the battle's longest gap is over 120 ms or its longest frame over 250
 geoscape's longest gap over 450 ms (the figures above with about a third of headroom). The
 kit has it as `ARGS/6SMOOTH.ARG` (PSMOOTH.KEY) for the board.
 
-### What is left
+### Remaining work
 
 - Full redraws (the view centred on a selected unit, a walker leaving the view): 100-160
   ms frames by day. Their time: the floor pass (`hz_rend.s`) 21 %, the sprites' records
@@ -1387,17 +1649,52 @@ too, nothing of it behind `XCOM_PORT` but the sample cache's size). The list of 
 still different, and how complete the game is against DOS: `engine/FORK.md`
 "Differences from the original game".
 
-| Difference | DOS (source) | Now | Tested |
-| --- | --- | --- | --- |
-| Windows appeared at once | Window::popup: the frame grows from the centre, 20 steps, the contents after it; across, down or both by window (`new Window(..., POPUP_*)` in each state) | `uk_popup` (20 steps of 14 ms, 0.28 s, the pointer alive), each window's kind; the windows that do not pop up in DOS open at once and silently (10 had the pop-up sound) | `make test`'s pictures (a step is a picture when a poll falls in it), sndui's sound order |
-| A menu popped up and sounded again after a window over it closed | OpenXcom's states: the one under is drawn again, not opened | the open pop-up menus kept as a stack (`uk_menu`), forgotten by a full screen | sndui: Load Saved Game's list and CANCEL: the start menu again without a sound |
-| Buttons did not press | TextButton: pressed (inverted) while the button is held, the click on press, the action on release | `uk_press` / `uk_held`: every bottom row, button columns, the geoscape's pop-ups and its six function buttons, the base, research, production, UFOpaedia, report, briefing screens; a KEYS script's `HOLD x y n` holds it | the pressed picture by HOLD (checked by eye), sndui |
-| The first base was named after its region | BuildNewBaseState's window, then BaseNameState (192 x 80, "Base Name?", OK only with a name, no cancel) | `uk_name_box`, `base_site_window`; Build New Base asks the same | every new-game script types HQ (`'H 'Q ENTER`; the real input `HQ{enter}` through Horizon's keyboard, its capitals; the app's test) and the LOG's `NAME` |
-| A UFO's detection played an alert that held the window's pop-up sound off | no alert: UfoDetectedState pops up with one of the three pop-up sounds (GEO.CAT 1-3; upstream's alert is 3) | the alert removed | the dogfight and mission runs (detections; their LOG and pictures on both builds); no sound test records them |
-| Explosions sounded as the snakeman's slither | SOUND1.CAT 0 is the slither (ufopaedia.org; OpenXcom's snakeman moveSound 0); explosions are 2 (power up to 80) and 5 | 2 and 5 by power | the battle runs with grenades and HE (bsave, soak) on both builds; no sound test records them |
-| One footstep for every floor | Tile::getFootstepSound: the MCD's Footstep byte, WALK_OFFSET 22 + 2 f at the walk's phase 3 of 8 and + 1 at phase 7; the flying warble (15) for fliers | the byte in the mission packs ("XFS1"), both halves of each step on the walk's own pace, the warble for floaters and for fliers in the air | sndbat: the craft's metal floor (step 1a, 1b), then the ground (step 2b), host and Atari816 block for block |
-| Silent: UFO doors, the inventory, reloads, throws (upstream had the sample, unused), machines' deaths; the rifle's shot for the autocannon, rocket and blaster launchers | SLIDING_DOOR_OPEN 20, ITEM_DROP 38, ITEM_RELOAD 17, ITEM_THROW 39, deathSound 23, fireSound 12 / 52 / 53 | all of them | make test's battle runs (the same LOG and pictures on both builds) |
-| Music: GMGEO1 in the start menu, none in the briefing, GMMARS in Cydonia's battle, GMWIN / GMLOSE after every battle, GMGEO2 never | GMSTORY (mainMenu, once), the briefing's (GMDEFEND; GMENBASE for terror sites and base defence; GMNEWMAR for Cydonia), GMTACTIC in every battle, GMMARS in the debriefing (DEBRIEF_MUSIC_GOOD / _BAD), GMGEO1 in the first month then GMGEO1 or GMGEO2 at random; GMWIN / GMLOSE only at the game's end | as DOS | sound.sh: the geoscape's track compared from its start (after GMSTORY, found in the task's writes) |
+- Windows appeared at once. DOS (source): Window::popup: the frame grows from the centre, 20
+  steps, the contents after it; across, down or both by window (`new Window(..., POPUP_*)`
+  in each state). Now: `uk_popup` (20 steps of 14 ms, 0.28 s, the pointer alive), each
+  window's kind; the windows that do not pop up in DOS open at once and silently (10 had the
+  pop-up sound). Tested: `make test`'s pictures (a step is a picture when a poll falls in
+  it), sndui's sound order.
+- A menu popped up and sounded again after a window over it closed. DOS (source): OpenXcom's
+  states: the one under is drawn again, not opened. Now: the open pop-up menus kept as a
+  stack (`uk_menu`), forgotten by a full screen. Tested: sndui: Load Saved Game's list and
+  CANCEL: the start menu again without a sound.
+- Buttons did not press. DOS (source): TextButton: pressed (inverted) while the button is
+  held, the click on press, the action on release. Now: `uk_press` / `uk_held`: every bottom
+  row, button columns, the geoscape's pop-ups and its six function buttons, the base,
+  research, production, UFOpaedia, report, briefing screens; a KEYS script's `HOLD x y n`
+  holds it. Tested: the pressed picture by HOLD (checked by eye), sndui.
+- The first base was named after its region. DOS (source): BuildNewBaseState's window, then
+  BaseNameState (192 x 80, "Base Name?", OK only with a name, no cancel). Now:
+  `uk_name_box`, `base_site_window`; Build New Base shows the same. Tested: every new-game
+  script types HQ (`'H 'Q ENTER`; the real input `HQ{enter}` through Horizon's keyboard, its
+  capitals; the app's test) and the LOG's `NAME`.
+- A UFO's detection played an alert that held the window's pop-up sound off. DOS (source):
+  no alert: UfoDetectedState pops up with one of the three pop-up sounds (GEO.CAT 1-3;
+  upstream's alert is 3). Now: the alert removed. Tested: the dogfight and mission runs
+  (detections; their LOG and pictures on both builds); no sound test records them.
+- Explosions sounded as the snakeman's slither. DOS (source): SOUND1.CAT 0 is the slither
+  (ufopaedia.org; OpenXcom's snakeman moveSound 0); explosions are 2 (power up to 80) and 5.
+  Now: 2 and 5 by power. Tested: the battle runs with grenades and HE (bsave, soak) on both
+  builds; no sound test records them.
+- One footstep for every floor. DOS (source): Tile::getFootstepSound: the MCD's Footstep
+  byte, WALK_OFFSET 22 + 2 f at the walk's phase 3 of 8 and + 1 at phase 7; the flying
+  warble (15) for fliers. Now: the byte in the mission packs ("XFS1"), both halves of each
+  step on the walk's own pace, the warble for floaters and for fliers in the air. Tested:
+  sndbat: the craft's metal floor (step 1a, 1b), then the ground (step 2b), host and
+  Atari816 block for block.
+- Silent: UFO doors, the inventory, reloads, throws (upstream had the sample, unused),
+  machines' deaths; the rifle's shot for the autocannon, rocket and blaster launchers. DOS
+  (source): SLIDING_DOOR_OPEN 20, ITEM_DROP 38, ITEM_RELOAD 17, ITEM_THROW 39, deathSound
+  23, fireSound 12 / 52 / 53. Now: all of them. Tested: make test's battle runs (the same
+  LOG and pictures on both builds).
+- Music: GMGEO1 in the start menu, none in the briefing, GMMARS in Cydonia's battle, GMWIN /
+  GMLOSE after every battle, GMGEO2 never. DOS (source): GMSTORY (mainMenu, once), the
+  briefing's (GMDEFEND; GMENBASE for terror sites and base defence; GMNEWMAR for Cydonia),
+  GMTACTIC in every battle, GMMARS in the debriefing (DEBRIEF_MUSIC_GOOD / _BAD), GMGEO1 in
+  the first month then GMGEO1 or GMGEO2 at random; GMWIN / GMLOSE only at the game's end.
+  Now: as DOS. Tested: sound.sh: the geoscape's track compared from its start (after
+  GMSTORY, found in the task's writes).
 
 **Pack format 6** (`engine/src/packver.h`): SOUNDS.PAK 42 effects (16 new: 8 footsteps, the
 warble, the large explosion, the UFO door, drop, reload, the machines' death, rocket,
@@ -1421,11 +1718,11 @@ pictures, 264 before) and `tests/runs-long.md5` (103) written again after a look
 pictures (the windows' steps, the name window, the site window); sound.sh: sndui starts
 with Load Saved Game's list and CANCEL and expects 19 effects in order
 (`WBWBBWBWBBWBBWBWBBW`), runs NOMUSIC (the start menu's GMSTORY is as loud as the shots),
-sndbat must have the footsteps; soundcheck.py knows the new effects' names. The
+sndbat must have the footsteps; soundcheck.py has the new effects' names. The
 Makefile's `make -j app` race fixed (XCOM.HZA's folder after `builds`: two sub-makes wrote
 the same `build/sum/` files).
 
-## 4j. The night by the blitter's colour remap (24 November 2026)
+## 4j. Night by the blitter's colour remap (24 November 2026)
 
 The night battle's view was shaded by the CPU at every present (`hz_shade_rect`, 115 ms for
 the whole view). Hardware revision $0D (Horizon 0.31) gave Ali a colour remap: a copy through
@@ -1434,8 +1731,8 @@ a 256-entry table (ABI.md "Colour remap"). Now:
 - `horizon/hz_bb.c`: a sheet of 256 x 16 tables (row k: level k's), 4 KB in the pictures'
   bank (offset 49,152, past PLEN); a row written from vgabat.c's `shade_tab` the first
   time its level is shown, after a wait (a table is a source). The first night present
-  probes once with a call of one SH_TABLE record: refused (ENODEV before REV $0D or with the
-  blitter off, EINVAL before Horizon 0.31) the CPU shades as before, and the console says
+  probes once with a call of one SH_TABLE record: if rejected (ENODEV before REV $0D or with the
+  blitter off, EINVAL before Horizon 0.31) the CPU shades as before, and the console prints
   which (`xcom: night shade: by the blitter's colour remap` / `no colour remap (error 9,
   REV $0C): by the CPU`). `plat_bb_present_shade` is `plat_bb_present` with the table's
   SH_TABLE record first and the copy `SH_COPY | SH_REMAP`, both in one `sheet_draw` call
@@ -1451,7 +1748,7 @@ a 256-entry table (ABI.md "Colour remap"). Now:
   level, a SH_TABLE record when the level changes (at most 11 tables, 360 cells: a few
   hundred records, about 3-4 ms of the kernel's time and the copy's 8 ms of Ali's), the
   CPU's part only the cells' levels when a light moved. That is the "per-cell night lights"
-  of "What is next": flares and fires lighting their area (1-2 days, the host's C first).
+  of "Next steps": flares and fires lighting their area (1-2 days, the host's C first).
 
 Other colour remaps looked for: none left on the CPU in the VGA game. The interface's
 colour map (`g_uk_cmap`, `uk_remap_vram`) is EGA's only; palette fades (the intro, the
@@ -1466,7 +1763,7 @@ Tests: `make test` has a second night run, `night12` (`r=12` in tests/runs: run8
 `--rev 12`, the CPU's shade), against the same host pictures; both night runs check the
 console's line. `make smooth` has the smooth battle at night too (the same limits); the
 kit has it as `ARGS/7NSMOOTH.ARG` for the board (the remap is not tried on the board yet: its
-console line says which path ran).
+console line prints which path ran).
 
 `tests/soundcheck.py` (make test's geo music): the geoscape track's first writes include,
 for each channel, a key-off ($B0-$B8) that keeps the frequency bits of the start menu's
@@ -1476,35 +1773,68 @@ later than the tree before: $B0 = $19 instead of the host's $1A, and the check f
 any change of the program's timing could make it). Those key-offs before a channel's first
 note of the track are now compared by their key bit only; every other write as before.
 
-| (the emulator, real clock) | Before (the CPU's shade) | After (the remap) | REV $0C (the fallback) |
-| --- | --- | --- | --- |
-| BENCH night: average full redraw | 264 ms | **157 ms** (day 154) | as before |
-| BENCH night: present view / scroll by one tile | 121 / 202 ms | **11 / 93 ms** (day 10 / 92) | |
-| BENCH night: cursor step / unit step, one rectangle | 26 / 32 ms | **19 / 23 ms** | |
-| smooth at night: scrolling | 5.2 a second (median 193 ms) | **20.0 a second** (median 50 ms; by day 20.8) | 5.4 a second |
-| smooth at night: the player's frames over 100 ms / the longest | 32 / 324 ms | **12 / 175 ms** | 32 / 318 ms |
-| smooth at night: the longest pointer stop | 109 ms | 100 ms | 111 ms |
-| smooth at night: walking | a step's present 70-90 ms after the one before | the same (paced by the animation) | |
+- BENCH night: average full redraw. Before (the CPU's shade): 264 ms. After (the remap):
+  **157 ms** (day 154). REV $0C (the fallback): as before.
+- BENCH night: present view / scroll by one tile. Before (the CPU's shade): 121 / 202 ms.
+  After (the remap): **11 / 93 ms** (day 10 / 92).
+- BENCH night: cursor step / unit step, one rectangle. Before (the CPU's shade): 26 / 32 ms.
+  After (the remap): **19 / 23 ms**.
+- smooth at night: scrolling. Before (the CPU's shade): 5.2 a second (median 193 ms). After
+  (the remap): **20.0 a second** (median 50 ms; by day 20.8). REV $0C (the fallback): 5.4 a
+  second.
+- smooth at night: the player's frames over 100 ms / the longest. Before (the CPU's shade):
+  32 / 324 ms. After (the remap): **12 / 175 ms**. REV $0C (the fallback): 32 / 318 ms.
+- smooth at night: the longest pointer stop. Before (the CPU's shade): 109 ms. After (the
+  remap): 100 ms. REV $0C (the fallback): 111 ms.
+- smooth at night: walking. Before (the CPU's shade): a step's present 70-90 ms after the
+  one before. After (the remap): the same (paced by the animation).
 
 By day nothing changed (BENCH and smooth's day battle the same within a few ms).
 
-## 4k. The night lights (24 November 2026)
+## 4k. Night lights (24 November 2026)
 
 A night battle was one darkness level for the whole view (section 4j). Now each area is lit
 as in the original: the soldiers' own light, fires, electro-flares on the ground and the
 terrain's lamps light their surroundings, the rest is at the night sky's level.
 
-### The original, upstream's model, the choice
+### Original, upstream's model, choice
 
-| | OpenXcom (the DOS game's rules) | upstream's VGA (`vgaasm.asm` `lit_present`, never ported before) | now |
-| --- | --- | --- | --- |
-| a tile's light | the most of: the sun's 15 - global shade (`calculateSunShading`), each light's power - round(distance) within power tiles each way, on every level (`addLight`); shade = 15 - light (`Tile::getShade`) | the same, the night sky 15 - 10, lights within 9 tiles each way (more adds nothing over the sky's 5) | the same (`engine/src/vlit.c`) |
-| sources | X-COM units not out (15, `_personalLighting`), burning units (15), fires (15), BT_FLARE items on a tile (items.rul `power` 15; carried ones do not light), floors and objects with an MCD light source | the same; at most 48 sources that reach the view, 24 of the terrain, 8 kinds of terrain lights, a tile's first light part | the same, every source, floor and object both |
-| when made again | a unit's move (`calculateUnitLighting`), a hit or explosion and a dropped flare (`calculateTerrainLighting`) | at a present, when a signature of the sources, the camera or the level changed | the same: the cells' levels only when a light came, went or moved, or the camera or level moved; a walk's step only the moved light's squares |
-| the picture | per tile: every part of the tile (floor, walls, object, items, the unit; doors by their side's discovery) drawn through `StandardShade` at the tile's shade; fire and smoke on a burning tile, the cursor, the path, projectiles at 0 (bright); undiscovered 16 (black); a walking unit's shade blended between its tiles | per cell of 16 x 8 pixels (20 x 18), the tile under the cell's centre at the view's level: a cell holds parts of several tiles, so at a light's edge the picture is up to 1.5 tiles off, a level below or above takes the cell's tile; the cursor and the arrow are shaded with their cell | upstream's cells (below why) |
-| night | the global shade from the globe's sun position, 0-15 (deep night 15: no sky light) | NIGHT_SHADE 10 for a night mission, 0 by day | upstream's |
-| the personal light toggle | an OpenXcom extra (key L, "purely cosmetic"; on by default) | none (the DOS game has none) | none |
-| terrain light above 15 (the X-COM base's lamps: 16) | light 16, shade 0 | level -1 (shown as 15: black) | 15, shade 0 (OpenXcom) |
+- a tile's light. OpenXcom (the DOS game's rules): the most of: the sun's 15 - global shade
+  (`calculateSunShading`), each light's power - round(distance) within power tiles each way,
+  on every level (`addLight`); shade = 15 - light (`Tile::getShade`). upstream's VGA
+  (`vgaasm.asm` `lit_present`, never ported before): the same, the night sky 15 - 10, lights
+  within 9 tiles each way (more adds nothing over the sky's 5). now: the same
+  (`engine/src/vlit.c`).
+- sources. OpenXcom (the DOS game's rules): X-COM units not out (15, `_personalLighting`),
+  burning units (15), fires (15), BT_FLARE items on a tile (items.rul `power` 15; carried
+  ones do not light), floors and objects with an MCD light source. upstream's VGA
+  (`vgaasm.asm` `lit_present`, never ported before): the same; at most 48 sources that reach
+  the view, 24 of the terrain, 8 kinds of terrain lights, a tile's first light part. now:
+  the same, every source, floor and object both.
+- when made again. OpenXcom (the DOS game's rules): a unit's move (`calculateUnitLighting`),
+  a hit or explosion and a dropped flare (`calculateTerrainLighting`). upstream's VGA
+  (`vgaasm.asm` `lit_present`, never ported before): at a present, when a signature of the
+  sources, the camera or the level changed. now: the same: the cells' levels only when a
+  light came, went or moved, or the camera or level moved; a walk's step only the moved
+  light's squares.
+- the picture. OpenXcom (the DOS game's rules): per tile: every part of the tile (floor,
+  walls, object, items, the unit; doors by their side's discovery) drawn through
+  `StandardShade` at the tile's shade; fire and smoke on a burning tile, the cursor, the
+  path, projectiles at 0 (bright); undiscovered 16 (black); a walking unit's shade blended
+  between its tiles. upstream's VGA (`vgaasm.asm` `lit_present`, never ported before): per
+  cell of 16 x 8 pixels (20 x 18), the tile under the cell's centre at the view's level: a
+  cell holds parts of several tiles, so at a light's edge the picture is up to 1.5 tiles
+  off, a level below or above takes the cell's tile; the cursor and the arrow are shaded
+  with their cell. now: upstream's cells (below why).
+- night. OpenXcom (the DOS game's rules): the global shade from the globe's sun position,
+  0-15 (deep night 15: no sky light). upstream's VGA (`vgaasm.asm` `lit_present`, never
+  ported before): NIGHT_SHADE 10 for a night mission, 0 by day. now: upstream's.
+- the personal light toggle. OpenXcom (the DOS game's rules): an OpenXcom extra (key L,
+  "purely cosmetic"; on by default). upstream's VGA (`vgaasm.asm` `lit_present`, never
+  ported before): none (the DOS game has none). now: none.
+- terrain light above 15 (the X-COM base's lamps: 16). OpenXcom (the DOS game's rules):
+  light 16, shade 0. upstream's VGA (`vgaasm.asm` `lit_present`, never ported before): level
+  -1 (shown as 15: black). now: 15, shade 0 (OpenXcom).
 
 **Per tile or per cell, decided by measurement.** Shading each tile's pictures (the
 original) means drawing every sprite record through its tile's table: the back buffer then
@@ -1520,7 +1850,7 @@ step: ~25 ms of levels, a part of the view's records), a scroll moves the levels
 view, and the fallback is the same records drawn by the CPU. So the cells: the same model as
 upstream's DOS VGA build (the 286 machine shows the same picture).
 
-### What was in the engine, what was added
+### Existing engine code and additions
 
 - **Rules: already there.** Sight at night is OpenXcom's (`los.c` `los_unit_sees`: X-COM
   sees past 9 tiles only units on a tile with light 6 or more, `effects.c` `fx_lit`:
@@ -1550,7 +1880,7 @@ upstream's DOS VGA build (the 286 machine shows the same picture).
   (`hz_shade_rect` on the Atari816, the C on the host): the same pixels by construction.
 - **On the Atari816 in assembly** (`horizon/hz_lit.s`; the C is the host's reference):
   `hz_lit_recs` (the records; with `-DLITCHECK` both run on every present and the console
-  says where they differ: none in BENCH's night run), `hz_lit_cells` (the cells' levels,
+  prints where they differ: none in BENCH's night run), `hz_lit_cells` (the cells' levels,
   incremental along a row), `hz_lit_stamp` and `hz_lit_rows` (a disc into the light map, a
   square of rows). cc816's C took 20-80 ms for what these do in 1-10.
 
@@ -1565,7 +1895,7 @@ upstream's DOS VGA build (the 286 machine shows the same picture).
   check that the script still makes its fire, flare and sightings. `night` / `night12`:
   their pictures are new (3 of 4: the soldiers' light around the craft).
 - BENCH at night: its screen checks now read the levels shown (`vga_lit_shown`): `0 screen
-  bytes differ` in every check (was some 45,000: the checks did not know the shade), and
+  bytes differ` in every check (was some 45,000: the checks did not account for the shade), and
   `VGA lights: N light maps, N cell level maps, N records in N night presents`.
 - `make smooth` and `make speed` as before (the night battle within the limits).
 
@@ -1576,17 +1906,23 @@ pointer circling), the same machine, before (section 4j: one level, one remapped
 after; by day nothing changed (BENCH 153 ms full redraw, present 10, scroll 93; smooth's
 day battle 22 scrolls a second, the longest pointer stop 102 ms):
 
-| (the emulator, real clock) | One night level (4j) | The night lights |
-| --- | --- | --- |
-| BENCH night: average full redraw | 157 ms | 182 ms |
-| BENCH night: present view (the whole view, 120-180 records kept) | 11 ms | 22 ms |
-| BENCH night: scroll by one tile | 93 ms | 115 ms |
-| BENCH night: cursor step / unit step, one rectangle | 19 / 23 ms | 27 / 30 ms |
-| BENCH night: VGA lights | | 3 light maps, 32 cell level maps, 9,329 records in 200 presents |
-| smooth at night: the longest pointer stop (limit 120) | 102 ms | 102 ms |
-| smooth at night: the player's frames over 100 ms / the longest (limit 250) | 12 / 179 ms | 26 / 213 ms |
-| smooth at night: scrolling | 19.2 a second (median 52 ms) | 12.3 a second (median 81 ms) |
-| smooth at night: walking (a step's present) | 11.1 a second (median 90 ms) | 8.8 a second (median 114 ms; by day 6.0, paced by the animation) |
+- BENCH night: average full redraw. One night level (4j): 157 ms. The night lights: 182 ms.
+- BENCH night: present view (the whole view, 120-180 records kept). One night level (4j): 11
+  ms. The night lights: 22 ms.
+- BENCH night: scroll by one tile. One night level (4j): 93 ms. The night lights: 115 ms.
+- BENCH night: cursor step / unit step, one rectangle. One night level (4j): 19 / 23 ms. The
+  night lights: 27 / 30 ms.
+- BENCH night: VGA lights. The night lights: 3 light maps, 32 cell level maps, 9,329 records
+  in 200 presents.
+- smooth at night: the longest pointer stop (limit 120). One night level (4j): 102 ms. The
+  night lights: 102 ms.
+- smooth at night: the player's frames over 100 ms / the longest (limit 250). One night
+  level (4j): 12 / 179 ms. The night lights: 26 / 213 ms.
+- smooth at night: scrolling. One night level (4j): 19.2 a second (median 52 ms). The night
+  lights: 12.3 a second (median 81 ms).
+- smooth at night: walking (a step's present). One night level (4j): 11.1 a second (median
+  90 ms). The night lights: 8.8 a second (median 114 ms; by day 6.0, paced by the
+  animation).
 
 Where a night present's time goes (temporary timers, the smooth battle): the levels 0.7
 ms when nothing moved, 20-25 ms when a soldier stepped (his squares of the light map, the
@@ -1597,11 +1933,11 @@ present loads the 15 tables (40 ms) and makes the terrain's map (80 ms), behind 
 battle's start. The CPU fallback (REV $0C) draws the same records through `hz_shade_rect`
 (about the whole view's 115 ms of section 4j, the records' C on top).
 
-### What is left
+### Remaining work
 
 - The scroll at night: the view's records are made again (the levels move with the
   view; 100-160 records), and `sheet_draw` costs about 85 us a record here (measured: the
-  same for plain copies, `-DLITEXP` experiment; ABI.md says 21 us on its fast path): about
+  same for plain copies, `-DLITEXP` experiment; ABI.md gives 21 us on its fast path): about
   half of the night's extra time on a scroll. The records of the kept view could be moved
   with the scroll and only the new strip's made; the kernel's per-record cost is the
   kernel owner's to look at.
@@ -1609,9 +1945,9 @@ battle's start. The CPU fallback (REV $0C) draws the same records through `hz_sh
   levels, the cursor and the selected unit's arrow are shaded (the original draws them
   bright), a level below the view's takes the view level's tile's light.
 - The night sky is upstream's fixed 10 (dusk and deep night as the globe's sun would give
-  them: not modelled, `geo.c` `site_dark` says night or day).
+  them: not modelled, `geo.c` `site_dark` gives night or day).
 
-## 5. The plan
+## 5. Plan
 
 Principle: **upstream's code runs unchanged** on a model of the machine it was written for;
 the port is `compat/` + `plat/` + back ends + small `#if defined(XCOM_PORT)` hooks in the
@@ -1621,14 +1957,44 @@ engine is our fork in `engine/`; following upstream is a merge from a branch at 
 tree, `engine/FORK.md` "Taking a newer upstream"; the assembly files that changed each have
 their C twin in `plat/`, named alike.)
 
-| Stage | Delivers | Tested by | Size (new lines) |
-| --- | --- | --- | --- |
-| 1 (done) | assessment; converter on Linux; DOS model; the VGA interface, geoscape and battle view in C; the game's assembly in C (floor pass, LOS fan, voxel line, waypoints); the host runs menus, geoscape, base screens and battles; 816 compiles; measurements | `make check-host` (14 pictures); BENCH's self-checks; voxcheck.py against OpenXcom; `tests/bench816` | 5,200 (`plat/`, `compat/`, `host/`, `horizon/`, tests) |
-| 2 | **the host complete**: heldasm, cutasm's FLI, DOS's smoke/fire pictures, the night lights in C; a check of the LOS fan (a C reference from the asm's comments, compared on random fans); the 32-bit `int` audit; reference runs: KEYS scripts for a campaign month, base screens, a terror site, a night battle, saves, with `SEED`, LOG and pictures as checksums | `make check-host`: LOG and pictures equal run to run | 1,500-2,000 |
-| 3 | **SDK far data model** (cc816 + libc, by the SDK's owner) **or** the fallback: a build-time source pass (`tools/farify.py`: `__far` on every data pointer declarator of upstream's files, using a typedef table; the library calls through far wrappers) — decided at the start of the stage. Then the engine boots on the 816 to the start menu and the geoscape with the virtual clock (`/V`): pictures and LOG compared with the host's for the same KEYS script | 816 vs host: LOG lines equal, pictures equal (checksums), at the same script steps (`--shot-on` on the engine's own lines) | far model: SDK work (estimate 1,500-2,500 lines in cc816 and the library); fallback: 600 lines of tool + a few dozen hand fixes |
-| 4a (done) | `make test` (host vs Atari816: LOG, pictures, saves, BENCH, real input); the 16-bit host; polling; the battle view by Ali (atlases unpacked on the machine); the screen split | section 4c | |
-| 4 | **speed**: battle sprites to blitter atlases (`tools/mkatlas.py` after XCOMCONV; the floor pass and render.c's sprite calls make sheet records; the back buffer a framebuffer page), pictures by `hz_read` into the framebuffer, the geoscape zoom in assembly, the voxel line / path search / LOS fan profiled (`prof816.py`) and moved to assembly where they dominate (the alien turn: upstream says 20 s on a 286 for the first jungle turn in exact mode); the 2.0 MB of UI pictures cached in far memory; the battlescape split | `BENCH` on the 816 against the 286 figures (full redraw 0.2-0.3 s, alien turn); the same LOG as the host (logic unchanged) | 2,000-3,000 (half assembly) |
-| 5 | **the game**: sound (music.c on the music timer, effects on Lau and POKEY), saves next to the program, 4-file limit checked, the intro, the end slides, the APP package (`make app`), README for players | campaign scripts on the 816 against the host's LOG; saves written and loaded; `--wav` checks; `make test`, `make test-app` | 800-1,200 |
+- 1 (done). Delivers: assessment; converter on Linux; DOS model; the VGA interface, geoscape
+  and battle view in C; the game's assembly in C (floor pass, LOS fan, voxel line,
+  waypoints); the host runs menus, geoscape, base screens and battles; 816 compiles;
+  measurements. Tested by: `make check-host` (14 pictures); BENCH's self-checks; voxcheck.py
+  against OpenXcom; `tests/bench816`. Size (new lines): 5,200 (`plat/`, `compat/`, `host/`,
+  `horizon/`, tests).
+- 2. Delivers: **the host complete**: heldasm, cutasm's FLI, DOS's smoke/fire pictures, the
+  night lights in C; a check of the LOS fan (a C reference from the asm's comments, compared
+  on random fans); the 32-bit `int` audit; reference runs: KEYS scripts for a campaign
+  month, base screens, a terror site, a night battle, saves, with `SEED`, LOG and pictures
+  as checksums. Tested by: `make check-host`: LOG and pictures equal run to run. Size (new
+  lines): 1,500-2,000.
+- 3. Delivers: **SDK far data model** (cc816 + libc, by the SDK's owner) **or** the
+  fallback: a build-time source pass (`tools/farify.py`: `__far` on every data pointer
+  declarator of upstream's files, using a typedef table; the library calls through far
+  wrappers), decided at the start of the stage. Then the engine boots on the 816 to the
+  start menu and the geoscape with the virtual clock (`/V`): pictures and LOG compared with
+  the host's for the same KEYS script. Tested by: 816 vs host: LOG lines equal, pictures
+  equal (checksums), at the same script steps (`--shot-on` on the engine's own lines). Size
+  (new lines): far model: SDK work (estimate 1,500-2,500 lines in cc816 and the library);
+  fallback: 600 lines of tool + a few dozen hand fixes.
+- 4a (done). Delivers: `make test` (host vs Atari816: LOG, pictures, saves, BENCH, real
+  input); the 16-bit host; polling; the battle view by Ali (atlases unpacked on the
+  machine); the screen split. Tested by: section 4c.
+- 4. Delivers: **speed**: battle sprites to blitter atlases (`tools/mkatlas.py` after
+  XCOMCONV; the floor pass and render.c's sprite calls make sheet records; the back buffer a
+  framebuffer page), pictures by `hz_read` into the framebuffer, the geoscape zoom in
+  assembly, the voxel line / path search / LOS fan profiled (`prof816.py`) and moved to
+  assembly where they dominate (the alien turn: upstream reports 20 s on a 286 for the first
+  jungle turn in exact mode); the 2.0 MB of UI pictures cached in far memory; the
+  battlescape split. Tested by: `BENCH` on the 816 against the 286 figures (full redraw
+  0.2-0.3 s, alien turn); the same LOG as the host (logic unchanged). Size (new lines):
+  2,000-3,000 (half assembly).
+- 5. Delivers: **the game**: sound (music.c on the music timer, effects on Lau and POKEY),
+  saves next to the program, 4-file limit checked, the intro, the end slides, the APP
+  package (`make app`), README for players. Tested by: campaign scripts on the 816 against
+  the host's LOG; saves written and loaded; `--wav` checks; `make test`, `make test-app`.
+  Size (new lines): 800-1,200.
 
 Honest size: about 9,000-11,000 new lines in the port (5,200 of them exist now) (plus the SDK's far data model, or the
 farify tool), most of them the C and assembly twins of upstream's 6,900 lines of VGA-mode
@@ -1650,27 +2016,44 @@ Risks:
 - **The GOG data** is not exactly DOS 1.4 (fonts, texts, HE types): behaviour around the
   patched HE records differs from DOS (those parts do not explode).
 
-## What is next (after stage 5)
+## Next steps (after stage 5)
 
-| What | Why | Estimate (agent time) |
-| --- | --- | --- |
-| ~~the A* goal search~~, ~~the voxel line in assembly~~ | done, exact (section 4f): the alien turns 4-5 times faster | |
-| ~~the stutter~~: the pointer alive in all work, the atlas kept, the path search in slices, the fan's walk in assembly | done (section 4h): the player's longest pointer stop 1.4 s → 80 ms | |
-| full redraws (100-160 ms), ~~the night's shade~~ (done: section 4j), the geoscape's screen changes (300 ms) | section 4h, "What is left" | 1-2 days |
-| the voxel line's tile crossing (about 1,300 cycles) and checked voxels (250-400); a search skipped when the same one was just done (a world version) | a first turn of a small battle 5-7 s (section 4f, "What limits it now"); 1-3 s needs about twice that | 1-2 days |
-| the sight fan's rays and levels (`plat/losfan.c`) in assembly (its walk is: section 4h) | 20-40 ms a fan left | 0.5 day |
-| the start-up's CPU part (3 s: the palette and picture loaders read through stdio byte by byte) | the start menu sooner | 0.5 day |
-| ~~the main bank: `hgame`'s queues~~ (the `.s` code moved: done, section 4; the queues: done in the SDK, far memory, 4.5 KB back) | room for the next changes | with the SDK |
-| ~~per-cell night lights~~ | done (section 4k): flares, fires, the soldiers' own light and the terrain's lamps light their area | |
-| the night's scroll (section 4k, "What is left"): the records of the view kept and moved with a scroll, the kernel's cost of a sheet record (about 85 us measured, the fast path's 21 us expected) | 12 scrolls a second at night against 21 by day | 1 day (+ the kernel's owner) |
-| the FLI's runs in assembly | the intro's explosion scene (1.1 s behind at worst) | 0.5 day |
-| report upstream: faults 1, 2, 3, 5, 6, 8 above, the GOG data, voxcheck.py | | |
-| the rest of the differences from DOS (walk frames, explosions, UFO doors, the 5-second speed, the battle's unit stats, terror units' abilities, the missing samples) | `engine/FORK.md` "Differences from the original game", with estimates | 0.5-5 days each |
+- ~~the A* goal search~~, ~~the voxel line in assembly~~. Why: done, exact (section 4f): the
+  alien turns 4-5 times faster.
+- ~~the stutter~~: the pointer alive in all work, the atlas kept, the path search in slices,
+  the fan's walk in assembly. Why: done (section 4h): the player's longest pointer stop 1.4
+  s → 80 ms.
+- full redraws (100-160 ms), ~~the night's shade~~ (done: section 4j), the geoscape's screen
+  changes (300 ms). Why: section 4h, "Remaining work". Estimate (agent time): 1-2 days.
+- the voxel line's tile crossing (about 1,300 cycles) and checked voxels (250-400); a search
+  skipped when the same one was just done (a world version). Why: a first turn of a small
+  battle 5-7 s (section 4f, "Remaining limits"); 1-3 s needs about twice that. Estimate
+  (agent time): 1-2 days.
+- the sight fan's rays and levels (`plat/losfan.c`) in assembly (its walk is: section 4h).
+  Why: 20-40 ms a fan left. Estimate (agent time): 0.5 day.
+- the start-up's CPU part (3 s: the palette and picture loaders read through stdio byte by
+  byte). Why: the start menu sooner. Estimate (agent time): 0.5 day.
+- ~~the main bank: `hgame`'s queues~~ (the `.s` code moved: done, section 4; the queues:
+  done in the SDK, far memory, 4.5 KB back). Why: room for the next changes. Estimate (agent
+  time): with the SDK.
+- ~~per-cell night lights~~. Why: done (section 4k): flares, fires, the soldiers' own light
+  and the terrain's lamps light their area.
+- the night's scroll (section 4k, "Remaining work"): the records of the view kept and moved
+  with a scroll, the kernel's cost of a sheet record (about 85 us measured, the fast path's
+  21 us expected). Why: 12 scrolls a second at night against 21 by day. Estimate (agent
+  time): 1 day (+ the kernel's owner).
+- the FLI's runs in assembly. Why: the intro's explosion scene (1.1 s behind at worst).
+  Estimate (agent time): 0.5 day.
+- report upstream: faults 1, 2, 3, 5, 6, 8 above, the GOG data, voxcheck.py.
+- the rest of the differences from DOS (walk frames, explosions, UFO doors, the 5-second
+  speed, the battle's unit stats, terror units' abilities, the missing samples). Why:
+  `engine/FORK.md` "Differences from the original game", with estimates. Estimate (agent
+  time): 0.5-5 days each.
 
-## What the user needs to provide or decide
+## User input needed
 
 - To play on the board: the packs on the card (`make card`, or copy data/packs as
-  app/README.TXT says) and XCOM.HZA installed. Nothing of this round was tried on the
+  app/README.TXT describes) and XCOM.HZA installed. Nothing of this round was tried on the
   board (the emulator only): the card's speed, the OPL2's and Lau's sound are its own.
 - Whether to release XCOM.HZA (GPL-3, no data) beside the other ports.
 - Whether the GOG edition is the one to support (the converter patch), or a DOS 1.4 copy.

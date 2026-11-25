@@ -5,7 +5,7 @@ The PC side of the Atari816's PC link (protocol: [`../Docs/04-pc-link.md`](../Do
 - **`atari816-link`**: the gateway. Shares one folder of the PC with the Atari816 (the volume
   `/PC:` there), gives it the time and the internet (URLs and TCP connections, made by the PC;
   `--no-net` switches that off), and lets the developer tools reach the board while it runs.
-  How to use it: the root [`README.md`](../README.md), "The PC link".
+  How to use it: the root [`README.md`](../README.md), "PC link".
 - **`pclink.py`**: the protocol (frames, sessions, the shared folder, the developer channel,
   the internet), used by the gateway and by the developer tools in [`../core/tools/`](../core/tools/).
 
