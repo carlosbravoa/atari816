@@ -407,7 +407,13 @@ int los_reveal(int unit)
        in_cone accepts, checked for every facing). The rays only mark
        tiles, so their order does not matter. */
     p.lfseg = FP_SEG(lf);
-    p.seenseg = FP_SEG(g_seen);
+    /* g_seen is path.c's wf, made as MK_FP(walk segment + STRIDE / 16, 0): its own
+       segment is FP_SEG + FP_OFF / 16. (DOS keeps a far pointer's segment, so FP_OFF
+       is 0 there; a memory model that gives a pointer inside a block the block's
+       segment and an offset made MK_FP(FP_SEG(g_seen), 0) the walk heights wh: the
+       tiles a fan saw became standable, X-COM's units stood in the air there, and
+       the fog was never lifted.) */
+    p.seenseg = FP_SEG(g_seen) + (FP_OFF(g_seen) >> 4);
     p.mxy = mxy;
     p.mx = (unsigned char)g_mx;
     p.my = (unsigned char)g_my;

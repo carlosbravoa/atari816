@@ -29,9 +29,10 @@ State by part:
 - Host build (Linux): the whole engine headless on a model of the DOS machine
   (`plat/xdos.c`), with DOS's 16-bit `int` (`tools/host16.py`): the reference.
 - Atari816 build: `hcc --code large --data far`: XCOM.PRG and MUSD.PRG (the music task).
-- Tests: `make test`: 16 KEYS-script runs of every screen on both builds (the two night
+- Tests: `make test`: 17 KEYS-script runs of every screen on both builds (the two night
   battles, one with the night lights' walk, fire, flare and sightings, also as a board
-  without the colour remap, REV $0C) (same LOG, same pictures pixel for pixel, same saves,
+  without the colour remap, REV $0C; soldiers out of the Skyranger to the ground, the fog
+  lifted by their sight) (same LOG, same pictures pixel for pixel, same saves,
   open files counted), the real mouse and keyboard three times (the clock as after the
   start, after 5 minutes, wrapping), a full card, the sound (OPL2 stream and Sound Blaster
   blocks against the host's, the beat, the volume); `make test-long`: longer runs (a big
@@ -70,8 +71,9 @@ make host-run ARGS="VGA NOINTRO KEYS $PWD/tests/geo.keys LOG LOG.TXT"
 ```
 
 On the Atari816 the options `/V` (virtual clock, test pictures), `/T n` (end after n idle
-seconds), `/S` (wait for the blitter at once) and `/U n` (n microseconds added to the
-clock: a machine on for long) come before the engine's (`engine/release/MANUAL.TXT`
+seconds), `/S` (wait for the blitter at once), `/U n` (n microseconds added to the
+clock: a machine on for long) and `/NR` (the night's shade by the CPU, also on a board with
+the colour remap) come before the engine's (`engine/release/MANUAL.TXT`
 section 10: `NOINTRO`, `BATTLE`, `MISSION FA1V.PAK`, `SEED n`, `KEYS file`, `LOG file`,
 `BENCH`, ...). Without options the game starts in VGA mode with its intro.
 

@@ -21,6 +21,7 @@ void vga_ms_draw(int x, int y);                                 /* 20 */
 void vga_ms_erase(int x, int y);                                /* 21 */
 void vga_gfx_night(int night);                                  /* 24 */
 void vga_gfx_dot(int x, int y, int colour);                     /* 25 */
+void vga_shift(int dc, int dr);         /* gfx_shift_window: dc cells of 8 pixels, dr rows */
 const int far *vga_pics_next(void);                             /* 26 */
 void vga_vx_world(const unsigned char far *map, unsigned vx, unsigned vy, unsigned zoom);
 void vga_vx_xor(int x0, int y0, int x1, int y1, int colour);

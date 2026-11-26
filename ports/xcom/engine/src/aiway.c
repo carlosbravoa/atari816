@@ -40,7 +40,11 @@ static void way_voxel(int *v, int x, int y, int z)
 /* Doors to walls, or back (path.h). */
 static void way_doors(void)
 {
-    path_doors_asm(FP_SEG(path_fog_table()) - MAP_MAX_TILES / 16, g_mx * g_my * g_mz, g_map, g_pak.mcd);
+    /* wf's own segment is FP_SEG + FP_OFF / 16 (los.c los_reveal says why) */
+    const unsigned char *wf = path_fog_table();
+
+    path_doors_asm(FP_SEG(wf) + (FP_OFF(wf) >> 4) - MAP_MAX_TILES / 16, g_mx * g_my * g_mz,
+                   g_map, g_pak.mcd);
 }
 
 /* The way to unit t, as above: the waypoints; 0 if they do not get there,

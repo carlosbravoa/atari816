@@ -1947,6 +1947,123 @@ battle's start. The CPU fallback (REV $0C) draws the same records through `hz_sh
 - The night sky is upstream's fixed 10 (dusk and deep night as the globe's sun would give
   them: not modelled, `geo.c` `site_dark` gives night or day).
 
+## 4l. Board report of release 0.31.1: units in the air, night strips (26 November 2026)
+
+Reported from the board: soldiers leaving the craft stay on its upper level, as if flying,
+and reveal no terrain; night battles show vertical dark strips.
+
+### Units in the air, no terrain revealed
+
+Reproduced in the emulator with the mouse (run816 script, real clock): FA1 by day, the
+first soldier selected in the Skyranger's cabin (level 1), a click on the grass beside the
+craft. The soldier walked to 3,13,1, a tile with no part at all, and stood there. The same
+happened on the host build: both builds share the fault, so `make test` (host against
+Atari816) could not see it.
+
+Cause: `engine/src/los.c` `los_reveal` passed the fog table to the sight fan as
+`FP_SEG(g_seen)`, and the fan (`plat/losfan.c`, `horizon/hz_fan.s`) used
+`MK_FP(seenseg, 0)`. `g_seen` is `path.c`'s `wf`, made as `MK_FP(walk segment + 625, 0)`
+inside the walk tables' block. On DOS the far pointer keeps segment + 625. The port's DOS
+model (`plat/xdos.c` `seg_of`) gives a pointer inside a heap block the block's segment and
+an offset, so `FP_SEG(wf)` was the walk segment and the fan wrote SEEN_BIT ($10) into the
+walk heights `wh` instead of `wf`:
+
+- every tile a soldier saw got $10 added to its height entry: an empty tile on level 1 had
+  wh 16 (standable at height 15), a floor on level 0 wh 17 (16 voxels up). The Enter /
+  click rule "a tile with no floor means the floor below" (`bplayer.c`) found the air tile
+  standable, and the path search walked through such tiles at the cabin's level;
+- `wf` never got SEEN_BIT from a fan: only the craft's block (`map_reveal`) and each
+  soldier's own tile were known, the rest stayed black.
+
+`engine/src/aiway.c` `way_doors` had the same fault (`FP_SEG(path_fog_table()) - 625`:
+the AI's waypoint search toggled door bits in `wh`, twice, instead of in `wf`). The code
+has been so since stage 1 (`d309c04`), so 0.30 had the fault too: not a regression, not
+the compiler, not the packs (a dump of the tile showed parts 0 0 0 0 and a height of 15:
+no terrain level was involved).
+
+Fix: both take the table's own segment, `FP_SEG(p) + (FP_OFF(p) >> 4)` (the same value on
+DOS, where `FP_OFF` is 0). Found with a gdb watchpoint on the wrong `wh` entry on the
+host: it stopped in `seen_new`, called from `los_reveal`.
+
+With the fog lifted, `make test`'s `bsave` showed a second fault, on the Atari816 only:
+after the aliens' turn the view went back to the soldier by a scroll of 24 cells and 4
+rows, and the right part of the view was stale. `gfx_shift_window` passed the move as one
+byte delta (`rows * 320 + pixels`), and `hz_bb.c` `plat_bb_shift` took a horizontal move of
+more than 160 pixels as one a row the other way (dr 0, dc -192 read as dr -1, dc +128):
+the blitter moved the wrapped part, not the kept part. The host's C shift is linear and
+right for both readings. `render_scroll` scrolls up to 31 cells (248 pixels), so every
+follow of a unit by 21-31 cells left a band of the old picture. Before the first fix those
+bands were mostly black, as the undiscovered map was. Fix: `gfx.c` gives the port the
+cells and rows (`vga_shift`, `XCOM_PORT`); `plat_bb_shift(dc, dr)` takes them as they are;
+`buf_shift` keeps the delta for other callers.
+
+Test: `walkout` in `tests/runs` (FA1 by day, `tests/walkout.keys`): Kowalski is sent to
+3,13 on the cabin's level, Tanaka down the ramp. The LOG has a line after each X-COM walk
+(`bplayer.c` `log_known`: the tile's floor and object, standable or not, the tiles known).
+`tests/check.sh` requires every walk to end on level 0, on a tile with a floor or object,
+and 200 more tiles known than at the start. Before the fix: `Kowalski walked to 3,13,1`,
+`stands on 0 0`, 968 -> 969 tiles known: FAIL. After: `3,13,0`, `stands on 2 0`, 968 ->
+1,716: PASS on both builds.
+
+Pictures: most battle pictures changed (the terrain the soldiers see is now drawn):
+`tests/runs.md5` (400 pictures) and `tests/runs-long.md5` (87, was 103: the soak run's
+battle takes another course) written again after looking at them. `tests/host.sh` (`make
+check-host`) now reads a run's `s=`, `k=` and `r=` as `check.sh` does (it failed at HEAD
+on `night12` and `nlight12`).
+
+Seen while looking, not changed: a quick base defence (`BATTLE MISSION BASEV.PAK`) on the
+Atari816 stops before the battle: `malloc(39600)` fails, the largest DOS block 1,595
+paragraphs; the host runs it. Also at HEAD.
+
+### Night strips
+
+The emulator shows no strips: `make test`'s night runs (`night`, `nlight`, REV $0D, the
+remap) and their REV $0C twins (`night12`, `nlight12`, the CPU) are the host's pictures
+pixel for pixel, and a run with `/NR` (below) gives the remap run's 25 test pictures with
+the same checksums.
+
+What X-COM sends at night (`plat/vgabat.c` `lit_recs`, `horizon/hz_lit.s`,
+`horizon/hz_bb.c` `plat_bb_present_lit`): `sheet_draw` calls of at most 128 records, after
+a wait for the previous list:
+
+- SH_TABLE (Ali OP 5): 256 entries from row l of a 256 x 16 sheet at offset 49,152 of the
+  pictures' bank, destination entry 0; one where the level changes and one at the start
+  of every call;
+- SH_COPY + SH_REMAP (OP 6) for levels 1-15, SH_COPY (OP 1) for level 0: from the back
+  buffer's sheet (framebuffer rows 205-388, the framebuffer's second bank) to the screen
+  (rows 0-143) at the same x and row. x and widths are multiples of 16 pixels (cells), so
+  source and destination have the same byte offset in a word (0); heights are multiples of
+  8 (a whole view) or any (a rectangle's present); records of one level and width are
+  joined down the view (16 x 144 for a column of cells). Never keyed, never in place,
+  never overlapping, never BACKWARDS. The whole view: 100-160 records.
+
+The RTL (`core/src/a816/a816_blit.sv`) read for these operations: the lanes' timing (lookup
+at lc 0-3, result back at lc 1-4, the word held until lc 4), the table write address for
+TABLE, the read placed while a word is in the lanes, and the SDRAM arbiter (`a816_nvc.sv`:
+a blitter grant never in the cycle its previous access ends): nothing found that gives
+columns for aligned copies, and `core/sim_a816/tb_blit.sv` checks these paths against the
+emulator's model. Not certain: no RTL change.
+
+The scroll fault above draws vertical bands of an old picture after a follow of 21-31
+cells, by day and at night; with the fog fault most of the map was black. Whether that is
+what the board showed is not known.
+
+For the board:
+
+- `sdk/c/game/tests/gt_nightx.c` (in hgame's tests: `run.py --only nightx`): no data, a
+  320 x 400 framebuffer as X-COM's, a pattern in rows 205-388, 16 tables at offset 49,152
+  of a bank. Cases: the whole view through one table; the cells as `lit_recs` makes them
+  (random levels, alternating columns, a lit disc, rows; random levels again while the CPU
+  copies memory); every source and destination byte offset with widths 1-100; in place;
+  keyed; tables changed by the CPU and loaded again. Every screen pixel is compared with
+  the CPU's value; a FAIL line gives the count, the first wrong pixel and its record, and
+  the wrong pixels by x mod 4 and by x mod 16. The emulator: 10 of 10 pass in the three
+  code models.
+- `/NR`: XCOM.PRG shades the night by the CPU on any board (console: `xcom: night shade: no
+  colour remap (/NR): by the CPU`). The same pictures as the remap; about 5 scrolls a
+  second at night against 12-13 (sections 4j, 4k). A way round a faulty remap until the hardware is fixed, and
+  a comparison on the board.
+
 ## 5. Plan
 
 Principle: **upstream's code runs unchanged** on a model of the machine it was written for;

@@ -101,9 +101,9 @@ typedef struct {
 extern unsigned char g_lit_sheet[2];
 int plat_bb_lit_ready(const unsigned char *tabs);
 int plat_bb_present_lit(const PlatRec *r, unsigned n);
-/* the view moved by dx bytes (rows * 320 + columns): the 2-D move (the strips
-   the move exposes are cleared and redrawn by the engine: render_scroll) */
-int plat_bb_shift(long dx);
+/* the view moved by dc pixels and dr rows: the 2-D move (the strips the move
+   exposes are redrawn by the engine: render_scroll) */
+int plat_bb_shift(int dc, int dr);
 /* the cursor's box (w x rows at off) to (out 1) or from (0) the platform's copy */
 int plat_bb_box(unsigned off, unsigned w, unsigned rows, int out);
 /* the selected unit's arrow (9 x 9, colour 0 clear) at x, y, inside the rectangle */

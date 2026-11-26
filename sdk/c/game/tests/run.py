@@ -139,6 +139,11 @@ TESTS = [
      ["gt_remap: 0 failed"], []),
     ("remap12", ["gt_remap.c"], ["--shot", "4", "--seconds", "6", "--rev", "12"],
      ["gt_remap: 0 failed"], []),
+    # (REV $0D) the remap as the X-COM port's night view uses it (16 x 8 cells, tall records,
+    # a table every 128 records), and at every byte offset: every screen pixel against the
+    # CPU's result. Also a program for the board (PASS / FAIL lines with the first wrong pixel)
+    ("nightx", ["gt_nightx.c"], ["--seconds", "40", "--stop-on", "gt_nightx: 0 failed"],
+     ["gt_nightx: 0 failed"], []),
 ]
 
 # tests whose pictures must be another test's (the same program on another board)

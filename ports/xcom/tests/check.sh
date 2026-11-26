@@ -164,6 +164,21 @@ while read -r name args; do
       ok "$name: a fire, a flare, aliens seen and lost in the dark ($(grep -ac ': night: alien' $L) LOG lines)"
     else bad "$name: the script no longer makes its fire, flare or sightings"; fi ;;
   esac
+  case "$keys" in walkout)
+    # out of the craft: every walk ends on level 0 on a floor (not in the air on the
+    # cabin's level), and the soldiers' sight added tiles to what was known at the start
+    for side in host Atari816; do
+      L=$O/$name/host/card/$log; [ $side = host ] || L=$O/$name/816/card/GAMES/XCOM/$log
+      k0=$(sed -n 's/^known at the start: \([0-9]*\) tiles.*/\1/p' $L)
+      r=$(awk -v k0="$k0" '/ walked to /{split($5, p, ","); n++; if (p[3] != 0) e = e " " $2 " at " $5}
+            / stands on /{if ($5 == 0 && $6 == 0) e = e " " $2 " on no floor"
+                          if (match($0, /, [0-9]+ tiles known/)) k = substr($0, RSTART + 2, RLENGTH - 14) + 0}
+            END{if (!n) e = " no walk"; if (k0 == "" || k - k0 < 200) e = e " " k0 " -> " k " tiles known";
+                print n " walks, " k0 " -> " k " tiles known" (e == "" ? "" : ";" e)}' $L)
+      case "$r" in *\;*) bad "$name: $side: $r" ;;
+                   *) ok "$name: $side: out of the craft to level 0: $r" ;; esac
+    done ;;
+  esac
 done < $RUNS
 
 if [ -n "$ipids" ]; then

@@ -25,3 +25,7 @@ night12    k=night r=12 VGA NOINTRO BATTLE SEED 1 MISSION FA1V.PAK RACE RSV.PAK 
 # board without the colour remap (REV $0C: the CPU shades each cell)
 nlight     s=800 VGA NOINTRO BATTLE SEED 1 MISSION UR0V.PAK RACE RSV.PAK NIGHT GEAR LOG NLIGHT.TXT
 nlight12   s=800 k=nlight r=12 VGA NOINTRO BATTLE SEED 1 MISSION UR0V.PAK RACE RSV.PAK NIGHT GEAR LOG NLIGHT.TXT
+# soldiers out of the Skyranger (FA1 by day): Kowalski sent to a tile beside the craft on the
+# cabin's level (the floor below it is meant), Tanaka down the ramp: each must end on level 0
+# on a floor, and their sight must lift the fog of war (the LOG's "tiles known")
+walkout    VGA NOINTRO BATTLE SEED 1 MISSION FA1V.PAK RACE RSV.PAK LOG WALKOUT.TXT

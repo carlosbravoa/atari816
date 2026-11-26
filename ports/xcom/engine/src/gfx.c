@@ -114,8 +114,17 @@ void gfx_shift_window(int dc, int dr)
             mouse_hide_rect(0, 0, 320, VIEW_H);
             vram_shift(PLANE_BYTES, dr * BUF_W + dc);
         }
-    } else
+    } else {
+#if defined(XCOM_PORT)
+        /* (the port's buffer is moved as a rectangle: it needs dc and dr apart,
+           which one delta cannot give once dc passes half the width) */
+        if (g_vga) {
+            vga_shift(dc, dr);
+            return;
+        }
+#endif
         buf_shift(g_bufseg, BUFC_W * BUF_ROWS, 1, dr * BUFC_W + dc * 2);
+    }
 }
 
 void gfx_dot(int x, int y, int colour)

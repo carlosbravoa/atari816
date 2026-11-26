@@ -67,6 +67,9 @@ code there):
   engine's busy loops (the turn's end, the AI).
 - `pedia.c`: after an article, the screen under the list again (VGA; the port keeps a
   real copy of the clean screen).
+- `gfx.c` `gfx_shift_window`: the view's move given to the port as cells and rows
+  (`vga_shift`) instead of one byte delta, which cannot tell a move of more than half the
+  width from one a row the other way (the port moves the kept part as a rectangle).
 
 **cc816's C** (every build, valid Watcom C): one far declarator a line (`cvpriv.h`,
 `xmemlend.h`, `invscr.c`: cc816 rejects `T far *a, far *b;`).
@@ -83,6 +86,20 @@ code there):
 - `music.c` `decode`: an instrument ends at its track's end (GMTACTIC's instrument 10 read
   past it).
 - (`pedia.c`'s list over the article, fault 6, is fixed for the port's VGA only, above.)
+
+**A far pointer's segment** (every build; the same code on DOS, where `FP_OFF` of these
+pointers is 0): `los.c` `los_reveal` and `aiway.c` `way_doors` take the fog table's segment
+as `FP_SEG + FP_OFF / 16`. The table is `path.c`'s `wf`, made as `MK_FP(walk segment + 625,
+0)` inside the walk tables' block; a memory model that gives a pointer inside a block the
+block's segment and an offset (the port's DOS model) made the sight fan mark the walk
+heights `wh` as seen instead of `wf`: the tiles a soldier saw became standable (units
+walked in the air beside the craft) and the fog of war never lifted
+(`ports/xcom/PORTING-NOTES.md` section 4l).
+
+**A walk's result in the LOG** (every build; `bplayer.c` `log_known`, only with LOG): after
+each X-COM walk, the parts of the tile the unit stands on, whether it is standable, and the
+tiles known (`T1: Kowalski stands on 2 0 (standable), 1346 tiles known, 49 of the 49
+round`), for the tests.
 
 **Smoothness** (every build; PORTING-NOTES.md section 4h):
 

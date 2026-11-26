@@ -103,6 +103,8 @@ SEED n, KEYS file, LOG file, BENCH, ...). The port's own come first:
   /IOB        time the card's requests, write IOBENCH.TXT (and /PC:/), end
   /PANPTR     the earlier screen: the picture follows the pointer up and down
   /CPUPTR     the game draws its pointer into the picture (not a sprite)
+  /NR         the night's shade by the CPU, not by the blitter's colour
+              remap (slower scrolling at night; a check of the remap)
 The engine's NOEXACTAI makes the aliens' turns much shorter (a battle's
 turn of 45 s takes about 8 s), with sight and aiming a little simpler than
 DOS's (MANUAL.TXT section 12).

@@ -93,6 +93,7 @@ unsigned long g_bb_draws, g_bb_unpacked, g_bb_flushes, g_bb_cpu;
 int g_bb_wait;                          /* /S: every operation drawn before it returns (the
                                            CPU may then read the buffer at any time: BENCH's
                                            own checks do) */
+int g_bb_noremap;                       /* /NR: the night's shade by the CPU (hz_plat.c) */
 
 /* how much of the atlas was used (a test run's end) */
 void hz_bb_stats(void)
@@ -590,6 +591,11 @@ static int shade_ready(unsigned lev, const unsigned char *tab)
     if (lev > 15 || shade_sheet < 0)
         return 0;
     t = (unsigned char far *)pics + SHADE_OFF;
+    if (!shade_sheet && g_bb_noremap) {
+        shade_sheet = -1;
+        printf("xcom: night shade: no colour remap (/NR): by the CPU\n");
+        return 0;
+    }
     if (!shade_sheet) {
         hz_sheetnew sn;
         hz_sheetrec r;
@@ -719,25 +725,16 @@ int plat_bb_present_lit(const PlatRec *r, unsigned n)
     return 1;
 }
 
-int plat_bb_shift(long dx)
+int plat_bb_shift(int dc, int dr)
 {
     hz_drawrec m;
-    int dr, dc, sx, sy, w, h;
+    int sx, sy, w, h;
 
     if (!ready)
         return 0;
-    if (!dx)
+    if (!dc && !dr)
         return 1;
     /* (x, y) -> (x + dc, y + dr): the part that stays inside */
-    dr = (int)(dx / 320);
-    dc = (int)(dx - (long)dr * 320);
-    if (dc > 160) {
-        dc -= 320;
-        dr++;
-    } else if (dc < -160) {
-        dc += 320;
-        dr--;
-    }
     sx = dc < 0 ? -dc : 0;
     sy = dr < 0 ? -dr : 0;
     w = (int)BB_W - (dc < 0 ? -dc : dc);

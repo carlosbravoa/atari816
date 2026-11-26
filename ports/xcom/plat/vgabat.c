@@ -588,17 +588,11 @@ shown:
 /* ---- 6: the view moves by delta CGA bytes (the buffer is exactly the
    view's width: what wraps round a row edge lands in the exposed strip,
    which is redrawn) */
-void __cdecl buf_shift(unsigned bufseg, unsigned plane_bytes, unsigned planes, int delta)
+static void shift_c(unsigned bufseg, long dx)
 {
     unsigned char far *buf = BUF(bufseg);
-    long dx = (long)(short)delta * 4;
     unsigned n, i;
 
-    (void)plane_bytes;
-    (void)planes;
-    PERF_N(PF_SHIFT, 0);
-    if (plat_bb_shift(dx))
-        return;
     if (dx > 0) {
         n = (unsigned)(BYTES - dx);
         for (i = n; i-- > 0;)
@@ -610,6 +604,40 @@ void __cdecl buf_shift(unsigned bufseg, unsigned plane_bytes, unsigned planes, i
     }
     /* (at night upstream moves the screen too: vshift; here the caller's
        full present after a scroll shows it: render_scroll) */
+}
+
+void __cdecl buf_shift(unsigned bufseg, unsigned plane_bytes, unsigned planes, int delta)
+{
+    long dx = (long)(short)delta * 4;
+    int w = (int)ROW, dr = (int)(dx / w), dc = (int)(dx - (long)dr * w);
+
+    (void)plane_bytes;
+    (void)planes;
+    PERF_N(PF_SHIFT, 0);
+    /* (one delta: the nearer of the two moves it can mean; gfx_shift_window calls
+       vga_shift with both numbers instead) */
+    if (dc > w / 2) {
+        dc -= w;
+        dr++;
+    } else if (dc < -w / 2) {
+        dc += w;
+        dr--;
+    }
+    if (!plat_bb_shift(dc, dr))
+        shift_c(bufseg, dx);
+}
+
+/* gfx_shift_window: the view moved by dc cells (8 pixels) and dr rows. The blitter
+   moves the part that stays as a rectangle, so it needs dc and dr themselves: one
+   delta (dr * 320 + dc pixels) means two different moves once dc passes half the
+   width (dr 0, dc -192 or dr -1, dc 128), and buf_shift's nearer one was then the
+   wrong one: the kept part stayed where it was (a 24-column scroll after an alien's
+   turn left half the view stale). The C's linear shift is right for both. */
+void vga_shift(int dc, int dr)
+{
+    PERF_N(PF_SHIFT, 0);
+    if (!plat_bb_shift(dc * 8, dr))
+        shift_c(g_bufseg, (long)dr * (int)ROW + dc * 8);
 }
 
 /* ---- 7: the cursor's box between the buffer and SAVE (out 1: to SAVE).

@@ -22,7 +22,9 @@
    pictures (plat.h "test runs"; the pointer then moves only by the
    script); /T n the seconds of no input that end a test run; /S the
    blitter's work waited for at once (horizon/hz_bb.c: BENCH's checks read
-   the back buffer behind its back). */
+   the back buffer behind its back); /NR the night's shade by the CPU, also
+   where the blitter has the colour remap (a check on the board: REV $0D's
+   remap against the CPU's picture). */
 #include "xcompat.h"
 #include <hgame.h>
 #include <horizon.h>
@@ -31,7 +33,7 @@
 
 int xcom_main(int argc, char **argv);
 void hz_bb_screen(int on);
-extern int g_bb_wait;
+extern int g_bb_wait, g_bb_noremap;
 void xd_init(int argc, char **argv);
 extern unsigned char xd_banks[17];
 
@@ -1107,6 +1109,9 @@ int main(int argc, char **argv)
             i++;
         } else if (i < argc && !strcmp(argv[i], "/S")) {
             g_bb_wait = 1;
+            i++;
+        } else if (i < argc && !stricmp(argv[i], "/NR")) {
+            g_bb_noremap = 1;
             i++;
         } else if (i + 1 < argc && !strcmp(argv[i], "/T")) {
             g_plat_idle = (unsigned)atoi(argv[i + 1]);

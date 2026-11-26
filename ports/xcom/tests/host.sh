@@ -10,7 +10,17 @@ out=build/host/check
 rm -rf $out && mkdir -p $out
 while read -r name args; do
     case "$name" in ''|\#*) continue ;; esac
-    sh tests/hostrun.sh "$name" $out/$name $args > $out/$name.txt 2>&1
+    # (a run's s=N, k=NAME and r=N, as tests/check.sh reads them: the keys of tests/NAME.keys)
+    keys=$name
+    while :; do
+        case "$args" in
+            k=*) keys=${args%% *}; keys=${keys#k=} ;;
+            s=*|r=*) ;;
+            *) break ;;
+        esac
+        args=${args#* }
+    done
+    sh tests/hostrun.sh "$keys" $out/$name $args > $out/$name.txt 2>&1
 done < tests/runs
 (cd $out && md5sum */shot*.ppm) > $out/host.md5
 if [ "$1" = "--refs" ]; then cp $out/host.md5 tests/runs.md5; echo "host: tests/runs.md5 written"; exit 0; fi

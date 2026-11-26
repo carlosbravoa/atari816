@@ -185,9 +185,9 @@ int plat_bb_present_lit(const PlatRec *r, unsigned n)
     (void)r; (void)n;
     return 0;
 }
-int plat_bb_shift(long dx)
+int plat_bb_shift(int dc, int dr)
 {
-    (void)dx;
+    (void)dc; (void)dr;
     return 0;
 }
 int plat_bb_box(unsigned off, unsigned w, unsigned rows, int out)

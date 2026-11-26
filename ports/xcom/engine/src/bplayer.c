@@ -640,6 +640,28 @@ static unsigned battle_mouse(unsigned key)
     return key == KEY_RCLICK ? ' ' : '\r';
 }
 
+/* For the tests' LOG after a walk: where the unit stands (the tile's floor and its
+   object, whether a non-flyer may stand there) and the fog of war: the tiles known
+   on the whole map and in the 7 x 7 square round the unit on its level. */
+static void log_known(int u)
+{
+    const Unit *un = &g_units[u];
+    const unsigned char *s = path_fog_table(), *t = TILE(un->x, un->y, un->z);
+    unsigned i, n = g_mx * g_my * g_mz, all = 0, ring = 0;
+    int x, y, h;
+
+    for (i = 0; i < n; i++)
+        all += (s[i] & SEEN_BIT) != 0;
+    for (y = un->y - 3; y <= un->y + 3; y++)
+        for (x = un->x - 3; x <= un->x + 3; x++)
+            if (IN_MAP(x, y, un->z) && (s[TIDX(x, y, un->z)] & SEEN_BIT))
+                ring++;
+    log_printf("T%d: %s stands on %u %u (%s), %u tiles known, %u of the 49 round", bt_turn,
+               un->name, t[PART_FLOOR], t[PART_OBJECT],
+               tile_standable(un->x, un->y, un->z, &h) ? "standable" : "not standable", all,
+               ring);
+}
+
 static int again;               /* player_turn: back from the options window */
 int bt_vlast = -1;              /* V: the alien it showed last (battle_in.h) */
 
@@ -752,6 +774,8 @@ static void turn(void)
                            bt_turn, g_units[w].name, g_units[w].x, g_units[w].y,
                            g_units[w].z, g_cur_x, g_cur_y, tz, g_units[w].tu,
                            timer_ms(timer_read() - t0));
+                if (g_log_path[0])
+                    log_known(w);
                 refresh_paths();
                 hud_status();
                 hud_cursor();
