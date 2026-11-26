@@ -33,6 +33,11 @@ original 8-bit software runs on its own hardware. F12 switches between it and th
   arrives.
 - Horizon is the software on the 65C816: a kernel, a desktop with windows, and the
   programs. F12 switches the screen between the desktop and the classic Atari.
+- The SDK runs on the PC and builds programs for Horizon in C and assembly. It has cc816, a
+  C compiler for the 65C816 (programs larger than 64 KB, with code in several banks), a C
+  library, hui for window programs and hgame for games, the emu816 emulator for tests,
+  profiling and debugging, and tools for art, packaging and deployment. Digger, X-COM and
+  Micropolis were ported with it. See [`sdk/`](sdk/README.md).
 - Lau plays sampled sound without the CPU. The Music program plays ProTracker modules
   (.MOD) and sound files (.WAV) from the card, the PC or the internet, without breaks while
   you work in other windows. Two original songs are on the card in `/Music`.
